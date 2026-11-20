@@ -353,6 +353,8 @@ pub struct OptionInputs {
     /// psiblast's `-num_iterations`: the request's `Web_StepNumber` with `-db`
     /// (`ArchiveRequest::step_number`).
     pub num_iterations: Option<i32>,
+    /// psiblast's `-ignore_msa_master` (`CPsiBlastArgs`, always recorded).
+    pub ignore_msa_master: bool,
 }
 
 impl OptionInputs {
@@ -402,6 +404,7 @@ impl OptionInputs {
             pseudocount: 0,
             gap_trigger: 22.0,
             num_iterations: None,
+            ignore_msa_master: false,
         }
     }
 }
@@ -1011,8 +1014,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             //             opt.SetIgnoreMsaMaster(args[kArgIgnoreMsaMaster]);
             //         }
             // ```
-            // (`-ignore_msa_master` is refused by LOSAT's parser: always FALSE.)
-            Class::PsiBlast => list.set("IgnoreMsaMaster", Boolean(false)),
+            Class::PsiBlast => list.set("IgnoreMsaMaster", Boolean(inputs.ignore_msa_master)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1113-1119
             // ```c++
             //     if (args[kArgPSIPseudocount]) {

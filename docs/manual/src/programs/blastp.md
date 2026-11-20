@@ -47,6 +47,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-word_size` | 3 (2 for `blastp-short`, 5 for `blastp-fast`) | Length of the word that starts an alignment |
 | `-threshold` | 11 (by word size and task) | Minimum score of a neighbouring word |
 | `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3 |
+| `-use_sw_tback` | off | Align the final results again with Smith-Waterman (with `-comp_based_stats` 1 to 3) |
 | `-seg` | `no` | Low-complexity filter |
 | `-window_size` | 40 (15 for `blastp-short`) | Two-hit window; 0 selects the one-hit method |
 | `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |
@@ -83,7 +84,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `blastp` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped` and `-use_sw_tback`.
+- `-ungapped`, and `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`).
 - `-subject_besthit`, `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).

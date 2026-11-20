@@ -2445,9 +2445,10 @@ pub fn tie_standard_output() -> std::io::Result<()> {
 /// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
 /// report. Where the standard error is the file of `-logfile` (tblastx's, rpsblast's and
 /// rpstblastn's run, `DiagTarget::into_standard_error`), a failed write is dropped, as NCBI's
-/// handler of that file drops it (`CFileHandleDiagHandler::Post`, ncbidiag.cpp:6695-6696: `if
-/// (NcbiSys_write(...)) {/*dummy*/}`; NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and
-/// writes its report; line WQA's D11 round 2, 2026-11-20).
+/// handler of that file drops it: `CFileHandleDiagHandler::Post` ignores what the write returns
+/// (NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and writes its report; line WQA's D11
+/// round 2, 2026-11-20).
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
 pub struct CliStderr(std::io::Stderr);
 
 impl CliStderr {

@@ -749,94 +749,7 @@ fn unix_program_name(
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:102-115
-// ```c++
-// #define DIR_PARENT  ".."
-// #define DIR_CURRENT "."
-// #define ALL_OS_SEPARATORS   ":/\\"
-//
-// #if defined(NCBI_OS_MSWIN)
-// #  define DIR_SEPARATOR     '\\'
-// #  define DIR_SEPARATOR_ALT '/'
-// #  define DISK_SEPARATOR    ':'
-// #  define DIR_SEPARATORS    "/\\"
-// #  define ALL_SEPARATORS    ":/\\"
-// #elif defined(NCBI_OS_UNIX)
-// #  define DIR_SEPARATOR     '/'
-// #  define DIR_SEPARATORS    "/"
-// #  define ALL_SEPARATORS    "/"
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-313, 439-452, 455-472, 487-505
-// ```c++
-// void CDirEntry::Reset(const string& path)
-// {
-//     m_Path = path;
-//     size_t len = path.length();
-//     // Root dir
-//     if ((len == 1)  &&  IsPathSeparator(path[0])) {
-//         return;
-//     }
-//     // Disk name
-// #  if defined(DISK_SEPARATOR)
-//     if ( (len == 2 || len == 3) && (path[1] == DISK_SEPARATOR) ) {
-//         return;
-//     }
-// #  endif
-//     m_Path = DeleteTrailingPathSeparator(path);
-// }
-// ...
-// bool CDirEntry::IsPathSeparator(const char c)
-// {
-// #if defined(DISK_SEPARATOR)
-//     if ( c == DISK_SEPARATOR ) {
-//         return true;
-//     }
-// #endif
-// #if defined(DIR_SEPARATOR_ALT)
-//     if ( c == DIR_SEPARATOR_ALT ) {
-//         return true;
-//     }
-// #endif
-//     return c == DIR_SEPARATOR;
-// }
-// ...
-// string CDirEntry::AddTrailingPathSeparator(const string& path)
-// {
-//     size_t len = path.length();
-//     if (len  &&  string(ALL_SEPARATORS).rfind(path.at(len - 1)) == NPOS) {
-//         return path + GetPathSeparator();
-//     }
-//     return path;
-// }
-//
-// string CDirEntry::DeleteTrailingPathSeparator(const string& path)
-// {
-//     size_t pos = path.find_last_not_of(DIR_SEPARATORS);
-//     if (pos + 1 < path.length()) {
-//         return path.substr(0, pos + 1);
-//     }
-//     return path;
-// }
-// ...
-// inline bool s_Win_IsDiskPath(const string& path)
-// {
-//     if ((isalpha((unsigned char)path[0]) && path[1] == ':')  &&
-//          (path[2] == '/' || path[2] == '\\')) {
-//         return true;
-//     }
-//     return false;
-// }
-//
-// // Windows:
-// inline bool s_Win_IsNetworkPath(const string& path)
-// {
-//     // Any combination of slashes in 2 first symbols
-//     if ((path[0] == '\\' || path[0] == '/')  &&
-//         (path[1] == '\\' || path[1] == '/')) {
-//         return true;
-//     }
-//     return false;
-// }
-// ```
 /// The rules by which NCBI's file API (`CDirEntry`) reads a path, which set its build for MS
 /// Windows (`NCBI_OS_MSWIN`) apart from its build for Unix (`NCBI_OS_UNIX`): the one reading of
 /// paths on every platform, `HOST` being the build's own (line WQA's D11 round 3, 2026-11-20).
@@ -898,29 +811,6 @@ impl PathRules {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-368, 475-483
-    // ```c++
-    // void CDirEntry::SplitPath(const string& path, string* dir,
-    //                           string* base, string* ext)
-    // {
-    //     // Get file name
-    //     size_t pos = path.find_last_of(ALL_SEPARATORS);
-    //     string filename = (pos == NPOS) ? path : path.substr(pos+1);
-    //
-    //     // Get dir
-    //     if ( dir ) {
-    //         *dir = (pos == NPOS) ? kEmptyStr : path.substr(0, pos+1);
-    //     }
-    // ...
-    // string CDirEntry::GetDir(EIfEmptyPath mode) const
-    // {
-    //     string dir;
-    //     SplitPath(GetPath(), &dir);
-    //     if ( dir.empty()  &&  mode == eIfEmptyPath_Current  &&  !GetPath().empty() ) {
-    //         return string(DIR_CURRENT) + DIR_SEPARATOR;
-    //     }
-    //     return dir;
-    // }
-    // ```
     /// `CDirEntry(path).GetDir()`: the directory of `path` as `reset` leaves it, up to and with
     /// its last separator (`SplitPath`); `./` (Windows `.\`) for a path without one; empty for an
     /// empty one.
@@ -961,56 +851,6 @@ impl PathRules {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:664-708, 776-788
-    // ```c++
-    // string CDirEntry::CreateAbsolutePath(const string& path, ERelativeToWhat rtw)
-    // {
-    //     if ( IsAbsolutePath(path) ) {
-    //         return NormalizePath(path);
-    //     }
-    //     string result;
-    //
-    // #if defined(NCBI_OS_MSWIN)
-    //     if ( path.find(DISK_SEPARATOR) != NPOS ) {
-    //         NCBI_THROW(CFileException, eRelativePath,
-    //                    "Path must not contain disk separator: " + path);
-    //     }
-    //     // Path started with slash
-    //     if (!path.empty() && (path[0] == '/' || path[0] == '\\')) {
-    //         // network path ?
-    //         if ( s_Win_IsNetworkPath(path) ) {
-    //             NCBI_THROW(CFileException, eRelativePath,
-    //                        "Cannot use network path: " + path);
-    //         }
-    //         // relative to current drive only
-    //         if (rtw != eRelativeToCwd) {
-    //             NCBI_THROW(CFileException, eRelativePath,
-    //                        "Path can be used as relative to current drive only: " + path);
-    //         }
-    //         return CDir::GetCwd().substr(0,3) + path;
-    //     }
-    // #endif
-    //
-    //     switch (rtw) {
-    //         case eRelativeToCwd:
-    //             result = ConcatPath(CDir::GetCwd(), path);
-    //             break;
-    // ...
-    //     return NormalizePath(result);
-    // ...
-    // string CDirEntry::ConcatPath(const string& first, const string& second)
-    // {
-    //     // Prepare first part of path
-    //     string path = AddTrailingPathSeparator(NStr::TruncateSpaces(first));
-    //     // Remove leading separator in "second" part
-    //     string part = NStr::TruncateSpaces(second);
-    //     if ( !path.empty()  &&  part.length() > 0  &&  part[0] == DIR_SEPARATOR ) {
-    //         part.erase(0,1);
-    //     }
-    //     // Add second part
-    //     path += part;
-    //     return path;
-    // }
-    // ```
     /// `CDirEntry::CreateAbsolutePath(path)` (`eRelativeToCwd`) of a path that is not absolute
     /// (`is_absolute`), in the working directory `cwd` (`CDir::GetCwd`, empty where it cannot be
     /// read): `cwd` and `path`, the spaces at their ends cut, joined by a separator and
@@ -1042,37 +882,6 @@ impl PathRules {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:745-773
-    // ```c++
-    // string CDirEntry::ConvertToOSPath(const string& path)
-    // {
-    //     // Not process empty or absolute path
-    //     if ( path.empty()  ||  IsAbsolutePathEx(path)) {
-    //         return NormalizePath(path);
-    //     }
-    //     // Now we have relative "path"
-    //     string xpath = path;
-    //     // Add trailing separator if path ends with DIR_PARENT or DIR_CURRENT
-    // #if defined(DIR_PARENT)
-    //     if ( NStr::EndsWith(xpath, DIR_PARENT) )  {
-    //         xpath += DIR_SEPARATOR;
-    //     }
-    // #endif
-    // #if defined(DIR_CURRENT)
-    //     if ( NStr::EndsWith(xpath, DIR_CURRENT) )  {
-    //         xpath += DIR_SEPARATOR;
-    //     }
-    // #endif
-    //     // Replace each path separator with the current OS separator character
-    //     for (size_t i = 0; i < xpath.length(); i++) {
-    //         char c = xpath[i];
-    //         if ( c == '\\' || c == '/' ) {
-    //             xpath[i] = DIR_SEPARATOR;
-    //         }
-    //     }
-    //     xpath = NormalizePath(xpath);
-    //     return xpath;
-    // }
-    // ```
     /// `CDirEntry::ConvertToOSPath(path)`: the path that the system opens, `path` normalized; a
     /// relative one (also on Unix, where the working directory cannot be read) with each '\\'
     /// and '/' made the platform's separator first (`a\b.log` is `a/b.log` on Unix).
@@ -1109,149 +918,6 @@ impl PathRules {
     /// itself (`C:x\..` is `C:\..`: NCBI's `pos` takes the comparison `!= NPOS`, 1).
     ///
     /// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-971
-    /// ```c++
-    ///     if ( path.empty() ) {
-    ///         return path;
-    ///     }
-    /// ...
-    ///     // Delete trailing slash for all paths except similar to 'd:\'
-    /// #  ifdef DISK_SEPARATOR
-    ///     if ( path.find(DISK_SEPARATOR) == NPOS ) {
-    ///         current = DeleteTrailingPathSeparator(path);
-    ///     } else {
-    ///         current = path;
-    ///     }
-    /// #  else
-    ///     current = DeleteTrailingPathSeparator(path);
-    /// #  endif
-    ///
-    ///     if ( current.empty() ) {
-    ///         // root dir
-    ///         return string(1, DIR_SEPARATOR);
-    ///     }
-    ///
-    /// #ifdef NCBI_OS_MSWIN
-    ///     NStr::ReplaceInPlace(current, "/", "\\");
-    /// #endif
-    ///
-    ///     while ( !current.empty()  ||  !tail.empty() ) {
-    ///         std::list<string> pretail;
-    ///         if ( !current.empty() ) {
-    ///             NStr::Split(current, kSep, pretail);
-    ///             current.erase();
-    ///             if (pretail.front().empty()
-    /// #ifdef DISK_SEPARATOR
-    ///                 ||  pretail.front().find(DISK_SEPARATOR) != NPOS
-    /// #endif
-    ///                 ) {
-    ///                 // Absolute path
-    ///                 head.clear();
-    /// #ifdef NCBI_OS_MSWIN
-    ///                 // Remove leading "\\?\". Replace leading "\\?\UNC\" with "\\".
-    ///                 static const char* const kUNC[] = { "", "", "?", "UNC" };
-    ///                 std::list<string>::iterator it = pretail.begin();
-    ///                 unsigned int matched = 0;
-    ///                 while (matched < 4  &&  it != pretail.end()
-    ///                        &&  !NStr::CompareNocase(*it, kUNC[matched])) {
-    ///                     ++it;
-    ///                     ++matched;
-    ///                 }
-    ///                 pretail.erase(pretail.begin(), it);
-    ///                 switch (matched) {
-    ///                 case 2: case 4: // got a UNC path (\\... or \\?\UNC\...)
-    ///                     head.push_back(kEmptyStr);
-    ///                     // fall through
-    ///                 case 1:         // normal volume-less absolute path
-    ///                     head.push_back(kEmptyStr);
-    ///                     break;
-    ///                 case 3/*?*/:    // normal path, absolute or relative
-    ///                     break;
-    ///                 }
-    /// #endif
-    ///             }
-    ///             tail.splice(tail.begin(), pretail);
-    ///         }
-    ///
-    ///         string next;
-    ///         if (!tail.empty()) {
-    ///             next = tail.front();
-    ///             tail.pop_front();
-    ///         }
-    ///         if ( !head.empty() ) { // empty heads should accept anything
-    ///             string& last = head.back();
-    ///             if (last == DIR_CURRENT) {
-    ///                 if (!next.empty()) {
-    ///                     head.pop_back();
-    ///                 }
-    /// #ifdef DISK_SEPARATOR
-    ///             } else if (!last.empty() && last[last.size()-1] == DISK_SEPARATOR) {
-    ///                 // Allow almost anything right after a volume specification
-    /// #endif
-    ///             } else if (next == DIR_CURRENT) {
-    ///                 // Leave out, since we already have content
-    ///                 continue;
-    ///             } else if (next.empty()) {
-    ///                 continue; // leave out empty components in most cases
-    ///             } else if (next == DIR_PARENT) {
-    /// #ifdef DISK_SEPARATOR
-    ///                 SIZE_TYPE pos;
-    /// #endif
-    ///                 // Back up if possible, assuming existing path to be "physical"
-    ///                 if (last.empty()) {
-    ///                     // Already at the root; .. is a no-op
-    ///                     continue;
-    /// #ifdef DISK_SEPARATOR
-    ///                 } else if ((pos = last.find(DISK_SEPARATOR) != NPOS)) {
-    ///                     last.erase(pos + 1);
-    /// #endif
-    ///                 } else if (last != DIR_PARENT) {
-    ///                     head.pop_back();
-    ///                     continue;
-    ///                 }
-    ///             }
-    ///         }
-    /// #ifdef NCBI_OS_UNIX
-    ///         // Is there a Windows equivalent for readlink?
-    ///         if ( follow_links ) {
-    ///             string s(head.empty() ? next : NStr::Join(head, string(1, DIR_SEPARATOR)) + DIR_SEPARATOR + next);
-    ///             char buf[PATH_MAX];
-    ///             int  length = (int)readlink(s.c_str(), buf, sizeof(buf));
-    ///             if (length > 0) {
-    ///                 current.assign(buf, length);
-    ///                 if (++link_depth >= 1024) {
-    /// ...
-    ///                     follow_links = eIgnoreLinks;
-    ///                 }
-    ///                 continue;
-    ///             }
-    ///         }
-    /// #endif
-    ///         // Normal case: just append the next element to head
-    ///         head.push_back(next);
-    ///     }
-    ///
-    ///     // Special cases
-    ///     if ( (head.size() == 0)  ||
-    ///          (head.size() == 2  &&  head.front() == DIR_CURRENT  &&  head.back().empty()) ) {
-    ///         // current dir
-    ///         return DIR_CURRENT;
-    ///     }
-    ///     if (head.size() == 1  &&  head.front().empty()) {
-    ///         // root dir
-    ///         return string(1, DIR_SEPARATOR);
-    ///     }
-    /// #ifdef DISK_SEPARATOR
-    ///     if (head.front().find(DISK_SEPARATOR) != NPOS) {
-    ///         if ((head.size() == 2  &&  head.back() == DIR_CURRENT) ||
-    ///             (head.size() == 3  &&  *(++head.begin()) == DIR_CURRENT  &&  head.back().empty()) ) {
-    ///             // root dir on drive X:
-    ///             return head.front() + DIR_SEPARATOR;
-    ///         }
-    ///     }
-    /// #endif
-    ///     // Compose path
-    ///     return NStr::Join(head, string(1, DIR_SEPARATOR));
-    /// ```
     /// `NStr::Split` with no flag keeps the empty parts; `NStr::CompareNocase` folds ASCII
     /// letters. At a depth of 1024 links NCBI posts a warning and stops following them: `None`
     /// then (a loop of links; the path that the system resolved to run the program, within its
@@ -2551,52 +2217,11 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6554-6559
-// ```c++
-// void CFileHandleDiagHandler::SetLogName(const string& log_name)
-// {
-//     string abs_name = CDirEntry::IsAbsolutePath(log_name) ? log_name
-//         : CDirEntry::CreateAbsolutePath(log_name);
-//     TParent::SetLogName(abs_name);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6456-6461 (`m_LogName` is a
 // `char[2048]`, ncbidiag.hpp:2597)
-// ```c++
-// void CStreamDiagHandler_Base::SetLogName(const string& log_name)
-// {
-//     size_t len = min(log_name.length(), sizeof(m_LogName) - 1);
-//     memcpy(m_LogName, log_name.data(), len);
-//     m_LogName[len] = '\0';
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6592-6614 (`Reopen`; the handle opens
-// `CFile::ConvertToOSPath(fname)` with `O_WRONLY | O_APPEND | O_CREAT`, on Windows also
-// `O_BINARY | O_NOINHERIT`, 6495-6520)
-// ```c++
-//     m_LowDiskSpace = false;
-//     CDiagFileHandleHolder* new_handle;
-//     new_handle = new CDiagFileHandleHolder(GetLogName(), flags);
-//     new_handle->AddReference();
-//     if (new_handle->GetHandle() == -1) {
-//         new_handle->RemoveReference();
-//         new_handle = NULL;
-//     }
-//     else {
-//         // Need at least 20K of free space to write logs
-//         try {
-//             CDirEntry entry(GetLogName());
-//             m_LowDiskSpace = CFileUtil::GetFreeDiskSpace(entry.GetDir()) < 1024*20;
-//         }
-//         catch (const CException&) {
-//             // Ignore error - could not check free space for some reason.
-//             // Try to open the file anyway.
-//         }
-//         if (m_LowDiskSpace) {
-//             new_handle->RemoveReference();
-//             new_handle = NULL;
-//         }
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6592-6614, 6495-6520 (`Reopen`: the
+// handle opens the name's OS form to append to it and makes the file where it is missing; on
+// Windows the file is also binary and not inherited)
 // Without a handle the handler collects the messages (`Post`) and writes them when a later
 // `Reopen`, 65 seconds on, finds the space; `Valid` holds with `m_LowDiskSpace`, so the log is
 // set up (ncbidiag.hpp:2672-2677). A file system that reports no free space (procfs, sysfs,
@@ -2604,14 +2229,6 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:870-878 (the first `SetupDiag`, which
 // sets up the log; an exception that it throws leaves `AppMain`, which BLAST+'s programs return
 // from `main`, e.g. c++/src/app/blast/tblastx_app.cpp:230)
-// ```c++
-//     try {
-//         CDiagContext::SetupDiag(diag, 0, eDCM_NoChange, m_LogFile);
-//     } catch (const CException& e) {
-//         NCBI_RETHROW(e, CAppException, eSetupDiag,
-//                      "Application diagnostic stream's setup failed");
-//     } catch (const exception& e) {
-// ```
 /// The paths that NCBI reads from a `-logfile` name that is not `""`, `-` or `/dev/null`
 /// (`log_file_name`).
 #[derive(Debug, PartialEq, Eq)]
@@ -2674,71 +2291,10 @@ pub(crate) fn log_file_name(
     })
 }
 
-// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:154-162 (NCBI's Unicode build, which
-// opens the log by `NcbiSys_open(_T_XCSTRING(CFile::ConvertToOSPath(fname)), ...)`,
-// c++/src/corelib/ncbidiag.cpp:6514-6515), 5666-5674, 5686-5689
-// ```c++
-// #  if defined(_DEBUG)
-// #    define _T_XSTRING(x) \
-//     ncbi::CUtf8::AsBasicString<ncbi::TXChar>(x, NULL, ncbi::CUtf8::eValidate)
-// #  else
-// #    define _T_XSTRING(x) \
-//     ncbi::CUtf8::AsBasicString<ncbi::TXChar>(x, NULL, ncbi::CUtf8::eNoValidate)
-// #  endif
-// #  define _T_STDSTRING(x)     ncbi::CUtf8::AsUTF8(x)
-// #  define _T_XCSTRING(x)      _T_XSTRING(x).c_str()
-// ...
-// CUtf8::x_Decode(TIterator& src)
-// {
-//     SIZE_TYPE more=0;
-//     TUnicodeSymbol sym = DecodeFirst(*src,more);
-//     while (more--) {
-//         sym = DecodeNext(sym, *(++src));
-//     }
-//     return sym;
-// }
-// ...
-//     CTempString::const_iterator src = str.begin();
-//     CTempString::const_iterator to  = str.end();
-//     for (; src != to; ++src) {
-//         TUnicodeSymbol ch = Decode(src);
-// ```
+// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:154-162, 5666-5674, 5686-5689
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6514-6515 (NCBI's Unicode build turns
+// the log's OS path into UTF-16 with `_T_XCSTRING` before it opens it)
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7174-7206
-// ```c++
-// TUnicodeSymbol CUtf8::DecodeFirst(char ch, SIZE_TYPE& more)
-// {
-//     TUnicodeSymbol chRes = 0;
-//     more = 0;
-//     if ((ch & 0x80) == 0) {
-//         chRes = ch;
-//     } else if ((ch & 0xE0) == 0xC0) {
-//         chRes = (ch & 0x1F);
-//         more = 1;
-//     } else if ((ch & 0xF0) == 0xE0) {
-//         chRes = (ch & 0x0F);
-//         more = 2;
-//     } else if ((ch & 0xF8) == 0xF0) {
-//         chRes = (ch & 0x07);
-//         more = 3;
-//     } else {
-//         NCBI_THROW2(CStringException, eBadArgs,
-//             "Source string is not in UTF8 format", 0);
-//     }
-//     return chRes;
-// }
-//
-//
-// TUnicodeSymbol CUtf8::DecodeNext(TUnicodeSymbol chU, char ch)
-// {
-//     if ((ch & 0xC0) == 0x80) {
-//         return (chU << 6) | (ch & 0x3F);
-//     } else {
-//         NCBI_THROW2(CStringException, eBadArgs,
-//             "Source string is not in UTF8 format", 0);
-//     }
-//     return 0;
-// }
-// ```
 /// Whether NCBI's `CUtf8` decodes every character of `bytes` (its release build, which does not
 /// validate first): each starts with a byte of `0xxxxxxx`, `110xxxxx`, `1110xxxx` or `11110xxx`
 /// and has as many bytes of `10xxxxxx` after it as that byte says. A string cut inside a character
@@ -2766,17 +2322,6 @@ fn decodes(bytes: &[u8]) -> bool {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3708-3716 (`NcbiSys_getcwd` is
 // `getcwd`, on Windows `_wgetcwd` in NCBI's Unicode build, c++/include/corelib/ncbisys.hpp:60,
 // 125; `TXChar` is then `wchar_t`)
-// ```c++
-// string CDir::GetCwd(void)
-// {
-//     TXChar buf[4096];
-//     if ( NcbiSys_getcwd(buf, sizeof(buf)/sizeof(TXChar) - 1) ) {
-//         return _T_CSTRING(buf);
-//     }
-//     LOG_ERROR_ERRNO(90, "CDir::GetCwd(): Cannot get current directory");
-//     return kEmptyCStr;
-// }
-// ```
 /// The working directory as `CDir::GetCwd` reads it: `None` where it cannot be read, and for one
 /// of 4095 characters or more (bytes; UTF-16 units on Windows), for which a buffer of 4095 has no
 /// room with the closing NUL (POSIX `getcwd`'s `ERANGE`). `LOG_ERROR_ERRNO` posts nothing unless
@@ -2858,21 +2403,6 @@ fn open_log_file(name: &OsStr, cwd: Option<&OsStr>) -> DiagTarget {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:4819-4830, 5177-5179 (Linux; Darwin's
 // branch, 5262-5264, takes the same `GET_STATFS_INFO`)
-// ```c++
-// #define GET_STATFS_INFO                                        \
-//     struct statfs st;                                          \
-//     memset(&st, 0, sizeof(st));                                \
-//     if (statfs(path.c_str(), &st) != 0) {                      \
-//         CNcbiError::SetFromErrno();                            \
-//         NCBI_THROW(CFileErrnoException, eFileSystemInfo,  string(msg) + path); \
-//     }                                                          \
-//     info->total_space  = (Uint8)st.f_bsize * st.f_blocks;      \
-//     info->free_space   = (Uint8)st.f_bsize * st.f_bavail;      \
-// ...
-// #  if (defined(NCBI_OS_LINUX) || defined(NCBI_OS_CYGWIN))  &&  defined(HAVE_STATFS)
-//
-//     GET_STATFS_INFO;
-// ```
 /// `CFileUtil::GetFreeDiskSpace(directory)` on Linux and macOS: the bytes free to a user on the
 /// file system of `directory` (`statfs`'s `f_bsize * f_bavail` in 64 bits, which wraps as NCBI's
 /// `Uint8` product does: 2^64 bytes or more free is the product modulo 2^64); `None` where it
@@ -2903,32 +2433,6 @@ fn free_space(block_size: u64, blocks: u64) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5107-5122, 5146-5152
-// ```c++
-// #if defined(NCBI_OS_MSWIN)
-//     // Try to get a root disk directory from given path
-//     string xpath = path;
-//     // Not UNC path
-//     if (!s_Win_IsNetworkPath(path)) {
-//         if ( !isalpha((unsigned char)path[0]) || path[1] != DISK_SEPARATOR ) {
-//             // absolute or relative path without disk name -- current disk,
-//             // dir entry should exists
-//             if ( CDirEntry(path).Exists() ) {
-//                 xpath = CDir::GetCwd();
-//             }
-//         }
-//         // Get disk root directory name from the path
-//         xpath[2] = '\\';
-//         xpath.resize(3);
-//     }
-// ...
-//     if (flags & fFSI_DiskSpace) {
-//         if ( !::GetDiskFreeSpaceEx(_T_XCSTRING(xpath),
-//                                    (PULARGE_INTEGER)&info->free_space,
-//                                    (PULARGE_INTEGER)&info->total_space, 0) ) {
-//             NCBI_THROW(CFileErrnoException, eFileSystemInfo, string(msg) + path);
-//         }
-//     }
-// ```
 /// `CFileUtil::GetFreeDiskSpace(directory)` on Windows: the bytes free to the caller on the disk
 /// of `directory` (`GetDiskFreeSpaceEx` of its root, `C:\`; of the network path as it is), with
 /// the working directory `cwd` (`ncbi_cwd`) for a path without a disk's name; `None` where it

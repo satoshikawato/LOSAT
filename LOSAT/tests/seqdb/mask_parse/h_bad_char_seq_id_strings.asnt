@@ -1,0 +1,1 @@
+Blast-db-mask-info ::= { algo-id 0, algo-program windowmasker, algo-options "x", masks { masks { mix { int { from 5, to 14, id general { db "d	b", tag str "t	g" } }, packed-int { { from 1, to 2, id genbank { name "n	m", accession "A	1" } } } } }, more FALSE } }

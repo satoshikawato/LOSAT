@@ -27,7 +27,9 @@ pub struct SeqIdError {
     pub line: u32,
     /// The function, as `NCBI_CURRENT_FUNCTION` names it.
     pub function: &'static str,
-    pub message: String,
+    /// The exception's message, as bytes: an id's text keeps the bytes of NCBI's `std::string`
+    /// (a seqid list's word that is not UTF-8: probe R3 of line LIB-B).
+    pub message: Vec<u8>,
 }
 
 // makeblastdb 2.17.0 (conda build) printed, for `>xyz|ABC|DEF`:
@@ -36,16 +38,23 @@ pub struct SeqIdError {
 // ID type xyz`. LOSAT names the build tree of the official Linux x64 release
 // (`ncbi_exception::NCBI_BUILD_ROOT`); the path is not compared (makedb-v5 DECISIONS 11).
 impl SeqIdError {
-    fn new(file: &'static str, line: u32, function: &'static str, message: String) -> Self {
+    fn new(
+        file: &'static str,
+        line: u32,
+        function: &'static str,
+        message: impl Into<Vec<u8>>,
+    ) -> Self {
         SeqIdError {
             file,
             line,
             function,
-            message,
+            message: message.into(),
         }
     }
 
-    /// The exception NCBI throws (`NCBI_THROW(CSeqIdException, eFormat, message)`).
+    /// The exception NCBI throws (`NCBI_THROW(CSeqIdException, eFormat, message)`). Its
+    /// callers (makeblastdb's deflines, blastdbcmd's `-entry`) parse ids that end at a byte of
+    /// 0x80 or more or words that are UTF-8, so the message is UTF-8 text here.
     pub fn exception(&self) -> NcbiException {
         let site = ThrowSite {
             file: self.file,
@@ -53,7 +62,7 @@ impl SeqIdError {
             kind: "CSeqIdException::eFormat",
             function: Some(self.function),
         };
-        NcbiException::new(site, self.message.as_str())
+        NcbiException::new(site, String::from_utf8_lossy(&self.message))
     }
 
     /// `CException::what()`: the report of the exception, ending with a newline.
@@ -345,16 +354,16 @@ fn textseq_set(
     allow_dot_version: bool,
 ) -> Result<TextseqId, SeqIdError> {
     const FUNCTION: &str = "ncbi::objects::CTextseq_id::Set";
-    let lossy = |s: &[u8]| String::from_utf8_lossy(s).into_owned();
     if version < 0 {
         return Err(SeqIdError::new(
             TEXTSEQ_ID_CPP,
             67,
             FUNCTION,
-            format!(
-                "Unexpected negative version {version} for accession {}",
-                lossy(acc_in)
-            ),
+            [
+                format!("Unexpected negative version {version} for accession ").as_bytes(),
+                acc_in,
+            ]
+            .concat(),
         ));
     }
     let acc = truncate_spaces(acc_in);
@@ -379,20 +388,24 @@ fn textseq_set(
                         TEXTSEQ_ID_CPP,
                         108,
                         FUNCTION,
-                        format!(
-                            "Version embedded in accession {} is not a positive integer",
-                            lossy(acc)
-                        ),
+                        [
+                            b"Version embedded in accession ".as_slice(),
+                            acc,
+                            b" is not a positive integer",
+                        ]
+                        .concat(),
                     ));
                 } else if version > 0 && ver != version {
                     return Err(SeqIdError::new(
                         TEXTSEQ_ID_CPP,
                         112,
                         FUNCTION,
-                        format!(
-                            "Incompatible version {version} supplied for accession {}",
-                            lossy(acc)
-                        ),
+                        [
+                            format!("Incompatible version {version} supplied for accession ")
+                                .as_bytes(),
+                            acc,
+                        ]
+                        .concat(),
                     ));
                 }
                 id.accession = Some(acc[..idx].to_vec());
@@ -408,10 +421,15 @@ fn textseq_set(
             TEXTSEQ_ID_CPP,
             129,
             FUNCTION,
-            format!(
-                "Accession and name missing for Textseq-id (but got version {version}, release {})",
-                lossy(release)
-            ),
+            [
+                format!(
+                    "Accession and name missing for Textseq-id (but got version {version}, release "
+                )
+                .as_bytes(),
+                release,
+                b")",
+            ]
+            .concat(),
         ));
     } else if !release.is_empty() {
         id.release = Some(release.to_vec());
@@ -682,11 +700,15 @@ pub fn set_typed(
                     SEQ_ID_CPP,
                     2941,
                     "ncbi::objects::CSeq_id::Set",
-                    format!(
-                        "Negative, excessively large, or non-numeric {} ID {}",
-                        selection_name(choice),
-                        String::from_utf8_lossy(acc)
-                    ),
+                    [
+                        format!(
+                            "Negative, excessively large, or non-numeric {} ID ",
+                            selection_name(choice)
+                        )
+                        .as_bytes(),
+                        acc,
+                    ]
+                    .concat(),
                 ));
             }
         }
@@ -788,10 +810,12 @@ fn split_version(acc_in: &[u8]) -> Result<(&[u8], i32), SeqIdError> {
             SEQ_ID_CPP,
             161,
             "ncbi::objects::s_SplitVersion",
-            format!(
-                "Version embedded in accession {} is not a positive integer",
-                String::from_utf8_lossy(acc_in)
-            ),
+            [
+                b"Version embedded in accession ".as_slice(),
+                acc_in,
+                b" is not a positive integer",
+            ]
+            .concat(),
         ));
     }
     Ok((&acc_in[..dot], ver))
@@ -1084,7 +1108,6 @@ pub fn seq_id_from_text(
 ) -> Result<ParsedSeqId, SeqIdError> {
     const FUNCTION: &str = "ncbi::objects::CSeq_id::Set";
     let the_id = truncate_spaces(the_id_in);
-    let lossy = |s: &[u8]| String::from_utf8_lossy(s).into_owned();
     let mut choice = SEQID_NOT_SET;
     if flags & NO_FASTA == 0 {
         choice = check_for_fasta_tag(the_id);
@@ -1122,7 +1145,7 @@ pub fn seq_id_from_text(
                         SEQ_ID_CPP,
                         2501,
                         FUNCTION,
-                        format!("Malformatted ID {}", lossy(the_id)),
+                        [b"Malformatted ID ".as_slice(), the_id].concat(),
                     ))
                 }
             }
@@ -1156,17 +1179,23 @@ pub fn seq_id_from_text(
             if flags & PARTIAL_OK != 0 {
                 warn(SeqIdWarning {
                     subcode: 10,
-                    message: format!(
-                        "Ignoring extra parts (synonyms?) in FASTA-style ID {}",
-                        lossy(the_id)
-                    ),
+                    message: [
+                        b"Ignoring extra parts (synonyms?) in FASTA-style ID ".as_slice(),
+                        the_id,
+                    ]
+                    .concat(),
                 });
             } else {
                 return Err(SeqIdError::new(
                     SEQ_ID_CPP,
                     2542,
                     FUNCTION,
-                    format!("FASTA-style ID {} has too many parts.", lossy(the_id)),
+                    [
+                        b"FASTA-style ID ".as_slice(),
+                        the_id,
+                        b" has too many parts.",
+                    ]
+                    .concat(),
                 ));
             }
         }
@@ -1320,7 +1349,6 @@ fn x_init(
     tv: TypeVariant,
 ) -> Result<(Option<ParsedSeqId>, u32), SeqIdError> {
     const FUNCTION: &str = "ncbi::objects::CSeq_id::x_Init";
-    let lossy = |s: &[u8]| String::from_utf8_lossy(s).into_owned();
     let (min_fields, max_fields) = match choice {
         SEQID_LOCAL | SEQID_GIBBSQ | SEQID_GIBBMT | SEQID_GIIM | SEQID_GI => (1, 1),
         SEQID_PATENT => (3, 3),
@@ -1389,12 +1417,15 @@ fn x_init(
                     SEQ_ID_CPP,
                     2799,
                     FUNCTION,
-                    format!(
-                        "Bad sequence number {} for {} patent {}",
-                        lossy(&fields[2]),
-                        lossy(&fields[0]),
-                        lossy(&fields[1])
-                    ),
+                    [
+                        b"Bad sequence number ".as_slice(),
+                        &fields[2],
+                        b" for ",
+                        &fields[0],
+                        b" patent ",
+                        &fields[1],
+                    ]
+                    .concat(),
                 ));
             }
             fields[2] = b"pat".to_vec();
@@ -1409,7 +1440,7 @@ fn x_init(
                     SEQ_ID_CPP,
                     2813,
                     FUNCTION,
-                    format!("Malformatted PDB ID {}", lossy(mol)),
+                    [b"Malformatted PDB ID ".as_slice(), mol].concat(),
                 ));
             }
             if mol.len() > 4 && fields[1].is_empty() {
@@ -1560,7 +1591,7 @@ pub fn parse_ids(
                             SEQ_ID_CPP,
                             2663,
                             "ncbi::objects::CSeq_id::ParseIDs",
-                            format!("Unsupported ID type {}", String::from_utf8_lossy(front)),
+                            [b"Unsupported ID type ".as_slice(), front].concat(),
                         ));
                     }
                 }
@@ -1580,7 +1611,7 @@ pub fn parse_ids(
                 }
                 warn(SeqIdWarning {
                     subcode: 7,
-                    message: error.what(),
+                    message: error.what().into_bytes(),
                 });
                 while let Some(front) = pieces.front() {
                     if front.len() != 2 && front.len() != 3 {

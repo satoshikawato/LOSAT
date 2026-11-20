@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.54
+- Version: 1.55
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -203,7 +203,11 @@
   contexts: the Owner's decision of 2026-11-20 on question Q-X5 (「Q1=A」, Q1 of that day's batch of
   questions = Q-X5); the rule-2 rejection of a batch in which a query is followed by a query
   without a search space, Owner-delegated (standing instruction 2026-09-29, restated 2026-10-07)
-  and part of the option A that the Owner chose; numbered after 1.53, line RG item X4)
+  and part of the option A that the Owner chose; numbered after 1.53, line RG item X4);
+  1.55 2026-11-20 (BLASTN, line RG item X6: reward 0 and penalty 0, NCBI's matrix-only scoring
+  of `-task rmblastn`, now runs; the explicit rejection of it with the greedy extension of
+  `-task megablast`, where NCBI divides by zero or does not finish, rule 3; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.54, line RG item X5)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1187,6 +1191,15 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   no hits, a deterministic result), stays an explicit rejection too.
 - Subjects of 2^31 letters or more in total: NCBI's 32-bit total wraps.
 - megablast gap costs above 32767: NCBI's 32-bit greedy distance arithmetic can wrap.
+- Reward 0 and penalty 0 (matrix-only scoring, the scores of `-task rmblastn`) with the greedy
+  extension of `-task megablast` (line RG X6, 2026-11-20, Owner-delegated): with gap costs 0
+  and 0 (megablast's own) NCBI divides by zero in the greedy set-up (`blast_gapalign.c:209`,
+  SIGFPE, exit status 136, also with `-ungapped`); with other gap costs the greedy alignment
+  converts an infinite quotient to `Int4` (`greedy_align.c:981`, undefined behaviour) and does
+  not finish on pairs of 60-100 kb. LOSAT refuses it where it checks the greedy gap costs (a
+  batch with a valid query), so a batch of invalid queries ends with NCBI's warning as in NCBI.
+  It differs from NCBI where NCBI finishes with other gap costs because no seed reaches the
+  greedy alignment (small inputs). `-no_greedy` and `-ungapped` with other gap costs run.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` that splits a query batch
   (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's `size_t` chunk ranges
   wrap; NCBI stops as in exception 1 where a chunk would be split again, and otherwise

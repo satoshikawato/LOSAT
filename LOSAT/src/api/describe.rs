@@ -26,7 +26,7 @@
 use clap::CommandFactory;
 
 use super::program::Program;
-use super::search::{file_options, API_OWNED};
+use super::search::{alignment_options, file_options, API_OWNED};
 use crate::cli::Cli;
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbiargs.hpp:588-598
@@ -172,6 +172,7 @@ pub fn describe(program: Program) -> Description {
         if matches!(long, "help" | "version")
             || API_OWNED.contains(&long)
             || file_options(program).contains(&long)
+            || alignment_options(program).contains(&long)
         {
             continue;
         }
@@ -228,7 +229,11 @@ mod tests {
                 .iter()
                 .map(|parameter| parameter.flag.as_str())
                 .collect();
-            for owned in API_OWNED.iter().chain(file_options(program)) {
+            for owned in API_OWNED
+                .iter()
+                .chain(file_options(program))
+                .chain(alignment_options(program))
+            {
                 assert!(
                     !flags.contains(&format!("-{owned}").as_str()),
                     "{program} lists -{owned}"
@@ -293,10 +298,16 @@ mod tests {
             .unwrap();
         assert_eq!(
             task.choices,
-            ["megablast", "dc-megablast", "blastn", "blastn-short"]
+            [
+                "megablast",
+                "dc-megablast",
+                "blastn",
+                "blastn-short",
+                "rmblastn"
+            ]
         );
-        // NCBI's rmblastn stays a refusal and is not offered.
-        assert!(!parses(Program::Blastn, "rmblastn"));
+        // NCBI's rmblastn (blastn with reward 0 and penalty 0) is offered and parses.
+        assert!(parses(Program::Blastn, "rmblastn"));
     }
 
     #[test]

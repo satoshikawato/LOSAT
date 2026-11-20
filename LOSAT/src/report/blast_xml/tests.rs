@@ -536,11 +536,11 @@ fn a_header_exception_comes_back_after_its_posts() {
     assert_eq!(native.exit, 255);
     // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
     assert!(
-        native.message.starts_with(&*crate::wording::losat_text(
+        native.message.starts_with(crate::wording::losat_text(
             "Error: NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7190: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeFirst() - Source string is not in UTF8 format (m_Pos = 0)\n"
-        )),
+        ).as_bytes()),
         "{}",
-        native.message
+        String::from_utf8_lossy(&native.message)
     );
     let diagnostics = String::from_utf8_lossy(&diagnostics);
     assert!(

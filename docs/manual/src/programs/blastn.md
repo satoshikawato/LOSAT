@@ -1,6 +1,6 @@
 # blastn
 
-`blastn` compares nucleotide queries with nucleotide subjects. Use it to find where a genome, contig or read set matches another, from near-identical copies (the default `megablast` task) to more distant relatives (`blastn`, `dc-megablast`) and very short queries (`blastn-short`).
+`blastn` compares nucleotide queries with nucleotide subjects. Use it to find where a genome, contig or read set matches another, from near-identical copies (the default `megablast` task) to more distant relatives (`blastn`, `dc-megablast`) and very short queries (`blastn-short`). `rmblastn` scores alignments with the nucleotide matrix alone, and its format 0 report shows raw scores.
 
 ## Synopsis
 
@@ -21,6 +21,9 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `blastn` | More divergent sequences | Word size 11, reward 2, penalty -3, gap open 5, gap extend 2 |
 | `dc-megablast` | Distant, cross-species matches | Discontiguous words (11 of 18 positions, coding template), reward 2, penalty -3, gaps 5/2, two hits within a window of 40 |
 | `blastn-short` | Queries of a few dozen bases | Word size 7, reward 1, penalty -3, gaps 5/2, E-value 1000, DUST off |
+| `rmblastn` | Scores from the matrix alone, as NCBI's `-task rmblastn` | The defaults of `blastn` with reward 0 and penalty 0 |
+
+With reward 0 and penalty 0 (`-task rmblastn`, or `-reward 0 -penalty 0` with another task), the search scores with NCBI's default nucleotide matrix (reward 1, penalty -3) and reads the X-drops (`-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`) as raw scores. The preliminary search keeps alignments by raw score (at least `-min_raw_gapped_score` when it is given) instead of by E-value; `-evalue` still applies to the final alignments. Format 0 shows raw scores only (` Score = 2722`) and leaves out the list of subjects and the Karlin-Altschul lines; the tabular formats still show bit scores and E-values.
 
 `-template_type` (`coding`, `optimal`, `coding_and_optimal`) and `-template_length` (16, 18 or 21) tune `dc-megablast`.
 
@@ -88,7 +91,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `blastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-task rmblastn` and `-reward 0`.
+- `-reward 0` with a penalty other than 0, and `-reward 0 -penalty 0` with the greedy extension of `-task megablast`.
 - `-ungapped` together with `-outfmt 17` (SAM).
 - `-html`, `-remote`, `-entrez_query`, `-gilist`, `-import_search_strategy`, `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-filtering_db` and `-index_name`. `-use_index true` on a database that has a MegaBLAST index (`makembindex`).

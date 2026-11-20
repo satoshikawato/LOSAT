@@ -439,5 +439,5 @@ starting with the CLI's standard error for the argv (§5; D3 review r2, 2026-11-
 asks for format 0 to 4 gives the formatting handler's lines of the tabular formats after its own
 lines, where they came first, and a failed one does not give them; TBLASTX's file of `-logfile`
 holds only the argv's lines, the rest coming on stream 3, NCBI's errors of the outputs that failed
-included (stream 9 gives their place as `3`, where version 4 gave `8`). A run that completes gives
+included (stream 9 gives their place as `3`). A run that completes gives
 the same lines, in another order where the argv asks for format 0 to 4.

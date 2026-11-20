@@ -17,4 +17,4 @@
 - LOSAT Web: Run details says where a run's warnings are when TBLASTX's `-logfile` takes them: in
   that file under Outputs, or not kept (`-logfile /dev/null`). Before, it said "The engine wrote no
   warnings." for such a run, whose warnings were in the file; it still says so when the file is
-  empty.
+  empty and the other outputs wrote no warnings.

@@ -168,7 +168,7 @@ function nativeFiles(directory, outfmt) {
   for (let n = 1; fs.existsSync(path.join(directory, `results_${n}.${extension}`)); n++) {
     files.push([`results_${n}.${extension}`, fs.readFileSync(path.join(directory, `results_${n}.${extension}`))]);
   }
-  // A run that failed leaves no master file, which comes after the last side file.
+  // A run that failed leaves the master file (`results`) empty, after the side files written before the error.
   if (fs.existsSync(path.join(directory, "results"))) files.push([`results.${extension}`, fs.readFileSync(path.join(directory, "results"))]);
   return files;
 }

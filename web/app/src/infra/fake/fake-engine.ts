@@ -223,7 +223,6 @@ export class FakeEngine implements EngineGateway {
   }
 }
 
-/** The program of a run: the first word of its argv. */
 /** The output that the CLI's run of the argv writes: the argv's own -outfmt output, else the format of its number (0 without one). */
 function ownOutput(argv: readonly string[]): RunOutput {
   if (customOutfmt(argv) !== undefined) return CUSTOM_OUTPUT;
@@ -232,6 +231,7 @@ function ownOutput(argv: readonly string[]): RunOutput {
   return number === 6 || number === 7 ? number : 0;
 }
 
+/** The program of a run: the first word of its argv. */
 function programOf(request: EngineRunRequest): ProgramId {
   return request.argv[0] as ProgramId;
 }

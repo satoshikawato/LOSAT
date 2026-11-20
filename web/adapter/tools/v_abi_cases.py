@@ -512,12 +512,18 @@ def failed_outputs() -> list[dict]:
     CLI's outfmt 6 and 7 complete (their streams are dropped with the failed run's)."""
     batch = "web/adapter/tests/fixtures/failed_outputs"
     searches = []
+    # The archives of outfmt 13 and 14: the CLI leaves `results` empty (no side file, the first batch's report
+    # is not written before the error), and the run's archive holds that master file as an empty entry.
     for outfmt, name in ((None, "outfmt0"), ("6", "outfmt6"), ("7", "outfmt7"), ("5", "outfmt5"),
-                         ("6 qseqid sseqid", "outfmt6_fields")):
+                         ("6 qseqid sseqid", "outfmt6_fields"), ("13", "outfmt13"), ("14", "outfmt14")):
         searches.append({"program": "blastp",
                          "argv": ["blastp", "-query", f"{batch}/later_batch.q.faa", "-subject", f"{batch}/later_batch.s.faa"],
                          "cwd": str(REPO), "cases": [f"failed_outputs.blastp.later_batch.{name}"], "frozen": {},
                          "expect": "failure", **({"outfmt": outfmt} if outfmt else {})})
+    searches.append({"program": "blastn",
+                     "argv": ["blastn", "-query", f"{batch}/later_batch.q.fna", "-subject", f"{batch}/later_batch.s.fna"],
+                     "cwd": str(REPO), "cases": ["failed_outputs.blastn.later_batch.outfmt13"], "frozen": {},
+                     "expect": "failure", "outfmt": "13"})
     searches.append({"program": "blastn",
                      "argv": ["blastn", "-query", "tests/fasta/outfmt0/pd_self_n.fna", "-subject", "tests/fasta/outfmt0/pd_self_n.fna",
                               "-parse_deflines", "-dust", "yes"],

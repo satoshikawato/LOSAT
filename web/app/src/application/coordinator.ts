@@ -538,7 +538,7 @@ export class Coordinator {
       } else if (staged) void this.deps.data.discardRun(runId).catch(() => undefined);
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
-        ...(kept === undefined ? {} : { result: kept.result }),
+        ...(kept?.result === undefined ? {} : { result: kept.result }),
         record: {
           endedAt: this.deps.now(),
           ...(cancelled ? {} : { error: failureText(error) }),

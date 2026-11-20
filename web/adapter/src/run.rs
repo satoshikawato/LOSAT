@@ -1110,9 +1110,19 @@ fn search(
                 }
             }
         } else {
-            // The side files written before the error, with the archive's central directory, as the CLI
-            // leaves them (its master file comes after the last one, so none): a run that failed keeps
-            // them (line WQA's sweep, D15, 2026-11-20).
+            // The side files written before the error and the master file as the run holds it (the CLI
+            // leaves its `-out` file empty when it fails before the master file is written), with the
+            // archive's central directory: a run that failed keeps them (line WQA's sweep, D15).
+            let mut zip = zip;
+            if let Err(error) = zip.add(master_name(format.number).as_bytes(), &master) {
+                return Err(Failed {
+                    cli_stderr: format!("{error}\n").into_bytes(),
+                    message: format!("the archive of outfmt {}: {error}", format.number),
+                    native: None,
+                    fault: true,
+                    kept: Vec::new(),
+                });
+            }
             match zip.finish() {
                 Ok(stream) => stream,
                 Err(error) => {

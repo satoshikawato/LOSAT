@@ -86,7 +86,8 @@ export interface FailedOutput {
 
 /** What `RunStore.keepFailedRun` keeps of a failed run: its outputs, and its warnings. */
 export interface KeptRun {
-  readonly result: ResultSetRef;
+  /** The outputs that the run wrote before its error; undefined where no kept output has bytes, and the run is dropped. */
+  readonly result?: ResultSetRef;
   /** What the run wrote to the CLI's standard error before its error; '' where it wrote nothing. */
   readonly diagnostics: string;
 }

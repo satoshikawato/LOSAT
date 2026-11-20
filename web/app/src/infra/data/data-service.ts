@@ -43,6 +43,7 @@ import type {
 import { concatBytes } from '../bytes';
 import { asStorageFull, isStorageFull, isStorageRemoved, type BlockStore, type BlockWriter } from './block-store';
 import { inflateFile } from './inflate';
+import { hasEntryBytes } from './zip-entries';
 
 export interface DataServiceDeps {
   readonly store: BlockStore;
@@ -299,6 +300,12 @@ export class DataService implements DataGateway {
         const diagnostics =
           length === 0 ? '' : new TextDecoder().decode(await this.deps.store.read(blockPath(run.token, DIAGNOSTICS_STREAM), 0, length));
         if (this.runs.get(runId) === run) {
+          if (!(await this.keptBytes(run))) {
+            // Nothing was written to a kept output (an empty file, an archive of empty entries): the run keeps only
+            // its warnings, as a failed run did before version 7.
+            await this.drop(runId, run).catch(() => undefined);
+            return { diagnostics };
+          }
           // The commit of a completed run: its outputs are read, and exported, as a completed run's are.
           this.runs.set(runId, { state: 'committed', token: run.token, lengths: Object.freeze({ ...run.lengths }) });
           return { diagnostics, result: this.resultOf(runId, run) };
@@ -311,6 +318,21 @@ export class DataService implements DataGateway {
     const current = this.runs.get(runId);
     if (current !== undefined) await this.drop(runId, current).catch(() => undefined);
     return undefined;
+  }
+
+  /**
+   * Whether a failed run wrote something to an output that it keeps: bytes of its own, or, for an archive (outfmt 13
+   * and 14), bytes in its entries, not in the archive's own records (the empty master file of a run that failed
+   * before writing it is an archive of 22 + 46 + 30 bytes of records and no data).
+   */
+  private async keptBytes(run: StagedRun): Promise<boolean> {
+    for (const output of [0, 6, 7, CUSTOM_OUTPUT] as const) {
+      const length = run.lengths[output] ?? 0;
+      if (length === 0 || run.failed.has(output)) continue;
+      const read = (start: number, end: number) => this.deps.store.read(blockPath(run.token, output), start, end - start);
+      if (await hasEntryBytes(read, length)) return true;
+    }
+    return false;
   }
 
   async readOutput(runId: string, output: RunOutput): Promise<Uint8Array> {

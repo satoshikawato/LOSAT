@@ -25,6 +25,7 @@ pub(crate) mod asn_text_reader;
 pub(crate) mod asn_types;
 pub mod encoder;
 pub mod json;
+pub(crate) mod object_frame;
 pub(crate) mod out_buffer;
 pub mod pssm;
 pub mod real;

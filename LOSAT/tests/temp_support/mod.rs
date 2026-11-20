@@ -226,3 +226,29 @@ pub fn worker_log_if_unset(command: &mut Command, label: &str) -> Option<TempFil
             log
         })
 }
+
+/// LOSAT's bytes of NCBI's frozen output or message: the one mapping of
+/// `losat::wording::losat_output_bytes` (AGENTS.md rule 8; `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+/// exception 12).
+pub fn expected_losat_bytes(frozen: Vec<u8>) -> Vec<u8> {
+    match losat::wording::losat_output_bytes(&frozen) {
+        std::borrow::Cow::Borrowed(_) => frozen,
+        std::borrow::Cow::Owned(mapped) => mapped,
+    }
+}
+
+/// [`expected_losat_bytes`] of text.
+pub fn expected_losat_text(frozen: String) -> String {
+    String::from_utf8(expected_losat_bytes(frozen.into_bytes())).expect("UTF-8 in, UTF-8 out")
+}
+
+/// [`expected_losat_text`] at the end of a chain: `read_to_string(..).unwrap().in_losat_words()`.
+pub trait InLosatWords {
+    fn in_losat_words(self) -> String;
+}
+
+impl InLosatWords for String {
+    fn in_losat_words(self) -> String {
+        expected_losat_text(self)
+    }
+}

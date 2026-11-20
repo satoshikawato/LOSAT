@@ -296,8 +296,8 @@ jobs:
           version = version.group(1)
           # One abi3 wheel per platform of the release binaries.
           platforms = {
-              "Linux x86-64": r"manylinux_\d+_\d+_x86_64(\.manylinux\w+_x86_64)*",
-              "Linux arm64": r"manylinux_\d+_\d+_aarch64(\.manylinux\w+_aarch64)*",
+              "Linux x86-64": r"manylinux\w+_x86_64(\.manylinux\w+_x86_64)*",
+              "Linux arm64": r"manylinux\w+_aarch64(\.manylinux\w+_aarch64)*",
               "Windows x64": r"win_amd64",
               "macOS arm64": r"macosx_\d+_\d+_arm64",
               "macOS x86-64": r"macosx_\d+_\d+_x86_64",

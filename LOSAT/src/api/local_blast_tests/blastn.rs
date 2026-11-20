@@ -141,6 +141,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -183,6 +184,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -389,6 +391,7 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
                 sink: OutputSink::Writer(&mut output),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -442,6 +445,7 @@ fn run_local_outputs(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -504,6 +508,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -525,7 +530,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
 // (quoted at `check_scoring_options_with`); c++/src/algo/blast/api/blast_aux.cpp:662-673
 // (`ThrowIfInvalidTask`, quoted at `TaskParser::check`). Values that the command line cannot give
 // (a template length the parser refuses, `limit_lookup`, which has no spelling, a task the parser
-// refuses) get NCBI's errors, or LOSAT's for rmblastn, instead of a search.
+// refuses) get NCBI's errors, or LOSAT's for another program's task, instead of a search.
 #[test]
 fn hand_set_template_lookup_and_task_are_refused() {
     let inputs = Inputs::new();
@@ -537,7 +542,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
         &inputs.subject.0,
         ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
-    let cases: [(&[&str], &str, fn(&mut BlastnArgs)); 6] = [
+    let cases: [(&[&str], &str, fn(&mut BlastnArgs)); 5] = [
         (
             &["-task", "dc-megablast"],
             "Invalid discontiguous template parameters: template length must be 16, 18, or 21",
@@ -561,13 +566,8 @@ fn hand_set_template_lookup_and_task_are_refused() {
         (&[], "'blastz' is not a supported task", |a| a.task = "BlastZ".into()),
         (
             &[],
-            "the task tblastn is not supported by LOSAT's BLASTN (use megablast, dc-megablast, blastn or blastn-short)",
+            "the task tblastn is not supported by LOSAT's BLASTN (use megablast, dc-megablast, blastn, blastn-short or rmblastn)",
             |a| a.task = "tblastn".into(),
-        ),
-        (
-            &[],
-            "the task rmblastn is not supported by LOSAT's BLASTN",
-            |a| a.task = "rmblastn".into(),
         ),
     ];
     for (extra, message, set) in cases {
@@ -582,6 +582,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -604,6 +605,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -895,6 +897,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
                     sink: OutputSink::Writer(&mut report),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: Some(&mut on_hits),
                 observer: Some(&mut extensions),
             };
@@ -973,6 +976,7 @@ fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_ca
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };

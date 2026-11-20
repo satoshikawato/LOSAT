@@ -66,6 +66,7 @@ fn run_local_does_not_write_outfmt_13_and_14() {
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -157,6 +158,7 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -327,6 +329,7 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
                     sink: OutputSink::Files(&mut master, SideFileSink::new("r", received.clone())),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };

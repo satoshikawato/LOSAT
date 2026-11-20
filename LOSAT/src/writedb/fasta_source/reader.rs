@@ -2668,7 +2668,7 @@ fn mol_of_ids(ids: &[ParsedSeqId], warn: ReaderWarn<'_>) -> Option<bool> {
 ///     return eUndefined;
 /// ```
 /// The stored residues have no space or digit.
-fn sequence_type(data: &[u8]) -> Option<bool> {
+pub(crate) fn sequence_type(data: &[u8]) -> Option<bool> {
     let (mut main_nuc, mut ambig, mut bad_nuc) = (0usize, 0usize, 0usize);
     let (mut amino_acid, mut exotic_aa, mut bad_aa) = (0usize, 0usize, 0usize);
     for &c in data {

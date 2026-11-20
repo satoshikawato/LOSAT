@@ -32,6 +32,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         out_ascii_pssm: ascii.map(str::to_string),
         pseudocount: 0,
         in_pssm: None,
+        in_msa: None,
         versions: Default::default(),
         check_scope: Default::default(),
         rounds: None,

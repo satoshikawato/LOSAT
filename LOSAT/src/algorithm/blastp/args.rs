@@ -590,6 +590,23 @@ impl ResolvedBlastpArgs {
         self.traceback_hitlist
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3288-3292
+    /// The heap of one query's redone matches as the composition-based redo starts.
+    ///
+    /// With unified P-values (BLASTP's `-comp_based_stats 1u`, `2u`, `3u`) the redo ends no match
+    /// early ([`super::hsp::BlastCompoHeap::without_early_end`]): the only query whose matches NCBI's test can
+    /// end is the last one of a query batch, whose result LOSAT defines by NCBI's search with a
+    /// copy of it after it, where NCBI redoes every match of it.
+    pub(crate) fn redone_match_heap(&self) -> super::hsp::BlastCompoHeap {
+        let heap =
+            super::hsp::BlastCompoHeap::new(self.traceback_hitlist_size(), self.inclusion_ethresh);
+        if self.comp_based_stats.unified_p {
+            heap.without_early_end()
+        } else {
+            heap
+        }
+    }
+
     fn compute_traceback_hitlist_size(&self) -> usize {
         match self.app {
             // RPS-BLAST's traceback keeps `hitlist_size` lists per volume (`s_RPSComputeTraceback`,

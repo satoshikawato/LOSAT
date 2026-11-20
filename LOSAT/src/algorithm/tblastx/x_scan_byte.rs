@@ -1516,6 +1516,7 @@ mod tests {
     fn indexes_and_presence_equal_the_rolled_index_and_pv() {
         let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
         let letters: Vec<u8> = (0..X_BLOCK + 2).map(|_| rng.next() as u8).collect();
+        // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
         let lookup = lookup_for(&[b"MKTAYIAKQRQISFVKSHFSRQ".to_vec()], 11);
         let presence = build_presence(&lookup);
         assert_eq!(presence.len(), X_MASK + 1);

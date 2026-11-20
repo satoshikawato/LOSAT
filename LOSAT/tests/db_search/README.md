@@ -2085,3 +2085,22 @@ chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n
 deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
 `(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
 (with the pdb one alone it prints `Unknown` and `no longer exists in database`).
+
+## Where some inputs come from (provenance)
+
+- `tm_psi_rhx.faa`, `tm_psi_rhy.faa` (commit eb27ebee4, 2026-11-04): the FASTA of the databases above; origin of the letters
+  not recorded.
+- `ids/plook_q*.faa`, `ids/plook_q*.fna`, `ids/plook_z_q0.faa`, `ids/nlook_q*.faa`, `ids/nlook_q*.fna`: written by
+  `ids/make_look_fasta.py` (random proteins, seed 20261103; commit d191a9d3a, 2026-11-02).
+- `ids/pord_q*.faa`, `ids/pord_q*.fna`, `ids/pord_x_q0.faa`, `ids/nord_q*.faa`, `ids/nord_q*.fna`: written by
+  `ids/make_ord_fasta.py` (random proteins, seed 20261102; commit 99074fc9f, 2026-11-02).
+- `ids/prdn_u0y.fna`: input of `ids/make_ids.py --pssmread-only` for the database `prdn_u0y`; origin of the letters not
+  recorded (commit a18dd4682, 2026-11-11).
+- `multidb/ld*.fa`, `multidb/l5b.fa`, `multidb/l6*.fa`, `multidb/nutl.fa`, `multidb/putl.fa`, `multidb/pfz*.fa`: written by
+  `make_multidb.py` (its docstring tells, per mode, which records they hold and which come from `ids/ids_q.faa`, from
+  `multidb/nnp.fa` or from seeded random letters); commits 2104f0950, dfa9763cd and db2e5a338 (2026-11-16), 6b1b2a43d,
+  bfa554af4 and dc934f255 (2026-11-17), 1a529b829 (2026-11-18).
+- `xpost/s60*.faa`: written by `make_xpost_inputs.py` (commit be806c7d4, 2026-11-16).
+- `xpost/m2b_*_qm.*`: made by agent4's `m2/probe_m2b.py`, and `xpost/db/{nST,pA,pB,pR3}/*.fa` by the probes of K4h review 2,
+  as `make_xpost_inputs.py`'s docstring says (commit 135255760, 2026-11-16); neither script is in this repository, and the
+  origin of the letters is not recorded.

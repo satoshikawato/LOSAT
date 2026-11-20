@@ -628,6 +628,7 @@ fn check_ranges(
     }
 }
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 /// A protein, and a nucleotide sequence that translates to it.
 const PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 const NUCLEOTIDE: &str = "ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGCCAGCTG\

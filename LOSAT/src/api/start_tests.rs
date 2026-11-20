@@ -17,6 +17,7 @@ use crate::api::{
     run, run_batches, run_collect, run_to_file, validate, FastaRecord, Inputs, Program,
 };
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 
 const NUCLEOTIDES: &[u8] =

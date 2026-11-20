@@ -179,6 +179,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
 
     let query = temp_path("swtback_query", "faa");
     let subject = temp_path("swtback_subject", "faa");
+    // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
     std::fs::write(&query, ">q\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     std::fs::write(&subject, ">s\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     let output = clean_losat_command()

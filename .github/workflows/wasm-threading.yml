@@ -62,7 +62,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install comparison test dependencies
-        run: python3 -m pip install matplotlib pandas 'seaborn>=0.12'
+        # Every package fixed by version and wheel hash: a run cannot pick up a new release, and a
+        # changed file fails the install.
+        run: |
+          python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: \
+            -r LOSAT/tests/requirements-wasm-threading.txt
       - name: Host and evidence parser tests
         run: |
           node --test LOSAT/tests/test_wasi_runners.js LOSAT/tests/test_wasi_shared_memory.js

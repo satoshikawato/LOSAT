@@ -2188,6 +2188,7 @@ mod tests {
     )]
     fn x_scan_plans_of_racing_batches_share_one_subject_plan() {
         let subject = x_test_subject(30_000);
+        // Test protein: made from the first residues of E. coli AsnA (RefSeq NP_418200.1) and other letters.
         let query: &[u8] = b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ";
         let side = XSubjectSide::new(1, 1, false);
         let threads = 8;

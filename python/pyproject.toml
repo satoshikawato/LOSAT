@@ -26,3 +26,5 @@ Issues = "https://github.com/satoshikawato/LOSAT/issues"
 
 [tool.maturin]
 module-name = "pylosat._pylosat"
+# Notes for coding agents are not part of the package.
+exclude = [{ path = "AGENTS.md", format = "sdist" }]

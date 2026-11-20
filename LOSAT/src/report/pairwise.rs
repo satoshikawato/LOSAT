@@ -4939,6 +4939,9 @@ pub struct TblastxPairwiseReport {
     /// The sources of the others' Bioseqs by subject index, as BLASTN's
     /// (`BlastnPairwiseReport::subject_sources`).
     pub subject_sources: Vec<super::defline::SourceTaxname>,
+    /// Whether the search linked its HSPs with sum statistics (`-sum_stats`, true by default):
+    /// the description table then has its `N` column (`TblastxSections::head`).
+    pub sum_stats: bool,
 }
 
 /// The start of the TBLASTX report, which NCBI writes before it searches: the program and
@@ -5472,6 +5475,15 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         //         m_ShowLinkedSetSize = true;
         //     }
         // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:157 (the formatter's
+        // `use_sum_statistics`) and c++/src/algo/blast/format/blast_format.cpp:503-504
+        // ```c++
+        //                                opt.GetSumStatisticsMode(),
+        // ...
+        //     if (m_ShowLinkedSetSize)
+        //         flags |= CShowBlastDefline::eShowSumN;
+        // ```
+        // The `N` column follows `-sum_stats` (`report.sum_stats`).
         // The titles of the subjects of the records read (by subject index), as BLASTN's.
         write_blastn_description_table(
             writer,
@@ -5481,7 +5493,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             &group.subject_titles,
             &report.parsed_subjects,
             &report.subject_sources,
-            true,
+            report.sum_stats,
             false,
             self.config.sort_columns(query.query_length),
             read,
@@ -8367,6 +8379,7 @@ mod tblastx_tests {
             prolog: true,
             parsed_subjects: Vec::new(),
             subject_sources: Vec::new(),
+            sum_stats: true,
         };
         // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
         let hits: Vec<PairwiseHit> = [(0, 1, 4), (0, 1, 4), (0, 2, 1), (2, 1, 1), (3, 1, 1)]

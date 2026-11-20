@@ -8,16 +8,18 @@
 losat psiblast -query QUERY.faa -db DB [options]
 losat psiblast -query QUERY.faa -subject SUBJECT.faa [options]
 losat psiblast -in_pssm QUERY.pssm -db DB [options]
+losat psiblast -in_msa ALIGNMENT.aln -db DB [options]
 ```
 
 With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.md)): `psiblast -query QUERY.faa -db DB [options]`.
 
 ## Input
 
-- **Query.** A protein FASTA file with `-query` (`-query -` reads the standard input), or a saved PSSM with `-in_pssm` in place of `-query`. `-in_pssm -` reads the PSSM from the standard input. `-query_loc START-STOP` searches part of the query.
+- **Query.** A protein FASTA file with `-query` (`-query -` reads the standard input), a saved PSSM with `-in_pssm`, or an alignment with `-in_msa`, in place of `-query`. `-in_pssm -` reads the PSSM from the standard input, and `-in_msa -` the alignment. `-query_loc START-STOP` searches part of the query.
 - **Several queries.** Each query runs its own rounds, one query after another.
 - **Database or subject.** `-db` names a protein BLAST database, with or without parsed sequence IDs (see [BLAST databases](../databases.md)). `-db "a b"` searches several databases at once. `-subject` searches a protein FASTA file instead. `-subject_loc START-STOP` searches part of the subject.
 - **Database filters.** `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-no_taxid_expansion`, `-seqidlist` and `-negative_seqidlist` keep every round to the sequences they select.
+- **Alignment.** `-in_msa FILE` starts from a multiple sequence alignment in Clustal format. LOSAT builds the PSSM from the alignment as NCBI BLAST+ does, and searches it as it searches an `-in_pssm` PSSM, with the same rounds and PSSM files. The first sequence is the query. `-msa_master_idx N` takes the N-th sequence instead (1 is the first), and `-ignore_msa_master` builds the PSSM without counting the query sequence. A lower-case letter of the query sequence is left out of the alignment. The PSSM from the alignment is built with a pseudocount of 0; `-pseudocount` applies to the PSSMs of later rounds. `-matrix` and the gap costs name the scoring of the PSSM. A master sequence that is the start of a longer sequence above it in the file is refused: put the master above the longer one (see [Refusals](../refusals.md)). The library and pylosat do not take `-in_msa`: make the PSSM with `-out_pssm` and read it there.
 - **PSSM file.** `-in_pssm` reads a PSSM in NCBI's ASN.1 text form, the form `-out_pssm` writes. It is searched with the BLOSUM62 matrix and gap costs 11/1.
   - The reports show the PSSM's query as the file holds it: lower-case letters stay lower case and match no subject letter, and a gap residue (`-`) is shown as `-`. NCBI BLAST+ shows the same.
   - A query residue that its coding does not have (such as `*` in `iupacaa`) stops the run with `BLAST engine error: Warning: Invalid residues found at positions ...` and exit status 3, as in NCBI BLAST+. [tblastn](tblastn.md) `-in_pssm` does the same.
@@ -30,11 +32,11 @@ Round 1 is a protein search of your query, as in `blastp`. After each round, LOS
 
 The PSSM files are written like this:
 
-- `-out_pssm FILE` and `-out_ascii_pssm FILE` get the PSSM at the start of each later round. With `-in_pssm`, they get the input PSSM first.
+- `-out_pssm FILE` and `-out_ascii_pssm FILE` get the PSSM at the start of each later round. With `-in_pssm` or `-in_msa`, they get the input PSSM first.
 - `-save_pssm_after_last_round` also saves the PSSM built from the last round's hits.
 - `-save_each_pssm` saves the PSSM of every round as `FILE.1`, `FILE.2` and so on, where `FILE` is the name given to `-out_pssm` or `-out_ascii_pssm`.
 
-`-comp_based_stats` takes 0 to 3 (default 2). Round 1 runs in the mode you give. Later rounds, and any `-in_pssm` search, run mode 2 and mode 3 as mode 1, and LOSAT prints NCBI's warning once per query.
+`-comp_based_stats` takes 0 to 3 (default 2). Round 1 runs in the mode you give. Later rounds, and any `-in_pssm` or `-in_msa` search, run mode 2 and mode 3 as mode 1, and LOSAT prints NCBI's warning once per query.
 
 ## Common options
 
@@ -42,6 +44,9 @@ The PSSM files are written like this:
 | --- | --- | --- |
 | `-query FILE` | `-` | Protein FASTA query |
 | `-in_pssm FILE` | | Start from a saved PSSM instead of `-query` |
+| `-in_msa FILE` | | Start from a Clustal alignment instead of `-query` |
+| `-msa_master_idx N` | 1 | With `-in_msa`: the sequence that is the query (1 is the first) |
+| `-ignore_msa_master` | off | With `-in_msa`: build the PSSM without counting the query sequence |
 | `-db NAME` | | Protein database |
 | `-subject FILE` | | Protein FASTA file to search instead of a database |
 | `-num_iterations N` | 1 | Number of rounds; 0 means until convergence |
@@ -68,7 +73,7 @@ For every option: `losat psiblast -help`.
 | Search | Supported `-outfmt` |
 | --- | --- |
 | FASTA query (`-query`) | 0, 6, 7, 10, 20 |
-| PSSM query (`-in_pssm`) | 0, 6, 7 |
+| PSSM or alignment query (`-in_pssm`, `-in_msa`) | 0, 6, 7 |
 
 Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`, and `delim=`. With `-outfmt 0`, the report shows each round, and the description table of a later round has NCBI's two parts: sequences used in the model and found again, and sequences not found before or not below the threshold before. With `-outfmt 7`, the comment lines count rounds. See [Output formats](../output-formats.md).
 
@@ -80,14 +85,16 @@ Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid
 
 Not yet supported:
 
-- `-in_msa`, `-msa_master_idx`, `-ignore_msa_master` and `-phi_pattern`.
-- `-outfmt` other than 0, 6, 7, 10 and 20 (with `-in_pssm`, other than 0, 6 and 7).
+- `-phi_pattern`.
+- `-in_msa` with an alignment in FASTA, PHYLIP, NEXUS, Sequin or MultAlin format. Only the Clustal format is read.
+- `-outfmt` other than 0, 6, 7, 10 and 20 (with `-in_pssm` or `-in_msa`, other than 0, 6 and 7).
 
 Also refused:
 
 - `-remote`, `-entrez_query`, `-html`, `-import_search_strategy`, `-gilist` and `-ipglist`.
 - `-use_sw_tback`.
-- With `-in_pssm`: any matrix or gap cost other than BLOSUM62 with 11/1, and a PSSM in binary or XML form.
+- With `-in_pssm` or `-in_msa`: any matrix or gap cost other than BLOSUM62 with 11/1. With `-in_pssm`: a PSSM in binary or XML form.
+- With `-in_msa`, where NCBI BLAST+ crashes: a query sequence of X or O alone, and `-matrix IDENTITY`.
 - A `-subject` file whose sequences all have no letters.
 
 `psiblast` has no `-task` and no `-ungapped`. For the full list, see [What LOSAT refuses](../refusals.md).

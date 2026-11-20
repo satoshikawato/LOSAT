@@ -969,7 +969,7 @@ impl BlastnArgs {
             self.dust =
                 parse_dust_filtering(&value).map_err(|message| crate::cli::NativeError {
                     exit: 1,
-                    message: format!("BLAST query/options error: {message}\n{footer}\n"),
+                    message: format!("BLAST query/options error: {message}\n{footer}\n").into(),
                 })?;
         }
         Ok(())
@@ -1035,7 +1035,7 @@ impl BlastnArgs {
                 message: format!(
                     "BLAST query/options error: Please specify at most one of filtering_db, window_masker_taxid, or window_masker_db.\n{}\n",
                     crate::wording::USER_MANUAL_FOOTER
-                ),
+                ).into(),
             }
             .into());
         }

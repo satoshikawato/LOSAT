@@ -826,7 +826,7 @@ pub(super) fn run_local(
     // call's run, `CallStart::new`), `CATCH_ALL` writes its line feeds alone
     // (`cli::catch_all_text`), as the command line writes the error.
     if crate::ncbi_exception::main_diag_failbit() {
-        let message = crate::cli::catch_all_text(&native.message).into_owned();
+        let message = crate::cli::catch_all_text(&native.message).to_vec();
         return Err(crate::cli::NativeError {
             exit: native.exit,
             message,
@@ -990,7 +990,7 @@ pub(super) fn check_inputs(search: &Search, inputs: Inputs<'_>) -> Result<(), Er
         && records().all(|record| record.believed().is_none())
     {
         return Err(Error::Argv(
-            "-parse_deflines needs the records of read_inputs, which reads the ids".to_string(),
+            "-parse_deflines needs the records of read_inputs, which reads the ids".into(),
         ));
     }
     Ok(())
@@ -1009,7 +1009,7 @@ fn searches(
     use crate::blastinput::app::output_format::ARCHIVE_FORMAT;
     use crate::blastinput::app::parse_formatting_string;
     if formats.is_empty() {
-        return Err(Error::Argv("no output format was requested".to_string()));
+        return Err(Error::Argv("no output format was requested".into()));
     }
     check_inputs(search, inputs)?;
     let numbers: Vec<i32> = formats
@@ -1019,7 +1019,7 @@ fn searches(
                 .map(|choice| choice.number)
                 .map_err(|error| {
                     log.post(&error);
-                    Error::Argv(format!("{error:#}"))
+                    Error::Argv(super::error::chain_bytes(&error))
                 })
         })
         .collect::<Result<_, _>>()?;
@@ -1032,7 +1032,7 @@ fn searches(
         if let Some(option) = pssm_file_option(&command) {
             return Err(Error::Argv(format!(
                 "{option} is not accepted by the library API with formats of two hit list sizes, which take two searches: the PSSM files are one search's; search those formats in calls of their own"
-            )));
+            ).into()));
         }
     }
     Ok((groups, num_threads(&command)))
@@ -1159,7 +1159,7 @@ pub fn run_to_file(
     // `-` is the command line's standard output, which the library does not write.
     if path.as_os_str() == "-" {
         return Err(Error::Argv(
-            "run_to_file writes a file: `run` gives a report to a writer".to_string(),
+            "run_to_file writes a file: `run` gives a report to a writer".into(),
         ));
     }
     let search = &search.writing_to(path);
@@ -1262,9 +1262,9 @@ fn collect_one(
         recorder.fault(format!("HSP {hsp} started but did not end"));
     }
     if let Some(fault) = recorder.fault.take() {
-        return Err(Error::Search(format!(
-            "internal error in the output ranges: {fault}"
-        )));
+        return Err(Error::Search(
+            format!("internal error in the output ranges: {fault}").into(),
+        ));
     }
     Ok(Searched {
         writers,
@@ -1495,7 +1495,7 @@ pub fn run_collect(
                 0,
             )
             .map_err(|fault| {
-                Error::Search(format!("internal error in the search's parts: {fault}"))
+                Error::Search(format!("internal error in the search's parts: {fault}").into())
             })?,
         None => Parts::new()
             .finish(search.program(), inputs, &[], None, None, 0)
@@ -1541,6 +1541,7 @@ mod tests {
     use super::*;
     use crate::api::{validate, Program};
 
+    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
     const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 
     fn one_protein() -> (Vec<FastaRecord>, Vec<FastaRecord>) {
@@ -1675,7 +1676,7 @@ mod tests {
         let error = run_collect(&search, Inputs::new(&query, &empty), &["6"]).unwrap_err();
         assert!(matches!(error, Error::Search(_)), "{error}");
         assert!(
-            error.message().contains("Empty CBlastQueryVector"),
+            error.to_string().contains("Empty CBlastQueryVector"),
             "{error}"
         );
     }

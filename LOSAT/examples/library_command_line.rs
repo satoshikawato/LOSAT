@@ -28,8 +28,8 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             let mut stderr = std::io::stderr();
-            let _ = stderr.write_all(error.message().as_bytes());
-            if !error.message().is_empty() && !error.message().ends_with('\n') {
+            let _ = stderr.write_all(error.message());
+            if !error.message().is_empty() && !error.message().ends_with(b"\n") {
                 let _ = stderr.write_all(b"\n");
             }
             ExitCode::FAILURE
@@ -41,7 +41,7 @@ fn main() -> ExitCode {
 /// argv is the parser's.
 fn reported(result: Result<(), Error>) -> Result<(), Error> {
     match result {
-        Err(Error::Search(_)) => Err(Error::Search(String::new())),
+        Err(Error::Search(_)) => Err(Error::Search(Vec::new())),
         other => other,
     }
 }
@@ -50,7 +50,7 @@ fn search() -> Result<(), Error> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some((program, words)) = args.split_first() else {
         return Err(Error::Argv(
-            "usage: library_command_line <program> -query <file> -db <db> [options...]".to_string(),
+            "usage: library_command_line <program> -query <file> -db <db> [options...]".into(),
         ));
     };
     // The tools take the command line's words as they are.
@@ -94,13 +94,13 @@ fn search_program(program: &str, words: &[String]) -> Result<(), Error> {
     let query = match (query, pssm) {
         (Some(_), Some(_)) => {
             return Err(Error::Argv(
-                "-query and -in_pssm are two queries: give one".to_string(),
+                "-query and -in_pssm are two queries: give one".into(),
             ))
         }
         (Some(query), None) => query,
         (None, Some(_)) => "",
         (None, None) if dry_run => "",
-        (None, None) => return Err(Error::Argv("-query is required".to_string())),
+        (None, None) => return Err(Error::Argv("-query is required".into())),
     };
     let read = |role, name: &str| match dry_run {
         true => Ok(Vec::new()),
@@ -127,7 +127,7 @@ fn search_program(program: &str, words: &[String]) -> Result<(), Error> {
         (None, None, Some(pssm)) if dry_run => Inputs::pssm(pssm, &[]),
         (None, None, None) if dry_run => Inputs::new(&[], &[]),
         (None, None, _) => {
-            return Err(Error::Argv("-db or -subject is required".to_string()));
+            return Err(Error::Argv("-db or -subject is required".into()));
         }
     };
     let mut stderr = std::io::stderr();

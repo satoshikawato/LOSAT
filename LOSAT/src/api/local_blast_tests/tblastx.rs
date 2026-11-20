@@ -421,7 +421,10 @@ fn native_error(result: anyhow::Result<()>) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .unwrap_or_else(|| panic!("NCBI's error: {error:#}"));
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 // NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and

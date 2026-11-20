@@ -677,7 +677,7 @@ mod tests {
         let native = |message: &str| {
             anyhow::Error::from(crate::cli::NativeError {
                 exit: 1,
-                message: message.to_string(),
+                message: message.to_string().into(),
             })
         };
         let lines = error_lines(

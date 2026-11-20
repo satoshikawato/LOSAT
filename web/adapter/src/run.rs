@@ -872,7 +872,7 @@ impl Failed {
     {
         let native = error
             .downcast_ref::<losat::web_adapter::NativeError>()
-            .map(|native| native.message.clone().into_bytes());
+            .map(|native| native.message.clone());
         let cli_stderr = match &native {
             Some(native) => native.clone(),
             None => format!("Error: {error:?}\n").into_bytes(),
@@ -2497,6 +2497,7 @@ mod tests {
             error,
             "-db (a database search) is not supported in the browser yet"
         );
+        // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
         let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
         let query = [FastaRecord::new("Query_1", b"q", protein)];
         let subject = [FastaRecord::new("Subject_1", b"s", protein)];

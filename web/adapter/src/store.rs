@@ -746,6 +746,7 @@ mod tests {
     #[test]
     fn inputs_read_together_belong_to_their_argv() {
         let words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+        // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
         let (query_bytes, subject_bytes) =
             (b">gb|AB000001.1| q\nMKTAYIAKQR\n", b">s1 t\nMKTAYIAKQR\n");
         let (query, subject, response) =

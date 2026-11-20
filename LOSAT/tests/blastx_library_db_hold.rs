@@ -453,7 +453,7 @@ fn a_library_call_with_several_formats_holds_them_all() {
                 &mut diagnostics,
             )
         };
-        let message = result.expect_err("the refusal").message().to_string();
+        let message = result.expect_err("the refusal").to_string();
         assert!(message.contains(PARSED_REFUSAL), "{formats:?}: {message}");
         assert!(
             sinks.iter().all(Vec::is_empty),

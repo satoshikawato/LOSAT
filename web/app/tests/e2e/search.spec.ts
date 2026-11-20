@@ -582,6 +582,7 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
       testInfo.annotations.push({ type: 'skip', description: `Compositional adjustments of ${id}: ${NO_NATIVE_REASON}` });
       return;
     }
+    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
     const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ';
     const nucleotide = 'ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT';
     const query = testInfo.outputPath(`${id}-query.fa`);

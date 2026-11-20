@@ -192,17 +192,6 @@ impl<'a> Line<'a> {
 
     /// `substr(pos, n)`: `n` clipped to the end; `pos` past the end throws `out_of_range`.
     // libstdc++ (GCC 13): bits/basic_string.h:385-393
-    // ```c++
-    //       size_type
-    //       _M_check(size_type __pos, const char* __s) const
-    //       {
-    // 	if (__pos > this->size())
-    // 	  __throw_out_of_range_fmt(__N("%s: __pos (which is %zu) > "
-    // 				       "this->size() (which is %zu)"),
-    // 				   __s, __pos, this->size());
-    // 	return __pos;
-    //       }
-    // ```
     // (`substr` calls `_M_check(__pos, "basic_string::substr")`, bits/basic_string.h:3163-3165;
     // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
     // basic_string::substr: __pos (which is 18446744073709551615) > this->size() (which is 10)`
@@ -1198,16 +1187,6 @@ impl CddData {
     // (`pos1` is `npos`) makes NCBI reserve `(npos - pos0) * 3` positions, more than a
     // `vector<int>` can hold whatever `pos0` is, which throws `std::length_error`:
     // libstdc++ (GCC 13): bits/vector.tcc:64-71
-    // ```c++
-    //   template<typename _Tp, typename _Alloc>
-    //     _GLIBCXX20_CONSTEXPR
-    //     void
-    //     vector<_Tp, _Alloc>::
-    //     reserve(size_type __n)
-    //     {
-    //       if (__n > this->max_size())
-    // 	__throw_length_error(__N("vector::reserve"));
-    // ```
     // (NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
     // vector::reserve` and exited 2, PS16a review oracle A4-1 cases `annot10` and `gen10`.)
     fn load_sites(&mut self, path: &str, specific: bool) -> Result<(), DataError> {

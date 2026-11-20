@@ -1,3 +1,26 @@
+// The algorithms, constants and tables of `exp`, `log` and `pow` here are the code of Arm
+// Optimized Routines (math/exp.c, exp_data.c, log.c, log_data.c, pow.c, pow_log_data.c,
+// math_config.h, math_err.c at commit 11253b0b9d6b), which glibc 2.35 also carries
+// (sysdeps/ieee754/dbl-64; musl carries the same tables). The notices of those files
+// (math_config.h has the first, the others the second):
+//
+// Copyright (c) 2017-2018, Arm Limited.
+// SPDX-License-Identifier: MIT
+//
+// Copyright (c) 2018, Arm Limited.
+// SPDX-License-Identifier: MIT
+//
+// The MIT License text is in THIRD_PARTY_NOTICES, section 4 (Arm Optimized Routines).
+// `log10` follows sysdeps/ieee754/dbl-64/e_log10.c of glibc 2.35, which is Sun's fdlibm code
+// and carries only this notice (THIRD_PARTY_NOTICES, section 5 (Sun's fdlibm)):
+//
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+
 //! No NCBI counterpart: the C library that NCBI BLAST+ calls. `exp`, `log`, `log10` and `pow` with
 //! the bits of glibc 2.35 on x86-64 with FMA, where NCBI BLAST+ 2.17.0 wrote the frozen bytes of the
 //! tests, on every target LOSAT builds for.
@@ -9,11 +32,13 @@
 //! apart on a small share of the arguments (exp 0.07 %, log 0.01 %), and a TBLASTX sum E value
 //! printed with 15 digits (`-outfmt 8`/`11`) multiplies such a difference by ~50.
 //!
-//! Each function below is glibc's code: every fused multiply-add of the compiled glibc function
-//! (read from the disassembly of the library, libm.so.6 of Ubuntu 2.35-0ubuntu3.18) is one call of
-//! an [`Fma`] method here, every other operation is the same IEEE operation in the same order, and
-//! the tables are glibc's (`tables.rs`). An FMA rounds once, so its result is the same on every
-//! target; how it is computed is the only thing that differs:
+//! `exp`, `log` and `pow` are the code of Arm Optimized Routines (MIT, see the notice above), which
+//! glibc 2.35 carries, built to give glibc's bits; `log10` is Sun's fdlibm code as in glibc's
+//! e_log10.c. Every fused multiply-add of the compiled glibc function (read from the disassembly of
+//! the library, libm.so.6 of Ubuntu 2.35-0ubuntu3.18) is one call of an [`Fma`] method here, every
+//! other operation is the same IEEE operation in the same order, and the tables are the same bits
+//! as glibc's (`tables.rs`, read from that library). An FMA rounds once, so its result is the same
+//! on every target; how it is computed is the only thing that differs:
 //! - [`Fused`] (`f64::mul_add`): the FMA instruction on aarch64, in the x86-64 copies compiled with
 //!   the `fma` feature (taken when the CPU has it, `x86_fma`), and on x86-64 builds that enable
 //!   `fma`; elsewhere the C library's correctly rounded `fma`.
@@ -32,7 +57,7 @@
     clippy::unreadable_literal,
     clippy::eq_op,
     clippy::approx_constant,
-    reason = "glibc's code: its bit patterns, its `(x - x) / (x - x)` for NaN and its digits of 1/ln 10"
+    reason = "the upstream code: its bit patterns, its `(x - x) / (x - x)` for NaN and its digits of 1/ln 10"
 )]
 
 mod tables;
@@ -425,7 +450,7 @@ fn top12(x: f64) -> u32 {
     (x.to_bits() >> 52) as u32
 }
 
-/// glibc's `__math_oflow` / `__math_uflow` (`xflow`): `+-0x1p769 * 0x1p769` or `+-0x1p-767 * 0x1p-767`.
+/// `__math_oflow` / `__math_uflow` of math_err.c (`xflow`): `+-0x1p769 * 0x1p769` or `+-0x1p-767 * 0x1p-767`.
 #[cold]
 fn xflow(sign: u64, y: f64) -> f64 {
     let s = if sign != 0 { -y } else { y };
@@ -442,10 +467,10 @@ fn math_uflow(sign: u64) -> f64 {
 
 const EXP_TABLE_BITS: u32 = 7;
 const EXP_N_MASK: u64 = (1 << EXP_TABLE_BITS) - 1;
-/// `SIGN_BIAS` of e_pow.c: added to `ki` it sets the sign bit of the scale.
+/// `SIGN_BIAS` of pow.c: added to `ki` it sets the sign bit of the scale.
 const SIGN_BIAS: u64 = 0x800 << EXP_TABLE_BITS;
 
-/// `specialcase` of e_pow.c (the one of e_exp.c is the same for its positive results): the result
+/// `specialcase` of pow.c (the one of exp.c is the same for its positive results): the result
 /// `scale * (1 + tmp)` near overflow (`k > 0`) or in the subnormal range (`k < 0`).
 #[cold]
 #[inline(never)]
@@ -473,7 +498,7 @@ fn exp_specialcase<F: Fma>(tmp: f64, sbits: u64, ki: u64) -> f64 {
     y * d(0x0010_0000_0000_0000) // 0x1p-1022
 }
 
-/// The body of e_exp.c's `__exp` and of e_pow.c's `exp_inline` once the input is in range:
+/// The body of exp.c's `exp` and of pow.c's `exp_inline` once the input is in range:
 /// `sign * exp(x + xtail)` (`TAIL`: `pow` adds its `xtail`); `special` when `|x| >= 512`.
 #[inline(always)]
 fn exp_core<F: Fma, const TAIL: bool>(x: f64, xtail: f64, sign_bias: u64, special: bool) -> f64 {
@@ -501,7 +526,7 @@ fn exp_core<F: Fma, const TAIL: bool>(x: f64, xtail: f64, sign_bias: u64, specia
     F::exp_tail(r, rt, d(sbits))
 }
 
-/// `tmp` of e_exp.c and e_pow.c: `tail + r + r2 * (C2 + r * C3) + r2 * r2 * (C4 + r * C5)`, with
+/// `tmp` of exp.c and pow.c: `tail + r + r2 * (C2 + r * C3) + r2 * r2 * (C4 + r * C5)`, with
 /// glibc's three FMAs and `rt = r + tail`.
 #[inline(always)]
 fn exp_tmp<F: Fma>(r: f64, rt: f64) -> f64 {
@@ -511,7 +536,7 @@ fn exp_tmp<F: Fma>(r: f64, rt: f64) -> f64 {
     F::fma(r2 * r2, p45, F::fma(p23, r2, rt))
 }
 
-/// glibc's `exp` (e_exp.c `__exp`).
+/// `exp` of exp.c, with glibc's bits.
 #[inline(always)]
 fn exp_impl<F: Fma>(x: f64) -> f64 {
     let abstop = top12(x) & 0x7ff;
@@ -538,7 +563,7 @@ fn exp_impl<F: Fma>(x: f64) -> f64 {
     exp_core::<F, false>(x, 0.0, 0, false)
 }
 
-/// glibc's `log` (e_log.c `__log`).
+/// `log` of log.c, with glibc's bits.
 #[inline(always)]
 fn ln_impl<F: Fma>(x: f64) -> f64 {
     let mut ix = x.to_bits();
@@ -593,8 +618,8 @@ fn ln_impl<F: Fma>(x: f64) -> f64 {
     F::ln_tail(r, kd, w, hi)
 }
 
-/// `y` of e_log.c near 1, whose result is `hi + y`: `lo + B[0] * rlo * (r + rhi) + r3 * p` with
-/// `p` glibc's polynomial in `r` (`B[1]` to `B[10]`), with its FMAs; `parts` is `[rhi, rlo, lo]`.
+/// `y` of log.c near 1, whose result is `hi + y`: `lo + B[0] * rlo * (r + rhi) + r3 * p` with
+/// `p` log.c's polynomial in `r` (`B[1]` to `B[10]`), with its FMAs; `parts` is `[rhi, rlo, lo]`.
 #[inline(always)]
 fn ln1_poly<F: Fma>(r: f64, r2: f64, r3: f64, parts: [f64; 3]) -> f64 {
     let [rhi, rlo, lo] = parts;
@@ -607,7 +632,7 @@ fn ln1_poly<F: Fma>(r: f64, r2: f64, r3: f64, parts: [f64; 3]) -> f64 {
     F::fma_product_led(p, r3, lo)
 }
 
-/// `y` of e_log.c, whose result is `y + hi`: `lo + r2 * A[0] + r * r2 * (A[1] + r * A[2] + r2 *
+/// `y` of log.c, whose result is `y + hi`: `lo + r2 * A[0] + r * r2 * (A[1] + r * A[2] + r2 *
 /// (A[3] + r * A[4]))` with `lo = w - hi + r + kd * Ln2lo`, with glibc's FMAs.
 #[inline(always)]
 fn ln_poly<F: Fma>(r: f64, kd: f64, w: f64, hi: f64) -> f64 {
@@ -651,7 +676,7 @@ fn log10_impl<F: Fma>(x: f64) -> f64 {
     z + y * LOG10_2HI
 }
 
-/// `checkint` of e_pow.c: 0 if `iy` is not an integer, 1 if odd, 2 if even.
+/// `checkint` of pow.c: 0 if `iy` is not an integer, 1 if odd, 2 if even.
 #[inline(always)]
 fn checkint(iy: u64) -> u32 {
     let e = (iy >> 52 & 0x7ff) as u32;
@@ -670,18 +695,18 @@ fn checkint(iy: u64) -> u32 {
     2
 }
 
-/// `zeroinfnan` of e_pow.c: the bits of 0, infinity or NaN.
+/// `zeroinfnan` of pow.c: the bits of 0, infinity or NaN.
 #[inline(always)]
 fn zeroinfnan(i: u64) -> bool {
     (i << 1).wrapping_sub(1) >= (f64::INFINITY.to_bits() << 1) - 1
 }
 
-/// `issignaling_inline` of glibc's math_config.h.
+/// `issignaling_inline` of math_config.h.
 fn issignaling(x: f64) -> bool {
     (x.to_bits() ^ 0x0008_0000_0000_0000) << 1 > 0x7ff8_0000_0000_0000 << 1
 }
 
-/// `log_inline` of e_pow.c: `log(x)` as `y + tail` with ~15 more bits in `tail`.
+/// `log_inline` of pow.c: `log(x)` as `y + tail` with ~15 more bits in `tail`.
 #[inline(always)]
 fn pow_log_inline<F: Fma>(ix: u64) -> (f64, f64) {
     const OFF: u64 = 0x3fe6_9555_0000_0000;
@@ -716,7 +741,7 @@ fn pow_log_inline<F: Fma>(ix: u64) -> (f64, f64) {
     (y, (hi - y) + lo)
 }
 
-/// The special inputs of e_pow.c's `__pow`: the result, or the bits of `|x|` (normalized when
+/// The special inputs of pow.c's `pow`: the result, or the bits of `|x|` (normalized when
 /// subnormal) and the sign bias for the general path.
 #[cold]
 #[inline(never)]
@@ -793,7 +818,7 @@ fn pow_special(x: f64, y: f64, topx: u32, topy: u32) -> Result<f64, (u64, u64)> 
     Err((ix, sign_bias))
 }
 
-/// glibc's `pow` (e_pow.c `__pow`).
+/// `pow` of pow.c, with glibc's bits.
 #[inline(always)]
 fn pow_impl<F: Fma>(x: f64, y: f64) -> f64 {
     let mut ix = x.to_bits();

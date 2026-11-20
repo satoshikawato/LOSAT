@@ -1124,7 +1124,8 @@ impl SetupEngineError {
     /// `BLASTERR_SUBJECT_LENGTH_INVALID` (`run_local_search_with_pool`, blast_setup.c:969-980):
     /// `-subject` of three empty records, or of `A`, `` and ``, with `-searchsp` or `OLD_FSC`
     /// (env parity probe f_probe of 2026-11-12).
-    pub(crate) const SUBJECT_LENGTH_INVALID: Self = Self("The average subject length is too short");
+    pub(crate) const SUBJECT_LENGTH_INVALID: Self =
+        Self(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT);
 
     /// `BlastHitSavingParametersNew`'s status 1 (`stats::setup::hit_saving_parameters_fail`):
     /// sum statistics with a setup subject length that is not positive, the average of a negative
@@ -7144,6 +7145,7 @@ mod tests {
     // batches) and without (one, two, three).
     #[test]
     fn x_search_batches_takes_the_batches_whatever_their_number() {
+        // Test protein: made from the first residues of E. coli AsnA (RefSeq NP_418200.1) and other letters.
         let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 4];
         let subjects: Vec<Vec<u8>> = (0..2usize)
             .map(|n| {

@@ -1,0 +1,2 @@
+Warning: [blastp] Query_2 allx310 310 X: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: [blastp] Query_4 allx60 60 X: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 

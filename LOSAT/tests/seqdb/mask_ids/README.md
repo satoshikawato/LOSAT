@@ -50,3 +50,10 @@ of `seqid::mask_handle` that reproduce it.
   `makeblastdb -blastdb_version 4` and `5`.
 
 Both format versions give the same answers; the test builds each case in version 5 and 4.
+
+## Where `fasta/` comes from
+
+`fasta/nuc_dup.fa`, `nuc_gibb.fa`, `nuc_giim.fa`, `nuc_multi.fa`, `nuc_multi2.fa`, `nuc_pat.fa`, `prot_2abc.fa`, `prot_3abc.fa`,
+`prot_abcd.fa`, `prot_main.fa`, `prot_xyzw.fa` and `idprobe2_prot.fa`: the sequences the mask cases above are run against
+(added in commit 5e7ee9ef7, 2026-11-13, M4a-1); their Seq-ids are those the cases probe. No generator or source of the
+letters is recorded.

@@ -467,7 +467,7 @@ impl TblastnArgs {
         if stream.failed && (pairwise || tax_report) {
             return Err(crate::cli::NativeError {
                 exit: 6,
-                message: "BLAST failed to write output\n".to_string(),
+                message: "BLAST failed to write output\n".into(),
             }
             .into());
         }
@@ -1399,9 +1399,7 @@ fn write_first_batch_prologs(
     // The program line of outfmt 0 (`TBLASTN`; `PSITBLASTN` with `-in_pssm`).
     program: &str,
 ) -> Result<()> {
-    let name = subject_path.map_or_else(String::new, |path| {
-        format!("User specified sequence set (Input: {})", path.display())
-    });
+    let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_name);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
     // ```c++
     //     if(dbscan_mode)
@@ -1823,7 +1821,7 @@ fn search(
                     )
                     .is_none()
                 {
-                    Err(PreliminaryReadError("The average subject length is too short").into())
+                    Err(PreliminaryReadError(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into())
                 } else if let Some(failure) = pssm_failure {
                     Err(failure.error("TBLASTN"))
                 } else {
@@ -2924,7 +2922,7 @@ mod tests {
         assert_eq!(native.exit, 3);
         assert_eq!(
             native.message,
-            "BLAST engine error: Database memory map file error\n"
+            b"BLAST engine error: Database memory map file error\n"
         );
         let refusal = batch_failure(XReadError(anyhow::anyhow!("refused")).into()).unwrap_err();
         assert_eq!(refusal.to_string(), "refused");
@@ -2943,7 +2941,7 @@ mod tests {
         assert_eq!(native.exit, 3);
         assert_eq!(
             native.message,
-            "BLAST engine error: The average subject length is too short\n"
+            b"BLAST engine error: The average subject length is too short\n"
         );
     }
 }

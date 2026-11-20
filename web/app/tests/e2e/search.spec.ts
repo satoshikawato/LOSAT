@@ -582,6 +582,7 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
       testInfo.annotations.push({ type: 'skip', description: `Compositional adjustments of ${id}: ${NO_NATIVE_REASON}` });
       return;
     }
+    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
     const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ';
     const nucleotide = 'ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT';
     const query = testInfo.outputPath(`${id}-query.fa`);
@@ -1131,7 +1132,7 @@ test('the header, and the "?" help that shows on hover or keyboard focus and sta
   await expect(help).toHaveCount(0);
   // Pointed at: shown; pointed away: gone (as NCBI's helpbox).
   await toggle.hover();
-  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast or blastn-short');
+  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn');
   await expect(help).toHaveAttribute('data-pinned', 'false');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await page.mouse.move(0, 0);
@@ -1201,13 +1202,14 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
 
   // Task Selection: BLASTN's "Optimize for", the engine's default task checked.
   await expect(page.getByTestId('param-task-field')).toContainText('Optimize for');
-  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(4);
+  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(5);
   await expect(page.getByTestId('param-task')).toHaveAccessibleName(/^Optimize for -task/);
   for (const [value, label] of [
     ['megablast', 'Highly similar sequences (megablast)'],
     ['dc-megablast', 'More dissimilar sequences (discontiguous megablast)'],
     ['blastn', 'Somewhat similar sequences (blastn)'],
     ['blastn-short', 'Short sequences (blastn-short)'],
+    ['rmblastn', 'Scores from the matrix alone (rmblastn)'],
   ] as const) {
     await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId(`param-task-${value}`) })).toHaveText(label);
   }

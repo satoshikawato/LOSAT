@@ -147,7 +147,7 @@ fn check_scoring_options_with(
     let greedy = args.task == "megablast" && !args.no_greedy;
     let mb_lookup_options = matches!(args.task.as_str(), "megablast" | "dc-megablast");
     let (_, template_length) = super::coordination::determine_template(args);
-    let matrix_only = spec.reward == 0 && spec.penalty == 0;
+    let matrix_only = super::coordination::matrix_only_scoring(spec.reward, spec.penalty);
     let message = if !matrix_only && spec.penalty >= 0 {
         "BLASTN penalty must be negative".to_string()
     } else if !ungapped && spec.gap_open > 0 && spec.gap_extend == 0 {
@@ -242,16 +242,16 @@ fn check_scoring_options_with(
     let footer = crate::wording::USER_MANUAL_FOOTER;
     Err(NativeError {
         exit: 1,
-        message: format!("BLAST query/options error: {message}\n{footer}\n"),
+        message: format!("BLAST query/options error: {message}\n{footer}\n").into(),
     }
     .into())
 }
 
 /// LOSAT's limits on the options that NCBI accepts, checked where NCBI starts the search
 /// (after its `Query is Empty!` success, before its Karlin-Altschul table error, whose
-/// computation the range limit bounds): a reward of 0 or less (NCBI's rmblastn matrix
-/// scoring when the penalty is 0 too, otherwise no valid query), a hit list size whose
-/// preliminary size overflows (`get_prelim_hitlist_size`),
+/// computation the range limit bounds): a reward of 0 or less with a penalty that is not 0
+/// (no valid query; reward 0 with penalty 0 is matrix-only scoring, which runs), a hit list
+/// size whose preliminary size overflows (`get_prelim_hitlist_size`),
 /// and a reward of `BLAST_SCORE_MAX` or a penalty of `BLAST_SCORE_MIN` (the 16-bit values
 /// after NCBI's conversion). The limit on greedy gap costs follows the table check
 /// (`check_greedy_gap_costs`).
@@ -268,10 +268,14 @@ fn check_losat_limits_with(
     ungapped: bool,
 ) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
-    if spec.reward <= 0 {
+    // Reward 0 with penalty 0 is matrix-only scoring (`coordination::engine_scoring_pair`).
+    // Another reward of 0 or less leaves every query without Karlin-Altschul values (NCBI:
+    // warnings and no hits), an explicit rejection of PD-LOSAT-NCBI-DEFECTS (version 1.1).
+    if spec.reward <= 0 && !super::coordination::matrix_only_scoring(spec.reward, spec.penalty) {
         anyhow::bail!(
-            "a reward of {} (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN",
-            spec.reward
+            "a reward of {} with a penalty of {} (NCBI BLAST+'s 16-bit values), for which no query has Karlin-Altschul values, is not supported by LOSAT's BLASTN; reward 0 needs penalty 0 (matrix-only scoring, as -task rmblastn)",
+            spec.reward,
+            spec.penalty
         );
     }
     super::hsp::check_prelim_hitlist_size(
@@ -327,6 +331,46 @@ pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
     if args.task == "megablast" && spec.gap_open.max(spec.gap_extend) > MAX_GREEDY_GAP_COST {
         anyhow::bail!(
             "gap costs above {MAX_GREEDY_GAP_COST} with greedy extension (-task megablast) are not supported by LOSAT's BLASTN"
+        );
+    }
+    Ok(())
+}
+
+/// LOSAT's refusal of matrix-only scoring (reward 0 and penalty 0) with the greedy extension of
+/// `-task megablast`, checked where `check_greedy_gap_costs` is (a batch with a valid query).
+/// NCBI sets up the greedy alignment with the option reward and penalty: with gap costs 0 and 0
+/// (megablast's own, also in an ungapped search, which sets it up too) it divides by their sum,
+/// 0 (SIGFPE, exit 136); with other gap costs the set-up passes, and the alignment divides by the
+/// half reward, 0, converts the infinite quotient to `Int4` (undefined behaviour) and does not
+/// end. An ungapped search with other gap costs runs no greedy alignment, and `-no_greedy` runs
+/// dynamic programming: both run (`TaskConfig::matrix_only`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:183,191-193,208-209
+/// ```c
+///    if (score_params->reward % 2 == 1) {
+/// ...
+///    } else {
+///       reward = score_params->reward;
+///       penalty = -score_params->penalty;
+/// ...
+///    if (score_params->gap_open==0 && score_params->gap_extend==0) {
+///       d_diff = (Xdrop+reward/2)/(penalty+reward)+1;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:979-981 (`match_score_half`
+/// is `match_score / 2`, :837)
+/// ```c
+///         xdrop_score = max_score[d - xdrop_offset] +
+///                       score_common_factor * d - xdrop_threshold;
+///         xdrop_score = (Int4)ceil((double)xdrop_score / match_score_half);
+/// ```
+pub fn check_greedy_matrix_only(args: &BlastnArgs, ungapped: bool) -> anyhow::Result<()> {
+    let spec = scoring_spec(args);
+    let greedy = args.task == "megablast" && !args.no_greedy;
+    let matrix_only = super::coordination::matrix_only_scoring(spec.reward, spec.penalty);
+    let zero_gap_costs = spec.gap_open == 0 && spec.gap_extend == 0;
+    if greedy && matrix_only && (zero_gap_costs || !ungapped) {
+        anyhow::bail!(
+            "reward 0 and penalty 0 (matrix-only scoring) with the greedy extension of -task megablast, where NCBI BLAST+ divides by zero (gap costs 0 and 0, also with -ungapped) or does not end (other gap costs; -no_greedy or -ungapped runs them), is not supported by LOSAT's BLASTN"
         );
     }
     Ok(())
@@ -439,7 +483,7 @@ pub(crate) fn karlin_error(
     text.push('\n');
     NativeError {
         exit: 3,
-        message: text,
+        message: text.into(),
     }
     .into()
 }
@@ -708,8 +752,17 @@ pub(crate) fn gap_x_dropoffs(
 ///     for (index = 0; index < xdrop_offset; index++)
 ///         aux_data->max_score[index] = 0;
 /// ```
+///
+/// Under matrix-only scoring (`matrix_only`) the X-drops are the options' values as raw scores
+/// (`subject_env`, from blast_parameters.c:208-217 and 472-482; the final one is not raised to
+/// the preliminary one), and the search extends by dynamic programming
+/// (`check_greedy_matrix_only` refuses the greedy extension before). Only the final X-drop is
+/// checked, as in the other DP searches: the preliminary DP caps its X-drop at the HSP's ungapped
+/// score (blast_gapalign.c:2959-2963).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_gapped_x_dropoffs(
     use_dp: bool,
+    matrix_only: bool,
     (gap_bits, final_bits): (f64, f64),
     (gapped, finale): (i32, i32),
     (reward, penalty): (i32, i32),
@@ -717,13 +770,20 @@ pub(crate) fn check_gapped_x_dropoffs(
 ) -> anyhow::Result<()> {
     // The final X-drop is the larger of its own and the preliminary one: when they are equal,
     // `-xdrop_gap` set it.
-    let (final_option, final_bits) = if finale == gapped {
+    let (final_option, final_bits) = if finale == gapped && !matrix_only {
         ("-xdrop_gap", gap_bits)
     } else {
         ("-xdrop_gap_final", final_bits)
     };
-    if use_dp {
+    if use_dp || matrix_only {
         if !crate::core::x_drop::kernel_x_drop_fits(finale, gap_open, gap_extend) {
+            if matrix_only {
+                return Err(crate::core::x_drop::kernel_x_drop_value_error(
+                    "BLASTN",
+                    final_option,
+                    &format!("{final_bits:?} (a raw score with reward 0 and penalty 0)"),
+                ));
+            }
             return Err(crate::core::x_drop::kernel_x_drop_error(
                 "BLASTN",
                 final_option,
@@ -778,11 +838,14 @@ mod tests {
     }
 
     fn message(result: anyhow::Result<()>) -> String {
-        result
-            .expect_err("rejected")
-            .downcast::<NativeError>()
-            .expect("an NCBI error")
-            .message
+        String::from_utf8(
+            result
+                .expect_err("rejected")
+                .downcast::<NativeError>()
+                .expect("an NCBI error")
+                .message,
+        )
+        .unwrap()
     }
 
     // NCBI reference: c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
@@ -959,10 +1022,14 @@ mod tests {
             assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
         }
         // Scores below the 16-bit limits are accepted (E2g V1), and so are the infinite
-        // and NaN e-values that NCBI searches with (E2g).
+        // and NaN e-values that NCBI searches with (E2g), and reward 0 with penalty 0
+        // (matrix-only scoring, line RG X6).
         for words in [
             &["-reward", "5000", "-penalty", "-1"][..],
             &["-reward", "32766", "-penalty", "-32767"],
+            &["-reward", "0", "-penalty", "0"],
+            &["-task", "rmblastn"],
+            &["-task", "blastn", "-reward", "0", "-penalty", "0"],
             &["-evalue", "+inf"],
             &["-evalue", "+nan"],
             &["-evalue", "-nan(7)"],
@@ -1041,7 +1108,7 @@ mod tests {
         let error = karlin_error("Substitution scores 1 and -6 are not supported", [false; 2]);
         assert_eq!(
             error.downcast::<NativeError>().unwrap().message,
-            "BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported \n"
+            b"BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported \n"
         );
         // A query without letters keeps its warning after the error (NCBI 2.17.0).
         let error = karlin_error(
@@ -1050,7 +1117,7 @@ mod tests {
         );
         assert_eq!(
             error.downcast::<NativeError>().unwrap().message,
-            "BLAST engine error: Error: Substitution scores 1 and -6 are not supported Warning: Sequence contains no data Error: Substitution scores 1 and -6 are not supported \n"
+            b"BLAST engine error: Error: Substitution scores 1 and -6 are not supported Warning: Sequence contains no data Error: Substitution scores 1 and -6 are not supported \n"
         );
     }
 
@@ -1174,8 +1241,10 @@ mod tests {
         }
         // (A gapped search of 1/-6 stops at its table: `context_blocks`,
         // `no_valid_query_needs_no_gapped_block`.)
-        // reward <= 0 stays refused.
+        // A reward of 0 with a negative penalty (megablast's -2) stays refused; with penalty 0 it
+        // is matrix-only scoring.
         assert!(run_checks_with(&["-reward", "0"], &[6], true).is_err());
+        assert!(run_checks_with(&["-reward", "0", "-penalty", "0"], &[6], true).is_ok());
         // The preliminary hit list of an ungapped search is the hit list: 2147483598 is accepted.
         assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], true).is_ok());
         assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], false).is_err());
@@ -1207,6 +1276,7 @@ mod tests {
         let check = |use_dp, (gapped, finale), (reward, penalty), (gap_open, gap_extend)| {
             check_gapped_x_dropoffs(
                 use_dp,
+                false,
                 (25.0, 100.0),
                 (gapped, finale),
                 (reward, penalty),
@@ -1241,5 +1311,63 @@ mod tests {
         assert!(check(true, (13, (1 << 30) - 104), (1, -2), (2, 1)).is_ok());
         assert!(refusal(check(true, (13, (1 << 30) - 103), (1, -2), (2, 1)))
             .contains("-xdrop_gap_final of 100.0 bits"));
+        // Matrix-only scoring (option reward 0 and penalty 0, engine pair 1/-3): the options are
+        // the raw X-drops (blast_parameters.c:472-482), checked as dynamic programming's final
+        // one, which keeps its own option's name when it equals the preliminary one.
+        let matrix_only = |(gap_bits, final_bits): (f64, f64), (gap_open, gap_extend)| {
+            check_gapped_x_dropoffs(
+                false,
+                true,
+                (gap_bits, final_bits),
+                (gap_bits as i32, final_bits as i32),
+                (1, -3),
+                (gap_open, gap_extend),
+            )
+        };
+        assert!(matrix_only((30.0, 100.0), (5, 2)).is_ok());
+        assert!(matrix_only((30.0, 0.0), (5, 2)).is_ok());
+        assert!(matrix_only((-100.0, 2_147_483_441.0), (5, 2)).is_ok());
+        assert_eq!(
+            refusal(matrix_only((-100.0, 2_147_483_442.0), (5, 2))),
+            "an -xdrop_gap_final of 2147483442.0 (a raw score with reward 0 and penalty 0), whose raw X-drop makes the sizes of NCBI BLAST+'s gapped alignment kernels leave 32-bit integers (undefined behaviour), is not supported by LOSAT's BLASTN"
+        );
+        assert!(
+            refusal(matrix_only((2_147_483_442.0, 2_147_483_442.0), (5, 2)))
+                .starts_with("an -xdrop_gap_final of 2147483442.0 (a raw score")
+        );
+    }
+
+    // NCBI 2.17.0 (line RG X6 probes, ws:~/losat-bench/work/rgx6): megablast's greedy extension
+    // with reward 0 and penalty 0 divides by zero with gap costs 0 and 0 (SIGFPE, exit 136, also
+    // with -ungapped) and does not end with other gap costs; -no_greedy and -ungapped with other
+    // gap costs run, as every other task does.
+    #[test]
+    fn matrix_only_scoring_with_the_greedy_extension_is_refused() {
+        let refused = |words: &[&str], ungapped| {
+            let error = check_greedy_matrix_only(&args(words), ungapped)
+                .expect_err("refused")
+                .to_string();
+            assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+        };
+        let runs = |words: &[&str], ungapped| {
+            assert!(
+                check_greedy_matrix_only(&args(words), ungapped).is_ok(),
+                "{words:?} {ungapped}"
+            );
+        };
+        let r0p0 = ["-reward", "0", "-penalty", "0"];
+        let affine = [&r0p0[..], &["-gapopen", "5", "-gapextend", "2"]].concat();
+        refused(&r0p0, false);
+        refused(&r0p0, true);
+        refused(&affine, false);
+        runs(&affine, true);
+        runs(&[&affine[..], &["-no_greedy"]].concat(), false);
+        for task in ["blastn", "dc-megablast", "blastn-short"] {
+            runs(&[&r0p0[..], &["-task", task]].concat(), false);
+        }
+        runs(&["-task", "rmblastn"], false);
+        runs(&["-task", "rmblastn"], true);
+        // megablast's own scores extend greedily.
+        runs(&[], false);
     }
 }

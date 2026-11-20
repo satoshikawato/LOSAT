@@ -104,7 +104,14 @@
   that the host's memory decides, and its review the same day read NCBI's pointer syntax in mask
   files (`NULL` for an optional member, `@n` with NCBI's report, `:Type value` of the declared
   type), refusing a `:Type` of another type and a list element stated as `NULL` that makeblastdb
-  dereferences (Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07))
+  dereferences; on 2026-11-20 line LIB read the local time of the creation date with the crate
+  jiff (the maintainer's 「TZ=A」 of that day), which gives glibc's time in zone files with leap
+  seconds, where version 1.3 listed a time 27 seconds later, and gives UTC for the forms of `TZ`
+  that glibc reads outside POSIX and jiff's time for rules whose change falls in another year in
+  UTC (tables of them; daylight time without a rule followed glibc's `posixrules`), which wait for
+  the maintainer's decision on its pull request; the rest of this history under the
+  maintainer's standing delegation (Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07))
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -264,9 +271,12 @@ subject length is too short" (it fails for a count of 2^31 or a length of 2^32 t
 order of NCBI's one-thread traceback: by OID, then the hit list's heap), and the reports'
 signed counts with NCBI's commas, which lose digits from 4,294,967,296,000,000,000. Refused,
 where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases summed past
-`Int8` (outfmt 0 to 5 and 13 to 16), their numbers of sequences summed past `int` (outfmt 5),
-and a summed length of exactly 2^63 in BLAST XML and XML2 (outfmt 5, 14, 16; NCBI writes `-0`;
-the Owner's question D1a3-2 of line RG may make it an exception). The requests of `-outfmt 11` and
+`Int8` (outfmt 0 to 5 and 13 to 16) and their numbers of sequences summed past `int` (outfmt 5).
+A summed length of exactly 2^63 (NCBI's Int8 -2^63), which NCBI's serial writer prints as `-0` in
+BLAST XML and XML2 (outfmt 5, 14, 16), the strategy and the archive, is written as
+`-9223372036854775808` (PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits,
+the Owner's answer Q1 = A of
+2026-11-17 to D1a-3's question, DECISIONS OQ-1117 of line RG; refused before). The requests of `-outfmt 11` and
 `-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
 (the query length of context 0; probe run2 of D1a-3). The preliminary stage of every search reads
 NCBI's option spaces of the statistics before their fallback to OID 0
@@ -281,14 +291,67 @@ effective lengths, the hit-saving cutoffs without the composition-based stretch 
 word cutoffs and the link cutoffs of the subject's length; the e-values of the traceback and the
 reports' counts and spaces are the setup's (Spouge's database factor 1), and the order of the
 results is the one-thread traceback's. The overflowing sums of BLAST XML, XML2 and JSON are refused
-where NCBI formats them (after the search: its own errors of the search come first). Refused until
-item D1a-4: OID ranges, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` and a total length of 0 or less
-(`LENGTH` 0 or of 2^63 or more) in RPSBLAST databases (NCBI's RPS search has no
-loop over subjects and opens each volume alone, whose statistics then read the volume's own length). Refused for
+where NCBI formats them (after the search: its own errors of the search come first). Line RG item
+D1a-4 part A (2026-11-17): RPSBLAST and RPSTBLASTN read these keys as NCBI's RPS search does
+(`CLocalRPSBlast`, rpsblast_local.cpp:331-400; one owner, `rps_search::volumes::RpsUnits`): a
+database of one volume is one search unit, the `-db` name with all its alias keys; one of several
+volumes searches each volume bare (its own length and count, no `STATS_*` key, the shortest length
+10, no OID range) under the database-wide `DbLength` (`STATS_TOTLEN`, else `GetTotalLength`) and
+`DbSeqNum` (`STATS_NSEQ`, else `GetNumSeqs`) that `x_AdjustDbSize` sets without `-searchsp` and
+`-dbsize`, each read only where above 0, while the Gumbel block reads `DbLength` where it is not 0.
+The footers print the first unit's search space, the search strategy's requests after the first hold
+that `DbLength` (0 and negatives too) and the last unit's search space, and the traceback sorts the
+results before its filters whatever the total length and after them (`-max_hsps`, `-qcov_hsp_perc`)
+only where the unit's `GetTotalLength` is above 0 (blast_traceback.c:1306, 1768-1771; part B, review A
+MF2). The preliminary stage's hit cutoff without the Gumbel block reads the space that
+`SplitQuery_SetEffectiveSearchSpace` sets (prelim_stage.cpp:219-221: the unit's total before the
+fallback to OID 0, its count without it), the traceback the setup's: they differ over one volume
+whose total is negative, and with `-dbsize` over one volume whose total is 0 or negative
+(SplitQuery's count is the unit's, the setup's 1; part B, review A MF1, review B N2). The setup of
+every unit fails as NCBI's where its average subject length is below one letter without the Gumbel
+block (an alias file's `NSEQ` above its `LENGTH` over one volume: `BLAST engine error: The average
+subject length is too short`, exit status 3, both programs; fix round 1, review A MF5). The search
+ignores `FIRST_OID` and `LAST_OID` (NCBI's lookup table holds every profile of a volume); a hit of a
+profile that they leave out among the profiles the reports show (those of the first
+`-max_target_seqs` subjects of a query's hit list, following profiles of one Seq-id counting as one
+subject, as NCBI's formatter counts them) is written as the included copy of its record that holds
+its Seq-id where there is one (NCBI's lookup by Seq-id finds it; fix round 2), and is refused where
+NCBI's report does not find it (`Unknown`, or a null pointer exception: the D1a-4 entry of
+PD-LOSAT-NCBI-DEFECTS)
+or finds another record, RPSBLAST before any output and RPSTBLASTN after the reports of
+the query batches before; one past that cut of several volumes' merged lists is NCBI's run, its
+HSPs counted by outfmt 7 (fix round 1, review A MF3). A unit's concatenated length `Lc` (`LENGTH`
+plus `NSEQ` over one volume, NCBI's `Int4` of the `Int8` sum; a bare volume's rows) sizes the
+diagonal table, bounds the ungapped extensions to the right and ends the gapped stage's interval
+tree, below the profiles, above them or negative, as in NCBI (blast_engine.c:1129-1149; part B); at
+the rows plus 1 the extensions read the row after the profiles as NCBI does (the zeros of the
+`.rps` file's last memory page: DECISIONS D1a4-9). Refused (the D1a-4 entry of PD-LOSAT-NCBI-DEFECTS,
+rule 3): a
+sum `LENGTH` plus `NSEQ` above 2,147,483,647 (NCBI frees the profiles twice and aborts), an `Lc` whose
+diagonal table passes 2^30 entries (`Lc` plus the window above 2^30: NCBI's loop never ends), both
+where NCBI's engine meets them (the unit's search of the first query batch NCBI searches: an empty
+query file or a first batch without letters ends as NCBI's; fix round 1, review B MF1), a query
+batch where two gapped alignments of one tree start past `Lc + 1` (NCBI's interval tree splits
+without end) and one where `Lc` is above the rows and an ungapped extension reads the row after the
+profiles past the `.rps` file's last page or goes on past that row (NCBI reads past its score
+matrix), RPSBLAST before any output and RPSTBLASTN after the reports of the query batches before, a
+setup count of 0 without the Gumbel block (`NSEQ 0` over one volume with `-searchsp` or `OLD_FSC`
+where a query is searched: SIGFPE; a run without a valid query is reported as NCBI reports it, fix
+round 3, review C MF1; a bare volume counts its profiles). With `-export_search_strategy` the requests after the
+first (a run of two query batches or more) hold `DbLength` = D, also -2^63 (`LENGTH` or
+`STATS_TOTLEN` 2^63 over several volumes), which NCBI writes as `-0` and LOSAT as
+`-9223372036854775808` (approved exception 17, Int8 -2^63 written as digits; with one query batch
+NCBI's only request holds no
+`DbLength`: fix round 1, review A MF4; refused until fix round 2). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
-also with `-ungapped`), where NCBI divides by zero (SIGFPE). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+also with `-ungapped`), where NCBI divides by zero (SIGFPE) as a query is searched. A run of
+queries without a valid one, which NCBI reports without dividing, is reported as NCBI's by
+BLASTX (its own check in the batch's setup) and, since fix round 3 of D1a-4, by BLASTP and
+PSI-BLAST (rows `db.ak.bp.nseq0.oldfsc.allx.7`, `db.ak.bp.nseq0.ssp.allx.7` and
+`db.ak.ps.nseq0.oldfsc.allx.7`); BLASTN, TBLASTN and TBLASTX still refuse it (their check runs at
+the database's open, before the queries; probe e8 of fix round 3, line RG's next item D1a-5). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
 below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
 average subject length is too short`, exit status 3.
 
@@ -631,17 +694,70 @@ Undefined behaviour of NCBI that is not reproduced:
   computation overflows and it writes a shorter file).
 - The test whether an input looks like FASTA does not read past the bytes it sampled.
 
-The creation date is the local time, found without the C library: the zone comes from `TZ`,
-`TZDIR` and `/etc/localtime` as glibc reads them, under WASI from the environment and the
-directories that the host gives the module, and on Windows from `TZ` and the system zone as
-Microsoft's C runtime (UCRT) reads them for NCBI's Windows build. A `TZ` offset beyond 596,523
-hours overflows UCRT's 32-bit arithmetic (undefined in C++); LOSAT takes the mathematical value.
-When no zone can be read, the date is UTC; so it is on Windows where UCRT's `localtime` fails (a
-`TZ` offset that puts the local time before 1969-12-31 12:00 or after 3001-01-19 21:59:59, where
-NCBI's `CTime` throws).
-Zone files with leap-second records give a time 27 seconds later than the C library's, and a
-`TZ` value with a daylight-saving name but no rule follows the United States rules unless
-`posixrules` says otherwise.
+The creation date is the local time, found without the C library. On Linux, macOS and WASI the
+zone is the one that glibc finds for NCBI's Linux build (observed with glibc 2.39): with `TZ`
+unset, the zone file `/etc/localtime`; otherwise `TZ` less one leading `:` (UTC where nothing is
+left) names the zone file itself when it starts with `/`, else the file of that name under
+`TZDIR` (`/usr/share/zoneinfo` when `TZDIR` is unset or empty), and where that is no zone file it
+is a POSIX rule. Under WASI the environment and the files are those that the host gives the
+module. The crate jiff reads the zone file and the rule (line LIB, 2026-11-20, on the
+maintainer's 「TZ=A」 of that day); LOSAT reads the leap-second records of a zone file itself, so
+that tzdata's `right/` zones give glibc's time, second 60 included. On Windows the zone comes
+from `TZ` and the system zone as Microsoft's C runtime (UCRT) reads them for NCBI's Windows
+build. A `TZ` offset beyond 596,523 hours overflows UCRT's 32-bit arithmetic (undefined in C++);
+LOSAT takes the mathematical value. When no zone can be read, the date is UTC; so it is on
+Windows where UCRT's `localtime` fails (a `TZ` offset that puts the local time before 1969-12-31
+12:00 or after 3001-01-19 21:59:59, where NCBI's `CTime` throws).
+
+Where glibc reads a `TZ` that POSIX does not write, or a zone file that jiff rejects, the date of
+NCBI's Linux build is glibc's reading and LOSAT's is UTC (8,588 rules and every zone of tzdata
+2026e in four builds compared with glibc, 1970 to 2100; the forms below are in
+LOSAT/tests/unit/local_time_glibc_vectors.tsv, which CI compares with LOSAT and with glibc). The
+local time at 2026-01-01 00:00 UTC and at 2026-07-25 17:20 UTC, as glibc gives it and as LOSAT
+does:
+
+| `TZ` | glibc | LOSAT |
+| --- | --- | --- |
+| `XXX+25` (hours past 24) | UTC-24:00, UTC-24:00 | UTC |
+| `XXX-168` | UTC+24:00, UTC+24:00 | UTC |
+| `XXX99999` | UTC-24:00, UTC-24:00 | UTC |
+| `XXX5:70` (minutes past 59) | UTC-05:59, UTC-05:59 | UTC |
+| `EST5EDT,M13.2.0,M11.1.0` (a month past 12) | UTC-04:00, UTC-05:00 | UTC |
+| `EST5EDT,M3.6.0,M11.1.0` (a week past 5) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT,M3.2.7,M11.1.0` (a weekday past 6) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT,J0,J300` (a Julian day 0) | UTC-04:00, UTC-05:00 | UTC |
+| `EST5EDT,366,300` (a day past 365) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT,M3.2.0/168,M11.1.0` (a rule time of 168 hours) | UTC-05:00, UTC-04:00 | UTC |
+| `AAA--8`, `JST--9` (two signs) | UTC+24:00, UTC+24:00 | UTC |
+| `JST+-9` | UTC-24:00, UTC-24:00 | UTC |
+| `EST5EDT,M3.2.0` (one date of the rule) | UTC-05:00, UTC-04:00 | UTC |
+| `EST5EDT,` (an empty rule) | UTC-05:00, UTC-04:00 | UTC |
+| `EST5EDT,M3,M11.1.0`, `EST5EDT,M3.2,M11.1.0`, `EST5EDT,,M11.1.0` (a date cut short) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT,m3.2.0,m11.1.0` (a lowercase `m`) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT4`, `XXX5YYY`, `XXX5YYY4` (daylight time without a rule: glibc takes the rules of the zone file `posixrules` under `TZDIR`, New York's on Debian and Ubuntu, or without it the United States' since 2007) | UTC-05:00, UTC-04:00 | UTC |
+| `XXX-9YYY`, `JST-9junk` | UTC+09:00, UTC+10:00 | UTC |
+| `XXX1:2` (minutes of one digit) | UTC-01:02, UTC-01:02 | UTC |
+| `XXX-5:3` | UTC+05:03, UTC+05:03 | UTC |
+| `XXX5YYY4:3,M3.2.0,M11.1.0` | UTC-05:00, UTC-04:03 | UTC |
+| `JST-9 `, `JST-9:` (text after the rule) | UTC+09:00, UTC+09:00 | UTC |
+| `JST-9,` | UTC+09:00, UTC+00:00 | UTC |
+| `EST5EDT,M3.2.0,M11.1.0 `, `EST5EDT,M3.2.0,M11.1.0,M12.1.0` | UTC-05:00, UTC-04:00 | UTC |
+| `America/Ojinaga` of a zone file built with `zic -b slim` (its footer disagrees with its last transition; the distributions' fat file is read) | UTC-06:00, UTC-05:00 | UTC |
+
+A rule whose change falls in another year in UTC than in local time (a valid POSIX rule) gives
+LOSAT another local time than glibc's for up to a day at the turn of the year: jiff keeps the
+change in its year in UTC, and glibc puts it where the rule says (231 of 5,000 such rules
+generated differ; no zone of tzdata 2026e does). The local time at 2025-12-31 23:59:59 UTC:
+
+| `TZ` | glibc | LOSAT |
+| --- | --- | --- |
+| `AAA-9BBB,0,365`, `AAA-9BBB,0/0,J365/25`, `AAA-9BBB,J60,365` | UTC+09:00 | UTC+10:00 |
+| `AAA1BBB,J60,365/-3` | UTC-01:00 | UTC+00:00 |
+| `XXX-24YYY,0/0,J365/25` | UTC+24:00 | UTC+25:00 |
+
+A zone file that breaks RFC 8536 (transitions or leap seconds out of order, a leap-second step
+other than one second, a footer that disagrees with the only local time type of a file without
+transitions) can give another time than glibc's, or UTC; zic writes no such file.
 
 A database of 1,000 volumes or more is not in FASTA order when it is read, with makeblastdb
 and with `losat makeblastdb` alike: NCBI opens volumes in the sorted order of their names, and

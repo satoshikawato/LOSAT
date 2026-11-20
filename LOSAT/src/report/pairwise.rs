@@ -515,7 +515,7 @@ pub struct BlastpPairwiseQuery {
 #[derive(Debug, Clone)]
 pub struct BlastpPairwiseReport {
     pub version: String,
-    pub database_name: String,
+    pub database_name: Vec<u8>,
     /// The `Database:` lines' counts of a FASTA subject set (its records and letters), NCBI's
     /// `Int8` (`tot_num_seqs`, `tot_length`); a `-db` search prints `PairwiseDatabase` and keeps
     /// its sums here (an alias file's `LENGTH` can pass 2^32 on a 32-bit target).
@@ -1106,7 +1106,45 @@ pub fn write_hsp_info<W: Write>(
             bit_score_str, h.raw_score, expect, evalue_str
         )?;
     }
+    write_hsp_identities(writer, hit, config)
+}
 
+/// The header of a BLASTN HSP under matrix-only scoring (reward 0, penalty 0: NCBI's
+/// `m_DisableKAStats`, which sets `eShowRawScoreOnly`): the raw score alone and an empty line,
+/// then the lines of `write_hsp_identities`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3586-3591,3605
+/// ```c++
+///         if ( m_AlignOption & eShowRawScoreOnly )
+///         {
+///             out<<" Score = "<<aln_vec_info->score<<"\n";
+///         }else
+/// ...
+///     out << "\n";
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:654-655
+/// ```c++
+///     if (disableKAStats)
+///         flags |= CDisplaySeqalign::eShowRawScoreOnly;
+/// ```
+pub fn write_hsp_info_raw_score<W: Write>(
+    writer: &mut W,
+    hit: &PairwiseHit,
+    config: &PairwiseConfig,
+) -> io::Result<()> {
+    writeln!(writer, " Score = {}", hit.hit.raw_score)?;
+    writeln!(writer)?;
+    write_hsp_identities(writer, hit, config)
+}
+
+/// The lines of an HSP's header after its score line: identities (and positives), gaps, the
+/// strand or the frames, and the empty line before the alignment (`write_hsp_info`).
+fn write_hsp_identities<W: Write>(
+    writer: &mut W,
+    hit: &PairwiseHit,
+    config: &PairwiseConfig,
+) -> io::Result<()> {
+    let h = &hit.hit;
     // Identity/Positives/Gaps line
     let align_len = h.length;
     let num_ident = h.num_ident;
@@ -2049,11 +2087,32 @@ fn write_spaces<W: Write>(writer: &mut W, count: usize) -> io::Result<()> {
 }
 
 #[inline]
-fn ensure_trailing_period(text: &str) -> String {
-    if text.ends_with('.') {
-        text.to_string()
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-801
+// ```c++
+// 	    string dbname;
+// 	    if (m_IsDbScan)
+// 		dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
+// 	    else
+// 		dbname = m_DbName;
+// ```
+/// The database name of a search of a `-subject` file (`m_IsDbScan`): `User specified sequence
+/// set (Input: <name>)` with the bytes of the file's name (`utils::os_bytes::path_bytes`), as
+/// NCBI keeps the `std::string` of the command line (a name that is not UTF-8, BLASTX's
+/// `-subject`: probe R2 of line LIB-B).
+pub(crate) fn subject_set_name(subject: &std::path::Path) -> Vec<u8> {
+    [
+        b"User specified sequence set (Input: ".as_slice(),
+        &crate::utils::os_bytes::path_bytes(subject),
+        b")",
+    ]
+    .concat()
+}
+
+fn ensure_trailing_period(text: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if text.ends_with(b".") {
+        std::borrow::Cow::Borrowed(text)
     } else {
-        format!("{text}.")
+        std::borrow::Cow::Owned([text, b"."].concat())
     }
 }
 
@@ -2340,7 +2399,7 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
     program: &str,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
@@ -2521,7 +2580,7 @@ fn write_final_database_block<W: Write>(
 // ```
 fn write_blastp_database_header_spacing<W: Write>(
     writer: &mut W,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     trailing: usize,
@@ -2543,7 +2602,7 @@ fn write_blastp_database_header_spacing<W: Write>(
     //         x_WrapOutputLine(db_titles, line_length, out);
     // ```
     write!(writer, "Database: ")?;
-    write_flatfile_wrapped(writer, ensure_trailing_period(database_name).as_bytes(), 68)?;
+    write_flatfile_wrapped(writer, &ensure_trailing_period(database_name), 68)?;
     writeln!(
         writer,
         "           {} sequences; {} total letters",
@@ -2736,19 +2795,7 @@ fn write_blastp_query_footer_spacing<W: Write>(
 //         m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
 //     }
 // ```
-// NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:661-670
-// ```c++
-//     inline basic_ostream<char, _Traits>&
-//     operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
-//     {
-//       if (!__s)
-// 	__out.setstate(ios_base::badbit);
-//       else
-// 	__ostream_insert(__out, __s,
-// 			 static_cast<streamsize>(_Traits::length(__s)));
-//       return __out;
-//     }
-// ```
+// libstdc++ (GCC 13): include/c++/13/ostream:661-670
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:96-103
 // ```c++
 // void
@@ -2838,14 +2885,14 @@ fn write_blastp_final_footer<W: Write>(
 /// `write_blastp_final_footer`).
 fn write_final_database_report<W: Write>(
     writer: &mut W,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:543-544
     // out << "  Database: "; x_WrapOutputLine(dbinfo->definition, line_length, out);
     write!(writer, "  Database: ")?;
-    write_flatfile_wrapped(writer, ensure_trailing_period(database_name).as_bytes(), 68)?;
+    write_flatfile_wrapped(writer, &ensure_trailing_period(database_name), 68)?;
     writeln!(writer, "    Posted date:  Unknown")?;
     writeln!(
         writer,
@@ -3626,6 +3673,30 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
 // BLASTN pairwise report
 // =============================================================================
 
+/// What the BLASTN prolog's program line and references follow: `-task megablast` (NCBI's
+/// `m_Megablast`; the program name stays `blastn`) and matrix-only scoring (the option reward and
+/// penalty both 0, NCBI's `m_DisableKAStats`), which also leaves out the description table, the
+/// query footers and the bit scores and e-values of the HSP headers.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:168-177
+/// ```c++
+///     if ( m_Program == "blastn" &&
+///          options.GetMatchReward() == 0 &&
+///          options.GetMismatchPenalty() == 0 )
+///     {
+///        /* This combination is an indicator that we have used matrices
+///         * solely to develop the hsp score.  Also for the time being it
+///         * indicates that KA stats are not available. -RMH-
+///         */
+///         m_DisableKAStats = true;
+///     }
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BlastnIntro {
+    pub megablast: bool,
+    pub matrix_only: bool,
+}
+
 /// One BLASTN query of the pairwise report (NCBI `CBlastAncillaryData` and the query's
 /// validity).
 ///
@@ -3652,9 +3723,9 @@ pub struct BlastnPairwiseQuery {
 #[derive(Debug, Clone)]
 pub struct BlastnPairwiseReport {
     pub version: String,
-    /// `-task megablast` (NCBI's `m_Megablast`; the program name stays `blastn`).
-    pub megablast: bool,
-    pub database_name: String,
+    /// The program line and references of the prolog (`-task megablast`, matrix-only scoring).
+    pub intro: BlastnIntro,
+    pub database_name: Vec<u8>,
     /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
     pub database_num_sequences: i64,
     pub database_total_letters: i64,
@@ -4396,6 +4467,48 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
     )
 }
 
+/// The prolog of a search under matrix-only scoring (`BlastnIntro::matrix_only`): the program
+/// line of rmblastn, NCBI's three lines of the RMBlast reference (the last without its line end),
+/// two line ends, then the references of the task (the megablast one for `-task megablast`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:376-395
+/// ```c++
+///     if ( m_Program == "blastn" &&
+///          m_DisableKAStats == true )
+///     {
+///       CBlastFormatUtil::BlastPrintVersionInfo("rmblastn", m_IsHTML,
+///                                               m_Outfile);
+///       m_Outfile << "\n\n";
+///       m_Outfile << "Reference: Robert M. Hubley, Arian Smit\n";
+///       m_Outfile << "RMBlast - RepeatMasker Search Engine\n";
+///       m_Outfile << "2010 <http://www.repeatmasker.org>";
+///     }else
+/// ...
+///     m_Outfile << NcbiEndl << NcbiEndl;
+/// ```
+fn write_matrix_only_pairwise_intro(
+    writer: &mut impl Write,
+    version: &str,
+    megablast: bool,
+) -> io::Result<()> {
+    super::reference::write_version_line(writer, false, "rmblastn", version)?;
+    writer.write_all(
+        b"\n\nReference: Robert M. Hubley, Arian Smit\nRMBlast - RepeatMasker Search Engine\n2010 <http://www.repeatmasker.org>",
+    )?;
+    // `NcbiEndl` writes a line end and flushes.
+    writeln!(writer)?;
+    writer.flush()?;
+    writeln!(writer)?;
+    writer.flush()?;
+    super::reference::write_prolog_references(
+        writer,
+        false,
+        super::reference::DEFAULT_PROTOCOL,
+        "blastn",
+        megablast,
+    )
+}
+
 // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:451-478
 // ```c++
 //     m_Outfile << NcbiEndl;
@@ -4567,13 +4680,15 @@ fn write_blastn_final_footer<W: Write>(
 pub fn write_blastn_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
-    megablast: bool,
-    database_name: &str,
+    intro: BlastnIntro,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    if megablast {
+    if intro.matrix_only {
+        write_matrix_only_pairwise_intro(writer, version, intro.megablast)?;
+    } else if intro.megablast {
         write_megablast_pairwise_intro(writer, version)?;
     } else {
         write_translated_pairwise_intro(writer, "BLASTN", version)?;
@@ -4644,7 +4759,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
         write_blastn_pairwise_prolog(
             writer,
             &report.version,
-            report.megablast,
+            report.intro,
             &report.database_name,
             report.database_num_sequences,
             report.database_total_letters,
@@ -4741,6 +4856,15 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         write_blastp_query_header(writer, &query.query_name, query.query_length)?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-449
+            // ```c++
+            //     /* Skip printing KA parameters if the program is rmblastn -RMH- */
+            //     if ( m_DisableKAStats )
+            //       return;
+            // ```
+            if report.intro.matrix_only {
+                return Ok(());
+            }
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else {
@@ -4760,6 +4884,22 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         //                               defline_length == -1 ? kFormatLineLength:defline_length,
         //                               m_NumSummary + additional);
         // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1533-1543
+        // ```c++
+        //     // Also disable when program is rmblastn.  At this time
+        //     // we do not want summary bit scores/evalues for this
+        //     // program. -RMH-
+        //     if ( (!m_IsBl2Seq || m_IsDbScan) && !(m_DisableKAStats || kIsGlobal) ) {
+        //         x_DisplayDeflines(aln_set, itr_num, prev_seqids);
+        //     }
+        //
+        //     //-------------------------------------------------
+        //     // print the alignments
+        //     m_Outfile << "\n";
+        // ```
+        if report.intro.matrix_only {
+            return writeln!(writer);
+        }
         // The titles of the subjects of the records read (by subject index).
         write_blastn_description_table(
             writer,
@@ -4786,6 +4926,13 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         part: std::ops::Range<usize>,
     ) -> io::Result<()> {
         let config = self.config;
+        // The HSP header: the raw score alone under matrix-only scoring
+        // (`write_hsp_info_raw_score`), chosen once for the subject.
+        let hsp_info = if self.report.intro.matrix_only {
+            write_hsp_info_raw_score::<W>
+        } else {
+            write_hsp_info::<W>
+        };
         // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
         // id is not shown), as BLASTP's (`write_database_subject_alignments_part`), or the lines
         // of the definition lines of one with parsed Seq-ids.
@@ -4809,7 +4956,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
                 &group.subject_hit_indices[&s_idx],
                 part,
                 |writer, hit| {
-                    write_hsp_info(writer, hit, config)?;
+                    hsp_info(writer, hit, config)?;
                     write_alignment(writer, hit, config)
                 },
             );
@@ -4825,7 +4972,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             &group.subject_hit_indices[&s_idx],
             part,
             |writer, hit| {
-                write_hsp_info(writer, hit, config)?;
+                hsp_info(writer, hit, config)?;
                 write_alignment(writer, hit, config)
             },
         )
@@ -4855,6 +5002,15 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
     }
 
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-449
+        // ```c++
+        //     /* Skip printing KA parameters if the program is rmblastn -RMH- */
+        //     if ( m_DisableKAStats )
+        //       return;
+        // ```
+        if self.report.intro.matrix_only {
+            return Ok(());
+        }
         let query = &self.queries[q_idx];
         write_nucleotide_query_footer_spacing(
             writer,
@@ -4925,7 +5081,7 @@ pub struct TblastxPairwiseQuery {
 #[derive(Debug, Clone)]
 pub struct TblastxPairwiseReport {
     pub version: String,
-    pub database_name: String,
+    pub database_name: Vec<u8>,
     /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
     pub database_num_sequences: i64,
     pub database_total_letters: i64,
@@ -4951,6 +5107,9 @@ pub struct TblastxPairwiseReport {
     /// The sources of the others' Bioseqs by subject index, as BLASTN's
     /// (`BlastnPairwiseReport::subject_sources`).
     pub subject_sources: Vec<super::defline::SourceTaxname>,
+    /// Whether the search linked its HSPs with sum statistics (`-sum_stats`, true by default):
+    /// the description table then has its `N` column (`TblastxSections::head`).
+    pub sum_stats: bool,
 }
 
 /// The start of the TBLASTX report, which NCBI writes before it searches: the program and
@@ -4968,7 +5127,7 @@ pub struct TblastxPairwiseReport {
 pub fn write_tblastx_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
@@ -5484,6 +5643,15 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         //         m_ShowLinkedSetSize = true;
         //     }
         // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:157 (the formatter's
+        // `use_sum_statistics`) and c++/src/algo/blast/format/blast_format.cpp:503-504
+        // ```c++
+        //                                opt.GetSumStatisticsMode(),
+        // ...
+        //     if (m_ShowLinkedSetSize)
+        //         flags |= CShowBlastDefline::eShowSumN;
+        // ```
+        // The `N` column follows `-sum_stats` (`report.sum_stats`).
         // The titles of the subjects of the records read (by subject index), as BLASTN's.
         write_blastn_description_table(
             writer,
@@ -5493,7 +5661,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             &group.subject_titles,
             &report.parsed_subjects,
             &report.subject_sources,
-            true,
+            report.sum_stats,
             false,
             self.config.sort_columns(query.query_length),
             read,
@@ -5624,7 +5792,7 @@ mod tests {
             &mut prolog,
             "2.17.0+",
             "BLASTP",
-            "s",
+            b"s",
             2,
             6_000_000_000,
             None,
@@ -5636,7 +5804,7 @@ mod tests {
             "{prolog}"
         );
         let mut epilog = Vec::new();
-        write_final_database_report(&mut epilog, "s", 2, 6_000_000_000).unwrap();
+        write_final_database_report(&mut epilog, b"s", 2, 6_000_000_000).unwrap();
         let epilog = String::from_utf8(epilog).unwrap();
         assert!(
             epilog.contains("  Number of letters in database: 6,000,000,000\n  Number of sequences in database:  2\n"),
@@ -6594,6 +6762,77 @@ mod tests {
         assert!(output_str.contains("Identities ="));
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3586-3591 (quoted
+    // at `write_hsp_info_raw_score`): under matrix-only scoring the header of an HSP is its raw
+    // score and a blank line, then the identities as in every report.
+    #[test]
+    fn matrix_only_hsp_header_is_the_raw_score() {
+        let hit = PairwiseHit::from(make_hit());
+        let config = PairwiseConfig {
+            program: "blastn".to_string(),
+            show_frame: false,
+            ..PairwiseConfig::default()
+        };
+        let mut raw = Vec::new();
+        write_hsp_info_raw_score(&mut raw, &hit, &config).unwrap();
+        let raw = String::from_utf8(raw).unwrap();
+        let mut full = Vec::new();
+        write_hsp_info(&mut full, &hit, &config).unwrap();
+        let full = String::from_utf8(full).unwrap();
+        let header = format!(" Score = {}\n\n", hit.hit.raw_score);
+        assert!(raw.starts_with(&header), "{raw}");
+        assert!(!raw.contains("Expect") && !raw.contains("bits"), "{raw}");
+        // The rest is the full header's from its identities on.
+        let identities = full.find(" Identities = ").expect("identities");
+        assert_eq!(&raw[header.len()..], &full[identities..]);
+    }
+
+    // NCBI 2.17.0 (line RG X6 probe `f_rm_sub_0`, ws:~/losat-bench/work/rgx6/s2): the outfmt 0
+    // prolog of matrix-only scoring (`write_matrix_only_pairwise_intro`, blast_format.cpp:376-395),
+    // and megablast's reference after the RMBlast lines for `-task megablast`.
+    #[test]
+    fn matrix_only_prolog_is_rmblastns() {
+        let intro = |megablast| {
+            let mut prolog = Vec::new();
+            write_blastn_pairwise_prolog(
+                &mut prolog,
+                "2.17.0+",
+                BlastnIntro {
+                    megablast,
+                    matrix_only: true,
+                },
+                b"User specified sequence set (Input: s1.fa)",
+                1,
+                100_000,
+                None,
+            )
+            .unwrap();
+            String::from_utf8(prolog).unwrap()
+        };
+        let blastn = intro(false);
+        assert!(
+            blastn.starts_with(
+                "RMBLASTN 2.17.0+\n\n\nReference: Robert M. Hubley, Arian Smit\nRMBlast - RepeatMasker Search Engine\n2010 <http://www.repeatmasker.org>\n\nReference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.\n"
+            ),
+            "{blastn}"
+        );
+        assert!(
+            blastn.contains(
+                "25:3389-3402.\n\n\n\nDatabase: User specified sequence set (Input: s1.fa).\n           1 sequences; 100,000 total letters\n"
+            ),
+            "{blastn}"
+        );
+        let megablast = intro(true);
+        assert!(
+            megablast.starts_with("RMBLASTN 2.17.0+\n\n\nReference: Robert M. Hubley"),
+            "{megablast}"
+        );
+        assert!(
+            megablast.contains("2010 <http://www.repeatmasker.org>\n\nReference: Zheng Zhang"),
+            "{megablast}"
+        );
+    }
+
     // NCBI reference: c++/src/objtools/align_format/showalign.cpp:4017-4018
     // ```c++
     //                               m_AV->StrandSign(0),
@@ -6656,8 +6895,11 @@ mod tests {
             .collect();
         let report = BlastnPairwiseReport {
             version: "2.17.0+".to_string(),
-            megablast: true,
-            database_name: "subjects".to_string(),
+            intro: BlastnIntro {
+                megablast: true,
+                matrix_only: false,
+            },
+            database_name: b"subjects".to_vec(),
             database_num_sequences: 3,
             database_total_letters: 300,
             database: None,
@@ -6753,7 +6995,7 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     writer: &mut W,
     program: &str,
     version: &str,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
@@ -7847,11 +8089,7 @@ pub fn write_blastx_epilog(
         write_final_database_block(writer, database)?;
     } else {
         write!(writer, "  Database: ")?;
-        write_flatfile_wrapped(
-            writer,
-            ensure_trailing_period(&report.database_name).as_bytes(),
-            68,
-        )?;
+        write_flatfile_wrapped(writer, &ensure_trailing_period(&report.database_name), 68)?;
         writeln!(writer, "    Posted date:  Unknown")?;
         writeln!(
             writer,
@@ -8365,7 +8603,7 @@ mod tblastx_tests {
             .collect();
         let report = TblastxPairwiseReport {
             version: "2.17.0+".to_string(),
-            database_name: "subjects".to_string(),
+            database_name: b"subjects".to_vec(),
             database_num_sequences: 3,
             database_total_letters: 900,
             matrix_name: "BLOSUM62".to_string(),
@@ -8379,6 +8617,7 @@ mod tblastx_tests {
             prolog: true,
             parsed_subjects: Vec::new(),
             subject_sources: Vec::new(),
+            sum_stats: true,
         };
         // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
         let hits: Vec<PairwiseHit> = [(0, 1, 4), (0, 1, 4), (0, 2, 1), (2, 1, 1), (3, 1, 1)]
@@ -8860,7 +9099,7 @@ mod tblastx_tests {
         let queries = [query(b"q0"), query(b"q1"), query(b"q2")];
         let report = BlastpPairwiseReport {
             version: String::new(),
-            database_name: String::new(),
+            database_name: Vec::new(),
             database_num_sequences: 1,
             database_total_letters: 400,
             matrix_name: Some("BLOSUM62".into()),
@@ -9183,7 +9422,7 @@ mod tblastx_tests {
         let hits = [hit(1), hit(3)];
         let report = BlastpPairwiseReport {
             version: "BLASTP 2.17.0+".to_string(),
-            database_name: "db".to_string(),
+            database_name: b"db".to_vec(),
             database_num_sequences: 1,
             database_total_letters: 180,
             matrix_name: Some("BLOSUM62".to_string()),

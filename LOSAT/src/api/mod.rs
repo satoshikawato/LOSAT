@@ -10,6 +10,7 @@
 //! use losat::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
 //!
 //! # fn main() -> Result<(), losat::api::Error> {
+//! // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 //! let query = read_fasta(Program::Blastp, Role::Query, b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let subject = read_fasta(Program::Blastp, Role::Subject, b">s\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let search = validate(Program::Blastp, &["-evalue", "1e-5", "-num_threads", "2"])?;

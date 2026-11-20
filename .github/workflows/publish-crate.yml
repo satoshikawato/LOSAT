@@ -1,0 +1,141 @@
+name: Publish crate
+
+# The maintainer's publication of the crate `losat` on crates.io (RELEASE.md, "Publish"). A version
+# on crates.io can be yanked but never deleted or replaced, so this is the last step of a release,
+# after the GitHub release and PyPI. Started by hand, on the release's tag or on main at it; the run
+# packages the commit it was started on (the tag is checked, never checked out):
+#  - `publish` off (the default): everything but the upload. The crate is packaged, held to the size
+#    limit of crates.io, compared byte for byte with the `.crate` file of the GitHub release
+#    `v<version>`, and built by `cargo publish --dry-run`. A rehearsal runs on any commit: one that
+#    is not the source of the tag `v<version>`, or has no GitHub release, is then a notice.
+#  - `publish` on: the same, with the tag and the release's crate required, then `cargo publish`
+#    with the token of the environment `crates-io` (its secret CARGO_REGISTRY_TOKEN), once the
+#    environment's required reviewer approves the job.
+# The first version of a crate can only be published with a token. After it, crates.io's Trusted
+# Publishing (no stored secret, as python-wheels.yml uses for PyPI) can be set up for the crate.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Upload to crates.io (the maintainer's act; a published version cannot be deleted)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  # crates.io refuses a .crate file over 10 MiB.
+  CRATES_IO_MAX_BYTES: 10485760
+
+jobs:
+  check:
+    name: package and check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      sha256: ${{ steps.package.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+
+      - id: package
+        name: Package the crate
+        working-directory: LOSAT
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --locked --no-deps --format-version 1 \
+            | python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "losat"))')
+          ../.github/scripts/release_tag_source.sh "$version" "$PUBLISH"
+          cargo package --locked --no-verify
+          crate=target/package/losat-$version.crate
+          bytes=$(stat -c %s "$crate")
+          sha256=$(sha256sum "$crate" | cut -d ' ' -f 1)
+          {
+            echo "### losat $version ($(git rev-parse HEAD))"
+            echo
+            echo "| file | bytes | of the 10 MiB limit | sha256 |"
+            echo "|---|---|---|---|"
+            echo "| losat-$version.crate | $bytes | $((bytes * 100 / CRATES_IO_MAX_BYTES)) % | \`$sha256\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$bytes" -gt "$CRATES_IO_MAX_BYTES" ]; then
+            echo "::error::losat-$version.crate is $bytes bytes; crates.io takes $CRATES_IO_MAX_BYTES at most"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      # The crate on crates.io is the release's source crate: `cargo package` writes the same bytes
+      # for the same commit and toolchain.
+      - name: Compare with the crate of the GitHub release
+        working-directory: LOSAT
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.package.outputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          TAG="v$VERSION"
+          if ! gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "losat-$VERSION.crate" --dir "$RUNNER_TEMP/release"; then
+            if [ "$PUBLISH" = true ]; then
+              echo "::error::the GitHub release $TAG has no losat-$VERSION.crate; publish the GitHub release first"
+              exit 1
+            fi
+            echo "::notice::rehearsal: no losat-$VERSION.crate of a GitHub release $TAG to compare with"
+            exit 0
+          fi
+          if ! cmp "$RUNNER_TEMP/release/losat-$VERSION.crate" "target/package/losat-$VERSION.crate"; then
+            echo "::error::the crate packaged from this commit differs from losat-$VERSION.crate of the GitHub release $TAG"
+            exit 1
+          fi
+          echo "The packaged crate is the GitHub release's losat-$VERSION.crate, byte for byte." >> "$GITHUB_STEP_SUMMARY"
+
+      # Builds the packaged crate as a user's `cargo install` would resolve it, and stops before the
+      # upload.
+      - name: cargo publish --dry-run
+        working-directory: LOSAT
+        run: cargo publish --dry-run --locked
+
+  publish:
+    name: publish losat ${{ needs.check.outputs.version }} on crates.io
+    if: inputs.publish
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/losat/${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+
+      # `--no-verify`: job `check` built this commit's crate in this run; the upload starts right
+      # after the approval. The packaged bytes are checked once more against that job's.
+      - name: cargo publish
+        working-directory: LOSAT
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.check.outputs.version }}
+          CHECKED_SHA256: ${{ needs.check.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::error::the environment crates-io has no secret CARGO_REGISTRY_TOKEN"
+            exit 1
+          fi
+          cargo package --locked --no-verify
+          echo "$CHECKED_SHA256  target/package/losat-$VERSION.crate" | sha256sum --check
+          cargo publish --locked --no-verify

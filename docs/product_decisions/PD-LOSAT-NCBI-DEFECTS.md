@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.52
+- Version: 1.53
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -175,12 +175,18 @@
   refusal of 1.31 narrowed to the other formats and to the first row of a query's report with
   `sacc`, `saccver` or `staxid`, where NCBI stops or prints an uninitialised number as in 1.37;
   line DBID item pfoff-2, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
-  numbered after 1.49);
+  numbered after 1.49)
   1.51 2026-11-18 (TBLASTX, the explicit rejection of the ungapped re-evaluation of HSPs on a subject
   of fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3, and
   names X-short-bat open in 1.46; line RG item X-short-tbx, Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.50, line DBID item pfoff-2);
-  1.52 2026-11-20 (psiblast and tblastn `-in_pssm`, line RG item Q-BM: the BitMagic data of a
+  2026-09-29, restated 2026-10-07; numbered after 1.50, line DBID item pfoff-2)
+  1.52 2026-11-18 (makeblastdb `-mask_data`, line NP item M4a-1c: the explicit rejection of a mask
+  file's string whose length passes the end of the file and is 1 GiB to 2^47 bytes, which NCBI's
+  reader reserves before it reads and which succeeds or fails by the host's memory, and of an
+  element of a mask's list stated as `NULL` that makeblastdb dereferences, whose report holds the
+  run's memory addresses, rule 3; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.51, line RG item X-short-tbx)
+  1.53 2026-11-20 (psiblast and tblastn `-in_pssm`, line RG item Q-BM: the BitMagic data of a
   Seq-table of the PSSM query's annotations decoded as NCBI's object manager decodes it, with
   NCBI's exception `BM::Invalid serialization format`; the rule-2 rejection of well-formed BitMagic
   data removed and the rule-3 rejection narrowed to the streams that NCBI reads past, runs with
@@ -189,7 +195,8 @@
   (「推奨通り」, Q-BM). A GAP block that is not one is decoded, and a row of the index that reaches
   it answered, where NCBI's scalar, SSE2 and SSE4.2 builds of BitMagic agree, and refused under
   rule 3 only where they differ, as NCBI's result then depends on the machine it was built for
-  (Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07); numbered after 1.51)
+  (Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07); numbered after 1.52, line
+  NP item M4a-1c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1501,6 +1508,32 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
   before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
   prints what the last loaded row set.
+- makeblastdb `-mask_data` (version 1.52, 2026-11-18, line NP item M4a-1c, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07): a string of a binary mask file whose
+  length passes the end of the file and is 1 GiB to 2^47 bytes. NCBI's reader reserves the
+  length before it reads the bytes (`CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`):
+  from 2^47 bytes, which no x86-64 host can allocate, it throws `std::bad_alloc` ("BLAST ran out
+  of memory", exit status 4, which LOSAT writes), past the largest `std::string` (2^63 - 1 bytes)
+  `std::length_error` ("Error: basic_string::_M_create", exit status 255, which LOSAT writes), and
+  below 1 GiB its reservation succeeds and the read ends at the end of the file (NCBI's
+  end-of-file report, which LOSAT writes); between them the reservation succeeds or fails by the
+  host's memory and overcommit, the bound of line PS's DECISIONS 40 that `losat rpsbproc` uses.
+  LOSAT refuses it (exit 1, "losat makeblastdb: mask data that LOSAT does not read: a string whose
+  length ... passes the end of the file ..."), before the build. Fixtures
+  `LOSAT/tests/seqdb/mask_parse/b_length_*.asnb` (`make_mask_parse_fixtures.py`).
+  An element of a mask's list of `CRef`s (`masks`, a `mix`, an `equiv`, a `packed-int`) stated as
+  `NULL` (`05 00` in binary), which NCBI's reader takes and leaves as an empty `CRef`
+  (`CObjectIStream::ReadPointer`, `serial/objistr.cpp:1133-1213`), is explicitly rejected under
+  rule 3 where makeblastdb dereferences it: the `GetId` of each mask in `x_ProcessMaskData`
+  (`**iter`) and the walk of `CSeq_loc::CheckId` (`**ii`, `(*li)->CheckId`,
+  `objects/seqloc/Seq_loc.cpp:3541-3620`) stop with a `CCoreException` whose report prints a stack
+  trace with the run's library addresses and the path of the installed binary. LOSAT refuses it
+  there (exit 1, "losat makeblastdb: mask data that LOSAT does not read: an element of ... stated
+  as NULL ..."): after the masks before it, after any error of NCBI's reader in the rest of its
+  object, and only where the walk reaches it (after two Seq-ids or a `feat` the walk stops first,
+  and LOSAT writes NCBI's "Cannot get masked range Seq-id"). Unit tests in
+  `LOSAT/src/writedb/mask_info/tests.rs`; the fixtures `h_pointer_*` and `b_pointer_*` of
+  `make_mask_parse_fixtures.py` hold the cases NCBI completes or fails on without that report.
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations
@@ -1531,7 +1564,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     allocations succeed or fail by the machine's memory (10,000,000 rows take NCBI 1.4 GB,
     100,000,000 rows end in `BLAST ran out of memory`);
   - BitMagic data of a Seq-table that NCBI decodes (`bit-bvector` values, a `bit-set-bvector`'s
-    sparse index; since version 1.52, line RG item Q-BM, LOSAT decodes it as NCBI does) in a
+    sparse index; since version 1.53, line RG item Q-BM, LOSAT decodes it as NCBI does) in a
     stream that NCBI reads past (empty or cut data, a big-endian array whose length moves NCBI's
     position past the data), that dereferences NCBI's null reference vector (an XOR block), that
     runs undefined behaviour or writes past BitMagic's blocks or buffers (an Elias gamma code of
@@ -1568,7 +1601,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   None of these is a rule-1 exception: D3-1's questions to the Owner, Q1 (the Dense-seg division by
   zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, were decided
   by the Owner on 2026-11-16 (「推奨通り」): Q1 to Q3 refuse their cases, as built, and Q-BM ports BitMagic
-  (line RG item Q-BM, version 1.52). Not a rule-3 item but a refusal: the XML and JSON
+  (line RG item Q-BM, version 1.53). Not a rule-3 item but a refusal: the XML and JSON
   reports of an untitled query whose annotations hold features (NCBI's definition line reads them;
   not ported). Since line RG item D3-2 LOSAT writes NCBI's ASN.1 text of the values it reads: the
   annotation's text that NCBI prints after its `Failed to parse location of` message (1204.6) is
@@ -1768,7 +1801,7 @@ in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists r
 would port. The last entry (version 1.45, line RG item D3-1) is not of these: it concerns a PSSM
 query's Seq-ids, not a database; it is Owner-delegated (standing instruction 2026-09-29, restated
 2026-10-07), not under the acceptance of 2026-11-02; and it has no row in PD-LOSAT-DATABASE-SEARCH.
-Version 1.45's rejection of well-formed BitMagic data was removed in version 1.52: line RG item
+Version 1.45's rejection of well-formed BitMagic data was removed in version 1.53: line RG item
 Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通り」, Q-BM):
 
 - A reported sequence whose id NCBI's formatters do not find, in the formats and field lists
@@ -1881,7 +1914,7 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT
   rejected them before Session S07+++b.
 - psiblast and tblastn `-in_pssm`, the BitMagic data of a Seq-table of the PSSM query's
-  annotations (version 1.52, 2026-11-20, line RG item Q-BM; the Owner decided on 2026-11-16
+  annotations (version 1.53, 2026-11-20, line RG item Q-BM; the Owner decided on 2026-11-16
   (「推奨通り」, Q-BM) to port it): `bit-bvector` values and a `bit-set-bvector`'s sparse index are
   decoded where NCBI's object manager decodes them, at the first value read
   (`CBVector_data::GetBitVector`: `bm::deserialize` of BitMagic 8.0.1 (Apache-2.0, bundled in NCBI BLAST+) in

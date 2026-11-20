@@ -159,20 +159,80 @@ test('a failed TBLASTX run keeps the file of its -logfile, with NCBI\'s error, u
   if (native !== undefined) expect(saved.bytes.equals(native), 'tblastx -logfile run.log, failed').toBe(true);
 });
 
+// The file of -logfile holds what the CLI's file holds for the run's own command line (line WQA's
+// sweep, D3 review r2, 2026-11-19). TBLASTX with -num_alignments 0 makes two searches (ABI §7): the
+// tabular formats' fails alone with NCBI's `No hits are being saved`, and the run completes as the
+// CLI's run of outfmt 0, whose file is empty. The other search's warning and error, which the file
+// had, are the run's warnings (ABI §5, stream 3).
+test('the file of -logfile of TBLASTX holds what the CLI writes for the run\'s own command line', async ({ page, browserName }) => {
+  await program(page, 'tblastx');
+  await paste(page, 'query', QUERY);
+  await paste(page, 'subject', SUBJECT);
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('0');
+  await page.getByTestId('param-extra').fill('-logfile run.log');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-outputs').click();
+  await page.getByTestId('format-run-files').click();
+  const file = page.getByTestId('run-file-0');
+  await expect(file.getByTestId('run-file-name')).toHaveText('run.log');
+  await expect(file.getByTestId('run-file-empty')).toHaveText('The file is empty.');
+  await shoot(page.getByTestId('results-outputs'), '05-outputs-logfile-two-searches', browserName);
+  const saved = await downloaded(page, () => file.getByTestId('run-file-download-0').click());
+  expect(saved.bytes.length).toBe(0);
+  const native = nativeLogFile(['tblastx', '-num_alignments', '0'], QUERY, SUBJECT);
+  if (native !== undefined) expect(saved.bytes.equals(native), 'tblastx -num_alignments 0 -logfile run.log').toBe(true);
+  // The tabular formats' warning and error are the run's warnings.
+  await page.getByTestId('results-view-details').click();
+  const warnings = page.getByTestId('run-diagnostics');
+  await expect(warnings).toBeVisible();
+  expect(await warnings.evaluate((element) => element.textContent ?? '')).toBe(
+    'Warning: [tblastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n',
+  );
+});
+
+// Where TBLASTX's run messages go nowhere (-logfile /dev/null; ABI §4), the run shows no warning: the
+// CLI writes none for any format, and the lines that the run's other formats add go nowhere too
+// (line WQA's sweep, D3 review r3, 2026-11-19: the tabular formats' warning and error showed). Run
+// details says that the run's warnings are not kept (ABI §5, stream 10; D7, 2026-11-20).
+test('TBLASTX with -logfile /dev/null shows no warning, as the CLI writes none', async ({ page }) => {
+  await program(page, 'tblastx');
+  await paste(page, 'query', QUERY);
+  await paste(page, 'subject', SUBJECT);
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('0');
+  await page.getByTestId('param-extra').fill('-logfile /dev/null');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-details').click();
+  await expect(page.getByTestId('run-diagnostics-place')).toHaveText("The run's warnings are not kept, as the run's -logfile writes its messages nowhere.");
+  await expect(page.getByTestId('run-diagnostics')).toHaveCount(0);
+  await expect(page.getByTestId('run-diagnostics-none')).toHaveCount(0);
+  if (NATIVE === undefined) return;
+  for (const outfmt of ['0', '6']) {
+    const cli = spawnSync(NATIVE, ['tblastx', '-query', 'query.fa', '-subject', 'subject.fa', '-num_alignments', '0', '-outfmt', outfmt, '-logfile', '/dev/null', '-num_threads', '1'], { cwd: nativeDirectory(QUERY, SUBJECT) });
+    expect(String(cli.stderr), `-outfmt ${outfmt}`).toBe('');
+  }
+});
+
 // Each output that a run could not write points to where its error is, as the engine says (ABI v2 §5, stream 9: the
 // place where it wrote the error; line WQA's sweep, D7, 2026-11-20), and the notice, the Outputs and Run details say
 // so. TBLASTX with -logfile run.log: -num_alignments 0, whose hit list of 0 fails the tabular formats, writes BLAST+'s
-// error where the run's messages go, the file of -logfile (which then holds what the tabular formats' search wrote: the
-// CLI's run of the argv's outfmt 0 writes none of it); a subject title that NCBI cannot decode stops them with LOSAT's
-// own refusal, which goes to the Warnings, as the CLI writes it to its standard error whatever -logfile is (the file
-// stays empty, as the CLI's). With -logfile /dev/null BLAST+'s error is written nowhere, and LOSAT's still to the
-// Warnings.
+// error to the Warnings with the rest of what the tabular formats add, and the file of -logfile holds what the CLI's
+// file of the argv's outfmt 0 holds, nothing (line WQA's sweep, D3 review r2, 2026-11-19); a subject title that NCBI
+// cannot decode stops them with LOSAT's own refusal, which goes to the Warnings, as the CLI writes it to its standard
+// error whatever -logfile is (the file stays empty, as the CLI's). With -logfile /dev/null BLAST+'s error is written
+// nowhere, and LOSAT's still to the Warnings.
 test("TBLASTX with -logfile: the outputs that could not be written point to where the run wrote their error", async ({ page }, testInfo) => {
   if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the CLI's file: ${NO_NATIVE_REASON}` });
   const notice = (kind: string) => page.locator(`[data-testid="results-notice"][data-kind="${kind}"]`);
   const bad = Buffer.concat([Buffer.from('>Subject_9 bad x'), Buffer.from([0x81]), Buffer.from(`y title\n${dna(7, 300)}\n`)]);
   const refusal = 'subject record 1 (Subject_9) has a title whose non-UTF-8 bytes';
-  const inFile = "in the file of the run's -logfile, run.log, under Outputs";
   const nowhere = "not kept, as the run's -logfile writes its messages nowhere";
   const warnings = 'under Warnings in Run details';
   const cases = [
@@ -181,11 +241,11 @@ test("TBLASTX with -logfile: the outputs that could not be written point to wher
       alignments: '0',
       extra: '-logfile run.log',
       kind: 'no-tabular-hits',
-      text: `-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (the "No hits are being saved" error, ${inFile}), so this run has no HSP records; outfmt 0 is still written.`,
-      place: inFile,
-      file: 'No hits are being saved',
-      diagnostics: undefined,
-      details: `The run's warnings are ${inFile}.`,
+      text: `-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (the "No hits are being saved" error, ${warnings}), so this run has no HSP records; outfmt 0 is still written.`,
+      place: warnings,
+      file: '',
+      diagnostics: 'No hits are being saved',
+      details: undefined,
     },
     {
       subject: bad,
@@ -250,11 +310,12 @@ test("TBLASTX with -logfile: the outputs that could not be written point to wher
       const shown = page.getByTestId('run-file-0');
       if (file === '') {
         await expect(shown.getByTestId('run-file-empty')).toHaveText('The file is empty.');
-        // The CLI's file of the same argv (outfmt 0, which writes the alignments) is empty too, and the CLI's run of
-        // outfmt 6 writes LOSAT's refusal to its standard error, none to the file.
-        const native = nativeLogFile(['tblastx'], QUERY, subject);
-        if (native !== undefined) expect(native.length, 'tblastx -logfile run.log, an undecodable subject title').toBe(0);
-        const six = nativeLogRun(['tblastx', '-outfmt', '6'], QUERY, subject);
+        // The CLI's file of the same argv (outfmt 0, which writes the alignments) is empty too.
+        const words = alignments === undefined ? ['tblastx'] : ['tblastx', '-num_alignments', alignments];
+        const native = nativeLogFile(words, QUERY, subject);
+        if (native !== undefined) expect(native.length, `${words.join(' ')} -logfile run.log: the file`).toBe(0);
+        // The CLI's run of outfmt 6 writes LOSAT's refusal to its standard error, none to the file.
+        const six = typeof subject === 'string' ? undefined : nativeLogRun(['tblastx', '-outfmt', '6'], QUERY, subject);
         if (six !== undefined) {
           expect(six.stderr.toString('utf8'), 'tblastx -outfmt 6 -logfile run.log: standard error').toContain(refusal);
           expect(six.file.length, 'tblastx -outfmt 6 -logfile run.log: the file').toBe(0);

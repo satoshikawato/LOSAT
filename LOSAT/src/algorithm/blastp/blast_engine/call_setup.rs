@@ -713,7 +713,7 @@ pub(super) fn call_lookup(
 ///    Int8 total_length = -1;
 ///    Int4 num_seqs = -1;
 /// ```
-pub(super) struct BlastpDbExtent {
+pub(super) struct BlastpDbExtent<'a> {
     /// NCBI's `Int8` (`BlastpDatabase::total_letters`, or the sum of the subject set's records).
     pub(super) total_db_len: i64,
     pub(super) sorts_results: bool,
@@ -721,22 +721,29 @@ pub(super) struct BlastpDbExtent {
     pub(super) num_subjects: i32,
     pub(super) eff_db_length: i64,
     pub(super) cutoff_subject_length: i32,
+    /// The setup's own total and number of sequences, which its average divides
+    /// (`BLAST_GapAlignSetUp`): `total_db_len` and `num_subjects`, or an RPS search's first unit's
+    /// without `x_AdjustDbSize`'s `DbSeqNum`.
+    pub(super) setup_numbers: (i64, i32),
+    /// rpsblast: the search units of the database (`rps_hooks::with_units`, line RG D1a-4), whose
+    /// first unit's numbers these are (`rps_hooks::RpsSetup`) and whose search reads each unit's.
+    pub(super) rps_units: Option<&'a crate::algorithm::rps_search::volumes::RpsUnits>,
 }
 
-/// The call's `BlastpDbExtent` (`database` none: the FASTA subject set `subjects`), with the
-/// refusal of statistics that count no sequence (`-old_fsc`); `run_call` checks the average
-/// subject length after it (its error writes NCBI's prolog first).
+/// The call's `BlastpDbExtent` (`database` none: the FASTA subject set `subjects`); `run_call`
+/// checks the setup's count and average subject length after it (`setup_fails`; the average's
+/// error writes NCBI's prolog first).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:888-889
 /// ```c
 /// BLAST_GapAlignSetUp(EBlastProgramType program_number,
 ///     const BlastSeqSrc* seq_src,
 /// ```
-pub(super) fn db_extent(
+pub(super) fn db_extent<'a>(
     args: &ResolvedBlastpArgs,
-    database: Option<&BlastpDatabase>,
+    database: Option<&'a BlastpDatabase>,
     subjects: &[EncodedProtein],
-) -> Result<BlastpDbExtent> {
+) -> Result<BlastpDbExtent<'a>> {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:766-769
     // ```c
     // kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
@@ -770,6 +777,12 @@ pub(super) fn db_extent(
             .sum::<i64>(),
         Some(database) => database.total_letters(),
     };
+    // rpsblast: the search units of the database (`rps_hooks::with_units`, line RG D1a-4), whose
+    // first unit's numbers the set-up reads in place of the database's (`rps_hooks::RpsSetup`).
+    let rps_units = database
+        .filter(|_| args.rps_search.is_some())
+        .and_then(BlastpDatabase::rps_units);
+    let rps_setup = rps_units.map(rps_hooks::RpsSetup::of);
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:914-921
     // ```c
     // /* Set the database length for new FSC */
@@ -799,8 +812,13 @@ pub(super) fn db_extent(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
     // `DbStatistics::sorts_results`): whether the traceback sorts the results at its end. A
     // FASTA subject set that finds hits has letters.
+    // (RPS-BLAST's traceback sorts before its filters whatever the length, blast_traceback.c:1306,
+    // in the RPS engine, `rps_search::traceback`; after them it follows this gate too, one volume
+    // with the `-db` name's length: `RpsUnit::sorts_results`.)
     let sorts_results = database.is_none_or(|database| database.statistics().sorts_results());
-    let gumbel_db_length = if args.dbsize != 0 {
+    let gumbel_db_length = if let Some(rps) = &rps_setup {
+        rps.gumbel_db_length
+    } else if args.dbsize != 0 {
         args.dbsize
     } else {
         database.map_or(total_db_len, |database| {
@@ -844,23 +862,16 @@ pub(super) fn db_extent(
     let num_subjects: i32 = match database {
         None if total_db_len == 0 => 1,
         None => i32::try_from(subjects.len().max(1)).unwrap_or(i32::MAX),
-        Some(database) => rps_hooks::dbsize_volume_num_seqs(args, database)
-            .map_or_else(|| database.statistics_num_sequences(), |count| count as i32),
+        Some(database) => rps_setup.map_or_else(
+            || database.statistics_num_sequences(),
+            |rps| rps.eff_num_seqs,
+        ),
     };
-    // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
-    // statistics' average (blast_setup.c:975, quoted at the check of the average in `run_call`),
-    // which divides by their number of sequences.
-    if let Some(database) = database.filter(|_| args.old_fsc) {
-        database.check_statistics_count(args.app.name())?;
-        // RPS-BLAST's first volume of none of the profiles (`rps_hooks::dbsize_volume_num_seqs`)
-        // gives the same division by 0: the same refusal (DECISIONS 14 of line RG), not a panic.
-        if num_subjects == 0 {
-            return Err(crate::algorithm::common::database::refusal(
-                crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
-                args.app.name(),
-            ));
-        }
-    }
+    // The setup's own total and count, which its average divides (`BLAST_GapAlignSetUp`; an RPS
+    // search's first unit's, without `x_AdjustDbSize`'s `DbSeqNum`).
+    let (setup_total, setup_count) = rps_setup.map_or((total_db_len, num_subjects), |rps| {
+        (rps.setup_total, rps.setup_count)
+    });
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
     //    /* use overriding value from effective lengths options or the real value
@@ -871,7 +882,9 @@ pub(super) fn db_extent(
     //       db_length = eff_len_params->real_db_length;
     // ```
     // `-dbsize` above 0 replaces the total length behind the effective lengths.
-    let eff_db_length: i64 = if args.dbsize > 0 {
+    let eff_db_length: i64 = if let Some(rps) = &rps_setup {
+        rps.eff_db_length
+    } else if args.dbsize > 0 {
         args.dbsize
     } else {
         total_db_len
@@ -900,12 +913,14 @@ pub(super) fn db_extent(
     // space).
     let cutoff_subject_length = match (database, gapped_gumbel.is_some()) {
         // `setup_subject_length` without the block: the average as NCBI's `Int4` (0 where it is
-        // 0 or the count is 0, which `run_call` refuses for a search after this function).
+        // 0 or the count is 0, which `setup_fails` refuses for a search: `check_setup_count`).
         (_, false) => {
-            crate::stats::setup::setup_subject_length(total_db_len, num_subjects, None).unwrap_or(0)
+            crate::stats::setup::setup_subject_length(setup_total, setup_count, None).unwrap_or(0)
         }
         (None, true) => blastp_preliminary_cutoff_subject_length(subjects),
-        (Some(database), true) => database.cutoff_subject_length(),
+        (Some(database), true) => {
+            rps_setup.map_or_else(|| database.cutoff_subject_length(), |rps| rps.min_length)
+        }
     };
     Ok(BlastpDbExtent {
         total_db_len,
@@ -914,7 +929,99 @@ pub(super) fn db_extent(
         num_subjects,
         eff_db_length,
         cutoff_subject_length,
+        setup_numbers: (setup_total, setup_count),
+        rps_units,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// ```c++
+//     int status = m_PrelimSearch->CheckInternalData();
+//     if (status != 0)
+//     {
+//          // Search was not run, but we send back an empty CSearchResultSet.
+// ```
+// (`CBlastPrelimSearch::CheckInternalData`, api/prelim_stage.cpp:322-327, is
+// `BlastScoreBlkCheck`, core/blast_stat.c:853-877: 1 where no context has a Karlin block, so a
+// batch without a valid query never reaches `BLAST_GapAlignSetUp`, core/blast_setup.c:969-975,
+// whose average divides by the count.)
+/// Whether LOSAT refuses a setup that divides by 0 sequences (`check_setup_count`): without the
+/// Gumbel block (`args.old_fsc`: `-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
+/// statistics' average (blast_setup.c:975, quoted at `setup_fails`), whose division by a count of
+/// 0 crashes (SIGFPE, DECISIONS 14 of line RG). `setup_count` is the setup's count of the search
+/// (`BlastpDbExtent::setup_numbers`): a database's statistics' count, 0 where they read 0
+/// sequences of a positive total (`SeqDb::statistics_count_is_zero`), or an RPS search's first
+/// unit's, which is the one unit that can count 0 (`RpsUnit::check_setup_count`: a unit of one
+/// volume with an alias file's `NSEQ 0`; the bare volumes of several count their profiles), so
+/// this one test is every unit's (review D of line RG D1a-4, N2). Where the total is not positive
+/// NCBI counts 1 (blast_setup.c:929-937, quoted at `SeqDb::statistics_total_length`): a
+/// database whose statistics count 0 of no letters has no OID 0 to read, NCBI's failed read,
+/// which `run_call` reports before this test (`SeqDb::first_oid_read_fails`); a FASTA subject
+/// set counts at least 1 (`db_extent`), so only a database search reaches 0 (review E of D1a-4,
+/// N2). The one test of the refusal: `check_setup_count` makes it in the call, and the block
+/// search (`x_query_block_plan`) leaves a search it would refuse to the call of all queries,
+/// which refuses before any output (review D of D1a-4, SF1).
+pub(super) fn setup_count_refused(args: &ResolvedBlastpArgs, setup_count: i32) -> bool {
+    args.old_fsc && setup_count == 0
+}
+
+/// LOSAT's refusal of `setup_count_refused`. `setup_fails` makes it only where a query of the call
+/// is valid: a call of invalid queries only is reported as NCBI reports such a batch (exit 0;
+/// review C of line RG D1a-4, MF1: probes e1 and e6). A call is NCBI's query batches of the run
+/// (blastp and rpsblast; blastp's block search runs a block of them as a call only where this
+/// test passes) or one query's round (psiblast, which searches one query per batch). The one owner
+/// of blastp's, psiblast's and rpsblast's check (rpstblastn: `RpsUnit::check_setup_count` per unit
+/// in its batches, the same gate).
+fn check_setup_count(args: &ResolvedBlastpArgs, setup_count: i32) -> Result<()> {
+    if setup_count_refused(args, setup_count) {
+        return Err(crate::algorithm::common::database::refusal(
+            crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
+            args.app.name(),
+        ));
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+// ```c
+//    if (sbp->gbp) {
+//    ...
+//    } else {
+//        min_subject_length = (Int4) (total_length/num_seqs);
+//    }
+//
+//    if(min_subject_length <=0) {
+// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+//    }
+// ```
+/// Whether the setup of the call's first searched batch fails with NCBI's
+/// `stats::setup::SUBJECT_LENGTH_TOO_SHORT` (`setup_subject_length` of the extent's setup
+/// numbers; rpsblast: every unit's, `RpsUnit::setup_subject_length`, one owner with rpstblastn's,
+/// the first unit's numbers being the set-up's), after LOSAT's refusal of its division by a count
+/// of 0 (`check_setup_count`): both only where a query of the call is valid (`contexts`), as NCBI
+/// meets them in a batch (`CLocalBlast::Run`, quoted at `setup_count_refused`).
+pub(super) fn setup_fails(
+    args: &ResolvedBlastpArgs,
+    extent: &BlastpDbExtent<'_>,
+    contexts: &[QueryContext],
+) -> Result<bool> {
+    if !contexts.iter().any(|ctx| ctx.is_valid) {
+        return Ok(false);
+    }
+    let (setup_total, setup_count) = extent.setup_numbers;
+    check_setup_count(args, setup_count)?;
+    let gumbel = !args.old_fsc;
+    Ok(extent.rps_units.map_or_else(
+        || {
+            crate::stats::setup::setup_subject_length(
+                setup_total,
+                setup_count,
+                gumbel.then_some((extent.cutoff_subject_length, false)),
+            )
+            .is_none()
+        },
+        |units| units.subject_length_too_short(gumbel),
+    ))
 }
 
 /// What `call_search_spaces`, `prelim_cutoffs` and `subject_parameters` read of `run_call`: each
@@ -1426,11 +1533,7 @@ pub(super) fn prelim_sinks(
     //     ASSERT(inclusion_ethresh != 0.0);
     // ```
     // The heaps hold psiblast's larger hit lists (`traceback_hitlist_size`).
-    let redone_matches = build_redone_match_heaps(
-        query_count,
-        args.traceback_hitlist_size(),
-        args.inclusion_ethresh,
-    );
+    let redone_matches = build_redone_match_heaps(query_count, || args.redone_match_heap());
     let preliminary_hit_lists: Vec<Option<BlastpHitList>> =
         std::iter::repeat_with(|| None).take(query_count).collect();
     // The preliminary hit lists with the compact element (`x_prelim_compact.rs`), the lists the

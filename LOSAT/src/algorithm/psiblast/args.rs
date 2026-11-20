@@ -76,7 +76,8 @@ use crate::blastinput::value_parsers::*;
 // ASN.1 and ASCII PSSMs (`pssm.rs`); with `-in_pssm` the
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
-// `-in_msa` and `-phi_pattern` are refused by the parser (`cli.rs` `is_unported_psiblast_arg`).
+// `-in_msa` makes the PSSM from an alignment (`in_msa.rs`) and searches it as `-in_pssm` does;
+// `-phi_pattern` is refused by the parser (`cli.rs` `is_unported_psiblast_arg`).
 // The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
@@ -345,7 +346,7 @@ pub struct PsiblastArgs {
     pub subject_loc: Option<String>,
     // NCBI's argument is a string (blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
-    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 6, 7, 10 and 20", "6, 7, 10 and 20", "; with -in_pssm: 0, 6 and 7"))]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 6, 7, 10 and 20", "6, 7, 10 and 20", "; with -in_pssm or -in_msa: 0, 6 and 7"))]
     pub outfmt: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1147-1152
     // ```c++
@@ -464,8 +465,8 @@ pub struct PsiblastArgs {
     // ```
     // The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
     // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is opened and read with
-    // the options (`algorithm::psiblast::in_pssm`); `-in_msa` and `-phi_pattern` are refused by
-    // the parser (`cli.rs` `is_unported_psiblast_arg`).
+    // the options (`algorithm::psiblast::in_pssm`); `-phi_pattern` is refused by the parser
+    // (`cli.rs` `is_unported_psiblast_arg`).
     #[arg(
         long = "in_pssm",
         value_name = "psi_chkpt_file",
@@ -474,6 +475,70 @@ pub struct PsiblastArgs {
         help = "PSI-BLAST checkpoint file"
     )]
     pub in_pssm: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1184-1229
+    // ```c++
+    //             arg_desc.AddOptionalKey(kArgMSAInputFile, "align_restart",
+    //                                     "File name of multiple sequence alignment to "
+    //                                     "restart PSI-BLAST",
+    //                                     CArgDescriptions::eInputFile);
+    //             ITERATE(vector<string>, exclusion, msa_exclusions) {
+    //                 arg_desc.SetDependency(kArgMSAInputFile,
+    //                                        CArgDescriptions::eExcludes,
+    //                                        *exclusion);
+    //             }
+    //
+    //             arg_desc.AddOptionalKey(kArgMSAMasterIndex, "index",
+    //                                     "Ordinal number (1-based index) of the sequence"
+    //                                     " to use as a master in the multiple sequence "
+    //                                     "alignment. If not provided, the first sequence"
+    //                                     " in the multiple sequence alignment will be "
+    //                                     "used", CArgDescriptions::eInteger);
+    //             arg_desc.SetConstraint(kArgMSAMasterIndex,
+    //                                    new CArgAllowValuesGreaterThanOrEqual(1));
+    //             ...
+    //             arg_desc.SetDependency(kArgMSAMasterIndex,
+    //                                    CArgDescriptions::eRequires,
+    //                                    kArgMSAInputFile);
+    //             arg_desc.SetDependency(kArgMSAMasterIndex,
+    //                                    CArgDescriptions::eExcludes,
+    //                                    kArgIgnoreMsaMaster);
+    //
+    //             arg_desc.AddFlag(kArgIgnoreMsaMaster,
+    //                              "Ignore the master sequence when creating PSSM", true);
+    //             ...
+    //             arg_desc.SetDependency(kArgIgnoreMsaMaster,
+    //                                    CArgDescriptions::eRequires,
+    //                                    kArgMSAInputFile);
+    // ```
+    // `msa_exclusions` are `-in_pssm`, `-query`, `-query_loc` and `-phi_pattern`; the last is
+    // refused by name (`cli.rs` `is_unported_psiblast_arg`) before any exclusion is looked at. The
+    // exclusions and requirements are errors of the argument parser, which LOSAT's parser reports
+    // with its own text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is read with
+    // the options (`algorithm::psiblast::in_msa`).
+    #[arg(
+        long = "in_msa",
+        value_name = "align_restart",
+        value_parser = ncbi_input_path(),
+        conflicts_with_all = ["query", "query_loc", "in_pssm"],
+        help = "File name of multiple sequence alignment to restart PSI-BLAST"
+    )]
+    pub in_msa: Option<PathBuf>,
+    #[arg(
+        long = "msa_master_idx",
+        value_name = "index",
+        value_parser = |value: &str| ncbi_integer_at_least(value, 1),
+        requires = "in_msa",
+        conflicts_with_all = ["ignore_msa_master", "query", "query_loc", "in_pssm"],
+        help = "Ordinal number (1-based index) of the sequence to use as a master in the multiple sequence alignment. If not provided, the first sequence in the multiple sequence alignment will be used"
+    )]
+    pub msa_master_idx: Option<i32>,
+    #[arg(
+        long = "ignore_msa_master",
+        requires = "in_msa",
+        conflicts_with_all = ["msa_master_idx", "query", "query_loc", "in_pssm"],
+        help = "Ignore the master sequence when creating PSSM"
+    )]
+    pub ignore_msa_master: bool,
 
     /// `BlastpArgs::first_query_ordinal`: the number of the first query of the records of a call
     /// that starts there (`api::run_batches`). 0 on the command line.
@@ -514,7 +579,7 @@ impl PsiblastArgs {
         // The round driver runs `-num_iterations` other than 1, and with `-in_pssm` one round too
         // when a PSSM file is written (the input PSSM before the search).
         let rounds = (self.num_iterations != 1
-            || (self.in_pssm.is_some()
+            || ((self.in_pssm.is_some() || self.in_msa.is_some())
                 && (self.out_pssm.is_some() || self.out_ascii_pssm.is_some())))
         .then(|| u32::try_from(self.num_iterations).unwrap_or(0));
         let request_inputs = self
@@ -590,6 +655,13 @@ impl PsiblastArgs {
                 pseudocount: self.pseudocount,
                 rounds,
                 in_pssm: self.in_pssm,
+                in_msa: self
+                    .in_msa
+                    .map(|path| crate::algorithm::psiblast::in_msa::MsaInput {
+                        path,
+                        master_index: self.msa_master_idx,
+                        ignore_master: self.ignore_msa_master,
+                    }),
                 versions: self.pssm_versions,
                 check_scope: self.pssm_check,
             }),
@@ -644,6 +716,7 @@ impl PsiblastArgs {
         inputs.pseudocount = self.pseudocount;
         inputs.inclusion_ethresh = self.inclusion_ethresh;
         inputs.num_iterations = Some(self.num_iterations);
+        inputs.ignore_msa_master = self.ignore_msa_master;
         inputs
     }
 
@@ -963,13 +1036,7 @@ mod tests {
 
     #[test]
     fn psiblasts_arguments_that_losat_does_not_run_are_named() {
-        for (option, value) in [
-            ("-in_msa", Some("x")),
-            ("-msa_master_idx", Some("2")),
-            ("-ignore_msa_master", None),
-            ("-phi_pattern", Some("x")),
-            ("-html", None),
-        ] {
+        for (option, value) in [("-phi_pattern", Some("x")), ("-html", None)] {
             let mut extra = vec![option];
             extra.extend(value);
             let error = parse(&extra).unwrap_err();

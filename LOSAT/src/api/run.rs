@@ -826,7 +826,7 @@ pub(super) fn run_local(
     // call's run, `CallStart::new`), `CATCH_ALL` writes its line feeds alone
     // (`cli::catch_all_text`), as the command line writes the error.
     if crate::ncbi_exception::main_diag_failbit() {
-        let message = crate::cli::catch_all_text(&native.message).into_owned();
+        let message = crate::cli::catch_all_text(&native.message).to_vec();
         return Err(crate::cli::NativeError {
             exit: native.exit,
             message,
@@ -1006,7 +1006,7 @@ fn searches(
                 .map(|choice| choice.number)
                 .map_err(|error| {
                     log.post(&error);
-                    Error::Argv(format!("{error:#}").into())
+                    Error::Argv(super::error::chain_bytes(&error))
                 })
         })
         .collect::<Result<_, _>>()?;
@@ -1101,6 +1101,7 @@ pub fn run(
                         })
                         .collect(),
                     diagnostics: &mut sink,
+                    later_warnings: None,
                     hits: None,
                     observer: None,
                 };
@@ -1174,6 +1175,7 @@ pub fn run_to_file(
                     sink: OutputSink::Out(&mut file),
                 }],
                 diagnostics: &mut sink,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -1239,6 +1241,7 @@ fn collect_one(
                 })
                 .collect(),
             diagnostics: &mut sink,
+            later_warnings: None,
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
@@ -1528,6 +1531,7 @@ mod tests {
     use super::*;
     use crate::api::{validate, Program};
 
+    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
     const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 
     fn one_protein() -> (Vec<FastaRecord>, Vec<FastaRecord>) {

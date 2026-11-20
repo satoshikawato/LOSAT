@@ -1037,7 +1037,10 @@ fn native(error: &anyhow::Error) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .unwrap_or_else(|| panic!("not a NativeError: {error:#}"));
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 const NUC_TITLE_WARNING: &str = "FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?\n";

@@ -541,6 +541,10 @@ pub(super) struct CutoffInputs<'a> {
     pub(super) x_dropoff_init: &'a [i32],
     /// `-min_raw_gapped_score` (`TaskConfig::min_raw_gapped_score`).
     pub(super) min_raw_gapped_score: Option<i32>,
+    /// NCBI's matrix-only scoring (`TaskConfig::matrix_only`): the word cutoff of a gapped search
+    /// is the ungapped search's formula with the gapped blocks, `-min_raw_gapped_score` caps it at
+    /// half its value, and the X-dropoffs keep their initial values.
+    pub(super) matrix_only: bool,
     pub(super) evalue_threshold: f64,
     /// The subject length of the word cutoffs of an ungapped search: the subject's own where NCBI
     /// computes the statistics of each subject (`BlastInitialWordParametersUpdate`'s `subj_length`,
@@ -570,9 +574,17 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
         search_karlin: search_karlin_ref,
         x_dropoff_init: x_dropoff_init_ref,
         min_raw_gapped_score,
+        matrix_only,
         evalue_threshold,
         subject_length,
     } = inputs;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348
+    // ```c
+    //       if (!gapped_calculation || sbp->matrix_only_scoring) {
+    // ```
+    // The word cutoff from the e-value of `BLAST_Cutoffs` (`ungapped::word_cutoff_score`): every
+    // ungapped search, and a gapped one under matrix-only scoring.
+    let word_cutoff_formula = UNGAPPED || matrix_only;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:336-377
     // ```c
     // if (!gapped_calculation || sbp->matrix_only_scoring) {
@@ -594,21 +606,22 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
     // of a `-subject` set, so `BlastInitialWordParametersUpdate` runs once for the batch.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1434-1445,
     // c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266, seqsrc_seqdb.cpp:203-209
-    let x_avg_subject_length: u64 = if let (true, Some(length)) = (UNGAPPED, subject_length) {
-        length
-    } else if UNGAPPED {
-        match subjects {
-            // `BlastSeqSrcGetAvgSeqLen` reads `GetTotalLength` and `GetNumSeqs`, not the
-            // statistics' `STATS_*` keys (`SeqDb::average_length`).
-            SubjectSource::Database(database) => database.average_length() as u32 as u64,
-            SubjectSource::Prepared(_) => ungapped::average_subject_length_subject_set(
-                db_len_total as u64,
-                db_num_seqs as u64,
-            ),
-        }
-    } else {
-        0
-    };
+    let x_avg_subject_length: u64 =
+        if let (true, Some(length)) = (word_cutoff_formula, subject_length) {
+            length
+        } else if word_cutoff_formula {
+            match subjects {
+                // `BlastSeqSrcGetAvgSeqLen` reads `GetTotalLength` and `GetNumSeqs`, not the
+                // statistics' `STATS_*` keys (`SeqDb::average_length`).
+                SubjectSource::Database(database) => database.average_length() as u32 as u64,
+                SubjectSource::Prepared(_) => ungapped::average_subject_length_subject_set(
+                    db_len_total as u64,
+                    db_num_seqs as u64,
+                ),
+            }
+        } else {
+            0
+        };
     let mut cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
     let mut hit_saving_cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
     // NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-211;
@@ -651,6 +664,21 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
                 &search_karlin_ref[context_idx].gapped,
             ),
         };
+        // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:882-893
+        // ```c
+        //          if ( program_number == eBlastTypeBlastn && sbp->matrix_only_scoring )
+        //          {
+        //             ...
+        //              params->cutoffs[context].cutoff_score = options->cutoff_score;
+        //              params->cutoffs[context].cutoff_score_max = (Int4)(options->cutoff_score/2);
+        //           }
+        // ```
+        // The cap of the word cutoff (`cutoff_score_max`): the hit-saving cutoff, or half of
+        // `-min_raw_gapped_score` (C's integer division) under matrix-only scoring.
+        let cutoff_score_max = match min_raw_gapped_score {
+            Some(score) if matrix_only => score / 2,
+            _ => hit_saving_cutoff,
+        };
         // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-374
         // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
         // new_cutoff = gap_trigger;
@@ -673,26 +701,45 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
         //       new_cutoff *= (Int4)sbp->scale_factor;
         //       new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
         // ```
-        let cutoff = if UNGAPPED {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:299-303
+        // ```c
+        //    if (sbp->kbp_gap) {
+        //       kbp_array = sbp->kbp_gap;
+        //    } else if (sbp->kbp_std) {
+        //       kbp_array = sbp->kbp_std;
+        //       gapped_calculation = FALSE;
+        // ```
+        let cutoff = if word_cutoff_formula {
+            let blocks = &search_karlin_ref[context_idx];
             ungapped::word_cutoff_score(
                 query_contexts[context_idx].len,
                 x_avg_subject_length,
-                &search_karlin_ref[context_idx].ungapped,
-                hit_saving_cutoff,
+                if UNGAPPED {
+                    &blocks.ungapped
+                } else {
+                    &blocks.gapped
+                },
+                cutoff_score_max,
             )
             .map_err(ungapped_cutoff_limit_error)?
         } else {
-            cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0)
+            cutoff_score_for_ungapped_extension(gap_trigger, cutoff_score_max, 1.0)
         };
         cutoff_scores.push(cutoff);
         hit_saving_cutoff_scores.push(hit_saving_cutoff);
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-397
     // ```c
     // if (curr_cutoffs->x_dropoff_init == 0)
     //    curr_cutoffs->x_dropoff = new_cutoff;
     // else
     //    curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
+    //
+    //  if ( program_number == eBlastTypeBlastn && sbp->matrix_only_scoring )
+    //  {
+    //     ...
+    //      curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
+    //   }
     // ```
     let mut x_dropoff_scores: Vec<i32> = Vec::with_capacity(cutoff_scores.len());
     for ((cutoff, &x_dropoff_init), &valid) in cutoff_scores
@@ -702,7 +749,7 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
     {
         let x_dropoff = if !valid {
             0
-        } else if x_dropoff_init == 0 {
+        } else if x_dropoff_init == 0 && !matrix_only {
             *cutoff
         } else {
             x_dropoff_init

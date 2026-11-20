@@ -1153,7 +1153,6 @@ pub(super) fn documents_may_refuse(
                 || documents().any(|&outfmt| {
                     crate::algorithm::common::database::report_sum_refusal(
                         pairwise.num_sequences,
-                        pairwise.total_letters,
                         pairwise.total_letters_overflow,
                         outfmt,
                     )
@@ -1360,11 +1359,31 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         ShownSubjects::Database { reported, .. } => reported.loads(),
         ShownSubjects::Fasta { .. } => &every_loaded,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-711
+    // ```c++
+    //     } else if (m_FormatType == CFormattingArgs::eXml) {
+    //         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
+    //         res->TrimSeqAlign(m_HitlistSize);
+    //         m_AccumulatedResults.push_back(res);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2358-2362
+    // ```c++
+    // void CBlastFormat::x_PrintXML2Report(const blast::CSearchResults& results,
+    //         							 CConstRef<blast::CBlastQueryVector> queries)
+    // {
+    // 	CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
+    //     res->TrimSeqAlign(m_HitlistSize);
+    // ```
+    // Every document writes the lists of each query that the cut to the hit list size keeps
+    // (`TrimSeqAlign` counts following Seq-aligns of matching subject ids as one, as
+    // `PruneSeqalign`): RPSTBLASTN's merged lists of several volumes, cut once per query
+    // (`BatchResults::shown_lists`); every list otherwise.
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
+        for qidx in 0..batch.queries.len() {
             if texts.len() == reports {
                 break;
             }
+            let lists = batch.shown_lists(qidx, options);
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
             texts.push(query_text(
@@ -1399,7 +1418,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut texts = texts.iter();
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
+        for qidx in 0..batch.queries.len() {
+            // The lists that the cut keeps, as above.
+            let lists = batch.shown_lists(qidx, options);
             let query = &queries[batch.query_ordinal + qidx];
             let Some(text) = texts.next() else {
                 // The held report that is never written (`written_queries`); the one held before
@@ -2074,7 +2095,7 @@ mod held_side_files_tests {
         let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
         assert_eq!(
             native.message,
-            "Command line argument error: Cannot open output file\n"
+            b"Command line argument error: Cannot open output file\n"
         );
         let mut master = held.clone();
         master.write_all(b"master").unwrap();
@@ -2140,7 +2161,7 @@ mod held_side_files_tests {
         let error = held.release().unwrap_err();
         let native = error.downcast_ref::<NativeError>().expect("a NativeError");
         assert_eq!(native.exit, 6);
-        assert_eq!(native.message, "BLAST failed to write output\n");
+        assert_eq!(native.message, b"BLAST failed to write output\n");
         drop((held, side, master));
         assert_eq!(std::fs::read(dir.join("o.out")).unwrap(), b"");
         std::fs::remove_dir_all(dir).ok();
@@ -2160,7 +2181,7 @@ mod held_side_files_tests {
         assert_eq!(native.exit, 1);
         assert_eq!(
             native.message,
-            "Command line argument error: Cannot open output file\n"
+            b"Command line argument error: Cannot open output file\n"
         );
         drop((held, side));
         std::fs::remove_dir_all(dir).ok();
@@ -2344,7 +2365,7 @@ mod held_formats_tests {
         let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
         assert_eq!(
             native.message,
-            "Command line argument error: Cannot open output file\n"
+            b"Command line argument error: Cannot open output file\n"
         );
         drop((first, blocked, last, stream, hold));
         assert_eq!([a.text(), files.text()], ["", "1:one;"].map(String::from));
@@ -2423,8 +2444,8 @@ mod held_formats_tests {
             .unwrap_err();
         let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
         assert_eq!(
-            (native.exit, native.message.as_str()),
-            (6, "BLAST failed to write output\n")
+            (native.exit, native.message.as_slice()),
+            (6, b"BLAST failed to write output\n".as_slice())
         );
         other.write_all(b"text 2 ").unwrap();
         assert_eq!(log.text(), "text 0 ");

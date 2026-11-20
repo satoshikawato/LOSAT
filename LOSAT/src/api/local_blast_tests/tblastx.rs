@@ -154,6 +154,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -190,6 +191,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -254,6 +256,7 @@ fn run_local_outputs(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -310,6 +313,7 @@ fn a_word_size_of_zero_is_ncbis_core_error() {
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -370,6 +374,7 @@ fn a_word_size_of_one_searches() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -395,7 +400,10 @@ fn native_error(result: anyhow::Result<()>) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .unwrap_or_else(|| panic!("NCBI's error: {error:#}"));
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 // NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and

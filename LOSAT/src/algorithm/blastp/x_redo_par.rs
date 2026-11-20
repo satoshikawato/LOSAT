@@ -247,6 +247,9 @@ pub(crate) struct XRedoParSearch<'a, P> {
     pub subjects: super::x_redo_subjects::XRedoSubjects<'a>,
     /// Each query's batch (`kappa_query_batches`): the heaps its early termination test reads.
     pub query_batches: &'a [Range<usize>],
+    /// Each query's context of the E-value adjustment with a composition P-value
+    /// (`kappa::evalue_adjust_contexts`).
+    pub evalue_adjust_contexts: &'a [super::kappa::EvalueAdjustContext],
     pub matrix: ScoringMatrix,
     pub gapped_params: &'a KarlinParams,
     pub gapped_gumbel: Option<&'a BlastGumbelBlk>,
@@ -416,9 +419,7 @@ fn x_end_above(
             // The heaps after the query first: they are not filled unless the query is the
             // last one of its batch, so this ends the test at once for the other queries.
             let may_end = (q_idx + 1..batch.end).all(|other| heaps[other].filled_to_cutoff())
-                && (batch.start..=q_idx).all(|other| {
-                    heaps[other].n.saturating_add(matches[other]) >= heaps[other].heap_threshold
-                });
+                && (batch.start..=q_idx).all(|other| heaps[other].may_fill(matches[other]));
             may_end.then(|| {
                 batch
                     .map(|other| COMPO_HEAP_EVALUE_STRETCH * heaps[other].ecutoff)
@@ -660,10 +661,9 @@ fn x_window<const SW: bool>(
         let mut at_risk = false;
         for (index, &matched) in job.iter().enumerate() {
             let best_evalue = x_local_match(lists, matched).best_evalue;
-            let heap_may_fill = heap.n.saturating_add(in_window + index) >= heap.heap_threshold;
             let may_end = batch_open
                 && end_above[q_idx].is_some_and(|above| best_evalue > above)
-                && heap_may_fill;
+                && heap.may_fill(in_window + index);
             let ended = may_end
                 && blast_compo_early_termination(best_evalue, &heaps[query_batches[q_idx].clone()]);
             at_risk |= may_end && !ended;
@@ -791,6 +791,7 @@ fn x_query_workspace<P>(search: &XRedoParSearch<'_, P>, q_idx: usize) -> BlastpK
         ctx.aa_len as i32,
         search.search_spaces[q_idx].length_adjustment as i32,
         search.search_spaces[q_idx].effective_space,
+        search.evalue_adjust_contexts[q_idx],
     )
 }
 
@@ -2901,6 +2902,7 @@ mod tests {
         subjects: Vec<EncodedProtein>,
         lists: Vec<Option<BlastpHitList>>,
         batches: Vec<Range<usize>>,
+        evalue_adjust_contexts: Vec<crate::algorithm::blastp::kappa::EvalueAdjustContext>,
         gapped_params: KarlinParams,
         gapped_gumbel: BlastGumbelBlk,
         matrix_info: crate::core::composition_adjustment::adjust_scores::BlastMatrixInfo,
@@ -3031,7 +3033,7 @@ mod tests {
             .map(|text| super::super::encoding::encode_protein_sequence(text))
             .collect();
         let db_letters: usize = subjects.iter().map(|subject| subject.aa_len).sum();
-        let search_spaces = contexts
+        let search_spaces: Vec<SearchSpace> = contexts
             .iter()
             .map(|ctx| {
                 let length_adjustment = 20_i64;
@@ -3046,12 +3048,22 @@ mod tests {
             .collect();
         let ideal = crate::stats::compute_blosum62_ideal_karlin_params()
             .expect("BLOSUM62 ideal parameters");
+        let batches = vec![0..3, 0..3, 0..3, 3..6, 3..6, 3..6];
+        let evalue_adjust_contexts = crate::algorithm::blastp::kappa::evalue_adjust_contexts(
+            &contexts,
+            &search_spaces,
+            &batches,
+            0,
+            None,
+        )
+        .expect("no refusal without unified P-values");
         XRedoFixture {
             contexts,
             search_spaces,
             subjects,
             lists,
-            batches: vec![0..3, 0..3, 0..3, 3..6, 3..6, 3..6],
+            batches,
+            evalue_adjust_contexts,
             gapped_params,
             gapped_gumbel: crate::stats::spouge::lookup_protein_gumbel_params(
                 &spec,
@@ -3153,6 +3165,7 @@ mod tests {
                             &fixture.subjects,
                         ),
                         query_batches: &fixture.batches,
+                        evalue_adjust_contexts: &fixture.evalue_adjust_contexts,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,
                         gapped_gumbel: Some(&fixture.gapped_gumbel),
@@ -3284,6 +3297,7 @@ mod tests {
                             &fixture.subjects,
                         ),
                         query_batches: &fixture.batches,
+                        evalue_adjust_contexts: &fixture.evalue_adjust_contexts,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,
                         gapped_gumbel: Some(&fixture.gapped_gumbel),
@@ -4045,6 +4059,7 @@ mod tests {
                             &fixture.subjects,
                         ),
                         query_batches: &fixture.batches,
+                        evalue_adjust_contexts: &fixture.evalue_adjust_contexts,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,
                         gapped_gumbel: Some(&fixture.gapped_gumbel),

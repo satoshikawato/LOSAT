@@ -9,9 +9,10 @@
 //! function. They are `pub(crate)`: their items change as the port advances. A few hidden items are
 //! `pub` for the crate's own clients, outside the compatibility promise of the version number: the
 //! `losat` binary calls the function `main_entry`; LOSAT Web's adapter names the engine through
-//! `api` and the module `web_adapter`, and reads and sets the field `FastaRecord::source` (what the
-//! BLAST archive writes besides the letters, with its method `FastaRecord::believed`); the tests
-//! use the module `wording`.
+//! `api` and the module `web_adapter`, reads and sets the field `FastaRecord::source` (what the
+//! BLAST archive writes besides the letters) and calls the methods of `FastaRecord`'s hidden `impl`
+//! (`believed`, `shown_id`, `subject_tabular_id` and the others there); the tests use the module
+//! `wording`.
 
 // The NCBI BLAST+ release that LOSAT's output follows, and the spellings of it that the output
 // carries. This is the one place in the code that names the release; every report, archive and

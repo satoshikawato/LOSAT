@@ -16,6 +16,10 @@ files that hold it, its license, and its notices and license text.
 
 Paths are relative to the losat crate (the directory LOSAT/ of the repository).
 
+The comments also cite two public-domain sources outside NCBI's code, whose authors ask for no
+notice: lmdb++ (lmdb++.h, NCBI's copy of the C++ wrapper of LMDB) and SQLite (btree.c, for the
+file format of the taxonomy database).
+
 The binaries (the losat command, the pylosat wheel and the WebAssembly builds) also contain
 the Rust crates they depend on, the Rust standard library and, in the WebAssembly builds,
 the C library wasi-libc. Their license texts are in the file THIRD_PARTY_LICENSES, which is
@@ -28,7 +32,9 @@ distributed with those binaries.
 What: most of LOSAT's code is translated from the C and C++ source of NCBI BLAST+ 2.17.0
 (the NCBI C++ Toolkit), and the data files LOSAT carries (scoring matrices, genetic codes,
 help texts) are NCBI's. The comments cite NCBI's files as
-"NCBI reference (598d8ae6): c++/...".
+"NCBI reference (598d8ae6): c++/...". The rpsbproc command is translated from NCBI's
+RpsbProc 0.5.1 (the package of 2025-05-13), whose files carry the same notice; the comments
+cite it as "NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/...".
 Files: the files of src/ that cite NCBI's source.
 License: the code and data written by NCBI are in the public domain in the United States.
 NCBI's notice (c++/scripts/projects/blast/LICENSE of the BLAST+ 2.17.0 source):
@@ -102,7 +108,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 Notice of midl.c and midl.h:
 
 -------------------------------------------------------------------------------
-/* This work is part of OpenLDAP Software <http://www.openldap.org/>.
+This work is part of OpenLDAP Software <http://www.openldap.org/>.
 
 Copyright 2000-2019 The OpenLDAP Foundation.
 Portions Copyright 2001-2018 Howard Chu, Symas Corp.
@@ -244,11 +250,14 @@ DEALINGS IN THE SOFTWARE.
 
 What: the code and tables of exp, log and pow (math/exp.c, exp_data.c, log.c, log_data.c,
 pow.c, pow_log_data.c, math_config.h, math_err.c), built to give the bits of glibc 2.35 on
-x86-64 with FMA. glibc 2.35 and musl carry the same code and tables.
+x86-64 with FMA. glibc 2.35 carries the same code and tables; musl the same tables.
 Files: src/utils/glibc_fma_libm.rs, src/utils/glibc_fma_libm/tables.rs.
-License: MIT. Notice of those files:
+License: MIT. Notices of those files (math_config.h has the first, the others the second):
 
 -------------------------------------------------------------------------------
+Copyright (c) 2017-2018, Arm Limited.
+SPDX-License-Identifier: MIT
+
 Copyright (c) 2018, Arm Limited.
 SPDX-License-Identifier: MIT
 -------------------------------------------------------------------------------

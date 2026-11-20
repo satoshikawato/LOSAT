@@ -1774,7 +1774,7 @@ pub(super) fn entries_accessions_to_oids(
 //         }
 // ```
 // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1461-1462
-// (LMDB's notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2.)
+// (LMDB's notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2 (LMDB).)
 /// The error of an LMDB file that opens but is not read: NCBI's text for an empty file (probe
 /// SR4), a file of another format (SR3) and another LMDB version; LOSAT's for the rest.
 fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {

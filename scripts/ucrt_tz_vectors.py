@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # `parse` below follows the code of Microsoft's C runtime (UCRT) that Microsoft publishes under the
 # MIT License in the NuGet package Microsoft.Windows.SDK.CRTSource 10.0.22621.3
-# (ucrt/time/tzset.cpp; also in THIRD_PARTY_NOTICES, section 6). The package's LICENSE:
+# (ucrt/time/tzset.cpp; also in THIRD_PARTY_NOTICES, section 6 (UCRT)). The package's LICENSE:
 #
 # MIT License
 #

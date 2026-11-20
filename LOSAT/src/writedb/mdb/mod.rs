@@ -28,7 +28,7 @@
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
-// (In LOSAT, the OpenLDAP Public License 2.8 is in THIRD_PARTY_NOTICES, section 2.)
+// (In LOSAT, the OpenLDAP Public License 2.8 is in THIRD_PARTY_NOTICES, section 2 (LMDB).)
 
 //! Port of the write path of the LMDB copy in NCBI BLAST+ (`c++/src/util/lmdb/mdb.c`,
 //! `midl.c`; "LMDB 0.9.24: (July 24, 2019)", `lmdb.h:199-213`) that makeblastdb 2.17.0 uses

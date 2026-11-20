@@ -329,6 +329,8 @@ These refusals apply to every search program that reads databases.
 | Option or value | What happens |
 | :--- | :--- |
 | `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern` | Refused: not yet supported. |
+| `-html` | Refused: not yet supported. |
+| `-best_hit_overhang`, `-best_hit_score_edge`, `-subject_besthit` | Refused, as in `blastp`. |
 | `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm`, only 0, 6 and 7 work. |
 | `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`) | Refused, as in `blastp`. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
@@ -361,7 +363,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - A PSSM whose columns' largest scores add up to 2^30 or more. Every PSSM of fewer than 19,800 columns passes.
 - A query whose letters give no Karlin-Altschul parameters. NCBI crashes.
 - A PSSM without a query, and query Seq-data other than `iupacaa`, `ncbieaa` and `ncbistdaa`.
-- A query whose annotations (`annot`) give a case of NCBI's object manager whose output names a memory address or depends on the machine. These cases are an empty location (`Empty region in 0x...`), a NULL-pointer report, a Dense-seg that NCBI divides by zero, BitMagic data, reads past a Packed-seg's vectors, and integer overflows.
+- A query whose annotations (`annot`) give a case of NCBI's object manager whose output names a memory address or depends on the machine. These cases are an empty location (`Empty region in 0x...`), a NULL-pointer report, a Dense-seg that NCBI divides by zero, malformed BitMagic data of a Seq-table, reads past a Packed-seg's vectors, and integer overflows. BitMagic data is decoded as NCBI decodes it; refused are the data that NCBI reads past (such as empty or cut data), decodes with undefined behaviour (such as an XOR block or a write past BitMagic's blocks) or from memory it did not write, and a GAP block that is not one where NCBI's scalar, SSE2 and SSE4.2 builds decode it or answer a row of it differently.
 - Also two Seq-ids of one location (a feature's, a Seq-table's or a Seq-table row's) with different messages that NCBI orders by address; a Seq-table of more than 10,000,000 rows; a Std-seg of more than 1,000,000 rows; and XML and JSON reports of an untitled query whose annotations hold features.
 - An error about the query's annotations, or a Seq-id twice in the entry. Two Seq-ids count as one when NCBI's object manager takes them as one: equal ones, and ones that differ only where NCBI does not look, such as the case of letters, GenBank, EMBL or DDBJ for an accession alone, or PDB's `chain` and `chain-id`.
 - A query Seq-entry set whose annotations NCBI's object manager takes, and which NCBI then stops at with its exception (`CSeq_entry::GetSeq()`).
@@ -406,7 +408,6 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpsblast` option. |
-| The environment variable `ADAPTIVE_CBS` with composition-based statistics | Refused. |
 | A query above 5,000,000 letters | Refused. |
 | A database that lists one volume twice (`-db "x x"`) | Refused. The database layer refuses it for every program; NCBI's `rpsblast` searches the volume once. |
 | A profile database whose volumes differ in matrix or gap costs | Refused. |
@@ -437,7 +438,6 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number 
 | `-use_sw_tback` with composition-based statistics | Refused. |
 | `-ungapped` without composition-based statistics | Refused. NCBI's `rpstblastn` crashes after the search. With composition-based statistics it gets NCBI's own error. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
-| A `CHUNK_SIZE` that NCBI cannot read as a number | Refused. NCBI stops with an exception that names its build's source files. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpstblastn` option. |
 | `-query_gencode 32` | Refused (exit status 2). |
@@ -610,7 +610,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 ## Out of scope: they need NCBI's servers or its GI and IPG databases
 
 - `-remote` and `-entrez_query`: all programs.
-- `-gilist` and `-negative_gilist`: all five search programs.
+- `-gilist` and `-negative_gilist`: all five search programs and `psiblast`.
 - `-ipglist` and `-negative_ipglist`: `blastp`, `blastx`, `psiblast`.
 - `-import_search_strategy`: all programs that take it.
 

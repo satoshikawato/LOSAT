@@ -160,15 +160,25 @@ impl PartialEq<Id> for [u8] {
     }
 }
 
-/// A quoted string: the UTF-8 parts as `str`'s `Debug` writes them, each other byte as `\xNN`
-/// (upper-case hex, as std writes the bytes of an `OsStr` on Unix that are not UTF-8).
 impl fmt::Debug for Id {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Ok(text) = self.to_str() {
+        fmt::Debug::fmt(&DebugBytes(self.as_bytes()), f)
+    }
+}
+
+/// Bytes as a quoted string: as `str`'s `Debug` writes them where they are UTF-8, otherwise the
+/// UTF-8 parts as `str`'s `Debug` writes them and each other byte as `\xNN` (upper-case hex, as
+/// std writes the bytes of an `OsStr` on Unix that are not UTF-8). The `Debug` of `Id` and of
+/// `Error`'s message.
+pub(super) struct DebugBytes<'a>(pub(super) &'a [u8]);
+
+impl fmt::Debug for DebugBytes<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Ok(text) = std::str::from_utf8(self.0) {
             return fmt::Debug::fmt(text, f);
         }
         f.write_char('"')?;
-        for chunk in self.as_bytes().utf8_chunks() {
+        for chunk in self.0.utf8_chunks() {
             let valid = format!("{:?}", chunk.valid());
             f.write_str(&valid[1..valid.len() - 1])?;
             for byte in chunk.invalid() {

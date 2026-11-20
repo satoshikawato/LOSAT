@@ -151,14 +151,14 @@ impl Search {
                     return Err(Error::Argv(format!(
                         "a PSSM query (Inputs::pssm) is searched by psiblast and tblastn, not by {}",
                         self.program.name()
-                    )));
+                    ).into()));
                 }
                 // `-in_pssm -` reads the command line's standard input, which the library does
                 // not read (`run_to_file` does not write it either).
                 if path.as_os_str() == "-" {
                     return Err(Error::Argv(
                         "Inputs::pssm reads a file: `-` is the command line's standard input"
-                            .to_string(),
+                            .into(),
                     ));
                 }
                 (PSSM, path.as_os_str())
@@ -207,7 +207,7 @@ fn parse(
             debug_assert!(STRATEGY_FILES.contains(&name));
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: the library API writes no search strategy file"
-            )));
+            ).into()));
         }
     }
     parse_words(program, argv, query, subject, out)
@@ -246,7 +246,7 @@ fn parse_words(
             .chain(out)
             .chain(argv.iter().map(std::ffi::OsString::from)),
     )
-    .map_err(|error| Error::Argv(crate::cli::render_message(&error)))?;
+    .map_err(|error| Error::Argv(crate::cli::render_message(&error).into()))?;
     Ok(cli.command)
 }
 
@@ -277,12 +277,12 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
             }
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: a PSSM query is given as the inputs (Inputs::pssm)"
-            )));
+            ).into()));
         }
         if API_OWNED.contains(&name) {
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: the inputs are given as records and the outputs as formats"
-            )));
+            ).into()));
         }
     }
     let argv: Vec<String> = argv.iter().map(|word| word.to_string()).collect();
@@ -335,7 +335,7 @@ mod tests {
             "losat", "blastp", "-query", "query", "-subject", "subject", "-evalue",
         ])
         .unwrap_err();
-        assert_eq!(error, Error::Argv(crate::cli::render_message(&cli)));
+        assert_eq!(error, Error::Argv(crate::cli::render_message(&cli).into()));
         let error = validate(Program::Blastn, &["-nosuchoption", "1"]).unwrap_err();
         assert!(matches!(error, Error::Argv(_)), "{error}");
     }
@@ -353,10 +353,12 @@ mod tests {
         ] {
             let error = validate(Program::Blastp, &[word, "x"]).unwrap_err();
             assert!(
-                error.message().contains("not accepted by the library API"),
+                error
+                    .to_string()
+                    .contains("not accepted by the library API"),
                 "{word}: {error}"
             );
-            assert!(error.message().starts_with(key(word)), "{word}: {error}");
+            assert!(error.to_string().starts_with(key(word)), "{word}: {error}");
         }
         for program in [Program::Blastp, Program::Blastx, Program::Psiblast] {
             assert!(validate(program, &["-parse_deflines"])
@@ -388,7 +390,7 @@ mod tests {
                     Err(Error::Argv(format!(
                         "{} is not accepted by the library API: the library API writes no search strategy file",
                         super::key(key)
-                    ))),
+                    ).into())),
                     "{program} {argv:?}"
                 );
             }
@@ -428,10 +430,10 @@ mod tests {
         validate(Program::Psiblast, &["-save_each_pssm"]).unwrap();
         // The parser takes one dash only.
         let error = validate(Program::Psiblast, &["--save_each_pssm"]).unwrap_err();
-        assert!(!error.message().contains("library API"), "{error}");
+        assert!(!error.to_string().contains("library API"), "{error}");
         // blastp has no such option: the parser's message.
         let error = validate(Program::Blastp, &["-save_each_pssm"]).unwrap_err();
-        assert!(!error.message().contains("PSSM"), "{error}");
+        assert!(!error.to_string().contains("PSSM"), "{error}");
     }
 
     // Series Q item Q6b: a PSSM query is an input (`Inputs::pssm`), which the search gives the
@@ -441,7 +443,7 @@ mod tests {
         let refused = |key: &str| {
             Error::Argv(format!(
                 "{key} is not accepted by the library API: a PSSM query is given as the inputs (Inputs::pssm)"
-            ))
+            ).into())
         };
         for program in [Program::Psiblast, Program::Tblastn] {
             assert_eq!(
@@ -462,7 +464,7 @@ mod tests {
         ] {
             let error = validate(program, &["-in_pssm", "p.asn"]).unwrap_err();
             assert!(
-                !error.message().contains("library API"),
+                !error.to_string().contains("library API"),
                 "{program}: {error}"
             );
         }
@@ -483,22 +485,24 @@ mod tests {
             let ranged = validate(program, &["-query_loc", "1-10"]).unwrap();
             let error = ranged.command(Inputs::pssm(path, &[])).unwrap_err();
             assert!(
-                matches!(&error, Error::Argv(message) if message.contains("cannot be used with")),
+                matches!(&error, Error::Argv(_))
+                    && error.to_string().contains("cannot be used with"),
                 "{program}: {error}"
             );
         }
         let search = validate(Program::Psiblast, &[]).unwrap();
         let standard_input = std::path::Path::new("-");
-        assert!(matches!(
-            search.command(Inputs::pssm(standard_input, &[])),
-            Err(Error::Argv(message)) if message.contains("standard input")
-        ));
+        let error = search
+            .command(Inputs::pssm(standard_input, &[]))
+            .unwrap_err();
+        assert!(matches!(error, Error::Argv(_)), "{error:?}");
+        assert!(error.to_string().contains("standard input"), "{error}");
         let search = validate(Program::Blastp, &[]).unwrap();
         assert_eq!(
             search.command(Inputs::pssm(path, &[])).unwrap_err(),
             Error::Argv(
                 "a PSSM query (Inputs::pssm) is searched by psiblast and tblastn, not by blastp"
-                    .to_string()
+                    .into()
             )
         );
     }
@@ -562,15 +566,16 @@ mod tests {
             }
         }
         let long = "a".repeat(256);
-        let Err(Error::Argv(message)) = search
+        let error = search
             .writing_to(std::path::Path::new(&long))
             .command(inputs)
-        else {
-            panic!("a name of 256 bytes");
-        };
+            .unwrap_err();
+        assert!(matches!(error, Error::Argv(_)), "{error:?}");
         assert!(
-            message.contains("Illegal value, expected file name length < 256"),
-            "{message}"
+            error
+                .to_string()
+                .contains("Illegal value, expected file name length < 256"),
+            "{error}"
         );
     }
 }

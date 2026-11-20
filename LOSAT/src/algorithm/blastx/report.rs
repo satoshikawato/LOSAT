@@ -54,7 +54,6 @@ use std::{io::Write, path::Path};
 pub(crate) struct DisplayAlignment {
     pub qseq: String,
     pub sseq: String,
-    pub masked_qseq: String,
     pub gaps: usize,
     pub gap_opens: usize,
     pub qstart: i32,
@@ -370,66 +369,25 @@ pub(super) fn display_query_residue(
 //             SetBTOP(btop_string);
 //         }
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2494-2529
-// ```c++
-//
-//     if(id.Which() != CSeq_id::e_not_set){
-//         /*only do this for sequence but not for others like middle line,
-//           features*/
-//         ITERATE(TSAlnSeqlocInfoList, iter, loc_list) {
-//             int from=(*iter)->aln_range.GetFrom();
-//             int to=(*iter)->aln_range.GetTo();
-//             int locFrame = (*iter)->seqloc->GetFrame();
-//             if(id.Match((*iter)->seqloc->GetInterval().GetId())
-//                && locFrame == frame){
-//                 bool isFirstChar = true;
-//                 CRange<int> eachSeqloc(0, 0);
-//                 //go through each residule and mask it
-//                 for (int i=max<int>(from, start);
-//                      i<=min<int>(to, start+len -1); i++){
-//                     //store seqloc start for font tag below
-//                     if ((m_AlignOption & eHtml) && isFirstChar){
-//                         isFirstChar = false;
-//                         eachSeqloc.Set(i, eachSeqloc.GetTo());
-//                     }
-//                     if (m_SeqLocChar==eX){
-//                         if(isalpha((unsigned char) actualSeq[i-start])){
-//                             actualSeq[i-start]='X';
-//                         }
-//                     } else if (m_SeqLocChar==eN){
-//                         actualSeq[i-start]='n';
-//                     } else if (m_SeqLocChar==eLowerCase){
-//                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-//                     }
-//                     //store seqloc start for font tag below
-//                     if ((m_AlignOption & eHtml)
-//                         && i == min<int>(to, start+len)){
-//                         eachSeqloc.Set(eachSeqloc.GetFrom(), i);
-//                     }
-//                 }
-//                 if(!(eachSeqloc.GetFrom()==0&&eachSeqloc.GetTo()==0)){
-// ```
 pub(crate) fn alignment(
-    batch: &BatchResults,
     hsp: &Hsp,
     subject: &FastaRecord,
     query_record: &FastaRecord,
     code: &crate::utils::genetic_code::GeneticCode,
 ) -> Result<DisplayAlignment> {
-    Ok(display_alignment(batch, hsp, subject, query_record, code, None)?.0)
+    Ok(display_alignment(hsp, subject, query_record, code, None)?.0)
 }
 
 /// `alignment` and the counts of its rows (`RowCounts`), the positives by `matrix` (the
 /// formatter's matrix of the search): outfmt 0's hits (`pairwise_hits`).
 pub(crate) fn counted_alignment(
-    batch: &BatchResults,
     hsp: &Hsp,
     subject: &FastaRecord,
     query_record: &FastaRecord,
     code: &crate::utils::genetic_code::GeneticCode,
     matrix: crate::config::ScoringMatrix,
 ) -> Result<(DisplayAlignment, RowCounts)> {
-    display_alignment(batch, hsp, subject, query_record, code, Some(matrix))
+    display_alignment(hsp, subject, query_record, code, Some(matrix))
 }
 
 /// The display alignment of `alignment`, with the counts of its rows where `counts` gives the
@@ -438,7 +396,6 @@ pub(crate) fn counted_alignment(
 /// only).
 #[inline(never)]
 fn display_alignment(
-    batch: &BatchResults,
     hsp: &Hsp,
     subject: &FastaRecord,
     query_record: &FastaRecord,
@@ -447,14 +404,11 @@ fn display_alignment(
 ) -> Result<(DisplayAlignment, RowCounts)> {
     let raw = &hsp.hsp;
     let (q_end, s_end) = hsp.seqalign_ends();
-    let context = &batch.prepared.contexts[raw.context];
     let query_length = query_record.sequence.len();
     let mut qi = usize::try_from(raw.q_start)?;
     let mut si = usize::try_from(raw.s_start)?;
     let mut qseq = Vec::new();
     let mut sseq = Vec::new();
-    let mut masked = Vec::new();
-    let mut query_columns = Vec::new();
     let mut gap_opens = 0;
     // The gaps of the Dense-seg (`GetAlignLengths`): the columns of a gap op, not the `-` letters
     // of the rows (a stored gap character of the subject is one).
@@ -507,15 +461,11 @@ fn display_alignment(
             } else {
                 b'-'
             };
-            if consume_q {
-                query_columns.push(qseq.len());
-            }
             if consume_s && sc == b'-' {
                 subject_stored_gaps.push(u32::try_from(sseq.len())?);
             }
             qseq.push(qc);
             sseq.push(sc);
-            masked.push(qc);
             qi += usize::from(consume_q);
             si += usize::from(consume_s);
         }
@@ -524,91 +474,6 @@ fn display_alignment(
         qi == q_end as usize && si == s_end as usize,
         "BLASTX edit script does not reach final endpoints"
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:930-959
-    // ```c++
-    //                                 (*query_interval)->GetTo());
-    //         TMaskedQueryRegions query_masks;
-    //         for (unsigned int index = 0; index < kNumContexts; index++) {
-    //
-    //             BlastSeqLoc* loc = mask->seqloc_array[qindex*kNumContexts+index];
-    //             for ( ; loc; loc = loc->next) {
-    //                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
-    //                 TSeqRange range(Map(kTarget, masked_range));
-    //                 if (range.NotEmpty() && range != kTarget) {
-    //                     int frame = BLAST_ContextToFrame(program, index);
-    //                     if (frame == INT1_MAX) {
-    //                         string msg("Conversion from context to frame failed ");
-    //                         msg += "for '" + Blast_ProgramNameFromType(program)
-    //                             + "'";
-    //                         NCBI_THROW(CBlastException, eCoreBlastError, msg);
-    //                     }
-    //                     CRef<CSeq_interval> seqint(new CSeq_interval);
-    //                     seqint->SetId().Assign((*query_interval)->GetId());
-    //                     seqint->SetFrom(range.GetFrom());
-    //                     seqint->SetTo(range.GetTo());
-    //                     CRef<CSeqLocInfo> seqloc_info
-    //                         (new CSeqLocInfo(seqint, frame));
-    //                     query_masks.push_back(seqloc_info);
-    //                 }
-    //             }
-    //         }
-    //         mask_v.push_back(query_masks);
-    //         qindex++;
-    //     }
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4305-4326
-    // ```c++
-    //             if(interval.GetId().Match(m_AV->GetSeqId(i)) &&
-    //                m_AV->GetSeqRange(i).IntersectingWith(loc_range)){
-    //                 int actualAlnStart = 0, actualAlnStop = 0;
-    //                 if(m_AV->IsPositiveStrand(i)){
-    //                     actualAlnStart =
-    //                         m_AV->GetAlnPosFromSeqPos(i,
-    //                                                   interval.GetFrom(),
-    //                                                           CAlnMap::eBackwards, true);
-    //                     actualAlnStop =
-    //                         m_AV->GetAlnPosFromSeqPos(i,
-    //                                                   interval.GetTo(),
-    //                                                   CAlnMap::eBackwards, true);
-    //                 } else {
-    //                     actualAlnStart =
-    //                         m_AV->GetAlnPosFromSeqPos(i,
-    //                                                   interval.GetTo(),
-    //                                                   CAlnMap::eBackwards, true);
-    //                     actualAlnStop =
-    //                         m_AV->GetAlnPosFromSeqPos(i,
-    //                                                   interval.GetFrom(),
-    //                                                   CAlnMap::eBackwards, true);
-    //                 }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:551-558
-    // ```c++
-    //         // then return the edge alnpos
-    //         if ((plus ? seq_pos < start : seq_pos > stop)) {
-    //             return GetAlnStart(seg.GetAlnSeg());
-    //         }
-    //         if ((plus ? seq_pos > stop : seq_pos < start)) {
-    //             return GetAlnStop(seg.GetAlnSeg());
-    //         }
-    //
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:593-595
-    // ```c++
-    //     TSeqPos delta = (seq_pos - start) / GetWidth(row);
-    //     return m_AlnStarts[seg.GetAlnSeg()]
-    //         + (plus ? delta : m_Lens[raw_seg] - 1 - delta);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4303-4306
-    // ```c++
-    //         	const CSeq_interval& interval = (*iter)->GetInterval();
-    //             TSeqRange loc_range(interval.GetFrom(), interval.GetTo());
-    //             if(interval.GetId().Match(m_AV->GetSeqId(i)) &&
-    //                m_AV->GetSeqRange(i).IntersectingWith(loc_range)){
-    // ```
-    // Every consumed query residue has width three; query gaps retain columns
-    // between the mapped mask endpoints. The masks here are the returned DNA
-    // intervals, after the core protein-to-DNA conversion, not lookup AA masks.
     let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, q_end);
     // A record cut to `-query_loc`: the reports read the frame from the record (NCBI reference:
     // c++/src/objtools/align_format/showalign.cpp:411-422, `seq_range::record_frame`).
@@ -622,65 +487,6 @@ fn display_alignment(
             query_place.length,
         ) as i8
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
-    // ```c++
-    //                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
-    //                 TSeqRange range(Map(kTarget, masked_range));
-    //                 if (range.NotEmpty() && range != kTarget) {
-    //                     int frame = BLAST_ContextToFrame(program, index);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2502
-    // ```c++
-    //             int locFrame = (*iter)->seqloc->GetFrame();
-    //             if(id.Match((*iter)->seqloc->GetInterval().GetId())
-    //                && locFrame == frame){
-    // ```
-    // The masks a row shows are those labelled with the row's frame in the record; a mask keeps
-    // the frame of the context it was found in, which counts from the ends of the searched
-    // letters. With `-query_loc` the two can differ, and NCBI then shows the masks of another
-    // frame's context on the row (the TBLASTX display, `tblastx::report::shown_query_masks`).
-    // `Map` moves each mask into the record, cut at the interval's end, and drops one that
-    // covers the whole interval; here the masks stay in the searched letters' coordinates.
-    // An ungapped HSP of length 0 (`-window_size 0`, `Blast_HSPTest` keeps it) has no letters to
-    // lower: its rows are empty (`query_columns` too), whatever masks its ends touch.
-    let shown_masks: &[(i32, i32)] = if query_columns.is_empty() {
-        &[]
-    } else if frame == raw.frame {
-        &context.dna_masks
-    } else {
-        batch
-            .prepared
-            .contexts
-            .iter()
-            .find(|shown| shown.query_index == context.query_index && shown.frame == frame)
-            .map_or(&[], |shown| &shown.dna_masks)
-    };
-    let last = query_length as i32 - 1;
-    for &(from, to) in shown_masks {
-        if from > to || from > last {
-            continue;
-        }
-        let to = to.min(last);
-        if (from == 0 && to == last) || to < qstart.min(qend) - 1 || from > qstart.max(qend) - 1 {
-            continue;
-        }
-        let map_nt = |nt: i32| {
-            let aa = if raw.frame > 0 {
-                (nt - i32::from(raw.frame) + 1).div_euclid(3)
-            } else {
-                (query_length as i32 + i32::from(raw.frame) - nt).div_euclid(3)
-            };
-            query_columns[(aa.clamp(raw.q_start, q_end - 1) - raw.q_start) as usize]
-        };
-        let (first, last) = if raw.frame > 0 {
-            (map_nt(from), map_nt(to))
-        } else {
-            (map_nt(to), map_nt(from))
-        };
-        for c in &mut masked[first..=last] {
-            *c = c.to_ascii_lowercase();
-        }
-    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
     // ```c++
     //     retval.Resize(k_NumAsciiChar, k_NumAsciiChar, -1000);
@@ -746,7 +552,6 @@ fn display_alignment(
         DisplayAlignment {
             qseq: String::from_utf8(qseq)?,
             sseq: String::from_utf8(sseq)?,
-            masked_qseq: String::from_utf8(masked)?,
             gaps,
             gap_opens,
             qstart: qstart + query_offset,
@@ -1640,6 +1445,12 @@ pub(super) fn pairwise_hits(
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let absolute = batch.query_ordinal + qidx;
             let query = &queries[absolute];
+            // The query's masks of every frame, as the query-anchored reports read them.
+            let query_masks = if lists.is_empty() {
+                Vec::new()
+            } else {
+                super::anchored::query_record_masks(batch, qidx, query)
+            };
             for list in lists {
                 let subject = &subjects[list.oid];
                 for hsp in &list.hsps {
@@ -1647,7 +1458,7 @@ pub(super) fn pairwise_hits(
                         continue;
                     }
                     let (a, counts) =
-                        counted_alignment(batch, hsp, subject, query, &code, options.scoring)?;
+                        counted_alignment(hsp, subject, query, &code, options.scoring)?;
                     let raw = &hsp.hsp;
                     // The report's hit is the HSP's Seq-align, so its offsets end where the
                     // Seq-align does (`Hsp::seqalign_ends`); their one reader here is
@@ -1679,9 +1490,11 @@ pub(super) fn pairwise_hits(
                         gap_info: Some(hsp.edit_script.clone()),
                         num_positives: counts.positive,
                     };
+                    let (query_seq, masks) =
+                        query_row_masks(a.qseq, (a.qstart, a.qend), a.frame, &query_masks);
                     hits.push(PairwiseHit {
                         hit,
-                        query_seq: Some(a.masked_qseq),
+                        query_seq: Some(query_seq),
                         subject_seq: Some(a.sseq),
                         query_frame: Some(a.frame),
                         subject_frame: None,
@@ -1724,7 +1537,7 @@ pub(super) fn pairwise_hits(
                         // not those of the rows (`a.identity`), which the display's translation
                         // and the subject's stored gap characters make.
                         seqalign_num_ident: hsp.identity,
-                        masks: None,
+                        masks,
                     });
                     // The model of the reads sorts by `hsp_scores` of the batch's query length
                     // without the rows (`ReportedSubjects::fetch_by_query`): the row's values
@@ -1745,9 +1558,68 @@ pub(super) fn pairwise_hits(
     // A `-subject_loc` subject can show runs of its record outside the interval
     // (`FastaRecord::archive_lowercase_runs`).
     if subjects.iter().any(FastaRecord::has_lowercase_runs) {
-        super::x_soft_subject::x_masked_subject_rows(&mut hits, subjects);
+        super::x_soft_subject::x_set_subject_row_masks(&mut hits, subjects);
     }
     Ok(hits)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
+// ```c++
+//                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
+//                 TSeqRange range(Map(kTarget, masked_range));
+//                 if (range.NotEmpty() && range != kTarget) {
+//                     int frame = BLAST_ContextToFrame(program, index);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2502
+// ```c++
+//             int locFrame = (*iter)->seqloc->GetFrame();
+//             if(id.Match((*iter)->seqloc->GetInterval().GetId())
+//                && locFrame == frame){
+// ```
+// The masks a row shows are those labelled with the row's frame in the record; a mask keeps
+// the frame of the context it was found in, which counts from the ends of the searched letters.
+// With `-query_loc` the two can differ, and NCBI then shows the masks of another frame's context
+// on the row (the TBLASTX display, `tblastx::report::shown_query_masks`).
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:593-595
+// ```c++
+//     TSeqPos delta = (seq_pos - start) / GetWidth(row);
+//     return m_AlnStarts[seg.GetAlnSeg()]
+//         + (plus ? delta : m_Lens[raw_seg] - 1 - delta);
+// ```
+/// The outfmt 0 query row `row` of a display alignment (`DisplayAlignment::qseq`, of the 1-based
+/// record positions `ends`, `qstart` and `qend`, on the frame `frame`) and the HSP's masks
+/// (`PairwiseHit::masks`, `None` when none meets the row): the query masks `query_masks` of every
+/// frame (`anchored::query_record_masks`, record positions) at the row's columns of
+/// `x_FillLocList` (`query_anchored::fill_row_loc_list`: the row's nucleotides from its first to its
+/// last, three a residue, on the frame's strand), which `x_OutputSeq` puts in lower case where
+/// the mask's frame is the row's (`frame`, the record's). The row comes back so, as the hit
+/// records that the library API and LOSAT Web hand out show it. An HSP without query letters (an
+/// ungapped HSP of length 0, `-window_size 0`) has no mask.
+fn query_row_masks(
+    row: String,
+    ends: (i32, i32),
+    frame: i8,
+    query_masks: &[crate::report::query_anchored::Mask],
+) -> (String, Option<Box<crate::report::query_anchored::HspMasks>>) {
+    if query_masks.is_empty() || row.is_empty() {
+        return (row, None);
+    }
+    let mut row = row.into_bytes();
+    let mut masks = crate::report::query_anchored::HspMasks::default();
+    let (first, last) = (ends.0.min(ends.1), ends.0.max(ends.1));
+    masks.set_row(
+        0,
+        frame,
+        &row,
+        |column| row[column] != b'-',
+        ((first - 1) as u32, (last - 1) as u32),
+        frame > 0,
+        3,
+        query_masks.iter().copied(),
+    );
+    masks.lower_row(0, &mut row);
+    let row = String::from_utf8(row).expect("ASCII alignment row");
+    (row, (!masks.is_empty()).then(|| Box::new(masks)))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:226-244

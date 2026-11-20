@@ -59,7 +59,7 @@ pub enum DbList {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ListWarning {
     /// `LOG_POST(Warning << text)` or a line written to `cerr`: the text alone.
-    Log(String),
+    Log(Vec<u8>),
     /// `ERR_POST(Warning << text)`: with the diagnostic prefix of the program.
     Posted(String),
     /// `ERR_POST(text)` at the default severity (an error that is reported before NCBI
@@ -1063,18 +1063,19 @@ pub(super) struct LmdbEntry {
 impl LmdbEntry {
     /// The file beside the LMDB file with the last two letters of its extension replaced
     /// (`GetFileNameFromExistingLMDBFile`, seqdb_lmdb.cpp:763-790): `tf`, `to`, `ot`.
+    /// The name's bytes are the volume's header's (line LIB-B).
     fn lookup_file(&self, letters: &str) -> PathBuf {
-        let mut name = self.lmdb.as_os_str().to_string_lossy().into_owned();
+        let mut name = crate::utils::os_bytes::path_bytes(&self.lmdb).into_owned();
         name.truncate(name.len().saturating_sub(2));
-        name.push_str(letters);
-        PathBuf::from(name)
+        name.extend_from_slice(letters.as_bytes());
+        crate::utils::os_bytes::path_from_bytes(name)
     }
 
     /// The name NCBI's messages give the entry: the LMDB file's name without directory and
-    /// extension (`GetDBFileNames`, `CSeqDB_Path::FindBaseName`).
-    fn base_name(path: &Path) -> String {
+    /// extension (`GetDBFileNames`, `CSeqDB_Path::FindBaseName`), its bytes.
+    fn base_name(path: &Path) -> Vec<u8> {
         path.file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned())
+            .map(|stem| crate::utils::os_bytes::os_str_bytes(stem).into_owned())
             .unwrap_or_default()
     }
 
@@ -1171,7 +1172,7 @@ impl LmdbEntry {
                 path: path.to_path_buf(),
                 message,
             },
-            other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path)).into()),
+            other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path))),
         };
         let mut found = if negative {
             let not_path = self.lookup_file("ot");
@@ -1204,7 +1205,7 @@ impl LmdbEntry {
                 path: ntf_path.clone(),
                 message,
             },
-            other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path)).into()),
+            other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path))),
         })
     }
 
@@ -1374,11 +1375,14 @@ impl LmdbEntry {
         if message == tax_files::NO_ACCESSION_INFO {
             SeqDbError::NotFound(message.into_bytes())
         } else if message.starts_with("MDB_BAD_VALSIZE") {
-            SeqDbError::NotFound(tax_files::accessions_lookup_error(&name).into())
+            SeqDbError::NotFound(tax_files::accessions_lookup_error(&name))
         } else {
             SeqDbError::Format {
                 path: self.lmdb.clone(),
-                message: format!("{} ({message})", tax_files::accessions_lookup_error(&name)),
+                message: format!(
+                    "{} ({message})",
+                    String::from_utf8_lossy(&tax_files::accessions_lookup_error(&name))
+                ),
             }
         }
     }
@@ -1814,13 +1818,14 @@ fn lmdb_file_error(error: SeqDbError) -> SeqDbError {
 
 fn missing_file(path: &Path) -> SeqDbError {
     SeqDbError::NotFound(
-        format!(
-            "File {} not found. If you renamed any BLAST database files, please use original file \
+        [
+            b"File ".as_slice(),
+            &crate::utils::os_bytes::path_bytes(path)[..],
+            b" not found. If you renamed any BLAST database files, please use original file \
          names, and makeblastdb to rename the database. If you deleted any BLAST database files, \
          you need to recreate the database.",
-            path.display()
-        )
-        .into(),
+        ]
+        .concat(),
     )
 }
 
@@ -1931,16 +1936,22 @@ fn entries_oid_tax_ids(
 
 /// NCBI's text when a taxid list selects no OID of `entries` (`CSeqDBLMDBSet::TaxIdsToOids`,
 /// quoted at `SeqDb::restrict_taxids`).
-fn tax_ids_not_found(entries: &[LmdbEntry]) -> String {
-    let names: Vec<String> = entries
+fn tax_ids_not_found(entries: &[LmdbEntry]) -> Vec<u8> {
+    let names: Vec<Vec<u8>> = entries
         .iter()
         .map(|entry| LmdbEntry::base_name(&entry.lmdb))
         .collect();
-    format!(
-        "Taxonomy ID(s) not found in the {} database{}.",
-        names.join(" "),
-        if entries.len() > 1 { "s" } else { "" }
-    )
+    [
+        b"Taxonomy ID(s) not found in the ".as_slice(),
+        &names.join(b" ".as_slice())[..],
+        b" database",
+        if entries.len() > 1 {
+            b"s.".as_slice()
+        } else {
+            b".".as_slice()
+        },
+    ]
+    .concat()
 }
 
 /// The taxid lookup files of a version 5 database opened without a list, for the lookups
@@ -1993,9 +2004,7 @@ impl TaxIdLookup<'_> {
     pub fn tax_ids_to_oids(&self, tax_ids: &BTreeSet<i32>) -> Result<Vec<u32>, SeqDbError> {
         let (oids, _) = entries_tax_oids(&self.entries, false, tax_ids)?;
         if oids.is_empty() {
-            return Err(SeqDbError::NotFound(
-                tax_ids_not_found(&self.entries).into(),
-            ));
+            return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
         }
         Ok(oids
             .into_iter()
@@ -2518,7 +2527,7 @@ impl SeqDb {
     ///
     /// Errors: NCBI's (`SeqDbError::NotFound`): a version 4 database, a positive list that
     /// selects no OID, a missing lookup file; the reader's for damaged lookup files.
-    pub fn restrict_taxids(&mut self, list: &TaxidList) -> Result<Option<String>, SeqDbError> {
+    pub fn restrict_taxids(&mut self, list: &TaxidList) -> Result<Option<Vec<u8>>, SeqDbError> {
         let (negative, tax_ids) = match list {
             TaxidList::Positive(tax_ids) => (false, tax_ids),
             TaxidList::Negative(tax_ids) => (true, tax_ids),
@@ -2532,7 +2541,7 @@ impl SeqDb {
         if oids.is_empty() {
             let text = tax_ids_not_found(&entries);
             if !negative {
-                return Err(SeqDbError::NotFound(text.into()));
+                return Err(SeqDbError::NotFound(text));
             }
             warning = Some(text);
         }

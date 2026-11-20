@@ -186,7 +186,7 @@ fn apply_list(
     // The lines keep the bytes of a seqid list's words (probe R3 of line LIB-B).
     for warning in warnings {
         let line = match warning {
-            crate::seqdb::ListWarning::Log(text) => text.into_bytes(),
+            crate::seqdb::ListWarning::Log(text) => text,
             crate::seqdb::ListWarning::Posted(text) => {
                 format!("Warning: [{prefix}] {text}").into_bytes()
             }

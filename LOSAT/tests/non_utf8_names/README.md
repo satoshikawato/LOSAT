@@ -8,7 +8,9 @@ that does not open (`R1*`), BLASTX's `-subject` name in the `Database:` lines of
 with such a name (`R6*`), a directory of `NCBI_CONFIG_PATH` with such a name whose `.ncbirc`
 names `BLASTDB` (`R7`) and a version 5 volume that names a missing LMDB file of such a name
 (`R8`, its `.pin` patched) and `blastdbcmd -metadata` of a volume whose LMDB file and its
-`.pot`, `.ptf` and `.pto` have such a name (`R8m`; NCBI counts and lists them), each name with the
+`.pot`, `.ptf` and `.pto` have such a name (`R8m`; NCBI counts and lists them), `blastdbcmd
+-taxids` over such files of `db_search/ids/prot_v5` (`R8t` a taxid of the database, `R8u` one not in
+it, whose message names the LMDB file), each name with the
 byte 0xE9, and a `-matrix` name of 1,000 `a` and 30
 `é` that NCBI's 1,024-byte message buffer cuts inside a character, after its byte 0xC3 (`R9`). Frozen on 2026-11-20 by line LIB-B
 (`make_fixtures.py --ncbi-bin "$NCBI_BIN"`, which writes `expected/<case>.stdout`, `.stderr` and

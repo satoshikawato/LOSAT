@@ -1729,6 +1729,9 @@ mod tests {
                 Lookup::Oids(oids) => format!("oids {oids:?}"),
                 Lookup::NotFound(acc) => format!("not found {acc}"),
                 Lookup::Stop(Stop::Ncbi(message)) => format!("error {message}"),
+                Lookup::Stop(Stop::NcbiBytes(message)) => {
+                    format!("error {}", String::from_utf8_lossy(&message))
+                }
                 Lookup::Stop(stop) => format!("{stop:?}"),
             }
         }

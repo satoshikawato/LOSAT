@@ -214,6 +214,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             ));
         }
     }
-    assert_eq!(ran, 21, "the cases of cases.tsv");
+    assert_eq!(ran, 23, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

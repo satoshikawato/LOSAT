@@ -236,6 +236,9 @@ impl RpstblastnArgs {
             comp_based_stats: self.comp_based_stats.clone(),
             several_volumes: false,
             costs: None,
+            strategy_db_length: None,
+            units: None,
+            strategy: false,
             setup: None,
         })
     }

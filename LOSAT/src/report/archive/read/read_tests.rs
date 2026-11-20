@@ -13,12 +13,13 @@ use super::{seq_align_id, seq_loc_id, Archive, ArchiveReader, Message, Search, S
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::asn_text_reader::real_of_parts;
-use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, ObjectStream};
+use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, ObjectStream, XmlStyle};
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::write::write_document;
 use crate::report::serial::asn_types::{read_document, ReadError, Value};
 use crate::report::serial::encoder::Encoder;
+use crate::report::serial::xml::XmlEncoder;
 use crate::seqid::ParsedSeqId;
 
 /// A fixture of this test, by name (`LOSAT/tests/fixtures/archive_read`).
@@ -208,27 +209,27 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
     );
 }
 
-/// The values of every archive of the fixtures, written by NCBI's binary writer
-/// (`AsnBinaryEncoder`) and read by the binary reader, are the values of the text: written back
-/// as text, its bytes. The archives that the binary writer does not write (a UTF8String, a
-/// delayed member: `SerialError::Unwritten`) are counted, not compared.
-#[test]
-fn every_archive_of_the_fixtures_reads_back_from_binary() {
+/// Every archive of the fixtures read as text, each object written by `write` (one encoding's
+/// writer: `Some` of what it could not write) and the whole read back by the stream `stream` makes
+/// of those bytes, written back as text: its bytes. The archives that the writer does not write
+/// (a UTF8String, a delayed member: `SerialError::Unwritten`) are counted, not compared.
+fn every_archive_reads_back(
+    write: impl Fn(&Value, &mut Vec<u8>) -> Option<String>,
+    stream: impl Fn(&[u8]) -> ObjectStream<&[u8]>,
+) {
     let (mut files, mut unwritten) = (0, Vec::new());
     let mut failures = Vec::new();
     for (path, text) in archive_fixtures() {
-        let mut stream = ObjectStream::new(&text[..], b"");
-        let mut binary = Vec::new();
+        let mut objects = ObjectStream::new(&text[..], b"");
+        let mut bytes = Vec::new();
         let mut written = true;
-        while !stream.end_of_data() {
-            let value = stream
+        while !objects.end_of_data() {
+            let value = objects
                 .read(named::BLAST4_ARCHIVE)
                 .0
                 .expect("a text fixture");
-            let mut enc = AsnBinaryEncoder::new(&mut binary);
-            write_document(&mut enc, named::BLAST4_ARCHIVE, &value);
-            if let Some(error) = enc.error() {
-                unwritten.push(format!("{}: {error:?}", path.display()));
+            if let Some(error) = write(&value, &mut bytes) {
+                unwritten.push(format!("{}: {error}", path.display()));
                 written = false;
                 break;
             }
@@ -237,7 +238,7 @@ fn every_archive_of_the_fixtures_reads_back_from_binary() {
             continue;
         }
         files += 1;
-        let error = match as_text(ObjectStream::binary(&binary[..], b"")) {
+        let error = match as_text(stream(&bytes)) {
             Ok((out, _)) => (out != text).then(|| first_difference(&text, &out)),
             Err(error) => Some(error),
         };
@@ -257,35 +258,90 @@ fn every_archive_of_the_fixtures_reads_back_from_binary() {
     );
 }
 
-/// The archives that NCBI BLAST+ 2.17.0 wrote of one search in ASN.1 text and in binary ASN.1
-/// (`ARCHIVE_FORMAT=bin`; the probes of line RG-F3 and of impl D: one object, a batch, a
-/// psiblast PSSM, `-subject`, an error, a query list of Seq-locs) are read as the same values:
-/// written back as text, the bytes of the text archive.
+/// The values of every archive of the fixtures, written by NCBI's binary writer
+/// (`AsnBinaryEncoder`) and read by the binary reader, are the values of the text.
 #[test]
-fn ncbis_binary_archives_read_as_their_text() {
-    let pairs = [
-        ("blastn_multi.asn", "blastn_multi.bin"),
-        ("blastn_batch.asn", "blastn_batch.bin"),
-        ("psiblast_in_pssm.asn", "psiblast_in_pssm.bin"),
-        ("psiblast_it3.asn", "psiblast_it3.bin"),
-        ("blastp_subject.asn", "blastp_subject.bin"),
-        ("error_blastp.asn", "error_blastp.bin"),
-        ("blastp_query_loc.asn", "blastp_query_loc.bin"),
-    ];
-    for (text_name, binary_name) in pairs {
+fn every_archive_of_the_fixtures_reads_back_from_binary() {
+    every_archive_reads_back(
+        |value, out| {
+            let mut enc = AsnBinaryEncoder::new(out);
+            write_document(&mut enc, named::BLAST4_ARCHIVE, value);
+            enc.error().map(|error| format!("{error:?}"))
+        },
+        |bytes| ObjectStream::binary(bytes, b""),
+    );
+}
+
+/// The values of every archive of the fixtures, written by NCBI's XML writer of the archive
+/// (`XmlEncoder::archive`, `ARCHIVE_FORMAT=xml`) and read by the XML reader in the ASN.1 style,
+/// are the values of the text. A value whose writing posts a replaced character is not written
+/// as it is (counted as not written).
+#[test]
+fn every_archive_of_the_fixtures_reads_back_from_xml() {
+    every_archive_reads_back(
+        |value, out| {
+            let mut enc = XmlEncoder::archive(out);
+            write_document(&mut enc, named::BLAST4_ARCHIVE, value);
+            match enc.error() {
+                Some(error) => Some(format!("{error:?}")),
+                None => enc.has_posts().then(|| "a character replaced".to_string()),
+            }
+        },
+        |bytes| ObjectStream::xml(bytes, b"", XmlStyle::Asn),
+    );
+}
+
+/// The archives that NCBI BLAST+ 2.17.0 wrote of one search in ASN.1 text and in another
+/// encoding (`ARCHIVE_FORMAT=bin` / `=xml`; the probes of line RG-F3 and of impl D: one object, a
+/// batch, a psiblast PSSM, `-subject`, an error, a query list of Seq-locs) are read through the
+/// encoding's guess as the same values: written back as text, the bytes of the text archive.
+fn ncbis_archives_read_as_their_text(encoding: Encoding, pairs: &[(&str, &str)]) {
+    for &(text_name, other_name) in pairs {
         let text = fixture(text_name);
-        let binary = fixture(binary_name);
-        let guessed = guess_encoding(&binary[..]);
-        assert_eq!(guessed.encoding.as_ref().ok(), Some(&Encoding::Binary));
-        let (out, objects) = as_text(guessed.into_stream().expect("a binary stream"))
-            .unwrap_or_else(|error| panic!("{binary_name}: {error}"));
+        let other = fixture(other_name);
+        let guessed = guess_encoding(&other[..]);
+        assert_eq!(guessed.encoding.as_ref().ok(), Some(&encoding));
+        let (out, objects) = as_text(guessed.into_stream().expect("a stream"))
+            .unwrap_or_else(|error| panic!("{other_name}: {error}"));
         assert!(objects >= 1);
         assert!(
             out == text,
-            "{binary_name}: {}",
+            "{other_name}: {}",
             first_difference(&text, &out)
         );
     }
+}
+
+#[test]
+fn ncbis_binary_archives_read_as_their_text() {
+    ncbis_archives_read_as_their_text(
+        Encoding::Binary,
+        &[
+            ("blastn_multi.asn", "blastn_multi.bin"),
+            ("blastn_batch.asn", "blastn_batch.bin"),
+            ("psiblast_in_pssm.asn", "psiblast_in_pssm.bin"),
+            ("psiblast_it3.asn", "psiblast_it3.bin"),
+            ("blastp_subject.asn", "blastp_subject.bin"),
+            ("error_blastp.asn", "error_blastp.bin"),
+            ("blastp_query_loc.asn", "blastp_query_loc.bin"),
+        ],
+    );
+}
+
+/// The XML archives (the psiblast ones are 200 kB and not copied: the round trip through
+/// `XmlEncoder::archive` covers the PSSM).
+#[test]
+fn ncbis_xml_archives_read_as_their_text() {
+    ncbis_archives_read_as_their_text(
+        Encoding::Xml,
+        &[
+            ("blastn_multi.asn", "blastn_multi.xml"),
+            ("blastn_batch.asn", "blastn_batch.xml"),
+            ("blastp_subject.asn", "blastp_subject.xml"),
+            ("error_blastp.asn", "error_blastp.xml"),
+            ("blastp_query_loc.asn", "blastp_query_loc.xml"),
+        ],
+    );
 }
 
 /// The lines that the reader of a stream posts, in NCBI's form (blast_formatter: no diagnostic
@@ -535,25 +591,21 @@ fn the_objects_of_a_stream_end_as_ncbis_did() {
             binary_batch[..binary_batch.len() - 1].to_vec(),
             Ok((2, Eof)),
         ),
-        // XML (no reader in LOSAT yet): formatted (P3.011-015), 1 cut at 50 % or without the
-        // last 20 bytes, formatted without its last byte, 1 after the archive with an element
-        // after it (P3.092, 106-107).
-        ("XML", xml.clone(), Err(Encoding::Xml)),
-        ("XML cut at 50 %", xml[..25305].to_vec(), Err(Encoding::Xml)),
-        (
-            "XML no last byte",
-            xml[..50610].to_vec(),
-            Err(Encoding::Xml),
-        ),
+        // XML (P3.011-015, 092, 106-107): formatted; 1 cut at 50 % or without the last 20 bytes;
+        // formatted without its last byte (the end of line after the root's closing tag); 1
+        // after the archive with an element after it (the next object's root `junk`).
+        ("XML", xml.clone(), Ok((1, Data))),
+        ("XML cut at 50 %", xml[..25305].to_vec(), Ok((0, Serial))),
+        ("XML no last byte", xml[..50610].to_vec(), Ok((1, Data))),
         (
             "XML no last 20 bytes",
             xml[..50591].to_vec(),
-            Err(Encoding::Xml),
+            Ok((0, Serial)),
         ),
         (
             "XML element after",
             [&xml[..], b"<junk/>"].concat(),
-            Err(Encoding::Xml),
+            Ok((1, Serial)),
         ),
     ];
     for (name, bytes, expected) in cases {

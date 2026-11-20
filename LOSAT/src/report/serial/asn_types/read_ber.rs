@@ -868,7 +868,9 @@ impl<S: AsnSource> Front for Ber<S> {
     fn frame_site(kind: FrameKind, skip: bool) -> (&'static str, u32, &'static str) {
         const BIN: &str = "src/serial/objistrasnb.cpp";
         match (kind, skip) {
-            (FrameKind::Named, _) => ("src/serial/objistr.cpp", 968, "ncbi::CObjectIStream::Read"),
+            (FrameKind::Named | FrameKind::NamedType, _) => {
+                ("src/serial/objistr.cpp", 968, "ncbi::CObjectIStream::Read")
+            }
             (FrameKind::Class, false) => (
                 BIN,
                 1237,

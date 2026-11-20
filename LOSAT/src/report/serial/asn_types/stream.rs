@@ -7,13 +7,15 @@
 //!
 //! The guess is the one port of `CFormatGuess` (`utils::format_guess`); each encoding is read by
 //! the generic reader of the type table (`read`) over that encoding's front end (`read_text`,
-//! `read_ber`) on a stream read in blocks (`StreamSource`), so one object at a time is in memory.
+//! `read_ber`, `read_xml`) on a stream read in blocks (`StreamSource`), so one object at a time is in memory.
 
 use std::io::{Read as IoRead, Seek, SeekFrom};
 
 use super::read::{read_object, Read};
 use super::read_ber::Ber;
 use super::read_text::Text;
+use super::read_xml::Xml;
+pub(crate) use super::read_xml::XmlStyle;
 use super::Value;
 use crate::ncbi_exception::NcbiException;
 use crate::report::serial::asn_text_reader::{AsnSource, Reader, StreamSource};
@@ -48,7 +50,7 @@ pub(crate) enum Encoding {
     Text,
     /// `eBinaryASN`: `CObjectIStreamAsnBinary`.
     Binary,
-    /// `eXml`: recognised; LOSAT has no XML reader of the table's types yet.
+    /// `eXml`: `CObjectIStream::Open(eSerial_Xml, f)`, `CObjectIStreamXml`.
     Xml,
     /// Any other answer (`eUnknown`, `eJSON`, another format): the caller's invalid input.
     Other,
@@ -112,13 +114,15 @@ pub(crate) fn guess_encoding<R: IoRead>(input: R) -> Guessed<R> {
 
 impl<R: IoRead> Guessed<R> {
     /// The object stream of the encoding guessed (`new CObjectIStreamAsn(f)`,
-    /// `new CObjectIStreamAsnBinary(f)`), from where the guess left the input; `None` for an
+    /// `new CObjectIStreamAsnBinary(f)`, `CObjectIStream::Open(eSerial_Xml, f)`: the ASN.1-style
+    /// XML, no `SetEnforcedStdXml`), from where the guess left the input; `None` for an
     /// encoding that is not one of them (the caller's invalid input).
     pub(crate) fn into_stream(self) -> Option<ObjectStream<R>> {
         let first = &self.taken[self.start..];
         match self.encoding {
             Ok(Encoding::Text) => Some(ObjectStream::new(self.input, first)),
             Ok(Encoding::Binary) => Some(ObjectStream::binary(self.input, first)),
+            Ok(Encoding::Xml) => Some(ObjectStream::xml(self.input, first, XmlStyle::Asn)),
             _ => None,
         }
     }
@@ -138,6 +142,7 @@ pub(crate) struct ObjectStream<R: IoRead> {
 enum Fronts<R: IoRead> {
     Text(Text<StreamSource<R>>),
     Binary(Ber<StreamSource<R>>),
+    Xml(Xml<StreamSource<R>>),
 }
 
 impl<R: IoRead> ObjectStream<R> {
@@ -157,6 +162,15 @@ impl<R: IoRead> ObjectStream<R> {
     pub(crate) fn binary(input: R, first: &[u8]) -> Self {
         ObjectStream {
             front: Fronts::Binary(Ber::new(StreamSource::new(input, first))),
+            failed: false,
+        }
+    }
+
+    /// The XML objects of `input` in the `style`, whose first bytes `first` were already taken
+    /// from it.
+    pub(crate) fn xml(input: R, first: &[u8], style: XmlStyle) -> Self {
+        ObjectStream {
+            front: Fronts::Xml(Xml::new(StreamSource::new(input, first), style)),
             failed: false,
         }
     }
@@ -196,6 +210,9 @@ impl<R: IoRead> ObjectStream<R> {
     // (`m_Input.EndOfData()` and `HasMore()` of `CIStreamBuffer` ask whether a byte follows,
     // reading the stream for one: the end of the input here.)
     // The binary stream keeps `EndOfData` of its base: any byte after an object starts the next.
+    // The XML stream's (`CObjectIStreamXml::EndOfData`, quoted at `Xml::end_of_data`) skips white
+    // space, comments and processing instructions as the text stream does, and anything that
+    // fails there is the end too.
     pub(crate) fn end_of_data(&mut self) -> bool {
         if self.failed {
             return true;
@@ -206,6 +223,7 @@ impl<R: IoRead> ObjectStream<R> {
                 r.src.byte_at(r.pos).is_none() || r.skip_white_space().is_err()
             }
             Fronts::Binary(ber) => ber.src.byte_at(ber.pos).is_none(),
+            Fronts::Xml(xml) => xml.end_of_data(),
         }
     }
 
@@ -216,6 +234,7 @@ impl<R: IoRead> ObjectStream<R> {
         let read = match &mut self.front {
             Fronts::Text(text) => read_object(text, root),
             Fronts::Binary(ber) => read_object(ber, root),
+            Fronts::Xml(xml) => read_object(xml, root),
         };
         if read.0.is_err() {
             self.failed = true;
@@ -232,6 +251,7 @@ impl<R: IoRead> ObjectStream<R> {
                 text.r.src.into_rest(pos)
             }
             Fronts::Binary(ber) => ber.src.into_rest(ber.pos),
+            Fronts::Xml(xml) => xml.x.src.into_rest(xml.x.pos),
         }
     }
 
@@ -241,6 +261,7 @@ impl<R: IoRead> ObjectStream<R> {
         match &self.front {
             Fronts::Text(text) => text.r.src.buffered(),
             Fronts::Binary(ber) => ber.src.buffered(),
+            Fronts::Xml(xml) => xml.x.src.buffered(),
         }
     }
 }

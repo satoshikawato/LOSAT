@@ -39,13 +39,13 @@ impl<S: AsnSource> Text<S> {
 //                    "number overflow in line " << GetLine());
 // }
 // ```
-const BAD_NUMBER: ThrowSite = ThrowSite {
+pub(super) const BAD_NUMBER: ThrowSite = ThrowSite {
     file: "src/util/strbuffer.cpp",
     line: 574,
     kind: "CUtilException::eWrongData",
     function: Some("ncbi::CIStreamBuffer::BadNumber"),
 };
-const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
+pub(super) const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
     file: "src/util/strbuffer.cpp",
     line: 583,
     kind: "CUtilException::eWrongData",
@@ -64,7 +64,9 @@ impl<S: AsnSource> Front for Text<S> {
         const ASN: &str = "src/serial/objistrasn.cpp";
         const ISTR: &str = "src/serial/objistr.cpp";
         match (kind, skip) {
-            (FrameKind::Named, _) => (ISTR, 968, "ncbi::CObjectIStream::Read"),
+            (FrameKind::Named | FrameKind::NamedType, _) => {
+                (ISTR, 968, "ncbi::CObjectIStream::Read")
+            }
             (FrameKind::Class, false) => {
                 (ASN, 1396, "ncbi::CObjectIStreamAsn::ReadClassSequential")
             }

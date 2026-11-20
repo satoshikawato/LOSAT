@@ -54,6 +54,10 @@ fn fail<T>(message: &str) -> Result<T> {
     Err(XmlError::Format(message.to_string()))
 }
 
+/// The message of the end of the input (`CEofException`, `CIStreamBuffer::FillBuffer`): the
+/// object stream (`asn_types::read_xml`) tells it from the other failures by it.
+pub(super) const EOF_MESSAGE: &str = "end of the input";
+
 fn unsupported(what: &str) -> XmlError {
     XmlError::Unsupported(format!(
         "{what} in an XML document is not supported by LOSAT's rpsbproc"
@@ -62,7 +66,7 @@ fn unsupported(what: &str) -> XmlError {
 
 /// `m_TagState`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TagState {
+pub(super) enum TagState {
     Outside,
     InsideOpening,
     InsideClosing,
@@ -416,19 +420,32 @@ pub(crate) const fn optional(name: &'static str) -> Member {
 
 /// The reader of XML documents from one source.
 pub(crate) struct XmlReader<S: AsnSource> {
-    src: S,
+    pub(super) src: S,
     /// The position of the next byte to read (`m_CurrentPos`).
-    pos: usize,
-    state: TagState,
+    pub(super) pos: usize,
+    pub(super) state: TagState,
     /// `m_RejectedTag`: a tag name read and given back (`UndoClassMember`).
-    rejected: Option<Vec<u8>>,
+    pub(super) rejected: Option<Vec<u8>>,
     /// `m_LastTag`.
-    last_tag: Vec<u8>,
+    pub(super) last_tag: Vec<u8>,
     /// `m_Encoding`.
-    encoding: Encoding,
+    pub(super) encoding: Encoding,
     /// `m_Utf8Buf` and `m_Utf8Pos`: the UTF-8 bytes of a character being returned one by one.
     utf8: Vec<u8>,
     utf8_at: usize,
+    /// The object stream of a type table (`asn_types::read_xml`, `CObjectIStream::Open(eSerial_Xml)`
+    /// for blast_formatter's archives) rather than rpsbproc's reader of a BLAST XML document:
+    /// attributes are skipped as NCBI skips the ones it does not know, and a control character
+    /// is replaced by `#` with a post (`x_VerifyChar`), where rpsbproc's refuses both.
+    object: bool,
+    /// `m_Input.GetLine()`: the line counter of NCBI's input buffer, which only
+    /// `SkipEndOfLine` advances.
+    pub(super) line: usize,
+    /// The bytes replaced by `#` (`ReplaceVisibleChar` of `x_VerifyChar`) and the line of each,
+    /// for the object stream to post.
+    pub(super) replaced: Vec<(u8, usize)>,
+    /// A position from which the source keeps its bytes (a delayed member's buffer).
+    pub(super) held: Option<usize>,
 }
 
 impl<S: AsnSource> XmlReader<S> {
@@ -442,32 +459,58 @@ impl<S: AsnSource> XmlReader<S> {
             encoding: Encoding::Unknown,
             utf8: Vec::new(),
             utf8_at: 0,
+            object: false,
+            line: 1,
+            replaced: Vec::new(),
+            held: None,
         }
+    }
+
+    /// The reader of an object stream (see `object`).
+    pub(super) fn object_stream(src: S) -> Self {
+        XmlReader {
+            object: true,
+            ..Self::new(src)
+        }
+    }
+
+    /// `UngetChar` of `count` bytes just read.
+    pub(super) fn skip_back(&mut self, count: usize) {
+        self.pos -= count;
+    }
+
+    /// `ResetState` of an object stream at its root frame: no tag open, none given back.
+    pub(super) fn reset_state(&mut self) {
+        self.state = TagState::Outside;
+        self.rejected = None;
+        self.last_tag.clear();
+        self.utf8.clear();
+        self.utf8_at = 0;
     }
 
     /// `PeekChar(offset)`: the byte, or the failure of the end of the input (`CEofException`).
     #[inline]
-    fn peek(&mut self, offset: usize) -> Result<u8> {
+    pub(super) fn peek(&mut self, offset: usize) -> Result<u8> {
         match self.src.byte_at(self.pos + offset) {
             Some(c) => Ok(c),
-            None => fail("end of the input"),
+            None => fail(EOF_MESSAGE),
         }
     }
 
     /// `PeekCharNoEOF(offset)`: the byte, 0 past the end of the input.
     #[inline]
-    fn peek_no_eof(&mut self, offset: usize) -> u8 {
+    pub(super) fn peek_no_eof(&mut self, offset: usize) -> u8 {
         self.src.byte_at(self.pos + offset).unwrap_or(0)
     }
 
     #[inline]
-    fn skip(&mut self, count: usize) {
+    pub(super) fn skip(&mut self, count: usize) {
         self.pos += count;
     }
 
     /// `GetChar()`.
     #[inline]
-    fn get_char(&mut self) -> Result<u8> {
+    pub(super) fn get_char(&mut self) -> Result<u8> {
         let c = self.peek(0)?;
         self.pos += 1;
         Ok(c)
@@ -518,7 +561,8 @@ impl<S: AsnSource> XmlReader<S> {
     //         SkipChar();
     // }
     // ```
-    fn skip_end_of_line(&mut self, last: u8) {
+    pub(super) fn skip_end_of_line(&mut self, last: u8) {
+        self.line += 1;
         let next = self.peek_no_eof(0);
         if i32::from(last) + i32::from(next as i8) == i32::from(b'\r' + b'\n') {
             self.pos += 1;
@@ -587,7 +631,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     }
     // }
     // ```
-    fn skip_ws(&mut self) -> Result<u8> {
+    pub(super) fn skip_ws(&mut self) -> Result<u8> {
         loop {
             let c = self.skip_spaces()?;
             match c {
@@ -672,8 +716,9 @@ impl<S: AsnSource> XmlReader<S> {
     // (`m_LeadingWs`, the spaces counted here, is given to the next `ReadTagData`; every tag
     // read resets it (`Found_lt`, `Found_gt`), and the character data of a member is read just
     // after its opening tag, so it is always 0 there: LOSAT does not keep it.)
-    fn skip_ws_and_comments(&mut self) -> Result<u8> {
-        self.src.release_before(self.pos);
+    pub(super) fn skip_ws_and_comments(&mut self) -> Result<u8> {
+        self.src
+            .release_before(self.held.map_or(self.pos, |held| held.min(self.pos)));
         loop {
             let c = self.skip_spaces()?;
             match c {
@@ -733,7 +778,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     Found_gt();
     // }
     // ```
-    fn end_tag(&mut self) -> Result<()> {
+    pub(super) fn end_tag(&mut self) -> Result<()> {
         let c = self.skip_ws()?;
         if c != b'>' && self.read_undefined_attributes()? != b'>' {
             return fail("'>' expected");
@@ -766,7 +811,20 @@ impl<S: AsnSource> XmlReader<S> {
     // }
     // ```
     // (`ReadName` throws for a byte that cannot start a name.)
-    fn read_undefined_attributes(&mut self) -> Result<u8> {
+    // (An object stream skips each attribute: its name, `=` and the quoted value. `xmlns` and `nil`
+    // would also set namespace maps and `m_IsNil`, which a type of an ASN.1 module never
+    // reads; the `nil` value's own check (`NStr::StringToBool`) is not made.)
+    pub(super) fn read_undefined_attributes(&mut self) -> Result<u8> {
+        if self.object {
+            loop {
+                let c = self.skip_ws()?;
+                if is_end_of_tag_char(c) {
+                    return Ok(c);
+                }
+                self.read_name(c)?;
+                self.read_attribute_value()?;
+            }
+        }
         let c = self.skip_ws()?;
         if is_end_of_tag_char(c) {
             return Ok(c);
@@ -819,7 +877,7 @@ impl<S: AsnSource> XmlReader<S> {
     // }
     // ```
     // (No frame of these types is read without its tag (`GetNotag`).)
-    fn end_opening_tag_self_closed(&mut self) -> Result<bool> {
+    pub(super) fn end_opening_tag_self_closed(&mut self) -> Result<bool> {
         if self.state == TagState::InsideOpening {
             let mut c = self.skip_ws()?;
             if c == b'/' && self.peek(1)? == b'>' {
@@ -862,7 +920,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     _ASSERT(OutsideTag());
     // }
     // ```
-    fn begin_data(&mut self) -> Result<()> {
+    pub(super) fn begin_data(&mut self) -> Result<()> {
         if self.state == TagState::InsideOpening {
             self.end_tag()?;
         }
@@ -887,7 +945,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     return c;
     // }
     // ```
-    fn begin_opening_tag(&mut self) -> Result<u8> {
+    pub(super) fn begin_opening_tag(&mut self) -> Result<u8> {
         self.begin_data()?;
         if self.skip_ws_and_comments()? != b'<' {
             return fail("'<' expected");
@@ -916,7 +974,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     return m_Input.PeekChar();
     // }
     // ```
-    fn begin_closing_tag(&mut self) -> Result<u8> {
+    pub(super) fn begin_closing_tag(&mut self) -> Result<u8> {
         self.begin_data()?;
         if self.skip_ws_and_comments()? != b'<' || self.peek(1)? != b'/' {
             return fail("'</' expected");
@@ -966,7 +1024,7 @@ impl<S: AsnSource> XmlReader<S> {
     // (`m_Doctype_found` is false for the types of an ASN.1 module (ReadFileHeader:
     // `GetDataSpec() == EDataSpec::eDTD`). A `:` after the first byte makes a namespace prefix,
     // refused; the `xmlns` and `nil` names of `m_Attlist` are attributes, refused before.)
-    fn read_name(&mut self, c: u8) -> Result<()> {
+    pub(super) fn read_name(&mut self, c: u8) -> Result<()> {
         if !is_first_name_char(c) {
             return fail("Name begins with an invalid character");
         }
@@ -1003,7 +1061,7 @@ impl<S: AsnSource> XmlReader<S> {
     //         m_LeadingWs = 0;
     //     ...
     // ```
-    fn undo_class_member(&mut self) {
+    pub(super) fn undo_class_member(&mut self) {
         if self.state == TagState::InsideOpening {
             self.rejected = Some(self.last_tag.clone());
             self.state = TagState::Outside;
@@ -1109,7 +1167,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     }
     // }
     // ```
-    fn read_attribute_value(&mut self) -> Result<Vec<u8>> {
+    pub(super) fn read_attribute_value(&mut self) -> Result<Vec<u8>> {
         if self.skip_ws()? != b'=' {
             return fail("'=' expected");
         }
@@ -1236,7 +1294,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     return c & 0xFF;
     // }
     // ```
-    fn read_escaped_char(&mut self, ending: u8) -> Result<(i32, bool)> {
+    pub(super) fn read_escaped_char(&mut self, ending: u8) -> Result<(i32, bool)> {
         let c = self.peek(0)?;
         if c == b'&' {
             self.skip(1);
@@ -1378,6 +1436,12 @@ impl<S: AsnSource> XmlReader<S> {
             c
         };
         if bad_char(c) {
+            if self.object {
+                // `ReplaceVisibleChar(c, eFNP_ReplaceAndWarn, ...)`: the post at the line now,
+                // and `#` (`x_FixCharsSubst`).
+                self.replaced.push((c as u8, self.line));
+                return Ok(i32::from(b'#'));
+            }
             return Err(XmlError::Unsupported(format!(
                 "a control character (0x{c:02x}) in the character data of an XML document is not supported by LOSAT's rpsbproc (NCBI replaces it and posts a warning)"
             )));
@@ -1482,7 +1546,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     str.reserve(str.size());
     // }
     // ```
-    fn read_tag_data(&mut self, out: &mut Vec<u8>) -> Result<()> {
+    pub(super) fn read_tag_data(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.begin_data()?;
         let mut cr = false;
         loop {
@@ -1536,7 +1600,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     str.reserve(str.size());
     // }
     // ```
-    fn read_word(&mut self, out: &mut Vec<u8>) -> Result<()> {
+    pub(super) fn read_word(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.begin_data()?;
         self.skip_ws()?;
         loop {
@@ -1826,7 +1890,7 @@ impl<S: AsnSource> XmlReader<S> {
     // ```
     // (The namespace prefix of the type name is refused by `read_name`; without one,
     // `m_CurrNsPrefix` is empty and `":" + typeName` never equals a type's name.)
-    fn read_file_header(&mut self) -> Result<Vec<u8>> {
+    pub(super) fn read_file_header(&mut self) -> Result<Vec<u8>> {
         if self.peek(0)? == 0xEF && self.peek(1)? == 0xBB && self.peek(2)? == 0xBF {
             self.skip(3);
             self.encoding = Encoding::Utf8;
@@ -2059,7 +2123,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     return SelfClosedTag();
     // }
     // ```
-    fn this_tag_is_self_closed(&mut self) -> Result<bool> {
+    pub(super) fn this_tag_is_self_closed(&mut self) -> Result<bool> {
         if self.state == TagState::InsideOpening {
             return self.end_opening_tag_self_closed();
         }
@@ -2083,12 +2147,12 @@ impl<S: AsnSource> XmlReader<S> {
     //     return SkipWSAndComments() == '<' && m_Input.PeekChar(1) == '/';
     // }
     // ```
-    fn next_tag_is_closing(&mut self) -> Result<bool> {
+    pub(super) fn next_tag_is_closing(&mut self) -> Result<bool> {
         self.begin_data()?;
         Ok(self.skip_ws_and_comments()? == b'<' && self.peek(1)? == b'/')
     }
 
-    fn next_is_tag(&mut self) -> Result<bool> {
+    pub(super) fn next_is_tag(&mut self) -> Result<bool> {
         self.begin_data()?;
         Ok(self.skip_ws_and_comments()? == b'<' && self.peek(1)? != b'/' && self.peek(1)? != b'!')
     }
@@ -2104,7 +2168,7 @@ impl<S: AsnSource> XmlReader<S> {
     //     return false;
     // }
     // ```
-    fn has_attlist(&mut self) -> Result<bool> {
+    pub(super) fn has_attlist(&mut self) -> Result<bool> {
         if matches!(
             self.state,
             TagState::InsideOpening | TagState::InsideClosing

@@ -279,3 +279,27 @@ fn a_binary_strategy_reads_as_its_text() {
         }
     }
 }
+
+/// A search strategy in the ASN.1-style XML (NCBI's `datatool -px` of the strategy text: line
+/// RG-F2's `craft/blastn.xml`) read by the archive's style (`XmlStyle::Asn`) is one
+/// `Blast4-request`, written back as text the strategy it was made of, and the stream stops after
+/// it with the rest of the input. (NCBI's `-import_search_strategy` reads standard XML
+/// (`SetEnforcedStdXml(true)`) and refuses this file: that style is line RG-F2's, `XmlStyle::Std`.)
+#[test]
+fn an_xml_strategy_reads_as_its_text() {
+    let text = fixture("strategy_blastn.asn");
+    let input = [&fixture("strategy_blastn.xml")[..], b"xyz"].concat();
+    let guessed = guess_encoding(&input[..]);
+    assert_eq!(guessed.encoding.as_ref().ok(), Some(&Encoding::Xml));
+    let mut stream = guessed.into_stream().expect("an XML stream");
+    let (value, posts) = stream.read(named::BLAST4_REQUEST);
+    assert!(posts.is_empty());
+    let mut out = Vec::new();
+    let mut enc = AsnTextEncoder::new(&mut out);
+    write_document(&mut enc, named::BLAST4_REQUEST, &value.expect("a strategy"));
+    assert_eq!(enc.error(), None);
+    assert!(out == text, "{}", String::from_utf8_lossy(&out));
+    let (mut rest, mut input) = stream.into_rest();
+    std::io::Read::read_to_end(&mut input, &mut rest).expect("a slice reads");
+    assert_eq!(rest, b"\nxyz");
+}

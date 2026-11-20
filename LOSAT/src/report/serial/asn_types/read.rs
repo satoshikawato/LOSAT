@@ -108,6 +108,9 @@ impl From<AsnTextError> for ReadError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum FrameKind {
     Named,
+    /// An `eFrameNamed` frame of `ReadNamedType` (a named type that is neither a SEQUENCE nor a
+    /// CHOICE), which only a stream that opens a tag for it (`Front::NAMED_TYPES`) has.
+    NamedType,
     Class,
     ClassMember,
     Choice,
@@ -146,6 +149,21 @@ impl Frame {
     /// A `Seq-table` class frame's `num-rows`, once read.
     pub(super) fn num_rows(&self) -> Option<i64> {
         self.num_rows
+    }
+
+    /// The frame's type (`GetFrameType`).
+    pub(super) fn kind(&self) -> FrameKind {
+        self.kind
+    }
+
+    /// The name of the type the frame names (`GetTypeInfo()->GetName()`); empty for none.
+    pub(super) fn type_name(&self) -> &'static str {
+        self.type_name.unwrap_or("")
+    }
+
+    /// The member or variant of a member or variant frame (`GetMemberId().GetName()`).
+    pub(super) fn member(&self) -> &'static str {
+        self.member.unwrap_or("")
     }
 }
 
@@ -187,7 +205,7 @@ impl Frame {
 impl Frame {
     fn info(&self) -> String {
         let kind = match self.kind {
-            FrameKind::Named => "eFrameNamed",
+            FrameKind::Named | FrameKind::NamedType => "eFrameNamed",
             FrameKind::Class => "eFrameClass",
             FrameKind::ClassMember => "eFrameClassMember",
             FrameKind::Choice => "eFrameChoice",
@@ -259,6 +277,38 @@ impl Cx<'_> {
 /// The steps of one encoding of NCBI's object stream that the walk of a value calls, each as
 /// that stream's function of the same name does it: where it ends, what it throws.
 pub(super) trait Front {
+    /// Whether the stream opens a tag of its own for a named type that is neither a SEQUENCE nor a
+    /// CHOICE (`BeginNamedType`, `EndNamedType` in a frame of `FrameKind::NamedType`).
+    const NAMED_TYPES: bool = false;
+    /// Whether a SEQUENCE OF has a frame of its own (`eFrameArray`): `CObjectIStreamXml::
+    /// ReadContainer` of a container without a name pushes none.
+    const ARRAY_FRAMES: bool = true;
+    /// Whether the elements of a list of `element`s have the frame of an element
+    /// (`eFrameArrayElement`).
+    fn element_frame(_element: u16) -> bool {
+        true
+    }
+    /// `BeginNamedType` of the named type `ty`, after its frame was pushed.
+    fn begin_named(&mut self, _ty: u16, _cx: &mut Cx<'_>) -> R<()> {
+        Ok(())
+    }
+    /// `EndNamedType`, before its frame is left.
+    fn end_named(&mut self, _cx: &mut Cx<'_>) -> R<()> {
+        Ok(())
+    }
+    /// `BeginChoice` of the CHOICE `ty`, after its frame was pushed.
+    fn begin_choice(&mut self, _ty: u16, _cx: &mut Cx<'_>) -> R<()> {
+        Ok(())
+    }
+    /// `EndChoice`, after the variant's frame was left.
+    fn end_choice(&mut self, _cx: &mut Cx<'_>) -> R<()> {
+        Ok(())
+    }
+    /// The end of a list's element (`EndArrayElement`), with the element's frame still on the
+    /// stack (when it has one).
+    fn end_element(&mut self, _cx: &mut Cx<'_>) -> R<()> {
+        Ok(())
+    }
     /// The source file, line and function of the `END_OBJECT_FRAME` that leaves a frame of
     /// `kind` (of a skip function: `skip`): the place of the line that `NCBI_RETHROW_SAME` adds to
     /// an exception passing through it.
@@ -370,6 +420,27 @@ pub(super) fn read_delayed<F: Front>(front: &mut F, ty: u16, cx: &mut Cx<'_>) ->
     value
 }
 
+/// `read_delayed` for a stream whose tags are named by the frames of the object that holds the
+/// member (`SkipStackTagName`): the new stream's stack starts with `outer`, the frames of the
+/// class and of the member that was read into the buffer (`CDelayBuffer::Update`, delaybuf.cpp:
+/// 63-84, `BEGIN_OBJECT_FRAME_OF2` of the class and of the member).
+pub(super) fn read_delayed_in<F: Front>(
+    front: &mut F,
+    outer: &[Frame],
+    ty: u16,
+    cx: &mut Cx<'_>,
+) -> R<Value> {
+    let mut reader = TypedReader {
+        r: front,
+        frames: outer.to_vec(),
+        posts: Vec::new(),
+        open: Vec::new(),
+    };
+    let value = reader.value(ty, false);
+    cx.posts.append(&mut reader.posts);
+    value
+}
+
 struct TypedReader<'r, F: Front> {
     r: &'r mut F,
     frames: Vec<Frame>,
@@ -403,6 +474,9 @@ enum Open {
     },
     /// A delayed member of the type `ty` (`delayed`) from `start`.
     Delayed { start: usize, ty: u16 },
+    /// The named types around a value (`ReadNamedType`): the end of `count` of them, the
+    /// innermost first.
+    Named { count: usize },
 }
 
 /// What the reader does next: read a value of a type (`skip`), or give a value read to the one
@@ -577,6 +651,10 @@ impl<F: Front> TypedReader<'_, F> {
     fn start(&mut self, ty: u16, skip: bool) -> R<Step> {
         let info = resolved(ty);
         let target = alias_target(ty);
+        let names = self.begin_names(ty, skip)?;
+        if names > 0 {
+            self.open.push(Open::Named { count: names });
+        }
         self.open.push(Open::Value { target, skip });
         let value = match info.kind {
             Kind::Sequence(members) => {
@@ -650,6 +728,7 @@ impl<F: Front> TypedReader<'_, F> {
             Open::Choice { index } => {
                 self.r.end_variant(cx!(self))?;
                 self.frames.pop();
+                self.r.end_choice(cx!(self))?;
                 self.frames.pop();
                 Ok(Step::Done(Value::Choice(index, Box::new(value))))
             }
@@ -659,13 +738,85 @@ impl<F: Front> TypedReader<'_, F> {
                 mut values,
                 block_start,
             } => {
+                self.r.end_element(cx!(self))?;
                 if !skip {
                     values.push(value);
                 }
                 self.next_element(element, skip, values, block_start)
             }
             Open::Delayed { start, ty } => self.r.delay_end(start, ty, cx!(self)).map(Step::Done),
+            Open::Named { count } => {
+                self.end_names(count)?;
+                Ok(Step::Done(value))
+            }
         }
+    }
+
+    /// `ReadNamedType` / `SkipNamedType` of each named type of the alias chain from `ty` that a
+    /// stream opens a tag for (`Front::NAMED_TYPES`), outermost first: its frame, then
+    /// `BeginNamedType`. The number of them. A named SEQUENCE or CHOICE has its own tag (its
+    /// class or choice calls) and so has a named ENUMERATED (`ReadEnum` of a type with a name).
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2039-2052 and objistr.cpp:1302-1313
+    // ```c++
+    // void CObjectIStreamXml::ReadNamedType(TTypeInfo namedTypeInfo,
+    //                                       TTypeInfo typeInfo,
+    //                                       TObjectPtr object)
+    // {
+    //     BEGIN_OBJECT_FRAME2(eFrameNamed, namedTypeInfo);
+    //
+    //     BeginNamedType(namedTypeInfo);
+    //     ReadObject(object, typeInfo);
+    //     EndNamedType();
+    //
+    //     END_OBJECT_FRAME();
+    // }
+    // ...
+    // void CObjectIStream::SkipNamedType(TTypeInfo namedTypeInfo,
+    //                                    TTypeInfo typeInfo)
+    // {
+    //     BEGIN_OBJECT_FRAME2(eFrameNamed, namedTypeInfo);
+    //     BeginNamedType(namedTypeInfo);
+    //
+    //     SkipObject(typeInfo);
+    //
+    //     EndNamedType();
+    //     END_OBJECT_FRAME();
+    // }
+    // ```
+    // (An alias (`CAliasTypeInfo`) reads through `ReadNamedType` of its aliased type, a named
+    // implicit class (`Seq-descr`) through `ReadImplicitMember`, a named string, number or
+    // OCTET STRING as an alias of the anonymous type: each is one such frame.)
+    fn begin_names(&mut self, mut ty: u16, skip: bool) -> R<usize> {
+        let mut count = 0;
+        if !F::NAMED_TYPES {
+            return Ok(0);
+        }
+        loop {
+            let info = super::type_info(ty);
+            if !info.name().is_empty()
+                && !matches!(
+                    info.kind,
+                    Kind::Sequence(_) | Kind::Choice(_) | Kind::Enumerated { .. }
+                )
+            {
+                self.push(FrameKind::NamedType, Some(info.name()), skip);
+                count += 1;
+                self.r.begin_named(ty, cx!(self))?;
+            }
+            match info.kind {
+                Kind::Alias(next) => ty = next,
+                _ => return Ok(count),
+            }
+        }
+    }
+
+    /// `EndNamedType` and the frame left, for each of the `count` named types, the innermost first.
+    fn end_names(&mut self, count: usize) -> R<()> {
+        for _ in 0..count {
+            self.r.end_named(cx!(self))?;
+            self.frames.pop();
+        }
+        Ok(())
     }
 
     /// `ReadClassSequential` / `SkipClassSequential` (`start`: the class frame, `BeginClass`, the
@@ -788,6 +939,7 @@ impl<F: Front> TypedReader<'_, F> {
         skip: bool,
     ) -> R<Step> {
         self.push_object(FrameKind::Choice, ty, name, skip);
+        self.r.begin_choice(ty, cx!(self))?;
         self.push(FrameKind::ChoiceVariant, None, skip);
         let index = self.r.begin_variant(ty, variants, cx!(self))?;
         let variant = &variants[index];
@@ -827,9 +979,13 @@ impl<F: Front> TypedReader<'_, F> {
     // no frame of its own, `ReadImplicitMember`, classinfo.cpp:289-306): `Object type= ` names
     // nothing (c07 of SURVEY_D3).
     fn start_list(&mut self, element: u16, set: bool, skip: bool) -> R<Step> {
-        self.push(FrameKind::Array, Some(""), skip);
+        if F::ARRAY_FRAMES {
+            self.push(FrameKind::Array, Some(""), skip);
+        }
         self.r.begin_list(set, cx!(self))?;
-        self.push(FrameKind::ArrayElement, None, skip);
+        if F::element_frame(element) {
+            self.push(FrameKind::ArrayElement, None, skip);
+        }
         let numbers = match resolved(element).kind {
             // The elements of an INTEGER or REAL list are read as the numbers themselves (no
             // `Value` each: a PSSM holds thousands); they have no hook.
@@ -843,9 +999,7 @@ impl<F: Front> TypedReader<'_, F> {
             Kind::Real => Value::Reals(self.reals(element, skip)?),
             _ => return self.next_element(element, skip, Vec::new(), true),
         };
-        self.frames.pop();
-        self.r.end_list(cx!(self))?;
-        self.frames.pop();
+        self.end_list_frames(element)?;
         Ok(Step::Done(numbers))
     }
 
@@ -867,10 +1021,20 @@ impl<F: Front> TypedReader<'_, F> {
             });
             return Ok(Step::Read(element, skip));
         }
-        self.frames.pop();
-        self.r.end_list(cx!(self))?;
-        self.frames.pop();
+        self.end_list_frames(element)?;
         Ok(Step::Done(Value::List(values)))
+    }
+
+    /// The element frame left, `EndContainer`, the array frame left (the frames a list has).
+    fn end_list_frames(&mut self, element: u16) -> R<()> {
+        if F::element_frame(element) {
+            self.frames.pop();
+        }
+        self.r.end_list(cx!(self))?;
+        if F::ARRAY_FRAMES {
+            self.frames.pop();
+        }
+        Ok(())
     }
 
     /// The elements of an INTEGER list of the type `element`, each `store`d as the list keeps it.
@@ -885,9 +1049,12 @@ impl<F: Front> TypedReader<'_, F> {
         let mut values = Vec::new();
         let mut block_start = true;
         while self.r.next_element(element, &mut block_start, cx!(self))? {
+            let names = self.begin_names(element, skip)?;
             if let Some(value) = self.r.integer(target, storage, skip, cx!(self))? {
                 values.push(store(value));
             }
+            self.end_names(names)?;
+            self.r.end_element(cx!(self))?;
         }
         Ok(values)
     }
@@ -898,9 +1065,12 @@ impl<F: Front> TypedReader<'_, F> {
         let mut values = Vec::new();
         let mut block_start = true;
         while self.r.next_element(element, &mut block_start, cx!(self))? {
+            let names = self.begin_names(element, skip)?;
             if let Some(value) = self.r.real(target, skip, cx!(self))? {
                 values.push(value);
             }
+            self.end_names(names)?;
+            self.r.end_element(cx!(self))?;
         }
         Ok(values)
     }

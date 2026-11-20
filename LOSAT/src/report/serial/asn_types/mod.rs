@@ -3,7 +3,7 @@
 //! PSSM file reaches (`PssmWithParameters`, psiblast and tblastn `-in_pssm`) and those of the
 //! BLAST archive and search strategy (`Blast4-archive`, `Blast4-request`,
 //! `Blast4-get-search-strategy-reply`), and the one generic reader that runs on them (`read`,
-//! over the steps of each encoding: ASN.1 text `read_text`, binary ASN.1 `read_ber`; a stream of
+//! over the steps of each encoding: ASN.1 text `read_text`, binary ASN.1 `read_ber`, XML `read_xml`; a stream of
 //! objects and its encoding: `stream`; typed access to the values: `view`). This module owns the
 //! table (`table`, generated
 //! by `scripts/asn_spec_gen.py` and checked against NCBI's generated `*_.cpp` by
@@ -44,6 +44,7 @@ mod hooks;
 pub(crate) mod read;
 mod read_ber;
 mod read_text;
+mod read_xml;
 pub(crate) mod stream;
 pub(crate) mod view;
 pub(crate) mod write;
@@ -55,6 +56,8 @@ pub(crate) mod table;
 mod read_ber_tests;
 #[cfg(test)]
 mod read_tests;
+#[cfg(test)]
+mod read_xml_tests;
 #[cfg(test)]
 mod stream_tests;
 #[cfg(test)]

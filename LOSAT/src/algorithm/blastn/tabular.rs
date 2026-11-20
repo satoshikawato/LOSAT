@@ -847,8 +847,10 @@ mod tests {
 
     // Ranges out of the order of `to_open` (a range whose `to_open` wrapped to 0 after larger
     // ones): the positions that `std::lower_bound` returned for them (`observe_lower_bound one`,
-    // `LOSAT/tests/unit/lower_bound_observed/README.md`), none of them the first range not less
-    // than the value (at 1, 1, 1, 0 and 2).
+    // `LOSAT/tests/unit/lower_bound_observed/README.md`). The first five are not the first range
+    // not less than the value (at 1, 1, 1, 0 and 2). The last two also tell the observed search
+    // from other searches that give the first five: `slice::partition_point`, for one, returns 3
+    // for 15.
     #[test]
     fn lower_bound_of_unordered_ranges_is_the_observed_one() {
         let ranges = |to_opens: &[u32]| {
@@ -867,6 +869,8 @@ mod tests {
         assert_eq!(ranges(&[10, 30, 0, 40, 50]).lower_bound(1, 25), 3);
         assert_eq!(ranges(&[100, 0, 0, 0, 0, 0, 0, 0]).lower_bound(0, 50), 8);
         assert_eq!(ranges(&[50, 0, 120, 4, 90, 200]).lower_bound(1, 100), 5);
+        assert_eq!(ranges(&[0, 0, 10, 20, 0]).lower_bound(0, 5), 2);
+        assert_eq!(ranges(&[0, 0, 10, 20, 0]).lower_bound(0, 15), 5);
     }
 
     #[test]

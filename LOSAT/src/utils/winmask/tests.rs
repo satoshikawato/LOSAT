@@ -635,6 +635,20 @@ fn binary_lookup_of_units_out_of_order_is_ncbis() {
         .map(|&unit| counts.true_count(unit).unwrap())
         .collect();
     assert_eq!(found, [0, 0, 0, 4]);
+    // Units 0, 0, 1, 2, 0 (observed with `observe_lower_bound one`): unit 1 finds the count at
+    // index 2 and unit 2 finds no entry, where `slice::partition_point` would find index 3.
+    let mut file = vec![w(0), w(4)];
+    for (unit, count) in [(0, 1), (0, 2), (1, 3), (2, 4), (0, 5)] {
+        file.push(w(unit));
+        file.push(w(count));
+    }
+    file.extend([w(1), w(2), w(3), w(4)]);
+    let counts = read_counts(file.concat()).unwrap();
+    for unit in [0, 1, 2] {
+        assert!(unit < reverse_complement(unit, 4));
+    }
+    assert_eq!(counts.true_count(1).unwrap(), 3);
+    assert_eq!(counts.true_count(2).unwrap(), 0);
 }
 
 #[test]

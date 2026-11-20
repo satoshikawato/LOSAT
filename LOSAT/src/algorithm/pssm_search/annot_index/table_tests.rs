@@ -108,6 +108,16 @@ fn sparse_indexes() {
         ),
         ["-", "-", "-", "-", "-", "-", "12"]
     );
+    // On { 0, 0, 1, 2, 0 } (observed with `observe_lower_bound one`): row 1 is index 2, and row
+    // 2 has no value, where `slice::partition_point` would find index 3.
+    assert_eq!(
+        values(
+            "data int { 10, 11, 12, 13, 14 }, sparse indexes { 0, 0, 1, 2, 0 }",
+            Want::Int4,
+            0..3
+        ),
+        ["10", "12", "-"]
+    );
     // `indexes-delta`: the rows 2, 3 and 7.
     assert_eq!(
         values(

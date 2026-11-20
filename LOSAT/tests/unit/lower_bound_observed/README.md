@@ -72,3 +72,9 @@ from indices 1, 2, 3, 7, 100 and 1,000 (2,907 trees, 876,450 calls, 879,357 retu
 and 2,200,001 calls of `std::lower_bound` with `PRangeLessPos`'s answer on random collections
 (in order, with ties, out of order, and built by `x_CombineWith` and `x_Subtract` with wrapped
 ranges; up to 5,000 elements; 1,013,350 from a start above 0; 675,941 out of order for their key).
+An independent review (2026-11-21, the same compiler and options) observed NCBI's two other
+forms of the call: no comparator on a `vector<unsigned>` with a `size_t` value (`GetIndexAt`), and
+`operator<` on `const entry *` pointers (`get_info`). They followed the same rule: 80,088 answer
+sequences (0 to 140 elements from indices 0, 1, 7 and 100) and 21,570,705 searches (every vector
+of 0 to 7 values from 0 to 7, every value 0 to 8; 12,881,916 out of order for their value), 0
+mismatches.

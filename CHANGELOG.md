@@ -2605,6 +2605,11 @@ a release moves them under `[Unreleased]` below.
 
 ### Packaging, tests and documentation
 
+- Test-only: the blastn tests that a panicking participant ends the partitioned seed stage
+  (`a_panicking_participant_ends_the_stage` and its stage in pieces) make the participant whose fold
+  panics take part instead of counting on a 1 ms sleep in every fold, so they no longer fail on a
+  loaded machine (a helper could leave the stalled stage before its first fold and the owner then
+  folded the whole stage: 28 of 1,000 runs on two loaded CPUs). No program output changes.
 - docs: a user manual (`docs/manual`, built with mdBook into a website): installation, a quick start, moving from NCBI BLAST+ and from LOSAT v0.1.0, one page for each program, and reference pages on databases, output formats, platforms, differences from NCBI BLAST+ and what LOSAT refuses. `scripts/check_manual_links.py` checks its links before each build.
 - docs: README's program table names `-outfmt 18` for the five search programs (the output-format table
   and the programs had it); the refusal list no longer says that `blastx` refuses `-query_loc` and

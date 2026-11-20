@@ -17,6 +17,19 @@ FASTA files:
   reads the stored O (26), which is not the X the query holds for its own O, so `q_o` against `s_o` is not
   "near identical", the subject is SEG-filtered and scores 266 bits; against `s_x` it scores 307 (and
   `-subject` gives 307 for both).
+- `oseed.faa` / `oseed_q.faa` (rows `db.oseed.*`, line NP item DBO): `oseed_o`, 20 V, `AOA`, 10 V, `AOA`, 20 V, and
+  `oseed_x`, the same with X; the queries `q_o`, `q_x` and `q_ox` are the same with I for V and O, X, or O then X in the
+  two words. A query word `AXA` (the query's O is read as X) scores 7 against itself with BLOSUM62, under the threshold
+  11, so NCBI's lookup table holds it under its own letters only: it finds the stored `AXA` of `oseed_x` and not the
+  stored `AOA` of `oseed_o`, which it would meet only as a neighbour (O scores as X). At `-threshold 7` (`db.oseed.t7.6`)
+  it is a neighbour of `AOA` and both subjects are found; with words of 6 (`db.oseed.w6.6`) the compressed alphabet
+  has no letter for O or X. `oseed_bx_q.fna` is `q_x` as DNA (ATT for I, GCT for A, NNN for X), the BLASTX query of
+  `db.oseed.bx.6`.
+- `oreal.faa` / `oreal_q.faa` (row `db.oreal.psi.6`, line NP item DBO): four proteins of `LOSAT/tests/fasta/AP027132.faa`
+  (records `a_BDV02837.1`, `a_BDV02907.1`, `a_BDV02938.1`, `a_BDV02956.1`) with 2 % of their letters replaced by O, X or U, and a protein of
+  `AP027131.faa` (`BDV02481.1_x`) with 3 % replaced by X (a fixed pseudo-random generator; the set was cut down from 1,116
+  such proteins while NCBI's result stayed apart from that of a search that reads a stored O as X). In PSIBLAST's
+  iterations 2 and 3 the PSSM scores a stored O with its own column O (`BLAST_SCORE_MIN`), not with column X.
 - `o_stored_bx_q.fna`: `s_x` back-translated with its twelve X as `NNN` codons, the BLASTX query of `db.o_stored.bx.8`
   (BLASTX reads the stored O of `s_o` as stored, 154 identities; `-subject o_stored.faa` reads it as X, 166, row
   `pyl.blastx.ostored.8` of `outfmt0_manifest.tsv`).
@@ -171,6 +184,10 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "PajaWSV proteins" -blastdb_version 4
     makeblastdb -in tests/db_search/o_stored.faa -dbtype prot -out tests/db_search/o_stored \
         -title "stored O against the query's X" -blastdb_version 4
+    makeblastdb -in tests/db_search/oseed.faa -dbtype prot -out tests/db_search/oseed \
+        -title "stored O and X in words under the threshold" -blastdb_version 4
+    makeblastdb -in tests/db_search/oreal.faa -dbtype prot -out tests/db_search/oreal \
+        -title "four proteins with stored O, X and U" -blastdb_version 4
     makeblastdb -in tests/db_search/vol2.faa -dbtype prot -out tests/db_search/vol2_nophr \
         -title "two volumes, the second without its header file" -blastdb_version 4 -max_file_sz 128B
     rm tests/db_search/vol2_nophr.01.phr

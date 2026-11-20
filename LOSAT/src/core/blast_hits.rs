@@ -367,6 +367,28 @@ mod tests {
         assert_eq!(protein, hsps);
     }
 
+    /// NCBI's `testSubjectBestHit`: four HSPs of context 0 at query offset 0, ending at 12, 6, 4
+    /// and 3 (12 / (i + 1)) in score order, with the query frame and length NCBI's test gives
+    /// them (frame 0 of a new HSP, the 12-letter query): one HSP is left for tblastn and for
+    /// blastn. The HSP lists are NCBI's two fixtures:
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1386-1402
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1495-1512
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1514-1542 testSubjectBestHit
+    #[test]
+    fn subject_besthit_keeps_one_of_ncbi_four_nested_hsps() {
+        for blastn in [false, true] {
+            let mut ends: Vec<i64> = (1..=4).map(|factor| 12 / factor).collect();
+            subject_besthit(&mut ends, blastn, |&end| BestHitExtent {
+                context: 0,
+                query_frame: 0,
+                offset: 0,
+                end,
+                query_length: 12,
+            });
+            assert_eq!(ends, vec![12], "blastn {blastn}");
+        }
+    }
+
     #[test]
     fn query_coverage_adds_a_half_below_99() {
         // 95 of 1000 letters: 9.5 % + 0.5.

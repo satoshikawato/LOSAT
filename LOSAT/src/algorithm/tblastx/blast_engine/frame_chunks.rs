@@ -545,20 +545,8 @@ fn add_chunk_result(sums: &mut ChunkSums<'_>, result: TblastxChunkScanResult) {
                 .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED)
                 .refuse(undefined);
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
-        // `-subject_besthit` on the frame's list after each merge (the contexts are the query
-        // frames; the end of an HSP of length 0 or less is NCBI's `Int4`), before the frame's list
-        // joins the subject's and before the linking.
         if sums.subject_besthit {
-            crate::core::blast_hits::subject_besthit(sums.frame_ungapped_hits, false, |hit| {
-                crate::core::blast_hits::BestHitExtent {
-                    context: i64::from(hit.ctx_idx),
-                    query_frame: i32::from(hit.q_frame),
-                    offset: i64::from(hit.q_aa_start),
-                    end: i64::from(hit.q_end_int4()),
-                    query_length: 0,
-                }
-            });
+            super::frame_subject_besthit(sums.frame_ungapped_hits);
         }
     }
 }

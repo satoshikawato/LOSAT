@@ -68,7 +68,7 @@ For every option: `losat blastdbcmd -help`.
 | `%L`, `%C` | Common name; common names of the leaf nodes. |
 | `%B`, `%K` | BLAST name; super kingdom. |
 | `%e`, `%P` | Membership integer; PIG. |
-| `%m<id>` | Masking data of algorithm `<id>`, as `N-M` ranges separated by `;`, or `none`. |
+| `%m<id>` | Masking data of algorithm `<id>`, as `N-M` ranges separated by `;`, or `none`. A database built with `makeblastdb -gi_mask` has the ids 0, 1, ... of its GI-indexed masks. |
 
 The names (`%S`, `%L`, `%C`, `%N`, `%B`, `%K`) and `-tax_info` names need NCBI's taxonomy database files; without them LOSAT prints `N/A`, as NCBI does (see [BLAST databases](../databases.md)). `%d` and `%b` (ASN.1 texts) are refused.
 

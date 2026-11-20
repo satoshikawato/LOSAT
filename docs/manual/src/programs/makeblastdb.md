@@ -81,9 +81,9 @@ The files, messages and exit status are those of NCBI's `makeblastdb` 2.17.0, wi
 - A database in one volume opens. NCBI's `makeblastdb` writes an alias file that names the database by its full path, which NCBI's programs take for another alias file: no program can open that database, and the build ends with `BLAST Database error: Illegal configuration: DB alias files are mutually recursive.` and exit status 2. LOSAT's alias file names the volume by its file name (`DBLIST db` for `-out db`), as the alias file of a database in several volumes names its volumes. The build then ends as one of several volumes does, with the metadata file (`.njs`, `.pjs`) and exit status 0, and NCBI's programs read the database and its masks. Every other file is NCBI's.
 - An alias file that NCBI's `makeblastdb` left from such a build cannot be read when the old database is removed, by NCBI or by LOSAT. A new build with `-gi_mask` writes its own alias file over it. A build without `-gi_mask` keeps it and ends with the error above, as NCBI's does: delete the `.nal` or `.pal` file first.
 
-NCBI's programs look for the GI-mask files from the current directory and the `BLASTDB` path, not from the database's directory, so they find them when they run where the build ran (or with `BLASTDB` set to that directory, or with an absolute `-gi_mask_name`).
+NCBI's programs and LOSAT's look for the GI-mask files from the current directory and the `BLASTDB` path, not from the database's directory, so they find them when they run where the build ran (or with `BLASTDB` set to that directory, or with an absolute `-gi_mask_name`). From elsewhere they stop with `Could not open gi-mask index files.`
 
-LOSAT's own programs do not read GI-indexed masks yet: `blastn`, `blastdbcmd` and the other readers refuse a database whose alias file has `MASKLIST` (see [What LOSAT refuses](../refusals.md)).
+LOSAT's `blastdbcmd` and `blastn` read the GI-indexed masks as NCBI's do (`-info`, `-outfmt %m`, `-mask_sequence_with`, `-db_soft_mask`, `-db_hard_mask`), and every search program searches such a database. A sequence without a GI has no masks of its own: like NCBI's programs, LOSAT's give it the masks of GI 4294967295 when the database has that GI. See [Databases](../databases.md) for when `MASKLIST` applies.
 
 ### Hash index
 

@@ -65,7 +65,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-parse_deflines` with two queries of one id in one query batch | Refused. |
 | `-parse_deflines` with a query and a subject of one id that are not the same record | Refused. |
 | `-db` with a sequence whose id NCBI cannot report correctly | Refused. The error names the sequence. |
-| An alias file with `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `MEMB_BIT`, `MASKLIST` or `OID_MASK_TYPE` | Refused. See Alias files below. `MASKLIST` names the GI-indexed masks that `makeblastdb -gi_mask` writes; LOSAT does not read them yet. |
+| An alias file with `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `MEMB_BIT` or `OID_MASK_TYPE` | Refused. See Alias files below. |
 | `SEQ_ID_PREFER_ACCESSION_OVER_GI` or `SEQ_ID_AVOID_GI` with a database that has parsed ids | Refused. |
 | `-xmlhelp`, `-version`, `-version-full`, `-version-full-xml`, `-version-full-json` in the library API, pylosat and the Web engine | Refused. They work on the command line. |
 | `-dryrun` | Reads and checks the arguments, then stops. It refuses what a normal run refuses. |
@@ -307,7 +307,7 @@ These refusals apply to every search program that reads databases.
 
 | Option or value | What happens |
 | :--- | :--- |
-| Alias-file keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `MEMB_BIT`, `MASKLIST` and `OID_MASK_TYPE` | Refused. They select sequences by a list, a mask or a membership bit. |
+| Alias-file keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `MEMB_BIT` and `OID_MASK_TYPE` | Refused. They select sequences by a list, a mask or a membership bit. |
 | Databases of a `-db` list whose total lengths sum past 64 bits (`-outfmt` 0 to 5 and 13 to 16) | Refused. NCBI's arithmetic overflows. |
 | Databases of a `-db` list whose numbers of sequences sum past 32 bits (`-outfmt` 5) | Refused. |
 | A total length of exactly 9,223,372,036,854,775,808 in BLAST XML and XML2 (`-outfmt` 5, 14 and 16) | Refused. NCBI writes `-0`. |

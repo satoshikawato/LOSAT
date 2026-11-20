@@ -1979,10 +1979,10 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001: the application reads
     // -version, -version-full*, -dryrun, -logfile and -conffile anywhere before `--`, also
     // in an option's value (`-out -version` prints the version). The command line prints the
-    // versions before parsing (`ncbi_version_request_reads_the_word_before_the_arguments`); the
-    // parser's callers without the command line's application start (the library API and the
-    // Web engine) refuse them by name in that place too, instead of writing a file named
-    // "-version" (line RG item E3). `-version=1` is an unknown option, as in NCBI
+    // versions before parsing (`ncbi_version_request_reads_the_word_before_the_arguments`), and
+    // so does the Web engine's ABI v2 (line WQA's D14, 2026-11-20); the parser's callers without
+    // an application start (the library API) refuse them by name in that place too, instead of
+    // writing a file named "-version" (line RG item E3). `-version=1` is an unknown option, as in NCBI
     // (`Unknown argument: "version"`, exit status 1; LOSAT's parser error, exception 1).
     for (program, upper) in [
         ("blastn", "BLASTN"),
@@ -1999,7 +1999,7 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(
                 error.contains(&format!(
-                    "the NCBI C++ Toolkit option {} runs on the command line of LOSAT's {upper} only",
+                    "the NCBI C++ Toolkit option {} runs on the command line and in the Web engine's ABI v2 of LOSAT's {upper} only",
                     words.last().unwrap()
                 )),
                 "{program} {words:?}: {error}"
@@ -2117,10 +2117,12 @@ fn toolkit_file_options_need_an_application_start() {
             assert!(parsed.is_ok(), "{program} {words:?}: {:?}", parsed.err());
         }
         // The versions, which the command line prints before parsing (line RG item E3), are
-        // refused by the library's parser and the Web engine's alike (line RG item E1w-2).
+        // refused by the library's parser and the Web engine's ABI v1 alike (line RG item E1w-2); a
+        // run of the Web engine's ABI v2 prints them before its parse, as the command line does
+        // (`api::start::CallerStart::version`; line WQA's D14, 2026-11-20).
         for word in ["-version", "-version-full-json"] {
             let text = format!(
-                "the NCBI C++ Toolkit option {word} runs on the command line of LOSAT's {upper} only: the library API and the Web engine do not write NCBI's version text"
+                "the NCBI C++ Toolkit option {word} runs on the command line and in the Web engine's ABI v2 of LOSAT's {upper} only: the library API and the Web engine's ABI v1 do not write NCBI's version text"
             );
             for error in [
                 parse(program, &["-out", word]).unwrap_err(),
@@ -2443,15 +2445,23 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
             .map(|error| error.exit_code()),
         Some(0)
     );
-    // `-xmlhelp` prints NCBI's XML on the command line (line RG item E2x, `ncbi_xmlhelp_tests`);
-    // the library API, which these tests are (no application start), refuses it by name.
-    for program in ["blastn", "makeblastdb", "rpsbproc"] {
+    // `-xmlhelp` prints NCBI's XML on the command line (line RG item E2x, `ncbi_xmlhelp_tests`)
+    // and, for the programs it runs, in the Web engine's ABI v2 (line WQA's D14, 2026-11-20); the
+    // library API, which these tests are (no application start), refuses it by name.
+    for (program, place) in [
+        (
+            "blastn",
+            "the command line and in the Web engine's ABI v2 of LOSAT's BLASTN",
+        ),
+        ("makeblastdb", "the command line of LOSAT's"),
+        ("rpsbproc", "the command line of LOSAT's"),
+    ] {
         let error = try_parse_from::<Cli, _, _>(["losat", program, "-xmlhelp"]).unwrap_err();
         let text = crate::cli::render_message(&error);
         assert!(
-            text.contains(
-                "the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's"
-            ),
+            text.contains(&format!(
+                "the NCBI C++ Toolkit option -xmlhelp runs on {place}"
+            )),
             "{program}: {text}"
         );
     }

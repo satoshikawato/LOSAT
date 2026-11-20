@@ -647,11 +647,15 @@ fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
 }
 
 /// No NCBI counterpart: an error of LOSAT's argument parser (`cli::try_parse_from`) or one of its
-/// refusals, written as clap writes it, and its exit status. The help that stopped the parser is
-/// written as its error's text is, but the XML of `-xmlhelp`, which `cli::xml_help_text` writes
-/// (NCBI's `PrintUsageXml(cout)`, exit status 0: ncbiapp.cpp:685-697, quoted at `ncbi_xmlhelp`).
+/// refusals, written as clap writes it, and its exit status. The help that stopped the parser, and
+/// the XML of `-xmlhelp` (NCBI's `PrintUsageXml(cout)`: ncbiapp.cpp:685-697, quoted at
+/// `ncbi_xmlhelp`), are written to the standard output, exit status 0 (`cli::printed_text`, which
+/// gives LOSAT Web's ABI v2 the same text).
 fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
-    if let Some(text) = crate::cli::xml_help_program(error).and_then(crate::cli::xml_help_text) {
+    // rpsbproc's arguments are not the single-dash words of the BLAST programs. rpsbproc's
+    // messages and help are written without a panic on a closed stream
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
+    if let Some(text) = crate::cli::printed_text(error, argv_is_rpsbproc) {
         if argv_is_rpsbproc {
             crate::rpsbproc::write_stdout(&text);
         } else {
@@ -659,20 +663,11 @@ fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
         }
         std::process::exit(0);
     }
-    // rpsbproc's arguments are not the single-dash words of the BLAST programs.
     let message = crate::cli::command_line_message(error, argv_is_rpsbproc);
-    // rpsbproc's messages and help are written without a panic on a closed stream
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
     if argv_is_rpsbproc {
-        if error.use_stderr() {
-            crate::rpsbproc::write_stderr(&message);
-        } else {
-            crate::rpsbproc::write_stdout(&message);
-        }
-    } else if error.use_stderr() {
-        write_dropping_errors(&mut std::io::stderr(), &message);
+        crate::rpsbproc::write_stderr(&message);
     } else {
-        write_dropping_errors(&mut std::io::stdout(), &message);
+        write_dropping_errors(&mut std::io::stderr(), &message);
     }
     std::process::exit(error.exit_code());
 }

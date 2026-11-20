@@ -114,13 +114,61 @@ fn command(binary: &Path, program: &str, case: &Case) -> Command {
         Some(file) => Stdio::from(fs::File::open(dir.join(file)).unwrap()),
         None => Stdio::null(),
     };
+    let out = out_file(program, case);
+    let words = case.words.iter().map(|word| {
+        if word == OUT_FILE {
+            out.as_os_str().to_owned()
+        } else {
+            word.into()
+        }
+    });
     command
         .env("NCBI_CONFIG_PATH", &dir)
         .current_dir(&dir)
         .arg(program)
-        .args(&case.words)
+        .args(words)
         .stdin(stdin);
     command
+}
+
+/// The word of the table that names a file the row writes (`-out @OUT@`): the run writes it
+/// in the test's temporary directory (`out_file`), and the file is compared with NCBI's,
+/// frozen in `ncbi/<name>.file`.
+const OUT_FILE: &str = "@OUT@";
+
+/// The file of `OUT_FILE` for `case` of `program`.
+fn out_file(program: &str, case: &Case) -> PathBuf {
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "masker-out-{program}-{}-{}",
+        case.name,
+        std::process::id()
+    ))
+}
+
+/// Whether the file that `case` wrote (`OUT_FILE`) differs from NCBI's; the file is removed.
+/// A row without `OUT_FILE` writes none.
+fn written_file_differs(program: &str, case: &Case) -> bool {
+    if !case.words.iter().any(|word| word == OUT_FILE) {
+        return false;
+    }
+    let path = out_file(program, case);
+    let got = fs::read(&path).unwrap_or_default();
+    let _ = fs::remove_file(&path);
+    let want = fs::read(
+        fixtures(program)
+            .join("ncbi")
+            .join(format!("{}.file", case.name)),
+    )
+    .unwrap();
+    if got != want {
+        eprintln!(
+            "--- {}: the written file differs\nLOSAT: {:?}\nNCBI:  {:?}",
+            case.name,
+            String::from_utf8_lossy(&got),
+            String::from_utf8_lossy(&want)
+        );
+    }
+    got != want
 }
 
 /// NCBI's stdout, stderr and exit status for `case` of `program`. NCBI's bytes come from Linux.
@@ -193,8 +241,17 @@ fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
 }
 
 /// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
-/// error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
+/// error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8). A row that
+/// LOSAT refuses by name has its message in `refused/<name>.err` (no standard output, exit
+/// status 1); NCBI's bytes of that row stay in `ncbi/` as the record of what NCBI does.
 fn expected_row(program: &str, name: &str) -> Streams {
+    if let Ok(err) = fs::read(
+        fixtures(program)
+            .join("refused")
+            .join(format!("{name}.err")),
+    ) {
+        return (Vec::new(), err, 1);
+    }
     let file = |extension: &str| {
         fixtures(program)
             .join("ncbi")
@@ -280,7 +337,8 @@ fn rows_that_differ(program: &str) -> Vec<String> {
     let mut differ = Vec::new();
     for case in cases_here(program) {
         let (got, want) = (run(program, &case), expected(program, &case));
-        if got != want {
+        let file_differs = written_file_differs(program, &case);
+        if got != want || file_differs {
             differ.push((case.name.clone(), got, want));
         }
     }
@@ -350,7 +408,7 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
             (out, err, i32::from(status != 0))
         };
         let got = (out, err, status);
-        if got != expected {
+        if written_file_differs(program, &case) || got != expected {
             differ.push((case.name.clone(), got, expected));
         }
     }

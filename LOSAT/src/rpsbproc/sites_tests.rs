@@ -251,7 +251,7 @@ fn the_motif_checks_of_the_binary_allocate_as_the_model_does() {
         }
         counts
     };
-    let mut checked = 0;
+    let (mut checked, mut wrong) = (0, Vec::new());
     for line in BINARY_ALLOCS
         .lines()
         .filter(|line| !line.starts_with('#') && !line.is_empty())
@@ -273,8 +273,11 @@ fn the_motif_checks_of_the_binary_allocate_as_the_model_does() {
             .map(|(size, d)| format!("{size}:{d:+}"))
             .collect::<Vec<_>>()
             .join(" ");
-        assert_eq!(text, delta, "{site} {motif} (baseline {base})");
+        if text != delta {
+            wrong.push(format!("{site} {motif} (baseline {base}): model {text:?}, binary {delta:?}"));
+        }
         checked += 1;
     }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     assert_eq!(checked, BINARY_ROWS);
 }

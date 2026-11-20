@@ -12,9 +12,9 @@ const STRING_HOST: &str = include_str!("../../tests/fixtures/rpsbproc_growth/str
 const VECTOR_TABLE: &str = include_str!("../../tests/fixtures/rpsbproc_growth/vector_ops.tsv");
 
 // The numbers of rows and operations of the tables.
-const STRING_COUNTS: (usize, usize) = (7620, 0);
+const STRING_COUNTS: (usize, usize) = (7620, 45502);
 const STRING_HOST_ROWS: usize = 12;
-const VECTOR_COUNTS: (usize, usize) = (11237, 0);
+const VECTOR_COUNTS: (usize, usize) = (11237, 98501);
 
 fn rows(table: &str) -> impl Iterator<Item = (&str, &str)> {
     table

@@ -1262,6 +1262,10 @@ impl ProSite {
         if start_pos >= tlen {
             return (Ok(None), false);
         }
+        #[cfg(test)]
+        if past == Past::Fail {
+            growth::events::match_starts();
+        }
         let matcher = Matcher {
             text,
             tlen,
@@ -1377,7 +1381,12 @@ impl ProSite {
         if let Ok(Some(_)) = result {
             return Ok(true);
         }
-        match self.run(text, tlen, start_pos, Past::Pass, text_heap).0 {
+        #[cfg(test)]
+        growth::events::pause(true);
+        let second = self.run(text, tlen, start_pos, Past::Pass, text_heap).0;
+        #[cfg(test)]
+        growth::events::pause(false);
+        match second {
             Ok(None) => Ok(false),
             _ => Err(MatchError::ReadPast),
         }

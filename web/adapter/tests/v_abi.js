@@ -375,7 +375,13 @@ function hitListSize(argv, number) {
 }
 
 // The lines of `text` (each with its line end) that it has more times than `held` (line -> copies),
-// in order; `held` then holds them (the adapter's `Diagnostics`).
+// in order; `held` then holds them (the adapter's `Diagnostics`). The adapter compares the error
+// of a format that failed alone as one text (`Diagnostics::error`), and this compares its lines
+// too: the two agree while no two different errors of a run share a line. NCBI's exception
+// reports end with an empty line, so a case whose formats stop with different exceptions (BLASTX's
+// HSPs of length 0 with -outfmt 5: the adapter's test
+// `formats_that_stop_after_a_query_warning_add_it_once`) is not one for this harness (review r2 of
+// 2026-11-20, L2).
 function linesAfter(held, text) {
   const copies = new Map();
   let added = "";

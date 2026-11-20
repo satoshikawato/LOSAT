@@ -402,10 +402,13 @@ def own_search() -> list[dict]:
     Runs whose own `-outfmt` is structured (5, 8, 11, 13; BLASTN's 17), with a query whose first
     record has no residues (review r3 M2): the CLI's run of the structured format does not write
     the query's `Sequence contains no data` warning, which those of outfmt 0, 6 and 7 write, so
-    stream 3 adds it after the argv's standard error.
+    stream 3 adds it after the argv's standard error; once, also in a run of two searches
+    (`-outfmt 5 -num_descriptions 5`), whose outfmt 0 writes it in the other search (review of
+    line WQA-LW, r2 L3, 2026-11-20).
 
     TBLASTX runs whose messages go nowhere (`-logfile /dev/null`, `-logfile ""`; review r3 M1):
-    stream 3 is empty, as the CLI's standard error for every format."""
+    stream 3 is empty, as the CLI's standard error for every format, also where the other formats
+    would add a query's warning to it (`-outfmt 5`, the query with an empty first record)."""
     inputs = {
         "blastp": ["-query", "tests/fasta/outfmt0/e2e_many_query.faa",
                    "-subject", "tests/fasta/outfmt0/e2e_many_subject.faa"],
@@ -484,6 +487,13 @@ def own_search() -> list[dict]:
         for outfmt in ("5", "8", "11", "13", *(("17",) if program == "blastn" else ())):
             add(f"query_warnings.{program}.outfmt{outfmt}", program, [], outfmt, failure=False, given=empty_first)
             searches[-1].update({"files": True} if outfmt == "13" else {"sam": True} if outfmt == "17" else {})
+        # A run of two searches (review r2 of 2026-11-20, L3): outfmt 6 and 7 of the argv's search
+        # add the warning, and outfmt 0's search, which writes it too, does not add it again.
+        add(f"query_warnings.{program}.outfmt5.nd5", program, ["-num_descriptions", "5"], "5", failure=False,
+            given=empty_first)
+    for name, logfile in (("devnull", "/dev/null"), ("empty", "")):
+        add(f"query_warnings.tblastx.outfmt5.logfile.{name}", "tblastx", ["-logfile", logfile], "5", failure=False,
+            given=empty_first)
     for name, logfile in (("devnull", "/dev/null"), ("empty", "")):
         add(f"logfile.tblastx.na0.{name}", "tblastx", ["-num_alignments", "0", "-logfile", logfile], failure=False)
         add(f"logfile.tblastx.line_length.warned.{name}", "tblastx", [*handler["line_length"], "-logfile", logfile],

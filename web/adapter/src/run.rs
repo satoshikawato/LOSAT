@@ -1675,11 +1675,14 @@ impl std::io::Write for Kept<'_> {
 /// other search writes only the lines of its warnings that stream 3 does not hold yet: the reader's
 /// and the queries' warnings, which every search of the run writes (up to the place where its
 /// formats end), come with the argv's search, and so does a formatting handler's line that both
-/// searches write (`Examining 5 or more matches`). The formatting handler's lines of a format
-/// after the first of its search come where stream 3 does not hold them. The errors of the
-/// searches that failed and the refusals of the formats that failed alone follow the warnings of
-/// their search, each once (streams 6 and 7 of a search stop at the same row). What is added goes
-/// where the sink writes it (`CallerSink::add`, `CallerSink::error`).
+/// searches write (`Examining 5 or more matches`). Each format after the first of its search
+/// then adds, in the search's order, its formatting handler's lines, what its run writes with its
+/// queries' reports where the argv's format is a structured one (`Searched::later`: the queries'
+/// warnings; BLASTX: every line of its reports' standard error), and its refusal where it failed
+/// alone, each where stream 3 does not hold it; the error of a search that failed follows that
+/// search's warnings. An error or a refusal comes once as a whole text (streams 6 and 7 of a
+/// search stop at the same row). What is added goes where the sink writes it (`CallerSink::add`,
+/// `CallerSink::error`).
 struct Diagnostics<'t> {
     /// The lines that stream 3 holds, with the number of times it holds each.
     lines: std::collections::HashMap<&'t [u8], usize>,
@@ -3635,7 +3638,10 @@ mod tests {
     /// Stream 3 of a run whose own -outfmt is structured: NCBI's standard error `own` of its command
     /// line, then each line of `other` (stream 3 of the run without -outfmt: outfmt 0, 6 and 7) past
     /// the copies of it that `own` holds. The structured formats write none of the queries' warnings
-    /// that outfmt 0, 6 and 7 write (line WQA's sweep, D3 review r3 M2, 2026-11-19).
+    /// that outfmt 0, 6 and 7 write (line WQA's sweep, D3 review r3 M2, 2026-11-19). The lines
+    /// come in the order of the run without -outfmt, which is stream 3's order (format by format,
+    /// §5) for the rows that use this: none has a format that failed alone before another
+    /// format's warning (review r2 of 2026-11-20, L2).
     fn and_the_lines_of(own: &[u8], other: &[u8]) -> String {
         let mut held: std::collections::HashMap<&[u8], usize> = std::collections::HashMap::new();
         for line in own.split_inclusive(|&byte| byte == b'\n') {
@@ -5640,5 +5646,31 @@ mod tests {
         // The argv's own outfmt 6 fails the run after the warning, as the CLI fails.
         let error = run(&[&words[..], &["-outfmt", "6"]].concat(), &query, &subject).unwrap_err();
         assert!(error.contains(tabular.trim_end()), "{error}");
+        // A run of two searches (`-num_descriptions 1` gives format 0 a hit list of 250 subjects
+        // and leaves the tabular formats theirs of 500, §7): 250 subjects score above the one
+        // with the HSP of length 0, so format 0 does not show it and completes; the tabular
+        // search's formats, which fail alone, each stop at it, after the warning. They share
+        // their search's diagnostics: outfmt 6 wrote the warning there before it stopped, and
+        // outfmt 7 does not write it again (`blastx::local::write_run`; line WQA, 2026-11-20:
+        // stream 3 showed it twice).
+        let mut subjects: Vec<FastaRecord> = (1..=250)
+            .map(|number| FastaRecord::new(&format!("Subject_{number}"), b"sbest", b"CVFNR"))
+            .collect();
+        subjects.push(FastaRecord::new(
+            "Subject_251",
+            b"s1",
+            &sequence("x2g_c0054_s.faa"),
+        ));
+        let one = ["-num_descriptions", "1"];
+        let written = streams(&[&words[..], &one].concat(), &query, &subjects).unwrap();
+        assert_eq!(discarded(&written), [6, 7]);
+        // The CLI's standard error for the argv, then what outfmt 6 adds: its handler's line
+        // and its refusal (outfmt 7 adds the same lines).
+        let ignored = "Warning: [blastx] The parameter -num_descriptions is ignored for output \
+                       formats > 4 . Use -max_target_seqs to control output\n";
+        assert_eq!(
+            diagnostics_of(&written),
+            format!("{warning}{ignored}{tabular}")
+        );
     }
 }

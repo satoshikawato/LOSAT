@@ -446,6 +446,7 @@ fn display_alignment(
     counts: Option<crate::config::ScoringMatrix>,
 ) -> Result<(DisplayAlignment, RowCounts)> {
     let raw = &hsp.hsp;
+    let (q_end, s_end) = hsp.seqalign_ends();
     let context = &batch.prepared.contexts[raw.context];
     let query_length = query_record.sequence.len();
     let mut qi = usize::try_from(raw.q_start)?;
@@ -520,7 +521,7 @@ fn display_alignment(
         }
     }
     ensure!(
-        qi == raw.q_end as usize && si == raw.s_end as usize,
+        qi == q_end as usize && si == s_end as usize,
         "BLASTX edit script does not reach final endpoints"
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:930-959
@@ -608,7 +609,7 @@ fn display_alignment(
     // Every consumed query residue has width three; query gaps retain columns
     // between the mapped mask endpoints. The masks here are the returned DNA
     // intervals, after the core protein-to-DNA conversion, not lookup AA masks.
-    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
+    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, q_end);
     // A record cut to `-query_loc`: the reports read the frame from the record (NCBI reference:
     // c++/src/objtools/align_format/showalign.cpp:411-422, `seq_range::record_frame`).
     let query_place = query_record.placement();
@@ -669,7 +670,7 @@ fn display_alignment(
             } else {
                 (query_length as i32 + i32::from(raw.frame) - nt).div_euclid(3)
             };
-            query_columns[(aa.clamp(raw.q_start, raw.q_end - 1) - raw.q_start) as usize]
+            query_columns[(aa.clamp(raw.q_start, q_end - 1) - raw.q_start) as usize]
         };
         let (first, last) = if raw.frame > 0 {
             (map_nt(from), map_nt(to))
@@ -751,7 +752,7 @@ fn display_alignment(
             qstart: qstart + query_offset,
             qend: qend + query_offset,
             sstart: raw.s_start + 1 + subject_offset,
-            send: raw.s_end + subject_offset,
+            send: s_end + subject_offset,
             frame,
             subject_stored_gaps,
         },
@@ -782,21 +783,19 @@ pub(crate) fn hsp_scores(
     query_length: usize,
 ) -> Result<crate::report::hit_sort::HspScores> {
     let raw = &hsp.hsp;
+    let (q_end, s_end) = hsp.seqalign_ends();
     let length = display_script(hsp)?
         .iter()
         .map(|op| op.num() as usize)
         .sum();
-    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
+    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, q_end);
     Ok(crate::report::hit_sort::HspScores::of_values(
         hsp.bit_score,
         hsp.evalue,
         hsp.identity,
         length,
         (usize::try_from(qstart)?, usize::try_from(qend)?),
-        (
-            usize::try_from(raw.s_start + 1)?,
-            usize::try_from(raw.s_end)?,
-        ),
+        (usize::try_from(raw.s_start + 1)?, usize::try_from(s_end)?),
     ))
 }
 
@@ -1030,7 +1029,16 @@ pub(super) struct LocalReport<'a, 'p> {
     pub refusal: &'a mut crate::api::local_blast::FormatRefusal,
 }
 
-/// Sorts the HSPs of each list of `batches` by e-value, the order of every report.
+/// Sorts the HSPs of each list of `batches` by e-value, the order of every report: NCBI sorts each
+/// list's HSPs, on their own ends, before it makes their Seq-aligns (`Hsp::seqalign_ends`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+/// ```c++
+///         // Sort HSPs with e-values as first priority and scores as
+///         // tie-breakers, since that is the order we want to see them in
+///         // in Seq-aligns.
+///         Blast_HSPListSortByEvalue(hsp_list);
+/// ```
 pub(super) fn sort_lists(batches: &mut [BatchResults]) {
     for batch in batches.iter_mut() {
         for lists in &mut batch.queries {
@@ -1386,7 +1394,7 @@ fn write_pairwise(
     // (`Unknown` where it throws), or a sequence's with parsed Seq-ids
     // (`database_description_label`), as the other programs' (D2 of line RG T7: no longer the
     // record's first word and rest); the others are not shown.
-    let ids: Vec<std::sync::Arc<[u8]>> = match shown {
+    let ids: Vec<crate::report::pairwise::DescriptionLabel> = match shown {
         ShownSubjects::Fasta { parsed, .. } => {
             let mut reported = vec![false; subjects.len()];
             for hit in hits {
@@ -1394,20 +1402,19 @@ fn write_pairwise(
                     *seen = true;
                 }
             }
-            let none: std::sync::Arc<[u8]> = std::sync::Arc::from(&b""[..]);
             subjects
                 .iter()
                 .enumerate()
                 .map(|(index, s)| {
                     if !reported[index] {
-                        return std::sync::Arc::clone(&none);
+                        return Default::default();
                     }
-                    std::sync::Arc::from(crate::report::pairwise::database_description_label(
+                    crate::report::pairwise::database_description_label(
                         &s.title,
                         &crate::report::defline::UNNAMED_SOURCE,
                         parsed.shown(index),
                         true,
-                    ))
+                    )
                 })
                 .collect()
         }
@@ -1532,6 +1539,20 @@ fn write_pairwise(
             ),
         }
     });
+    // The queries' gapped K where a batch gives its own (`BatchResults::gapped_k`), in the
+    // reports' order of the queries; the table's K elsewhere.
+    let query_gapped_k: Option<Vec<f64>> = batches
+        .iter()
+        .any(|batch| batch.gapped_k.is_some())
+        .then(|| {
+            batches
+                .iter()
+                .flat_map(|batch| match &batch.gapped_k {
+                    Some(gapped_k) => gapped_k.clone(),
+                    None => vec![report.gapped_karlin.k; batch.queries.len()],
+                })
+                .collect()
+        });
     // The warnings of each query and the texts of its subjects' reads, at the shared writer's places
     // (`QueryWarnings::before_query`, `subject_read`).
     let mut warnings =
@@ -1555,6 +1576,7 @@ fn write_pairwise(
         database,
         records_parsed,
         &record_titles,
+        query_gapped_k.as_deref(),
         probe,
         first_hsp,
         anchored
@@ -1627,6 +1649,10 @@ pub(super) fn pairwise_hits(
                     let (a, counts) =
                         counted_alignment(batch, hsp, subject, query, &code, options.scoring)?;
                     let raw = &hsp.hsp;
+                    // The report's hit is the HSP's Seq-align, so its offsets end where the
+                    // Seq-align does (`Hsp::seqalign_ends`); their one reader here is
+                    // `PairwiseHit::rows_empty`, NCBI's `CSeq_align::GetSeqRange` on these rows.
+                    let (q_end, s_end) = hsp.seqalign_ends();
                     let len = a.qseq.len();
                     let hit = Hit {
                         identity: 100.0 * counts.identity as f64 / len as f64,
@@ -1646,9 +1672,9 @@ pub(super) fn pairwise_hits(
                         s_idx: u32::try_from(list.oid)?,
                         raw_score: raw.score,
                         sort_query_offset: usize::try_from(raw.q_start)?,
-                        sort_query_end: usize::try_from(raw.q_end)?,
+                        sort_query_end: usize::try_from(q_end)?,
                         sort_subject_offset: usize::try_from(raw.s_start)?,
-                        sort_subject_end: usize::try_from(raw.s_end)?,
+                        sort_subject_end: usize::try_from(s_end)?,
                         has_sort_offsets: true,
                         gap_info: Some(hsp.edit_script.clone()),
                         num_positives: counts.positive,
@@ -1763,15 +1789,16 @@ fn pairwise_metadata(
     // A database's lines come from `ShownSubjects::pairwise_database`; these fields serve
     // `-subject` (the Gumbel block's printed numbers do not depend on the length).
     let (database_name, num_sequences, total) = match shown {
+        // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are held in memory.
         ShownSubjects::Fasta { path, .. } => (
             format!("User specified sequence set (Input: {})", path.display()),
-            subjects.len(),
-            subjects.iter().map(|s| s.sequence.len()).sum(),
+            subjects.len() as i64,
+            subjects.iter().map(|s| s.sequence.len() as i64).sum(),
         ),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
-            usize::try_from(pairwise.num_sequences).unwrap_or(usize::MAX),
-            usize::try_from(pairwise.total_letters).unwrap_or(usize::MAX),
+            pairwise.num_sequences,
+            pairwise.total_letters,
         ),
     };
     BlastpPairwiseReport {
@@ -1792,7 +1819,7 @@ fn pairwise_metadata(
             Default::default()
         },
         gumbel: options.has_gumbel_block().then(|| {
-            lookup_protein_gumbel_params(&scoring, total as i64)
+            lookup_protein_gumbel_params(&scoring, total)
                 .expect("the gap costs are in the matrix's table (`args.rs`)")
         }),
         // BLASTX's sections read the counts of `BlastxPairwiseOptions` (`write_blastx_pairwise_report`).

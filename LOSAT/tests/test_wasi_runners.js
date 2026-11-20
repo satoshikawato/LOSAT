@@ -241,12 +241,17 @@ for (const threaded of [false, true]) {
           assert.ok(WebAssembly.validate(bytes));
           fs.writeFileSync(fixture, bytes);
           // Descriptor 4 keeps the test's stderr for the exit line; for fd 2 the host's standard
-          // error is the slow pipe and its standard output /dev/null.
+          // error is the slow pipe and its standard output /dev/null. The pipeline is a script file
+          // run by `sh`, not a `sh -c` string: the paths reach it only as its arguments, and CodeQL
+          // (js/shell-command-injection-from-environment, alerts #41 and #45) reads every argument
+          // of `sh -c` as part of the command.
           const redirect = fd === 1 ? "4>&2" : "4>&2 2>&1 >/dev/null";
-          const result = spawnSync("sh", ["-c",
-            `{ python3 -c "$3" ${fd} && "$0" "$1" "$2"; echo "exit $?" >&4; } ${redirect} | { sleep 1; wc -c; }`,
+          const pipeline = path.join(directory, "slow-reader.sh");
+          fs.writeFileSync(pipeline,
+            `{ python3 -c "$4" "$5" && "$1" "$2" "$3"; echo "exit $?" >&4; } ${redirect} | { sleep 1; wc -c; }\n`);
+          const result = spawnSync("sh", [pipeline,
             process.execPath, path.join(__dirname, threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js"),
-            fixture, NONBLOCK], {
+            fixture, NONBLOCK, String(fd)], {
             env: hostEnv(), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
           });
           assert.ifError(result.error);
@@ -638,6 +643,32 @@ test("LOSAT_WASI_GUARD_CACHE's index compiles the cached bytes at once and keeps
   }
 });
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:176-181
+// ```c++
+//     // ... and wait for the threads to finish
+//     Uint8 retv(0);
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         void * result(0);
+//         (*thread)->Join(&result);
+// ```
+// The join of the test modules (spawner, reactorSpawner): wait until the thread count at address
+// 0 is `spawns` (the instructions that push it), keeping the count it compares in the i32 local
+// `counted`:
+//   block { loop { counted = count; if (counted == spawns) break; memory.atomic.wait32(0, counted, -1) } }
+// The wait expects the count that was compared, not a second load of it. With a second load, a
+// thread that adds the last count between the two loads and notifies before the wait starts left
+// the wait on a count that no thread changes again, with no notify to come: 20 of 22,000 runs of
+// the guard cache index test's 2-thread command with 2 standby workers hung so until killed, and
+// 0 of 22,000 with this form (2026-11-19, Node 24.21.0).
+// `late` puts the compare and the wait apart until every thread has added its count, as when
+// the threads end in that gap (spawner's `late`).
+function awaitCount(spawns, counted, late = false) {
+  const load = [...i32(0), 0xfe, 0x10, 2, 0];                                   // i32.atomic.load(0)
+  const apart = late ? [0x03, 0x40, ...load, ...spawns, 0x47, 0x0d, 0, 0x0b] : []; // loop { if (count != spawns) again }
+  return [0x02, 0x40, 0x03, 0x40, ...load, 0x22, counted, ...spawns, 0x46, 0x0d, 1, ...apart,
+    ...i32(0), 0x20, counted, 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b];
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:156-180
 // ```c++
 //     // Create the threads ...
@@ -651,11 +682,13 @@ test("LOSAT_WASI_GUARD_CACHE's index compiles the cached bytes at once and keeps
 //         (*thread)->Join(&result);
 // ```
 // A command that starts `spawns` threads (start_arg 1, 2, 4, ...; exit 90 when a spawn
-// fails) and waits until every thread has added its start_arg and tid. It prints the
-// thread count and 'a' + the tid sum and exits with the start_arg sum, so a lost,
+// fails) and waits until every thread has added its start_arg and tid (awaitCount). It prints
+// the thread count and 'a' + the tid sum and exits with the start_arg sum, so a lost,
 // repeated or misdirected start changes stdout or the status. `bulk` adds a memory.fill
-// and a memory.copy for the shared-memory guard. The host options under test change
-// when workers boot, never this output.
+// and a memory.copy for the shared-memory guard. `late`: the threads do not notify, and the
+// command waits only after every thread has added (awaitCount's `late`), so a join that waits
+// for a count already reached never returns. The host options under test change when workers
+// boot, never this output.
 // A module on the shared memory with no instruction for the shared-memory guard.
 function nothingToGuard() {
   return Buffer.from([
@@ -667,7 +700,7 @@ function nothingToGuard() {
   ]);
 }
 
-function spawner(spawns, { bulk = false } = {}) {
+function spawner(spawns, { bulk = false, late = false } = {}) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                          // proc_exit(i32)
     [0x60, 0, 0],                                // _start()
@@ -690,9 +723,7 @@ function spawner(spawns, { bulk = false } = {}) {
     main.push(...i32(1 << i), 0x10, 1, ...i32(1), 0x48, 0x04, 0x40, ...i32(90), 0x10, 0, 0x0b);
   }
   main.push(
-    // block { loop { if (count == spawns) break; memory.atomic.wait32(0, count, -1) } }
-    0x02, 0x40, 0x03, 0x40, ...load(0), ...i32(spawns), 0x46, 0x0d, 1,
-    ...i32(0), ...load(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...awaitCount(i32(spawns), 0, late),                                       // local 0 = counted
     ...byte(32, [...load(0), ...i32(48), 0x6a]), ...byte(33, [...load(8), ...i32(97), 0x6a]),
     ...byte(34, i32(10)),
     ...i32(16), ...i32(32), 0x36, 2, 0, ...i32(20), ...i32(3), 0x36, 2, 0,  // iovec {32, 3}
@@ -702,7 +733,7 @@ function spawner(spawns, { bulk = false } = {}) {
     ...load(4), 0x10, 0,                                                       // proc_exit(sum)
   );
   const thread = [...add(4, [0x20, 1]), ...add(8, [0x20, 0]), ...add(0, i32(1)),
-    ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a];                             // notify(0, 1)
+    ...(late ? [] : [...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a])];           // notify(0, 1)
   return Buffer.from([
     0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, types),
@@ -710,7 +741,7 @@ function spawner(spawns, { bulk = false } = {}) {
     ...section(3, vector([[1], [3]])),
     ...section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 3],
       [...name("wasi_thread_start"), 0, 4]])),
-    ...section(10, vector([body(main), body(thread)])),
+    ...section(10, vector([body(main, 1), body(thread)])),
   ]);
 }
 
@@ -897,6 +928,28 @@ test("a spawn returns at once when its standby worker waits, with the same threa
   }
 });
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:176-181
+// ```c++
+//     // ... and wait for the threads to finish
+//     Uint8 retv(0);
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         void * result(0);
+//         (*thread)->Join(&result);
+// ```
+// The test modules' join (awaitCount) when every thread adds its count between the join's compare
+// and its wait and notifies nobody (spawner's `late`): the wait sees a count other than the one
+// compared and the join compares again. A wait that expected a second load of the count slept on
+// the reached count until spawnSync's timeout. Both standby workers wait for their threads, so
+// each spawn returns before its thread runs and the first compare comes before the threads' counts.
+test("the test modules' join ends when the threads add their counts between its compare and its wait", () => {
+  const result = runThreaded(spawner(2, { late: true }), ["-num_threads", "3"], { LOSAT_WASI_THREADS_DEBUG: "1" },
+    { startDelayMs: 3000 });
+  // 2 threads, tid sum 3 ('a' + 3), start_arg sum 1 + 2.
+  assert.equal(result.status, 3, result.stderr);
+  assert.equal(result.stdout, "2d\n");
+  assert.deepEqual(hostEvents(result.stderr).filter((e) => e.event === "ready" && e.waiting).map((e) => e.tid), [1, 2]);
+});
+
 test("a rejected spawn has the same result with LOSAT_WASI_PRESPAWN", () => {
   const bytes = spawner(3);
   const argv = ["-num_threads", "4"];
@@ -1038,22 +1091,16 @@ function reactorSpawner() {
   const load = (address) => [...i32(address), 0xfe, 0x10, 2, 0];                   // i32.atomic.load
   const store = (address, value) => [...i32(address), ...value, 0xfe, 0x17, 2, 0];  // i32.atomic.store
   const add = (address, value) => [...i32(address), ...value, 0xfe, 0x1e, 2, 0, 0x1a]; // atomic add; drop
-  const spawns = [0x20, 0], i = 1;                                             // local 0 = spawns, local 1 = i
+  const spawns = [0x20, 0], i = 1;                                 // locals: 0 spawns, 1 i, 2 counted
   const run = [...store(0, i32(0)), ...store(4, i32(0)), ...store(8, i32(0)), ...store(12, i32(0)),
     // block { loop { if (i >= spawns) break; if (thread-spawn(1 << i) < 1) return -1; i += 1 } }
     0x02, 0x40, 0x03, 0x40, 0x20, i, ...spawns, 0x4e, 0x0d, 1,
     ...i32(1), 0x20, i, 0x74, 0x10, 0, ...i32(1), 0x48, 0x04, 0x40, ...i32(-1), 0x0f, 0x0b,
     0x20, i, ...i32(1), 0x6a, 0x21, i, 0x0c, 0, 0x0b, 0x0b,
-    // block { loop { if (count == spawns) break; memory.atomic.wait32(0, count, -1) } }
-    0x02, 0x40, 0x03, 0x40, ...load(0), ...spawns, 0x46, 0x0d, 1,
-    ...i32(0), ...load(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...awaitCount(spawns, 2),
     ...store(12, i32(1)), ...i32(12), ...spawns, 0xfe, 0x00, 2, 0, 0x1a,          // release; notify(12, spawns)
     ...load(4),
   ];
-  const withLocal = (instructions) => {                                          // one i32 local
-    const bytes = [1, 1, 0x7f, ...instructions, 0x0b];
-    return [...uleb(bytes.length), ...bytes];
-  };
   const thread = [...add(4, [0x20, 1]), ...add(8, [0x20, 0]), ...add(0, i32(1)),
     ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a,                              // notify(0, 1)
     // block { loop { if (released) break; memory.atomic.wait32(12, 0, -1) } }
@@ -1069,7 +1116,7 @@ function reactorSpawner() {
     ...section(7, vector([[...name("memory"), 2, 0], [...name("_initialize"), 0, 1],
       ...api.map((alias) => [...name(alias), 0, 1]), [...name("run"), 0, 2],
       [...name("wasi_thread_start"), 0, 3]])),
-    ...section(10, vector([body([]), withLocal(run), body(thread)])),
+    ...section(10, vector([body([]), body(run, 2), body(thread)])),
   ]);
 }
 

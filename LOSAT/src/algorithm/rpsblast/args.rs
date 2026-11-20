@@ -122,7 +122,7 @@ pub struct RpsblastArgs {
         help = "Use composition-based statistics: D or d default (as 0 for RPS-BLAST), 0 or F or f simplified, 1 or T or t composition-based statistics, 2 and 3 as 1 with a larger preliminary e-value"
     )]
     pub comp_based_stats: String,
-    #[arg(long, default_value = "0", value_name = "SPEC")]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 6, 7 and 10", "6, 7 and 10", ""))]
     pub outfmt: String,
     #[arg(
         long = "show_gis",
@@ -134,11 +134,11 @@ pub struct RpsblastArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
-    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
-    /// blast_args.cpp:2683-2721, quoted at `FormattingArgs`): the width of the outfmt 0
-    /// alignment rows; the sorts are read with NCBI's warnings and sort nothing: NCBI's
-    /// rpsblast does not hand them to its formatter (`app/rpsblast_app.cpp:187`,
-    /// `SetLineLength` only).
+    // `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    // blast_args.cpp:2683-2721, quoted at `FormattingArgs`): the width of the outfmt 0
+    // alignment rows; the sorts are read with NCBI's warnings and sort nothing: NCBI's
+    // rpsblast does not hand them to its formatter (`app/rpsblast_app.cpp:187`,
+    // `SetLineLength` only).
     #[command(flatten)]
     pub formatting: FormattingArgs,
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]

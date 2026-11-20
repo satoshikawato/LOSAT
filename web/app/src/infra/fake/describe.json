@@ -88,6 +88,16 @@
     ]
    },
    {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-searchsp",
     "help": "Effective length of the search space",
     "takes_value": true
@@ -126,7 +136,7 @@
    },
    {
     "flag": "-perc_identity",
-    "help": "Percent identity threshold for filtering HSPs (Blast_HSPTest)",
+    "help": "Percent identity threshold for filtering HSPs (default: 0, no filtering)",
     "takes_value": true
    },
    {
@@ -161,7 +171,7 @@
    },
    {
     "flag": "-max_hsps",
-    "help": "Maximum number of HSPs per subject (unlimited when omitted) Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270",
+    "help": "Maximum number of HSPs per subject (unlimited when omitted)",
     "takes_value": true
    },
    {
@@ -242,7 +252,7 @@
    },
    {
     "flag": "-subject_besthit",
-    "help": "Apply subject best hit filtering (disabled by default). Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135",
+    "help": "Apply subject best hit filtering (disabled by default)",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -485,6 +495,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -1087,6 +1107,16 @@
     ]
    },
    {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-searchsp",
     "help": "Effective length of the search space",
     "takes_value": true
@@ -1621,6 +1651,16 @@
     ]
    },
    {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-searchsp",
     "help": "Effective length of the search space",
     "takes_value": true
@@ -2145,6 +2185,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [

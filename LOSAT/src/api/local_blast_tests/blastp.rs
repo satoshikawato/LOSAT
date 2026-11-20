@@ -812,3 +812,83 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
         "the hit records of the blocks differ from those of the search of all queries"
     );
 }
+
+// Line WQA's sweep, D7, 2026-11-19: with `-parse_deflines`, LOSAT refuses outfmt 0 of a query that
+// is also a subject and has masks (`believed::refuse_shared_masks_in`), that format's alone. Over
+// queries that would make blocks, a call in which outfmt 0 fails alone (`FormatRefusal::FailsAlone`,
+// LOSAT Web's outfmt 0 when the argv asks for another format) takes the search of all queries
+// (`x_query_block_plan`), refuses outfmt 0 and writes outfmt 6 as the call of outfmt 6 alone does;
+// a call in which outfmt 0 fails the call (the command line's one format) fails with the refusal.
+#[test]
+fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
+    use crate::api::local_blast::FormatRefusal;
+    let (query, _) = block_inputs();
+    let first = read_records(&query.0).remove(0);
+    let mut letters = first.seq().to_vec();
+    letters[..20].make_ascii_lowercase();
+    let subject = TempFasta::new("blocks_shared_subject.faa", &[("c0q0", &letters)]);
+    let extra = ["-parse_deflines", "-lcase_masking", "-evalue", "0.001"];
+    let args = || blastp_args(&query.0, &subject.0, &extra);
+    let command = Commands::Blastp(args());
+    let (queries, subjects) = crate::api::input::read_search_inputs(
+        crate::api::Program::Blastp,
+        &command,
+        Some(false),
+        &std::fs::read(&query.0).unwrap(),
+        &std::fs::read(&subject.0).unwrap(),
+    )
+    .map_err(|error| error.to_string())
+    .unwrap();
+    assert!(queries[0]
+        .believed()
+        .is_some_and(|ids| ids.shared.is_some()));
+    let refusal = "is both a query and a subject under -parse_deflines and has masks";
+    let alone = run_formats(&["6"], false, |outputs| {
+        run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+    });
+    assert!(
+        !alone.outputs[0].is_empty(),
+        "the fixture must produce hits"
+    );
+    for fails_alone in [true, false] {
+        let (mut six, mut zero, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: vec![
+                FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut six),
+                    refusal: FormatRefusal::FailsCall,
+                },
+                FormatOutput {
+                    outfmt: "0",
+                    sink: OutputSink::Writer(&mut zero),
+                    refusal: if fails_alone {
+                        FormatRefusal::FailsAlone
+                    } else {
+                        FormatRefusal::FailsCall
+                    },
+                },
+            ],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let result = run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs);
+        if fails_alone {
+            result.expect("outfmt 0 fails alone");
+            let error = outputs.formats[1]
+                .refusal
+                .take_refused()
+                .expect("outfmt 0 refused");
+            assert!(format!("{error:#}").contains(refusal), "{error:#}");
+            drop(outputs);
+            assert!(
+                six == alone.outputs[0],
+                "outfmt 6 as the call of outfmt 6 alone"
+            );
+        } else {
+            let error = result.expect_err("outfmt 0 fails the call");
+            assert!(format!("{error:#}").contains(refusal), "{error:#}");
+        }
+    }
+}

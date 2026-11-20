@@ -121,11 +121,6 @@ pub(super) struct PrelimRun<'a> {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     pub(super) blastp_num_threads: usize,
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub(super) total_db_len: usize,
 }
 
 /// What `run_call` reads of the preliminary stage after it (`run_preliminary`): RPS-BLAST's gapped
@@ -226,11 +221,6 @@ where
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         blastp_num_threads,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        total_db_len,
     } = *stage;
     #[cfg(all(
         feature = "parallel",
@@ -252,7 +242,6 @@ where
                 blastp_num_threads,
                 subjects.len(),
                 subjects.len(),
-                total_db_len,
             )
     };
     #[cfg(any(

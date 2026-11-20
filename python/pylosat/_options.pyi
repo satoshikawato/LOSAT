@@ -53,7 +53,7 @@ class BlastnOptions(TypedDict, total=False):
     evalue: float
     """Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)"""
     perc_identity: float
-    """Percent identity threshold for filtering HSPs (Blast_HSPTest)"""
+    """Percent identity threshold for filtering HSPs (default: 0, no filtering)"""
     max_target_seqs: int
     """Maximum number of aligned sequences to keep (default: 500)"""
     num_descriptions: int
@@ -72,8 +72,7 @@ class BlastnOptions(TypedDict, total=False):
     query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
     for outfmt != 0"""
     max_hsps: int
-    """Maximum number of HSPs per subject (unlimited when omitted) Reference:
-    ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270"""
+    """Maximum number of HSPs per subject (unlimited when omitted)"""
     qcov_hsp_perc: float
     """Percent query coverage per hsp"""
     reward: int
@@ -100,8 +99,7 @@ class BlastnOptions(TypedDict, total=False):
     subject_loc: str
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
     subject_besthit: bool
-    """Apply subject best hit filtering (disabled by default). Reference:
-    ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135"""
+    """Apply subject best hit filtering (disabled by default)"""
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""

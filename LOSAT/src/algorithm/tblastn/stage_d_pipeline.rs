@@ -1,6 +1,7 @@
 //! Internal local-subject TBLASTN Stage C to D composition pipeline.
 //! The public CLI remains gated while Stage D and Stage E are incomplete.
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::collections::HashMap;
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -98,12 +99,14 @@ pub(super) struct LocalStageDProfile<'a> {
 
 /// The numbers of a database (`-db`) as NCBI's setup reads them from its sequence source
 /// (`SeqDb::statistics`): the total length and the number of sequences of the setup
-/// (`DbStatistics::setup_total`, `setup_count`: NCBI's `Int4`, negative for a negative `NSEQ`)
+/// (`DbStatistics::setup_total`, `setup_count`: NCBI's `Int8`, not negative, which an alias
+/// file's `LENGTH` declares, so 2^32 or more also on a 32-bit target; NCBI's `Int4`, negative for
+/// a negative `NSEQ`)
 /// and the Gumbel block's length in nucleotides (`gumbel_db_length`: the total before the
 /// fallback to OID 0, so 0 or negative for an alias file's `LENGTH` of 0 or of 2^63 or more).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct DatabaseNumbers {
-    pub total_length: u64,
+    pub total_length: i64,
     pub num_seqs: i32,
     pub gumbel_db_length: i64,
     /// `BlastSeqSrcGetTotLen` (`DbStatistics::engine_db_length`): only a positive one sorts the
@@ -174,11 +177,22 @@ impl SubjectSetNumbers {
     /// answers.
     const MIN_LENGTH: usize = 10;
 
-    /// The total length in nucleotides: the database's, or the sum of the subjects'.
-    pub(super) fn total_nt(&self, subjects: &SubjectLetters<'_>) -> u64 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
+    // ```c++
+    //     if(dbscan_mode)
+    //     {
+    // 	ITERATE(vector<BLAST_SequenceBlk*>, iter, m_ivSeqBlkVec)
+    // 	{
+    //             m_iTotalLength += (Int8) (*iter)->length;
+    // 	}
+    //     }
+    // ```
+    /// The total length in nucleotides, NCBI's `Int8`: the database's, or the sum of the
+    /// subjects' (each held in memory, so at most `isize::MAX`).
+    pub(super) fn total_nt(&self, subjects: &SubjectLetters<'_>) -> i64 {
         match self.database {
             Some(database) => database.total_length,
-            None => subjects.lengths().map(|length| length as u64).sum(),
+            None => subjects.lengths().map(|length| length as i64).sum(),
         }
     }
 
@@ -201,11 +215,9 @@ impl SubjectSetNumbers {
     }
 
     /// `-dbsize` in nucleotides when above 0, which the effective lengths read in place of the
-    /// database's (or a subject's) length (blast_setup.c:716-721).
-    pub(super) fn dbsize_nt(&self) -> Option<usize> {
-        self.dbsize
-            .filter(|&dbsize| dbsize > 0)
-            .and_then(|dbsize| usize::try_from(dbsize).ok())
+    /// database's (or a subject's) length (blast_setup.c:716-721), NCBI's `Int8`.
+    pub(super) fn dbsize_nt(&self) -> Option<i64> {
+        self.dbsize.filter(|&dbsize| dbsize > 0)
     }
 
     /// The number of sequences, NCBI's `Int4`.
@@ -218,22 +230,19 @@ impl SubjectSetNumbers {
 
     /// The database length of the effective lengths in nucleotides (divided by 3 there): a
     /// positive `-dbsize`, else the total `total_nt` (blast_setup.c:716-735).
-    pub(super) fn eff_length_nt(&self, total_nt: u64) -> u64 {
-        match self.dbsize {
-            Some(dbsize) if dbsize > 0 => dbsize as u64,
-            _ => total_nt,
-        }
+    pub(super) fn eff_length_nt(&self, total_nt: i64) -> i64 {
+        self.dbsize_nt().unwrap_or(total_nt)
     }
 
     /// The Gumbel block's database length in residues: a `-dbsize` other than 0, else a
     /// database's length before the fallback to OID 0 (`DatabaseNumbers::gumbel_db_length`) or
     /// the total `total_nt` of a FASTA set, divided by 3 (blast_setup.c:916-922; C's `Int8`
     /// division, toward 0).
-    pub(super) fn gumbel_db_length(&self, total_nt: u64) -> i64 {
+    pub(super) fn gumbel_db_length(&self, total_nt: i64) -> i64 {
         match (self.dbsize, self.database) {
             (Some(dbsize), _) if dbsize != 0 => dbsize / 3,
             (_, Some(database)) => database.gumbel_db_length / 3,
-            _ => (total_nt / 3) as i64,
+            _ => total_nt / 3,
         }
     }
 
@@ -255,7 +264,7 @@ impl SubjectSetNumbers {
     pub(super) fn gumbel_block(
         &self,
         spec: &ProteinScoringSpec,
-        total_nt: u64,
+        total_nt: i64,
     ) -> Option<BlastGumbelBlk> {
         if self.old_fsc {
             return None;
@@ -1182,8 +1191,8 @@ fn run_local_search_with_pool(
     );
     let code = GeneticCode::try_from_id(profile.genetic_code).map_err(anyhow::Error::msg)?;
     // The set's numbers: a database's, or those of the FASTA subjects (`SubjectSetNumbers`).
-    let total_nt = usize::try_from(profile.subject_set.total_nt(&subjects))?;
-    let stats_nt = usize::try_from(profile.subject_set.eff_length_nt(total_nt as u64))?;
+    let total_nt = profile.subject_set.total_nt(&subjects);
+    let stats_nt = profile.subject_set.eff_length_nt(total_nt);
     let num_subjects = profile.subject_set.num_seqs(&subjects);
     let query_lengths: Vec<i32> = queries
         .iter()
@@ -1206,7 +1215,7 @@ fn run_local_search_with_pool(
     // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
     // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
     // BLAST_KarlinStoE_simple with the context's effective search space.
-    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
+    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt);
     // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
     // ```c
     //             if ( !m_Subjects.empty() ) {
@@ -1251,10 +1260,10 @@ fn run_local_search_with_pool(
     // itself decides, as `sbp->gbp` does in NCBI, here and in the average-length error below.
     // `None`: the setup fails (`stats::setup::setup_subject_length`, below).
     let min_subject_length = if gumbel.is_none() {
-        crate::stats::setup::setup_subject_length(total_nt as i64, num_subjects, None)
+        crate::stats::setup::setup_subject_length(total_nt, num_subjects, None)
     } else {
         crate::stats::setup::setup_subject_length(
-            total_nt as i64,
+            total_nt,
             num_subjects,
             Some((profile.subject_set.shortest_subject_length(&subjects), true)),
         )
@@ -1759,7 +1768,7 @@ fn run_local_search_with_pool(
             best_evalue: postredo.best_evalue,
             best_score: postredo.hsps[0].hsp.score,
         };
-        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
+        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
         let mut target = TargetTranslation::of(subject, &code);
         let mut owned: Vec<_> = survivors.into_iter().map(Some).collect();
         let payloads = postredo
@@ -2622,8 +2631,8 @@ struct QuerySetInputs<'a> {
     ungapped: &'a KarlinParams,
     gumbel: Option<&'a BlastGumbelBlk>,
     /// The database length of the effective lengths in nucleotides
-    /// (`SubjectSetNumbers::eff_length_nt`).
-    total_nt: usize,
+    /// (`SubjectSetNumbers::eff_length_nt`), NCBI's `Int8`.
+    total_nt: i64,
     num_subjects: i32,
     /// The setup's subject length of the hit-saving parameters (`setup_subject_length`), 0
     /// where the setup fails (`SetupEngineError::SUBJECT_LENGTH_INVALID`).
@@ -2659,10 +2668,11 @@ struct LocalParameterRecipe<'a> {
 
 impl LocalParameterRecipe<'_> {
     /// The parameters with the database length `db_nt` in nucleotides (the setup's total, `-dbsize`
-    /// or a subject's length), the options' spaces `option_spaces` and the call `call`.
+    /// or a subject's length; NCBI's `Int8` `real_db_length`), the options' spaces `option_spaces`
+    /// and the call `call`.
     fn parameters(
         &self,
-        db_nt: usize,
+        db_nt: i64,
         option_spaces: Option<&[i64]>,
         call: LocalParameterCall,
     ) -> Result<LocalSubjectParameters, crate::stats::setup::SearchSpaceOverflow> {
@@ -3032,7 +3042,7 @@ struct PreliminaryInputs<'a> {
 struct SubjectUpdate<'a> {
     recipe: &'a LocalParameterRecipe<'a>,
     option_spaces: &'a [i64],
-    dbsize_nt: Option<usize>,
+    dbsize_nt: Option<i64>,
     min_length: usize,
 }
 
@@ -3287,7 +3297,7 @@ fn run_preliminary_subjects_into(
         let inputs = match inputs.update {
             Some(update) if subject.len() >= update.min_length => {
                 x_update = update.recipe.parameters(
-                    update.dbsize_nt.unwrap_or(subject.len()),
+                    update.dbsize_nt.unwrap_or(subject.len() as i64),
                     Some(update.option_spaces),
                     LocalParameterCall::Update {
                         subject_length: i32::try_from(subject.len())?,
@@ -3800,7 +3810,7 @@ fn finish_local_mode0_no_sum_stats(
                     )?;
                 Ok(KappaHspPayload {
                     bit_score: (hsp.hsp.score as f64 * gapped_params[context].lambda
-                        - gapped_params[context].k.ln())
+                        - gapped_params[context].k.glibc_ln())
                         / std::f64::consts::LN_2,
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,
@@ -3901,6 +3911,59 @@ fn finish_local_mode0_no_sum_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-922 and :716-735
+    // (quoted at `SubjectSetNumbers`)
+    // A total of 2^32 letters or more is NCBI's `Int8` on every target, wasm32's 32-bit `usize`
+    // included: a database's (an alias file's `LENGTH`, rows db.cnt.l4295.*, db.cnt.l4294.* and
+    // db.cnt.avg2p32.*), a FASTA set's sum of long records, and `-dbsize`. The effective lengths
+    // and the Gumbel block read it whole.
+    #[test]
+    fn subject_set_numbers_hold_totals_of_2_to_the_32_letters_or_more() {
+        let lengths = [3_000_000_000usize, 3_000_000_000];
+        let subjects = SubjectLetters::Lengths(&lengths);
+        for total in [
+            4_294_967_296_000_000_000i64,
+            4_294_967_295_999_999_999,
+            68_719_476_736,
+        ] {
+            assert!(total > i64::from(u32::MAX));
+            let numbers = SubjectSetNumbers {
+                database: Some(DatabaseNumbers {
+                    total_length: total,
+                    num_seqs: 16,
+                    gumbel_db_length: total,
+                    engine_db_length: total,
+                    min_length: 10,
+                    request_count: 16,
+                }),
+                ..SubjectSetNumbers::default()
+            };
+            assert_eq!(numbers.total_nt(&subjects), total);
+            assert_eq!(numbers.dbsize_nt(), None);
+            assert_eq!(numbers.eff_length_nt(total), total);
+            assert_eq!(numbers.gumbel_db_length(total), total / 3);
+        }
+        // A FASTA set: the sum of its records.
+        let fasta = SubjectSetNumbers::default();
+        assert_eq!(fasta.total_nt(&subjects), 6_000_000_000);
+        assert_eq!(fasta.eff_length_nt(6_000_000_000), 6_000_000_000);
+        assert_eq!(fasta.gumbel_db_length(6_000_000_000), 2_000_000_000);
+        // A `-dbsize` of 2^32 or more replaces the total.
+        let dbsize = SubjectSetNumbers {
+            dbsize: Some(4_294_967_296_000_000_000),
+            ..fasta
+        };
+        assert_eq!(dbsize.dbsize_nt(), Some(4_294_967_296_000_000_000));
+        assert_eq!(
+            dbsize.eff_length_nt(6_000_000_000),
+            4_294_967_296_000_000_000
+        );
+        assert_eq!(
+            dbsize.gumbel_db_length(6_000_000_000),
+            1_431_655_765_333_333_333
+        );
+    }
 
     // The search reads the subjects as slices of the records' residues (`tblastn_app.rs`).
     fn subject_slices(subjects: &[Vec<u8>]) -> Vec<&[u8]> {

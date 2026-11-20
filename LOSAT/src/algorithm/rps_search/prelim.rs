@@ -563,9 +563,9 @@ mod tests {
 
     // blast_engine.c:874-899, blast_hits.c (`Blast_HitListUpdate`, `s_EvalueCompareHSPLists`):
     // without the Gumbel block every preliminary HSP has the e-value 0, so the lists are ordered
-    // by the first HSP's score (down), then the ordinal id (down), which is the order of the
-    // composition-based redo's reads: the last list read is the lowest, and its profile's K is
-    // the batch's (`RpsTraceback::trace_query_redo`).
+    // by the first HSP's score (down), then the ordinal id (down), which is the order of
+    // rpsblast's composition-based redo's reads: the last list read is the lowest, and its
+    // profile's K is the batch's (`stream_lists`, `RpsTraceback::trace_query_redo`).
     #[test]
     fn lists_of_e_value_zero_are_ordered_by_score_then_ordinal_id() {
         let mut hit_list = BlastpHitList::new(10);

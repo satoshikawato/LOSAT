@@ -536,7 +536,7 @@ fn check(
     let db_length = if args.db_length() > 0 {
         i128::from(args.db_length())
     } else {
-        metadata.db_len_total as i128
+        i128::from(metadata.db_len_total)
     };
     let factor = 2 * lengths.iter().copied().max().unwrap_or(0) as i128 + 1;
     if (db_length.abs() + i128::from(metadata.db_num_seqs.unsigned_abs()) * factor) * factor

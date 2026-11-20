@@ -104,4 +104,42 @@ describe('rpc', () => {
     await expect(pending).rejects.toThrow('the worker stopped');
     await expect(client.add(1, 2)).rejects.toThrow('the worker stopped');
   });
+
+  it('names what could not start, and tells it once', async () => {
+    const target = new EventTarget();
+    const endpoint: RpcEndpoint = {
+      postMessage: () => undefined,
+      addEventListener: (type, listener) => target.addEventListener(type, listener),
+    };
+    const told: Error[] = [];
+    const client = rpcClient<Service>(endpoint, ['add'], { notStarted: () => new Error('the part could not start'), onEnd: (error) => told.push(error) });
+    const pending = client.add(1, 2);
+    target.dispatchEvent(new Event('error'));
+    target.dispatchEvent(new Event('error'));
+    await expect(pending).rejects.toThrow('the part could not start');
+    expect(told.map((error) => error.message)).toEqual(['the part could not start']);
+  });
+
+  // Line WQA's sweep, D2 (2026-11-19): a worker that ends without an error event (the browser ended it) never answered,
+  // and its calls waited for good: a run stayed "Organizing results", a pasted text "Reading the records…".
+  it('rejects pending and later calls once the worker has ended without an error event', async () => {
+    const target = new EventTarget();
+    const endpoint: RpcEndpoint = {
+      postMessage: (message) => {
+        const { id } = message as { id: number };
+        // The first call is answered; the worker then ends, and answers nothing.
+        if (id === 1) queueMicrotask(() => target.dispatchEvent(new MessageEvent('message', { data: { id, ok: true, value: 3 } })));
+      },
+      addEventListener: (type, listener) => target.addEventListener(type, listener),
+    };
+    let end: (error: Error) => void = () => undefined;
+    const told: Error[] = [];
+    const client = rpcClient<Service>(endpoint, ['add'], { ended: new Promise((resolve) => (end = resolve)), onEnd: (error) => told.push(error) });
+    expect(await client.add(1, 2)).toBe(3);
+    const pending = client.add(1, 2);
+    end(new Error('the part stopped'));
+    await expect(pending).rejects.toThrow('the part stopped');
+    await expect(client.add(1, 2)).rejects.toThrow('the part stopped');
+    expect(told.map((error) => error.message)).toEqual(['the part stopped']);
+  });
 });

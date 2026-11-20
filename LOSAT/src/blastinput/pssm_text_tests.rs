@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::report::serial::pssm::{asn_text, PssmWithParameters, SeqEntry};
+use crate::utils::glibc_fma_libm::GlibcLibm;
 
 fn fixture(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -124,7 +125,7 @@ fn libm_pow10_is_glibcs_pow() {
     use crate::report::serial::asn_text_reader::libm_pow10;
 
     for exp in -400..=400 {
-        let pow = 10f64.powf(f64::from(exp));
+        let pow = 10f64.glibc_pow(f64::from(exp));
         assert_eq!(libm_pow10(exp).to_bits(), pow.to_bits(), "10^{exp}");
     }
     assert_eq!(libm_pow10(i32::MIN), 0.0);

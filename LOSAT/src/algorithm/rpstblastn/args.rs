@@ -65,9 +65,9 @@ pub const USAGE: &str = include_str!("usage.txt");
 // rpstblastn's arguments: rpsblast's, with the genetic code of the query (`-query_gencode`), the
 // query strands (`-strand`) and `-ungapped`, in the order of NCBI's `-help` (the struct is
 // rpsblast's copied, not flattened: a flattened group would change the order of the options).
-// The search runs with BLASTX's driver and the RPS engine (`into_blastx_args`). Composition-based
-// statistics 1 to 3 (the default 1), `-searchsp`, `-dbsize` and `OLD_FSC` are refused until the
-// later items of series PR run them (PS12b, PS12a phase B); `-html`, the remote options and
+// The search runs with BLASTX's driver and the RPS engine (`into_blastx_args`), composition-based
+// statistics 0 to 3 included (the default 1, item PS12b). `-use_sw_tback` with composition-based
+// statistics is refused until item PS12c (`check_options`); `-html`, the remote options and
 // `-import_search_strategy` by the parser (`cli.rs` `is_unported_rpstblastn_arg`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
@@ -203,9 +203,10 @@ impl RpstblastnArgs {
 
     /// The RPS search of the arguments (what BLASTX's arguments do not hold), after LOSAT's
     /// refusal of the output formats that a later item writes (NCBI parses `-outfmt` before its
-    /// option handlers). The refusals of the composition-based statistics that a later item
-    /// runs come once per run before the first byte, after NCBI's own errors of the options and
-    /// the database (`TranslatedRpsSearch::check_options`; review A of PS12a, N1).
+    /// option handlers). The refusals of the options that a later item runs (`-use_sw_tback`
+    /// with composition-based statistics) come once per run before the first byte, after NCBI's
+    /// own errors of the options and the database (`TranslatedRpsSearch::check_options`; review
+    /// A of PS12a, N1).
     pub(crate) fn rps_search(&self) -> Result<TranslatedRpsSearch> {
         // NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`);
         // outfmt 13 and 14 to the standard output get NCBI's own error (BLASTX's).
@@ -455,10 +456,10 @@ mod tests {
             .contains("-evalue"));
     }
 
-    // blast_args.cpp:839-865 (quoted at `rps_composition_mode`): RPS-BLAST's letters; mode 0 runs,
-    // the others are refused until item PS12b; with -ungapped BLASTX's resolve gives NCBI's error.
+    // blast_args.cpp:839-865 (quoted at `rps_composition_mode`): RPS-BLAST's letters; every mode
+    // runs (item PS12b); with -ungapped BLASTX's resolve gives NCBI's error.
     #[test]
-    fn composition_modes_run_without_statistics_only() {
+    fn composition_modes_run() {
         for value in ["0", "F", "f", "D", "d"] {
             let args = parse(&["-comp_based_stats", value])
                 .unwrap()
@@ -471,19 +472,20 @@ mod tests {
                 0
             );
         }
-        for value in ["1", "T", "t", "2", "3"] {
-            assert!(
-                late_refusal(&["-comp_based_stats", value]).contains(&format!(
-                    "-comp_based_stats {value} is not supported by LOSAT's RPSTBLASTN yet"
-                )),
-                "{value}"
-            );
+        for (value, mode) in [("1", 1), ("T", 1), ("t", 1), ("2", 2), ("3", 3)] {
+            let args = parse(&["-comp_based_stats", value])
+                .unwrap()
+                .into_blastx_args()
+                .unwrap();
+            assert_eq!(args.comp_based_stats, mode.to_string(), "{value}");
+            let search = search(&["-comp_based_stats", value]);
+            assert_eq!(search.search.requested_cbs, mode, "{value}");
+            assert!(search.check_options().is_ok(), "{value}");
         }
         // The default (1).
-        assert_eq!(
-            late_refusal(&[]),
-            "-comp_based_stats 1 is not supported by LOSAT's RPSTBLASTN yet"
-        );
+        let default = search(&[]);
+        assert_eq!(default.search.requested_cbs, 1);
+        assert!(default.check_options().is_ok());
         // ungapped with the default: NCBI's options error (BLASTX's resolve).
         let error = parse(&["-ungapped"])
             .unwrap()

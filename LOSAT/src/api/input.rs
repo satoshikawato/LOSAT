@@ -33,6 +33,7 @@ use super::program::Program;
 use super::search::Search;
 use crate::blastinput::fasta_reader::{read_all, FastaInputSource, FastaRecord, ReaderConfig};
 use crate::blastinput::input_files::open_file_input;
+use crate::cli::Commands;
 
 /// Which input of a search a FASTA holds. The reader's flags and the generated local IDs
 /// (`Query_N`, `Subject_N`) depend on it.
@@ -74,18 +75,24 @@ pub(super) fn is_protein(program: Program, role: Role) -> bool {
 }
 
 /// The reader configuration of the command line for the input of `role`: the program's flags,
-/// the data loaders on (the command line without `.ncbirc` or `DATA_LOADERS`).
-fn reader_config(program: Program, role: Role) -> ReaderConfig {
+/// the data loaders on (the command line without `.ncbirc` or `DATA_LOADERS`). `writes_archive`
+/// is whether the search writes the BLAST archive (outfmt 11), or `None` where its formats are not
+/// known yet (`read_inputs`).
+fn reader_config(program: Program, role: Role, writes_archive: Option<bool>) -> ReaderConfig {
     let name = program.reader_name();
     let protein = is_protein(program, role);
-    // The archive (outfmt 11) shows each record's defline as it is written, and the formats of
-    // the searches of the records are not known here (`check_archive_inputs`).
-    match role {
+    let config = match role {
         Role::Query => ReaderConfig::query(name, protein, true),
         Role::Subject => ReaderConfig::subject(name, protein, true),
+    };
+    match writes_archive {
+        // The archive (outfmt 11) shows each record's defline as it is written, and the formats of
+        // the searches of the records are not known here (`check_archive_inputs`).
+        None => config.with_defline(true).with_archive_unknown(),
+        // The command line's reader, which keeps the deflines for the archive and refuses as it
+        // reads what the archive cannot write (`refuse_range_in_archive`).
+        Some(writes) => config.with_defline(writes),
     }
-    .with_defline(true)
-    .with_archive_unknown()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:633-640
@@ -148,7 +155,7 @@ pub(super) fn check_archive_inputs(program: Program, inputs: Inputs<'_>) -> Resu
 /// only has no record. A reader error is the command line's message (`Error::Input`).
 pub fn read_fasta(program: Program, role: Role, bytes: &[u8]) -> Result<Vec<FastaRecord>, Error> {
     read_source(
-        FastaInputSource::from_bytes(bytes, reader_config(program, role)),
+        FastaInputSource::from_bytes(bytes, reader_config(program, role, None)),
         role,
     )
 }
@@ -229,12 +236,75 @@ pub fn read_inputs(
     query: &[u8],
     subject: &[u8],
 ) -> Result<(Vec<FastaRecord>, Vec<FastaRecord>), Error> {
-    let parse_deflines = search.parse_deflines();
+    read_search_inputs(
+        search.program(),
+        &search.any_subject(),
+        None,
+        query,
+        subject,
+    )
+}
+
+/// Whether the arguments `command` have `-parse_deflines`: a search that reads the ids of the
+/// deflines, whose query and subjects are read together for its arguments (`read_search_inputs`).
+pub fn parse_deflines_of(command: &Commands) -> bool {
+    match command {
+        Commands::Blastp(args) => args.parse_deflines,
+        Commands::Tblastn(args) => args.parse_deflines,
+        Commands::Blastn(args) => args.parse_deflines,
+        Commands::Tblastx(args) => args.parse_deflines,
+        Commands::Blastx(args) => args.parse_deflines,
+        Commands::Psiblast(args) => args.parse_deflines,
+        Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => false,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:67-72
+// ```c++
+//     // Set an appropriate default for the strand
+//     if (m_Strand == eNa_strand_other) {
+//         m_Strand = (m_DLConfig.m_IsLoadingProteins)
+//             ? eNa_strand_unknown
+//             : eNa_strand_both;
+//     }
+// ```
+/// The `-strand` value of the arguments `command`, for the programs that have the option.
+fn strand_of(command: &Commands) -> Option<&str> {
+    match command {
+        Commands::Blastn(args) => Some(args.strand.as_str()),
+        Commands::Blastx(args) => Some(args.strand.as_str()),
+        _ => None,
+    }
+}
+
+/// The query and subject FASTA bytes of a search of `program` with the parsed arguments `command`
+/// (the command line's, of that program), read as the command line reads its `-query` and
+/// `-subject` files: the reader of `read_fasta`, with `-parse_deflines` the ids of the deflines,
+/// read in one scope of ids, the subjects first, and the query's `-strand`. `writes_archive` is
+/// whether the search writes the BLAST archive (outfmt 11), whose Bioseqs show the deflines as
+/// read: the reader keeps them then, and refuses an id with a range as it reads it, as the command
+/// line's reader does (`refuse_range_in_archive`). `None` where the formats are not known yet
+/// (`read_inputs`): every defline is kept, and the search refuses such a record when it writes the
+/// archive (`check_archive_inputs`). A reader error is the command line's message (`read_source`).
+/// The one reading of `read_inputs` and LOSAT Web's `register_inputs` (`web/adapter`, docs/web/
+/// abi_v2.md §4). Returns `(query, subject)`.
+pub fn read_search_inputs(
+    program: Program,
+    command: &Commands,
+    writes_archive: Option<bool>,
+    query: &[u8],
+    subject: &[u8],
+) -> Result<(Vec<FastaRecord>, Vec<FastaRecord>), Error> {
+    let parse_deflines = parse_deflines_of(command);
     let scope = parse_deflines.then(Default::default);
     let read = |role: Role, bytes: &[u8]| {
-        let config = reader_config(search.program(), role).with_parse_deflines(parse_deflines);
-        let config = match search.strand() {
-            Some(strand) if role == Role::Query => config.with_strand(&strand),
+        let config =
+            reader_config(program, role, writes_archive).with_parse_deflines(parse_deflines);
+        let config = match strand_of(command) {
+            Some(strand) if role == Role::Query => config.with_strand(strand),
             _ => config,
         };
         let mut source = FastaInputSource::from_bytes(bytes, config);

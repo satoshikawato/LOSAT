@@ -257,8 +257,9 @@ same request.
   file, help and version words with `file/help arguments are unsupported for the
   TBLASTN web API`. The shared vector `LOSAT/tests/fixtures/web_v1_tblastn/` (11
   cases: outfmt 0, 6, 7 and 11, a label, blank and comment-only inputs, and errors)
-  holds the CLI's bytes: `LOSAT/tests/web_v1_tblastn.rs` checks the CLI against it, and
-  the `web_api` tests check both exports.
+  holds the CLI's bytes, apart from the line end that the CLI writes after LOSAT's own
+  parser messages since v0.2.0 (`unknown.err`): `LOSAT/tests/web_v1_tblastn.rs` checks the
+  CLI against it, and the `web_api` tests check both exports, which return the vector's bytes.
 - `-num_threads` defaults to `1`. The serial module rejects a value above 1
   (`abi_v2.md` §2); `validate_threads` is in `LOSAT/src/utils/threading.rs:104`.
 - `run_pair_handles` supports only `blastp`, `blastx` and `tblastn`. For `blastn` and `tblastx` it

@@ -101,7 +101,7 @@ impl Search {
     /// The parsed arguments, with either kind of subject: `validate` accepted one of them. The
     /// reader's options come from here before the search refuses what the API does not take
     /// (`parse`).
-    fn any_subject(&self) -> Commands {
+    pub(super) fn any_subject(&self) -> Commands {
         let query = (QUERY, std::ffi::OsStr::new("query"));
         parse_words(self.program, &self.argv, query, [SUBJECT, "subject"], None)
             .or_else(|_| parse_words(self.program, &self.argv, query, [DATABASE, "subject"], None))
@@ -110,36 +110,7 @@ impl Search {
 
     /// Whether the search's argv has `-parse_deflines` (`read_inputs`).
     pub(crate) fn parse_deflines(&self) -> bool {
-        match self.any_subject() {
-            Commands::Blastp(args) => args.parse_deflines,
-            Commands::Tblastn(args) => args.parse_deflines,
-            Commands::Blastn(args) => args.parse_deflines,
-            Commands::Tblastx(args) => args.parse_deflines,
-            Commands::Blastx(args) => args.parse_deflines,
-            Commands::Psiblast(args) => args.parse_deflines,
-            Commands::Rpsblast(_)
-            | Commands::Rpstblastn(_)
-            | Commands::Makedb(_)
-            | Commands::Rpsbproc(_) => false,
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:67-72
-    // ```c++
-    //     // Set an appropriate default for the strand
-    //     if (m_Strand == eNa_strand_other) {
-    //         m_Strand = (m_DLConfig.m_IsLoadingProteins)
-    //             ? eNa_strand_unknown
-    //             : eNa_strand_both;
-    //     }
-    // ```
-    /// The `-strand` value of the search's argv, for the programs that have the option.
-    pub(crate) fn strand(&self) -> Option<String> {
-        match self.any_subject() {
-            Commands::Blastn(args) => Some(args.strand),
-            Commands::Blastx(args) => Some(args.strand),
-            _ => None,
-        }
+        super::input::parse_deflines_of(&self.any_subject())
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87

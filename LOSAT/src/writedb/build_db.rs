@@ -81,10 +81,35 @@ pub struct BuildDatabase<'a> {
 //             }
 //         }
 // ```
-/// `CDirEntry::NormalizePath` of an absolute Unix path, without following
-/// links: `.` and empty components go, `..` takes its parent with it.
-#[cfg(not(any(windows, target_os = "wasi")))]
-fn normalize_absolute_path(path: &str) -> String {
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-824
+// ```c++
+// string CDirEntry::NormalizePath(const string& path, EFollowLinks follow_links)
+// {
+//     if ( path.empty() ) {
+//         return path;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:951-960
+// ```c++
+//     // Special cases
+//     if ( (head.size() == 0)  ||
+//          (head.size() == 2  &&  head.front() == DIR_CURRENT  &&  head.back().empty()) ) {
+//         // current dir
+//         return DIR_CURRENT;
+//     }
+//     if (head.size() == 1  &&  head.front().empty()) {
+//         // root dir
+//         return string(1, DIR_SEPARATOR);
+//     }
+// ```
+/// `CDirEntry::NormalizePath` of a Unix path, without following links: `.`
+/// and empty components go, `..` takes its parent with it. A relative path
+/// stays relative (`.` when nothing is left).
+#[cfg(not(windows))]
+fn normalize_path(path: &str) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
     let current = path.trim_end_matches('/');
     if current.is_empty() {
         return "/".to_string();
@@ -109,6 +134,9 @@ fn normalize_absolute_path(path: &str) -> String {
         }
         head.push(next);
     }
+    if head.is_empty() || head == [".", ""] {
+        return ".".to_string();
+    }
     if head.len() == 1 && head[0].is_empty() {
         return "/".to_string();
     }
@@ -132,8 +160,10 @@ fn normalize_absolute_path(path: &str) -> String {
 //             break;
 // ```
 // The reference platform is Unix. On Windows the path is made absolute by
-// the system's own rule; under WASI, where a program sees only the
-// directories it was given, the name is used as it is.
+// the system's own rule. The WASI targets take Unix's rule: their current
+// directory is the C library's (wasi-libc's `getcwd`), which the command sets
+// from the `PWD` that its host gives (`cli::main_entry`) and which is `/`
+// when the host gives none.
 /// `CDirEntry::CreateAbsolutePath(dbname)`.
 fn create_absolute_path(dbname: &str) -> String {
     // `NormalizePath` leaves no separator at the end of a path that is not a
@@ -145,23 +175,62 @@ fn create_absolute_path(dbname: &str) -> String {
             .unwrap_or_else(|_| dbname.to_string());
         dir_entry_path(&absolute).to_string()
     }
-    #[cfg(target_os = "wasi")]
+    #[cfg(not(windows))]
     {
-        dir_entry_path(dbname).to_string()
+        absolute_path_in(std::env::current_dir().ok().as_deref(), dbname)
     }
-    #[cfg(not(any(windows, target_os = "wasi")))]
-    {
-        if dbname.starts_with('/') {
-            return normalize_absolute_path(dbname);
-        }
-        match std::env::current_dir() {
-            Ok(cwd) => {
-                let cwd = cwd.to_string_lossy();
-                normalize_absolute_path(&format!("{}/{dbname}", cwd.trim_end_matches('/')))
-            }
-            Err(_) => dbname.to_string(),
-        }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:776-788
+// ```c++
+// string CDirEntry::ConcatPath(const string& first, const string& second)
+// {
+//     // Prepare first part of path
+//     string path = AddTrailingPathSeparator(NStr::TruncateSpaces(first));
+//     // Remove leading separator in "second" part
+//     string part = NStr::TruncateSpaces(second);
+//     if ( !path.empty()  &&  part.length() > 0  &&  part[0] == DIR_SEPARATOR ) {
+//         part.erase(0,1);
+//     }
+//     // Add second part
+//     path += part;
+//     return path;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3708-3716
+// ```c++
+// string CDir::GetCwd(void)
+// {
+//     TXChar buf[4096];
+//     if ( NcbiSys_getcwd(buf, sizeof(buf)/sizeof(TXChar) - 1) ) {
+//         return _T_CSTRING(buf);
+//     }
+//     LOG_ERROR_ERRNO(90, "CDir::GetCwd(): Cannot get current directory");
+//     return kEmptyCStr;
+// }
+// ```
+/// `CDirEntry::CreateAbsolutePath(dbname)` on Unix, where the current
+/// directory is `cwd` (`None` when it cannot be read: `GetCwd` gives "").
+/// `ConcatPath` cuts the C spaces at the ends of both parts (a tab at the end
+/// of `-out` is not in the database's name; makeblastdb refuses a name with a
+/// space before); the result is normalized, relative when there is no
+/// current directory.
+#[cfg(not(windows))]
+fn absolute_path_in(cwd: Option<&Path>, dbname: &str) -> String {
+    if dbname.starts_with('/') {
+        return normalize_path(dbname);
     }
+    let cwd = cwd.map(|cwd| cwd.to_string_lossy()).unwrap_or_default();
+    let mut path = crate::ncbi_str::truncate_spaces_str(&cwd).to_string();
+    if !path.is_empty() && !path.ends_with('/') {
+        path.push('/');
+    }
+    let mut part = crate::ncbi_str::truncate_spaces_str(dbname);
+    if !path.is_empty() {
+        part = part.strip_prefix('/').unwrap_or(part);
+    }
+    path.push_str(part);
+    normalize_path(&path)
 }
 
 /// A separator of directory names (`DIR_SEPARATORS`).
@@ -363,15 +432,8 @@ fn create_path(dir: &str) -> bool {
     }
     let mut tmp = path.as_str();
     let mut missed_parts: Vec<&str> = Vec::new();
-    // NCBI's path is absolute here. LOSAT's is relative under WASI
-    // (`create_absolute_path`): its first component has no separator
-    // before it and can be missing too.
-    let mut relative_start = false;
     while !tmp.is_empty() && std::fs::symlink_metadata(tmp).is_err() {
         let Some(pos) = tmp.rfind(is_separator) else {
-            missed_parts.push(tmp);
-            tmp = "";
-            relative_start = true;
             break;
         };
         missed_parts.push(&tmp[pos + 1..]);
@@ -382,9 +444,7 @@ fn create_path(dir: &str) -> bool {
     }
     let mut p = tmp.to_string();
     for part in missed_parts.iter().rev() {
-        if !std::mem::take(&mut relative_start) {
-            p.push(std::path::MAIN_SEPARATOR);
-        }
+        p.push(std::path::MAIN_SEPARATOR);
         p.push_str(part);
         if !dir_create(&p) {
             return false;
@@ -1460,15 +1520,65 @@ impl<'a> BuildDatabase<'a> {
 mod tests {
     use super::*;
 
-    #[cfg(not(any(windows, target_os = "wasi")))]
+    #[cfg(not(windows))]
     #[test]
     fn absolute_paths_are_normalized_as_ncbi_does() {
-        assert_eq!(normalize_absolute_path("/a//b/./c/../d/"), "/a/b/d");
-        assert_eq!(normalize_absolute_path("/a/b/.."), "/a");
-        assert_eq!(normalize_absolute_path("/../a"), "/a");
-        assert_eq!(normalize_absolute_path("/a/./"), "/a");
-        assert_eq!(normalize_absolute_path("/"), "/");
-        assert_eq!(normalize_absolute_path("/a/.."), "/");
+        assert_eq!(normalize_path("/a//b/./c/../d/"), "/a/b/d");
+        assert_eq!(normalize_path("/a/b/.."), "/a");
+        assert_eq!(normalize_path("/../a"), "/a");
+        assert_eq!(normalize_path("/a/./"), "/a");
+        assert_eq!(normalize_path("/"), "/");
+        assert_eq!(normalize_path("/a/.."), "/");
+    }
+
+    // `CDirEntry::NormalizePath` of relative paths (ncbifile.cpp:820-971), the
+    // name that `CreateAbsolutePath` gives without a current directory.
+    #[cfg(not(windows))]
+    #[test]
+    fn relative_paths_are_normalized_as_ncbi_does() {
+        assert_eq!(normalize_path(""), "");
+        assert_eq!(normalize_path("n"), "n");
+        assert_eq!(normalize_path("./n"), "n");
+        assert_eq!(normalize_path("a/./b//c/"), "a/b/c");
+        assert_eq!(normalize_path("a/../b"), "b");
+        assert_eq!(normalize_path("a/.."), ".");
+        assert_eq!(normalize_path("../a/../../b"), "../../b");
+        assert_eq!(normalize_path("."), ".");
+        assert_eq!(normalize_path(".//a"), ".//a");
+    }
+
+    // `CDirEntry::CreateAbsolutePath` relative to the current directory: the
+    // rule of every target but Windows, the WASI commands' included, whose
+    // current directory is the one the host gives in `PWD` (`/` without it).
+    // makeblastdb 2.17.0 printed "New DB name:   <cwd>/t" for `-out $'t\t'`
+    // (and wrote `t.nin`), and "<parent>/sp/m" for `-out m` in a directory
+    // `sp `.
+    #[cfg(not(windows))]
+    #[test]
+    fn a_relative_name_is_joined_to_the_current_directory_as_ncbi_does() {
+        let cwd = |dir: &'static str| Some(Path::new(dir));
+        assert_eq!(absolute_path_in(cwd("/w"), "n"), "/w/n");
+        assert_eq!(absolute_path_in(cwd("/w/"), "n"), "/w/n");
+        assert_eq!(absolute_path_in(cwd("/"), "n"), "/n");
+        assert_eq!(absolute_path_in(cwd("/w"), "./sub/../n"), "/w/n");
+        assert_eq!(absolute_path_in(cwd("/w"), "../n"), "/n");
+        assert_eq!(absolute_path_in(cwd("/w"), "sub/"), "/w/sub");
+        assert_eq!(absolute_path_in(cwd("/w"), "/abs//n/"), "/abs/n");
+        // `ConcatPath` cuts the spaces at the ends of both parts, also those
+        // of the current directory.
+        assert_eq!(absolute_path_in(cwd("/w"), "t\t"), "/w/t");
+        assert_eq!(absolute_path_in(cwd("/w"), "\t/x"), "/w/x");
+        assert_eq!(absolute_path_in(cwd("/w/sp "), "m"), "/w/sp/m");
+        // No current directory: the name, normalized.
+        assert_eq!(absolute_path_in(None, "n"), "n");
+        assert_eq!(absolute_path_in(None, "./a/../n\t"), "n");
+        assert_eq!(absolute_path_in(None, "\t/x"), "/x");
+        // The process's own directory, as `create_absolute_path` reads it.
+        let here = std::env::current_dir().unwrap();
+        assert_eq!(
+            create_absolute_path("n"),
+            format!("{}/n", here.to_string_lossy().trim_end_matches('/'))
+        );
     }
 
     // Values makeblastdb 2.17.0 printed in "added N sequences in T seconds."

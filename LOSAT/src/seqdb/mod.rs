@@ -1273,7 +1273,6 @@ impl SeqDb {
             seqtype,
             alias::LocalCopy::CurrentDir,
             &SearchPath::current_dir()?,
-            alias::MaskList::Refuse,
         )?;
         Self::open_tree(tree, name, seqtype)
     }
@@ -1307,7 +1306,6 @@ impl SeqDb {
             seqtype,
             alias::LocalCopy::CurrentDir,
             search,
-            alias::MaskList::Pass,
         )?;
         let mut title = Vec::new();
         alias::walk_title(&tree.root, volume_title, &mut title);

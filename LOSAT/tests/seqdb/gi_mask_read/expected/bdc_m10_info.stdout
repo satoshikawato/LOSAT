@@ -1,0 +1,26 @@
+Database: t
+	12 sequences; 5,020 total bases
+
+Date: Nov 20, 2026  8:20 PM	Longest sequence: 520 bases
+
+BLASTDB Version: 4
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+0            dust                                    window=64; level=20; linker=1           
+1            dust                                    window=64; level=10; linker=1           
+
+Volumes:
+	<R>/m10/db.00
+	<R>/m10/db.01
+	<R>/m10/db.02
+	<R>/m10/db.03
+	<R>/m10/db.04
+	<R>/m10/db.05
+	<R>/m10/db.06
+	<R>/m10/db.07
+	<R>/m10/db.08
+	<R>/m10/db.09
+	<R>/m10/db.10
+	<R>/m10/db.11

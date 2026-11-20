@@ -4,10 +4,11 @@
 //! and `DBLIST`, the counts NCBI's reader takes from its walks of the alias
 //! tree (`NSEQ`, `LENGTH`, `MIN_SEQ_LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`:
 //! `walk_totals`) and the OID ranges `FIRST_OID` / `LAST_OID` (`compute_masks`,
-//! `range_mask`). The keys that select sequences by a list, an OID mask or a
-//! membership bit, and `MASKLIST`, are explicit errors (not supported yet);
-//! unknown keys, `VDBLIST` and `MAX_SEQ_LENGTH` among them, are ignored, as in
-//! NCBI.
+//! `range_mask`), and `MASKLIST`, the names of the GI-indexed masks of the
+//! top alias file (`gi_mask_list`, read by `super::gi_mask`). The keys that
+//! select sequences by a list, an OID mask or a membership bit are explicit
+//! errors (not supported yet); unknown keys, `VDBLIST` and `MAX_SEQ_LENGTH`
+//! among them, are ignored, as in NCBI.
 //!
 //! Two ways lead from a name to its volumes. `resolve_in` is NCBI's: the
 //! name of a search program's `-db` is looked for in the directories of a
@@ -127,25 +128,28 @@ pub(super) struct AliasTree {
     pub root: AliasNode,
     /// Volume paths without extension, sorted as NCBI opens them.
     pub volumes: Vec<String>,
+    /// The names of the GI-indexed masks that NCBI's reader uses for the database
+    /// (`gi_mask_list`); `None` where it uses the mask columns of the volumes.
+    pub gi_masks: Option<Vec<String>>,
 }
 
 /// Alias keys that LOSAT recognises and does not support: they select
 /// sequences by a list, an OID mask or a membership bit (alias_files.txt
-/// "Type: filter"), or name masks LOSAT does not read (`MASKLIST`). They are
-/// the keys NCBI's reader looks up (seqdbalias.cpp) but those LOSAT reads:
-/// `TITLE`, `DBLIST`, the counts of the walks (`walk_totals`) and the OID
-/// ranges (`compute_masks`). `MAX_SEQ_LENGTH`, which NCBI never applies
-/// (seqdbimpl.cpp:972-976 takes the maximum from the volumes), and `VDBLIST`,
-/// which only NCBI's VDB tools read (vdbalias.cpp; `CSeqDBAliasNode` looks it
-/// up nowhere), are ignored as unknown keys are.
-const UNSUPPORTED_KEYS: [&str; 8] = [
+/// "Type: filter"). They are the keys NCBI's reader looks up (seqdbalias.cpp)
+/// but those LOSAT reads: `TITLE`, `DBLIST`, the counts of the walks
+/// (`walk_totals`), the OID ranges (`compute_masks`) and `MASKLIST`
+/// (`gi_mask_list`; NCBI reads it only after the whole tree is built and only
+/// in the top alias file, and passes over it everywhere else). `MAX_SEQ_LENGTH`,
+/// which NCBI never applies (seqdbimpl.cpp:972-976 takes the maximum from the
+/// volumes), and `VDBLIST`, which only NCBI's VDB tools read (vdbalias.cpp;
+/// `CSeqDBAliasNode` looks it up nowhere), are ignored as unknown keys are.
+const UNSUPPORTED_KEYS: [&str; 7] = [
     "GILIST",
     "TILIST",
     "SEQIDLIST",
     "TAXIDLIST",
     "OIDLIST",
     "MEMB_BIT",
-    "MASKLIST",
     "OID_MASK_TYPE",
 ];
 
@@ -1095,8 +1099,23 @@ fn read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     values
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:133-140
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:117-139
 // ```c++
+//     // Skip gi mask if more than one DBs are specified.
+//     if (m_DBList.size() != 1) {
+//         m_HasGiMask = false;
+//     }
+//
+//     x_ResolveNames(prot_nucl, locked);
+//
+//     CSeqDBAliasStack recurse;
+//
+//     x_ExpandAliases(CSeqDB_BasePath("-"), prot_nucl, recurse, locked);
+//
+//
+//
+//     _ASSERT(recurse.Size() == 0);
+//
 //     // When we get here, the subnodes tree has been built
 //     if (m_HasGiMask) {
 //         if (m_SubNodes.size() != 1 ||
@@ -1106,25 +1125,56 @@ fn read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
 //         }
 //     }
 // ```
-// NCBI's reader takes `MASKLIST` (the GI masks of `makeblastdb -gi_mask`) as a value of the alias
-// file and looks at it only after the whole tree is built; the GI-mask reader it then makes
-// opens no file until a mask is asked for (seqdbimpl.cpp:81-91, seqdbgimask.cpp:46-55). So
-// makeblastdb's own reads of a database (the removal of the old one, the metadata of the new
-// one) go through such an alias file as through any other.
-/// What the reader does with an alias file's `MASKLIST`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum MaskList {
-    /// Refused (`UNSUPPORTED_KEYS`): LOSAT's programs that read sequences do not read GI masks.
-    Refuse,
-    /// Passed over, as makeblastdb's reads pass it: the volumes and alias files are what they
-    /// are without it.
-    Pass,
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1743-1757
+// ```c++
+// void CSeqDBAliasFile::
+// GetMaskList(vector <string> & mask_list)
+// {
+//     if (!m_HasGiMask) {
+//         return;
+//     }
+//
+//     mask_list.clear();
+//
+//     // parse the white spaces...
+//     vector <CTempString> masks;
+//     SeqDB_SplitQuoted(m_SubNodes[0]->m_Values["MASKLIST"], masks);
+//     ITERATE(vector <CTempString>, mask, masks) {
+//         mask_list.push_back(string(*mask));
+//     }
+// }
+// ```
+// `m_HasGiMask` starts true (seqdbalias.cpp:106). `MASKLIST` anywhere else (an alias file over
+// the database, a database among several names, a deeper alias file) is passed over without a
+// word: the volumes' mask columns are then the database's masks.
+/// The names of the GI-indexed masks that NCBI's reader uses for the top node `root` of the
+/// database given as `names` names (`CSeqDBAliasFile::GetMaskList` when `HasGiMask`): one name,
+/// whose alias file (the root's one subnode) has `MASKLIST`, whose value is split as a list of
+/// database names is. `None` otherwise. A name that is not UTF-8 is LOSAT's refusal (the names
+/// are paths).
+fn gi_mask_list(root: &AliasNode, names: usize) -> Result<Option<Vec<String>>, SeqDbError> {
+    let [subnode] = root.subnodes.as_slice() else {
+        return Ok(None);
+    };
+    if names != 1 {
+        return Ok(None);
+    }
+    let Some(value) = subnode.value("MASKLIST") else {
+        return Ok(None);
+    };
+    let mut list = Vec::new();
+    for name in split_quoted(value, false) {
+        let name = std::str::from_utf8(name).map_err(|_| SeqDbError::Unsupported {
+            path: subnode.this_name.clone().unwrap_or_default().into(),
+            message: "a MASKLIST name is not valid UTF-8".to_string(),
+        })?;
+        list.push(name.to_string());
+    }
+    Ok(Some(list))
 }
 
 struct Resolver<'a> {
     seqtype: SeqType,
-    /// `MASKLIST`: refused, or passed over by makeblastdb's own reads.
-    masklist: MaskList,
     /// Alias files being expanded, outermost first.
     recurse: Vec<String>,
     /// The directory where a volume named in an alias file is looked for
@@ -1279,12 +1329,12 @@ impl Resolver<'_> {
         for (key, value) in &values {
             match key.as_slice() {
                 b"DBLIST" => dblist = value,
-                b"MASKLIST" if self.masklist == MaskList::Pass => {}
                 other => {
                     if let Some(key) = UNSUPPORTED_KEYS.iter().find(|k| k.as_bytes() == other) {
                         return Err(unsupported(format!(
                             "alias file key {key} is not supported; LOSAT reads TITLE, DBLIST, NSEQ, \
-                             LENGTH, STATS_NSEQ, STATS_TOTLEN, MIN_SEQ_LENGTH, FIRST_OID and LAST_OID"
+                             LENGTH, STATS_NSEQ, STATS_TOTLEN, MIN_SEQ_LENGTH, FIRST_OID, LAST_OID \
+                             and MASKLIST"
                         )));
                     }
                 }
@@ -1562,7 +1612,11 @@ fn volumes_in_order(root: AliasNode) -> AliasTree {
             .then_with(|| a.cmp(b))
     });
     volumes.dedup();
-    AliasTree { root, volumes }
+    AliasTree {
+        root,
+        volumes,
+        gi_masks: None,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:155-165
@@ -1753,7 +1807,6 @@ pub(super) fn resolve_in(
     }
     let mut resolver = Resolver {
         seqtype,
-        masklist: MaskList::Refuse,
         recurse: Vec::new(),
         local_dir: Some(search.cwd.clone()),
         search: Some(search),
@@ -1822,7 +1875,11 @@ pub(super) fn resolve_in(
         };
         resolver.expand(&mut root, db_dir, "-", &[entry.to_string()], skip_local)?;
     }
-    Ok(volumes_in_order(root))
+    let gi_masks = gi_mask_list(&root, resolved_names.len())?;
+    Ok(AliasTree {
+        gi_masks,
+        ..volumes_in_order(root)
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:85-97
@@ -1850,18 +1907,16 @@ pub(super) fn resolve_in(
 /// it is): an alias file when `db_base.{p|n}al` exists, else the single
 /// volume `db_base.{p|n}in`. `local_copy` says where the volumes named in an
 /// alias file are looked for; `search` is the search path that a database which is not there
-/// names in NCBI's message (the files are looked for at `db_base` only); `masklist` what is done
-/// with a `MASKLIST`.
+/// names in NCBI's message (the files are looked for at `db_base` only). The callers read no
+/// masks: `MASKLIST` is passed over (`AliasTree::gi_masks` is `None`).
 pub(super) fn resolve_one_name(
     db_base: &str,
     seqtype: SeqType,
     local_copy: LocalCopy<'_>,
     search: &SearchPath,
-    masklist: MaskList,
 ) -> Result<AliasTree, SeqDbError> {
     let mut resolver = Resolver {
         seqtype,
-        masklist,
         recurse: Vec::new(),
         local_dir: match local_copy {
             LocalCopy::CurrentDir => std::env::current_dir()
@@ -1960,7 +2015,6 @@ pub(crate) fn find_volume_paths(
         seqtype,
         LocalCopy::No,
         &SearchPath::current_dir()?,
-        MaskList::Pass,
     )?;
     let mut alias_files = std::collections::BTreeSet::new();
     collect_alias_files(&tree.root, &mut alias_files);

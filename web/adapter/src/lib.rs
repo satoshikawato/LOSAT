@@ -70,14 +70,16 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 4 since `losat_web2_register_inputs`, which
-/// reads the inputs of a run with `-parse_deflines`, and the signal of stream 9 for every output
-/// stream that failed (line WQA's sweep, D7, 2026-11-19); 3 since the signal of stream 9, which
-/// makes the host discard a stream that failed alone after a chunk of it was sent (line RG item
-/// T7-W).
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 6 since a run of `-db`, which takes no subject
+/// handle and reads the database from the run's working directory that the host preopens as `.`
+/// (line WQA D12a, 2026-11-20; 5 is taken by open branches); 4 since
+/// `losat_web2_register_inputs`, which reads the inputs of a run with `-parse_deflines`, and the
+/// signal of stream 9 for every output stream that failed (line WQA's sweep, D7, 2026-11-19); 3
+/// since the signal of stream 9, which makes the host discard a stream that failed alone after a
+/// chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    4
+    6
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -369,6 +371,9 @@ pub extern "C" fn losat_web2_inflate_end(handle: u32) -> i32 {
     })
 }
 
+/// Runs the argv on the registered query and subject. A run of `-db` takes the subject handle 0:
+/// the engine opens the database by name from the host's preopened `.` (docs/web/abi_v2.md §3, §4).
+///
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
 #[no_mangle]

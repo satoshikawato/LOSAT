@@ -6,10 +6,11 @@ use std::sync::Arc;
 
 use losat::api::FastaRecord;
 use losat::web_adapter::{
-    run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    ApplicationSettings, CallerSink, CallerStart, Cli, Commands, CountsSource, ErrorSource,
-    FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink, PairwiseHit, ReportOutputs,
-    RunFiles,
+    run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
+    run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
+    run_local_database_tblastx, run_local_tblastn, run_local_tblastx, ApplicationSettings,
+    CallerSink, CallerStart, Cli, Commands, CountsSource, ErrorSource, FormatObserver,
+    FormatOutput, FormatRefusal, HspIndex, OutputSink, PairwiseHit, ReportOutputs, RunFiles,
 };
 
 use crate::emit::{
@@ -291,6 +292,31 @@ pub fn writes_archive(words: &[&str]) -> bool {
     })
 }
 
+/// The database of the arguments `command` (`-db NAME`), which the run opens by name as the command
+/// line opens it, from the files of the run's working directory that the host gives the engine
+/// (docs/web/abi_v2.md §3, §4; line WQA D12a, 2026-11-20). `None` for a search of `-subject`.
+fn database_of(command: &Commands) -> Option<&str> {
+    match command {
+        Commands::Blastp(args) => args.db.as_deref(),
+        Commands::Tblastn(args) => args.db.as_deref(),
+        Commands::Blastn(args) => args.db.as_deref(),
+        Commands::Tblastx(args) => args.db.as_deref(),
+        Commands::Blastx(args) => args.db.as_deref(),
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => None,
+    }
+}
+
+/// Whether a run of `words` (program name first) searches the database of `-db` (`database_of`):
+/// its `run` takes no subject handle (0), and `register_inputs` reads its query alone. False for
+/// an argv that the CLI's parser rejects.
+pub fn searches_database(words: &[&str]) -> bool {
+    parse_words(words).is_ok_and(|(_, command)| database_of(&command).is_some())
+}
+
 /// The environment of the application start of a run in LOSAT Web (`start`): no variable but the
 /// directory of BLASTN's `-window_masker_taxid` (`files::WINDOW_MASKER_PATH`), set in the layer of
 /// NCBI's registry that comes before its files, so that the registry of `-window_masker_taxid`
@@ -364,9 +390,11 @@ impl losat::web_adapter::FileReceiver for NoFiles {
 /// reads of the argv `words` (program name first) before its arguments (`preparse`): the file of
 /// the last `-conffile` (which the host registers as kind 2 before it validates), the file of
 /// `-logfile` (NCBI's scan of it, `log_file`: a run gives it on `STREAM_RUN_FILES`), whether
-/// the run is a dry run, and whether the run takes its inputs from `losat_web2_register_inputs`
-/// (`inputs_together`: an argv with `-parse_deflines`). An unknown program, and a version word,
-/// which LOSAT Web refuses, are errors.
+/// the run is a dry run, whether the run takes its inputs from `losat_web2_register_inputs`
+/// (`inputs_together`: an argv with `-parse_deflines`), and whether it searches the database of
+/// `-db` (`searches_database`: its `run` takes no subject handle, and the engine opens the
+/// database from the run's files, line WQA D12a). An unknown program, and a version word, which
+/// LOSAT Web refuses, are errors.
 pub fn start_json(words: &[&str]) -> Result<String, String> {
     use losat::web_adapter::Preparsed;
     Program::parse(words.first().copied().unwrap_or(""))?;
@@ -392,8 +420,9 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
     );
     let _ = write!(
         out,
-        ",\"dry_run\":{dryrun},\"register_inputs\":{}}}",
-        inputs_together(words)
+        ",\"dry_run\":{dryrun},\"register_inputs\":{},\"database\":{}}}",
+        inputs_together(words),
+        searches_database(words)
     );
     Ok(out)
 }
@@ -543,10 +572,6 @@ fn blastn_group_check(
     group: &[Output],
 ) -> Result<(), String> {
     use losat::web_adapter::{check_losat_limits, check_scoring_options};
-    // The host has no database files.
-    if args.db.is_some() {
-        return Err("-db (a database search) is not supported in the browser yet".to_string());
-    }
     let outfmts: Vec<i32> = group.iter().map(|output| output.number as i32).collect();
     // `process_options` sets the counts that the checks read.
     let (counts, _) = losat::web_adapter::run_report_counts(
@@ -968,6 +993,7 @@ fn search(
     formats: &[Output],
     query: &[FastaRecord],
     subject: &[FastaRecord],
+    settings: &ApplicationSettings,
     diagnostics: &mut (dyn std::io::Write + Send),
 ) -> Result<Searched, Failed> {
     let mut writers: Vec<StreamWriter> = formats
@@ -1030,7 +1056,35 @@ fn search(
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
+        // A search of `-db` (line WQA D12a): the program's database entry, as the library's
+        // `api::run` runs it, with the run's application settings, which find the database (the
+        // run's working directory, then `BLASTDB` of a registered `.ncbirc` or `-conffile`, as on
+        // the command line). The engine opens its files by name, from the files that the host
+        // gives it (docs/web/abi_v2.md §3); the subject records are none.
+        let database = database_of(&command).is_some();
         let result = match command {
+            Commands::Blastp(args) if database => {
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
+                run_local_database_blastp(args, query, settings.clone(), &mut outputs)
+            }
+            Commands::Tblastn(args) if database => {
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
+                losat::web_adapter::refuse_tblastn_pssm_query(&args).and_then(|()| {
+                    run_local_database_tblastn(args, query, settings.clone(), &mut outputs)
+                })
+            }
+            Commands::Blastn(args) if database => {
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
+                run_local_database_blastn(args, query, settings.clone(), &mut outputs)
+            }
+            Commands::Tblastx(args) if database => {
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
+                run_local_database_tblastx(args, query, settings.clone(), &mut outputs)
+            }
+            Commands::Blastx(args) if database => {
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
+                run_local_database_blastx(args, query, settings.clone(), &mut outputs)
+            }
             Commands::Blastp(args) => {
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_blastp(args, query, subject, "", "", &mut outputs)
@@ -1513,18 +1567,21 @@ fn search_all(
             give_counts(&mut command, counts.as_ref(), settings);
             let mut warnings = Vec::new();
             let result = match (streamed && position == 0, groups.len() > 1) {
-                (true, false) => search(command, group, query, subject, &mut *diagnostics),
+                (true, false) => {
+                    search(command, group, query, subject, settings, &mut *diagnostics)
+                }
                 (true, true) => search(
                     command,
                     group,
                     query,
                     subject,
+                    settings,
                     &mut Kept {
                         sink: &mut *diagnostics,
                         copy: &mut warnings,
                     },
                 ),
-                (false, _) => search(command, group, query, subject, &mut warnings),
+                (false, _) => search(command, group, query, subject, settings, &mut warnings),
             };
             let ends = matches!(&result, Err(failed) if position == own || failed.fault);
             outcomes.push((result, warnings));

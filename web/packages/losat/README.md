@@ -101,7 +101,11 @@ A host that keeps every chunk would keep output that the command line does not w
 file of `-conffile` under that name to `engine.validate(argv, registry)` and as
 `EngineRunRequest.conffile`; `reactorControl` validates it on an instance of its own, opened with its
 second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
-run fails, `runFilesOf(error)` returns it.
+run fails, `runFilesOf(error)` returns it. The engine reads a `-logfile` name as the command line on
+Linux reads it where the name's directories exist: the file's name is the whole name, which may
+contain `/` (`logs/run.log`, `/tmp/run.log`, `/dev/stdout`); show and save it as a name, not as a
+path. The standard error (`/dev/stderr`) and a directory (`logs/`) give no file: their messages
+are on stream 3.
 
 `RuntimeInfo.messages` says where the run's messages went (the warnings that the command line writes
 to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile'` (the file of

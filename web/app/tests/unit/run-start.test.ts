@@ -855,6 +855,10 @@ describe('the name of a downloaded file of a run', () => {
     // A file named as an output's file (-logfile outfmt6.txt) is not saved under that output's name.
     expect(runFileName(run, 'outfmt6.txt')).not.toBe(outputFileName(run, 6));
     expect(runFileName(run, 'outfmt6.txt')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.outfmt6.txt');
+    // A name with a directory is saved as a name: each `/` is `_` (line WQA's sweep, D11, 2026-11-20).
+    expect(runFileName(run, 'logs/run.log')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.logs_run.log');
+    expect(runFileName(run, '/tmp/run.log')).toBe('losat-run3-tblastx-20261104T111530Z.logfile._tmp_run.log');
+    expect(runFileName(run, '/dev/stdout')).toBe('losat-run3-tblastx-20261104T111530Z.logfile._dev_stdout');
   });
 });
 

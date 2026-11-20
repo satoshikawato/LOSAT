@@ -10,7 +10,7 @@
 // as PNGs.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Download, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
@@ -126,6 +126,91 @@ test('the file of -logfile is a file of the run: shown after the formats and sav
     expect(again).toEqual(saved);
     const native = nativeLogFile([id, '-max_target_seqs', '1'], QUERY, SUBJECT);
     if (native !== undefined) expect(saved.bytes.equals(native), `${id} -logfile run.log`).toBe(true);
+  }
+});
+
+/**
+ * What the native CLI writes for the search `words` (program first) with `-logfile NAME` on the inputs, with the run's
+ * one thread, in a new working directory where the name's directories exist: its standard error, and the file that the
+ * name makes (undefined where it makes none). Undefined without LOSAT_WEB_NATIVE.
+ */
+function nativeNamedLog(
+  words: readonly string[],
+  name: string,
+  query: string,
+  subject: string,
+): { readonly stderr: Buffer; readonly file: Buffer | undefined } | undefined {
+  if (NATIVE === undefined) return undefined;
+  const directory = nativeDirectory(query, subject);
+  const slash = name.lastIndexOf('/');
+  if (slash > 0) mkdirSync(join(directory, name.slice(0, slash)), { recursive: true });
+  const run = spawnSync(NATIVE, [words[0]!, '-query', 'query.fa', '-subject', 'subject.fa', ...words.slice(1), '-logfile', name, '-num_threads', '1'], { cwd: directory });
+  expect(run.status, `native ${words.join(' ')} -logfile ${name}: ${run.stderr.toString('utf8')}`).toBe(0);
+  const path = join(directory, name);
+  return { stderr: run.stderr, file: existsSync(path) && statSync(path).isFile() ? readFileSync(path) : undefined };
+}
+
+// A -logfile name is read as the CLI on Linux reads it where the name's directories exist (ABI v2 §4 `losat_web2_start`;
+// line WQA's sweep, D11, 2026-11-20): a name with a directory makes a file of the run under its whole name, as the CLI
+// makes it there (TBLASTX writes the warning of -max_target_seqs 1 into it, BLASTN to its warnings, the file empty), and
+// it is saved with each '/' as '_'; /dev/stderr is the standard error, so TBLASTX's warning is among its Warnings and the
+// run has no file. Before, the press was refused: "the -logfile name logs/run.log has a directory, which LOSAT Web does
+// not have: give a file name without one".
+test('a -logfile name with a directory makes a file of that name, and /dev/stderr is the Warnings', async ({ page, browserName }, testInfo) => {
+  if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the files: ${NO_NATIVE_REASON}` });
+  const cases = [
+    { id: 'tblastx', name: 'logs/run.log', saved: 'logs_run\\.log' },
+    { id: 'blastn', name: 'a/b/run.log', saved: 'a_b_run\\.log' },
+    { id: 'tblastx', name: '/dev/stderr', saved: undefined },
+  ] as const;
+  for (const [index, { id, name, saved }] of cases.entries()) {
+    // Each case on a page of its own: its run is run 1.
+    if (index > 0) await openSearch(page);
+    await program(page, id);
+    await paste(page, 'query', QUERY);
+    await paste(page, 'subject', SUBJECT);
+    await openParameters(page);
+    await page.getByTestId('param-max_target_seqs').selectOption('other');
+    await page.getByTestId('param-max_target_seqs-other').fill('1');
+    await page.getByTestId('param-extra').fill(`-logfile ${name}`);
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, 1, 'completed');
+    await chooseRun(page, 1);
+    const warning = `Warning: [${id}] Examining 5 or more matches is recommended\n`;
+    const native = nativeNamedLog([id, '-max_target_seqs', '1'], name, QUERY, SUBJECT);
+    await page.getByTestId('results-view-outputs').click();
+    if (saved === undefined) {
+      // The standard error: no file of the run, and the warning is among the run's Warnings, as the CLI writes it.
+      await expect(page.getByTestId('format-run-files')).toHaveCount(0);
+      await page.getByTestId('results-view-details').click();
+      await expect(page.getByTestId('run-diagnostics')).toHaveText(warning.trimEnd());
+      await expect(page.getByTestId('run-diagnostics-place')).toHaveCount(0);
+      if (native !== undefined) {
+        expect(native.stderr.toString('utf8'), `${id} -logfile ${name}: the CLI's standard error`).toBe(warning);
+        expect(native.file, `${id} -logfile ${name}: no file`).toBeUndefined();
+      }
+      continue;
+    }
+    const text = id === 'tblastx' ? warning : '';
+    const tab = page.getByTestId('format-run-files');
+    await expect(tab).toHaveText(`-logfile ${name}`);
+    await tab.click();
+    const file = page.getByTestId('run-file-0');
+    await expect(file.getByTestId('run-file-name')).toHaveText(name);
+    if (text === '') await expect(file.getByTestId('run-file-empty')).toHaveText('The file is empty.');
+    else await expect(file.getByTestId('run-file-text')).toHaveText(text);
+    await shoot(page.getByTestId('results-outputs'), `08-outputs-logfile-${id}-${name.replace(/[^a-z]+/g, '-')}`, browserName);
+    const download = await downloaded(page, () => page.getByTestId('run-file-download-0').click());
+    expect(download.name).toMatch(new RegExp(`^losat-run1-${id}-.*Z\\.logfile\\.${saved}$`));
+    expect(download.bytes.toString('utf8')).toBe(text);
+    await page.getByTestId('results-download-all').click();
+    await expect(page.getByTestId('results-download-menu').getByTestId('results-download-run-file-0')).toHaveText(`${name} (-logfile)`);
+    await page.keyboard.press('Escape');
+    if (native !== undefined) {
+      expect(native.file?.equals(download.bytes), `${id} -logfile ${name}: the CLI's file`).toBe(true);
+      expect(native.stderr.toString('utf8'), `${id} -logfile ${name}: the CLI's standard error`).toBe(id === 'tblastx' ? '' : warning);
+    }
   }
 });
 

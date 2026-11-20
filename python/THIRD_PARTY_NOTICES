@@ -13,6 +13,7 @@ files that hold it, its license, and its notices and license text.
   6. Microsoft's C runtime, UCRT (MIT License)
   7. The Rust crate bzip2 0.6.1 (MIT License)
   8. The Rust crate ruzstd 0.9.1 (MIT License)
+  9. Two icons of LOSAT Web, from Heroicons and Feather (MIT License)
 
 Paths are relative to the losat crate (the directory LOSAT/ of the repository).
 
@@ -390,6 +391,70 @@ License: MIT. Its LICENSE:
 MIT License
 
 Copyright (c) 2019 Moritz Borcherding
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------
+
+===============================================================================
+9. Two icons of LOSAT Web, from Heroicons and Feather
+===============================================================================
+
+What: the shapes of two icons of LOSAT Web's screens. The check mark beside an accepted
+input is the icon "check" of Heroicons version 1 (outline set; https://heroicons.com, the
+npm package heroicons 1.0.6, the last release of version 1). The warning triangle beside
+"Closing or reloading this tab ends the search" is the icon "alert-triangle" of Feather
+(https://feathericons.com, the npm package feather-icons 4.29.2), with its coordinates
+rounded.
+Files (from the repository's root, outside the losat crate): web/app/src/ui/SourceCard.vue
+(Heroicons) and web/app/src/ui/RunStatus.vue (Feather).
+License: MIT, both. The LICENSE of heroicons 1.0.6:
+
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2020 Refactoring UI Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------
+
+The LICENSE of feather-icons 4.29.2:
+
+-------------------------------------------------------------------------------
+The MIT License (MIT)
+
+Copyright (c) 2013-2023 Cole Bemis
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

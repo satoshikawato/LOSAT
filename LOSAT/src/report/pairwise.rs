@@ -515,7 +515,7 @@ pub struct BlastpPairwiseQuery {
 #[derive(Debug, Clone)]
 pub struct BlastpPairwiseReport {
     pub version: String,
-    pub database_name: String,
+    pub database_name: Vec<u8>,
     /// The `Database:` lines' counts of a FASTA subject set (its records and letters), NCBI's
     /// `Int8` (`tot_num_seqs`, `tot_length`); a `-db` search prints `PairwiseDatabase` and keeps
     /// its sums here (an alias file's `LENGTH` can pass 2^32 on a 32-bit target).
@@ -2087,11 +2087,32 @@ fn write_spaces<W: Write>(writer: &mut W, count: usize) -> io::Result<()> {
 }
 
 #[inline]
-fn ensure_trailing_period(text: &str) -> String {
-    if text.ends_with('.') {
-        text.to_string()
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-801
+// ```c++
+// 	    string dbname;
+// 	    if (m_IsDbScan)
+// 		dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
+// 	    else
+// 		dbname = m_DbName;
+// ```
+/// The database name of a search of a `-subject` file (`m_IsDbScan`): `User specified sequence
+/// set (Input: <name>)` with the bytes of the file's name (`utils::os_bytes::path_bytes`), as
+/// NCBI keeps the `std::string` of the command line (a name that is not UTF-8, BLASTX's
+/// `-subject`: probe R2 of line LIB-B).
+pub(crate) fn subject_set_name(subject: &std::path::Path) -> Vec<u8> {
+    [
+        b"User specified sequence set (Input: ".as_slice(),
+        &crate::utils::os_bytes::path_bytes(subject),
+        b")",
+    ]
+    .concat()
+}
+
+fn ensure_trailing_period(text: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if text.ends_with(b".") {
+        std::borrow::Cow::Borrowed(text)
     } else {
-        format!("{text}.")
+        std::borrow::Cow::Owned([text, b"."].concat())
     }
 }
 
@@ -2378,7 +2399,7 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
     program: &str,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
@@ -2559,7 +2580,7 @@ fn write_final_database_block<W: Write>(
 // ```
 fn write_blastp_database_header_spacing<W: Write>(
     writer: &mut W,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     trailing: usize,
@@ -2581,7 +2602,7 @@ fn write_blastp_database_header_spacing<W: Write>(
     //         x_WrapOutputLine(db_titles, line_length, out);
     // ```
     write!(writer, "Database: ")?;
-    write_flatfile_wrapped(writer, ensure_trailing_period(database_name).as_bytes(), 68)?;
+    write_flatfile_wrapped(writer, &ensure_trailing_period(database_name), 68)?;
     writeln!(
         writer,
         "           {} sequences; {} total letters",
@@ -2864,14 +2885,14 @@ fn write_blastp_final_footer<W: Write>(
 /// `write_blastp_final_footer`).
 fn write_final_database_report<W: Write>(
     writer: &mut W,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:543-544
     // out << "  Database: "; x_WrapOutputLine(dbinfo->definition, line_length, out);
     write!(writer, "  Database: ")?;
-    write_flatfile_wrapped(writer, ensure_trailing_period(database_name).as_bytes(), 68)?;
+    write_flatfile_wrapped(writer, &ensure_trailing_period(database_name), 68)?;
     writeln!(writer, "    Posted date:  Unknown")?;
     writeln!(
         writer,
@@ -3704,7 +3725,7 @@ pub struct BlastnPairwiseReport {
     pub version: String,
     /// The program line and references of the prolog (`-task megablast`, matrix-only scoring).
     pub intro: BlastnIntro,
-    pub database_name: String,
+    pub database_name: Vec<u8>,
     /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
     pub database_num_sequences: i64,
     pub database_total_letters: i64,
@@ -4660,7 +4681,7 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
     intro: BlastnIntro,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
@@ -5060,7 +5081,7 @@ pub struct TblastxPairwiseQuery {
 #[derive(Debug, Clone)]
 pub struct TblastxPairwiseReport {
     pub version: String,
-    pub database_name: String,
+    pub database_name: Vec<u8>,
     /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
     pub database_num_sequences: i64,
     pub database_total_letters: i64,
@@ -5106,7 +5127,7 @@ pub struct TblastxPairwiseReport {
 pub fn write_tblastx_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
@@ -5771,7 +5792,7 @@ mod tests {
             &mut prolog,
             "2.17.0+",
             "BLASTP",
-            "s",
+            b"s",
             2,
             6_000_000_000,
             None,
@@ -5783,7 +5804,7 @@ mod tests {
             "{prolog}"
         );
         let mut epilog = Vec::new();
-        write_final_database_report(&mut epilog, "s", 2, 6_000_000_000).unwrap();
+        write_final_database_report(&mut epilog, b"s", 2, 6_000_000_000).unwrap();
         let epilog = String::from_utf8(epilog).unwrap();
         assert!(
             epilog.contains("  Number of letters in database: 6,000,000,000\n  Number of sequences in database:  2\n"),
@@ -6780,7 +6801,7 @@ mod tests {
                     megablast,
                     matrix_only: true,
                 },
-                "User specified sequence set (Input: s1.fa)",
+                b"User specified sequence set (Input: s1.fa)",
                 1,
                 100_000,
                 None,
@@ -6878,7 +6899,7 @@ mod tests {
                 megablast: true,
                 matrix_only: false,
             },
-            database_name: "subjects".to_string(),
+            database_name: b"subjects".to_vec(),
             database_num_sequences: 3,
             database_total_letters: 300,
             database: None,
@@ -6974,7 +6995,7 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     writer: &mut W,
     program: &str,
     version: &str,
-    database_name: &str,
+    database_name: &[u8],
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
@@ -8068,11 +8089,7 @@ pub fn write_blastx_epilog(
         write_final_database_block(writer, database)?;
     } else {
         write!(writer, "  Database: ")?;
-        write_flatfile_wrapped(
-            writer,
-            ensure_trailing_period(&report.database_name).as_bytes(),
-            68,
-        )?;
+        write_flatfile_wrapped(writer, &ensure_trailing_period(&report.database_name), 68)?;
         writeln!(writer, "    Posted date:  Unknown")?;
         writeln!(
             writer,
@@ -8586,7 +8603,7 @@ mod tblastx_tests {
             .collect();
         let report = TblastxPairwiseReport {
             version: "2.17.0+".to_string(),
-            database_name: "subjects".to_string(),
+            database_name: b"subjects".to_vec(),
             database_num_sequences: 3,
             database_total_letters: 900,
             matrix_name: "BLOSUM62".to_string(),
@@ -9082,7 +9099,7 @@ mod tblastx_tests {
         let queries = [query(b"q0"), query(b"q1"), query(b"q2")];
         let report = BlastpPairwiseReport {
             version: String::new(),
-            database_name: String::new(),
+            database_name: Vec::new(),
             database_num_sequences: 1,
             database_total_letters: 400,
             matrix_name: Some("BLOSUM62".into()),
@@ -9405,7 +9422,7 @@ mod tblastx_tests {
         let hits = [hit(1), hit(3)];
         let report = BlastpPairwiseReport {
             version: "BLASTP 2.17.0+".to_string(),
-            database_name: "db".to_string(),
+            database_name: b"db".to_vec(),
             database_num_sequences: 1,
             database_total_letters: 180,
             matrix_name: Some("BLOSUM62".to_string()),

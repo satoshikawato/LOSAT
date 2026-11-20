@@ -163,6 +163,12 @@ jobs:
         run: python3 LOSAT/tests/ncbi_unit_case_ledger.py check --root .
       - name: Ledger checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ncbi_unit_case_ledger.py'
+      # NCBI's Linux build: makeblastdb's dates come from glibc's localtime. The unit tests of
+      # LOSAT/src/writedb/local_offset.rs compare LOSAT's local time with the fixture
+      # LOSAT/tests/unit/local_time_glibc_vectors.tsv; this compares the fixture with this runner's
+      # glibc (152 forms of TZ and TZDIR, under a second, 2026-11-20).
+      - name: Local time is glibc's
+        run: python3 -I scripts/local_time_glibc_vectors.py --check
       # No NCBI counterpart: release bookkeeping. Pending CHANGELOG entries are one file per pull
       # request (changelog.d/README.md), so two pull requests never conflict in CHANGELOG.md.
       - name: Changelog fragments

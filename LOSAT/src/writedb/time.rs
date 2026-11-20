@@ -52,12 +52,16 @@ impl LocalTime {
     // that the host gives, read by the crate jiff; UCRT on Windows), and
     // where no zone is found or read (no zone file, a WASI host that gives
     // neither `TZ` nor a zone file, a `TZ` that jiff does not read) the time
-    // is UTC.
+    // is UTC. A leap second of a zone file is second 60, as glibc writes it.
     /// The current local time, or `None` where the platform has no clock.
     pub fn now() -> Option<Self> {
         let seconds = unix_seconds()?;
-        let offset = local_utc_offset(seconds).unwrap_or(0);
-        Some(Self::from_unix_seconds(seconds + offset))
+        let offset = local_utc_offset(seconds).unwrap_or_default();
+        let mut time = Self::from_unix_seconds(seconds + offset.seconds);
+        if offset.leap_second {
+            time.second = 60;
+        }
+        Some(time)
     }
 
     /// The calendar time `seconds` after 1970-01-01 00:00:00 (Gregorian

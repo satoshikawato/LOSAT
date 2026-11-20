@@ -17,14 +17,27 @@
 //!   as glibc's does: LOSAT reads the file's table of leap seconds itself (RFC 8536 §3.2), which
 //!   jiff does not use.
 //! - A zone that jiff cannot read is UTC, as is an instant outside jiff's range. The forms of `TZ`
-//!   that glibc reads and jiff does not are in `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md`.
+//!   that glibc reads and jiff does not are in `docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md`.
 
-/// The offset in seconds of the local time from UTC at `unix_seconds`, or `None` for UTC
+/// How far the local time of an instant is from UTC (`local_utc_offset`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LocalOffset {
+    /// The local calendar time is that of the instant plus `seconds`.
+    pub seconds: i64,
+    /// The instant is a leap second of the zone file (tzdata's `right/` zones), which the C
+    /// library writes as second 60: the calendar time of `seconds` is second 59 of that minute.
+    pub leap_second: bool,
+}
+
+/// The local time of `unix_seconds` as an offset from UTC, or `None` for UTC
 /// (`super::time::LocalTime::now` then gives UTC).
-pub fn local_utc_offset(unix_seconds: i64) -> Option<i64> {
+pub fn local_utc_offset(unix_seconds: i64) -> Option<LocalOffset> {
     #[cfg(windows)]
     {
-        super::windows_zone::windows_local_utc_offset(unix_seconds)
+        super::windows_zone::windows_local_utc_offset(unix_seconds).map(|seconds| LocalOffset {
+            seconds,
+            leap_second: false,
+        })
     }
     #[cfg(not(windows))]
     {
@@ -44,22 +57,31 @@ use jiff::tz::TimeZone;
 #[cfg(not(windows))]
 struct Zone {
     zone: TimeZone,
-    /// (instant, correction) of each leap second (RFC 8536 §3.2, "leap-second records"): after
-    /// the instant, the local time is `correction` seconds less. At the instant itself glibc gives
-    /// the second 60 of the minute, which LOSAT's `LocalTime` writes as the next minute (tzdata
-    /// 2026e lists no leap second after 2016).
+    /// (instant, correction) of each leap second (RFC 8536 §3.2, "leap-second records"): from
+    /// the instant on, the local time is `correction` seconds less than the zone's offset gives.
     leap_seconds: Vec<(i64, i64)>,
 }
 
 #[cfg(not(windows))]
 impl Zone {
-    /// The offset of the local time from UTC at `unix_seconds`, or `None` outside jiff's range of
-    /// instants.
-    fn offset_at(&self, unix_seconds: i64) -> Option<i64> {
+    /// The local time at `unix_seconds`, or `None` outside jiff's range of instants. As glibc
+    /// gives it (observed): the correction of the last record at or before the instant, and at
+    /// the instant of a record that adds a second, second 60 (a record that takes one away skips
+    /// a second instead).
+    fn offset_at(&self, unix_seconds: i64) -> Option<LocalOffset> {
         let instant = jiff::Timestamp::from_second(unix_seconds).ok()?;
-        let leap = self.leap_seconds.partition_point(|&(at, _)| at < unix_seconds);
-        let correction = leap.checked_sub(1).map_or(0, |i| self.leap_seconds[i].1);
-        Some(i64::from(self.zone.to_offset(instant).seconds()) - correction)
+        let in_force = self
+            .leap_seconds
+            .partition_point(|&(at, _)| at <= unix_seconds);
+        let correction =
+            |records: usize| records.checked_sub(1).map_or(0, |i| self.leap_seconds[i].1);
+        let leap_second = in_force > 0
+            && self.leap_seconds[in_force - 1].0 == unix_seconds
+            && correction(in_force) > correction(in_force - 1);
+        Some(LocalOffset {
+            seconds: i64::from(self.zone.to_offset(instant).seconds()) - correction(in_force),
+            leap_second,
+        })
     }
 }
 
@@ -87,7 +109,10 @@ fn zone_of(tz: Option<&std::ffi::OsStr>, tzdir: Option<&std::ffi::OsStr>) -> Opt
     let path = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(&path) };
     zone_file(path.as_ref()).or_else(|| {
         let zone = TimeZone::posix(std::str::from_utf8(name).ok()?).ok()?;
-        Some(Zone { zone, leap_seconds: Vec::new() })
+        Some(Zone {
+            zone,
+            leap_seconds: Vec::new(),
+        })
     })
 }
 
@@ -108,7 +133,10 @@ fn zone_file(path: &std::path::Path) -> Option<Zone> {
         return None;
     }
     let zone = TimeZone::tzif("localtime", &data).ok()?;
-    Some(Zone { zone, leap_seconds: leap_seconds(&data)? })
+    Some(Zone {
+        zone,
+        leap_seconds: leap_seconds(&data)?,
+    })
 }
 
 /// The leap-second records of TZif data that jiff has read (RFC 8536 §3): those of the data
@@ -151,7 +179,10 @@ fn leap_seconds(data: &[u8]) -> Option<Vec<(i64, i64)>> {
                     8 => i64::from_be_bytes(at.try_into().unwrap()),
                     _ => i64::from(i32::from_be_bytes(at.try_into().unwrap())),
                 };
-                (at, i64::from(i32::from_be_bytes(correction.try_into().unwrap())))
+                (
+                    at,
+                    i64::from(i32::from_be_bytes(correction.try_into().unwrap())),
+                )
             })
             .collect(),
     )
@@ -185,7 +216,7 @@ mod tests {
     }
 
     /// The forms that glibc reads otherwise than LOSAT (docs/product_decisions/
-    /// PD-LOSAT-NCBI-DEFECTS.md, makeblastdb's dates): every other form gives glibc's time.
+    /// PD-LOSAT-DATABASE-SEARCH.md, the creation date): every other form gives glibc's time.
     const DIFFERING: &[(&str, Differs)] = &[
         // Numbers outside POSIX's ranges, which glibc brings into them.
         ("XXX+25", Differs::Utc),
@@ -230,22 +261,42 @@ mod tests {
         ("slim/America/Ojinaga", Differs::Utc),
     ];
 
-    fn losat(tz: Option<&str>, tzdir: Option<&str>, unix_seconds: i64) -> Option<i64> {
-        zone_of(tz.map(OsStr::new), tzdir.map(OsStr::new))?.offset_at(unix_seconds)
+    /// A local time as the vectors write glibc's: the calendar time less the instant (second 60
+    /// counted as the next minute's second 0), and whether it is second 60.
+    type Local = (i64, bool);
+    /// (instant, local time) of a form.
+    type Points = Vec<(i64, Local)>;
+
+    /// LOSAT's local time at `unix_seconds`.
+    fn losat(tz: &str, tzdir: Option<&str>, unix_seconds: i64) -> Option<Local> {
+        let offset =
+            zone_of(Some(OsStr::new(tz)), tzdir.map(OsStr::new))?.offset_at(unix_seconds)?;
+        Some((
+            offset.seconds + i64::from(offset.leap_second),
+            offset.leap_second,
+        ))
     }
 
-    /// (instant, glibc's offset) of a row of the vectors or of the server.
-    fn points(row: &str) -> Vec<(i64, i64)> {
+    /// (instant, (glibc's offset, second 60)) of a row of the vectors: `instant:offset`, or
+    /// `instant:offset:60` where glibc writes the second as 60.
+    fn points(row: &str) -> Points {
         row.split(' ')
             .map(|point| {
-                let (t, offset) = point.split_once(':').unwrap();
-                (t.parse().unwrap(), offset.parse().unwrap())
+                let mut fields = point.split(':');
+                let t = fields.next().unwrap().parse().unwrap();
+                let offset = fields.next().unwrap().parse().unwrap();
+                let leap_second = match fields.next() {
+                    None => false,
+                    Some("60") => true,
+                    Some(other) => panic!("{point}: {other}"),
+                };
+                (t, (offset, leap_second))
             })
             .collect()
     }
 
     /// The forms of the vectors: (TZ, TZDIR, points), `{dir}` made ZONES.
-    fn vectors() -> Vec<(String, Option<String>, Vec<(i64, i64)>)> {
+    fn vectors() -> Vec<(String, Option<String>, Points)> {
         VECTORS
             .lines()
             .filter(|line| !line.starts_with('#'))
@@ -258,20 +309,15 @@ mod tests {
             .collect()
     }
 
-    /// The instants where LOSAT's time is not glibc's, unless `DIFFERING` lists `form` (where
+    /// The instants where LOSAT's time is not glibc's, unless `DIFFERING` lists `tz` (where
     /// LOSAT's time must differ as listed).
-    fn compare(
-        form: &str,
-        tz: Option<&str>,
-        tzdir: Option<&str>,
-        glibc: &[(i64, i64)],
-    ) -> Option<String> {
-        let losat: Vec<Option<i64>> = glibc.iter().map(|&(t, _)| losat(tz, tzdir, t)).collect();
-        let differing = DIFFERING.iter().find(|(f, _)| *f == form).map(|&(_, d)| d);
+    fn compare(tz: &str, tzdir: Option<&str>, glibc: &[(i64, Local)]) -> Option<String> {
+        let losat: Vec<Option<Local>> = glibc.iter().map(|&(t, _)| losat(tz, tzdir, t)).collect();
+        let differing = DIFFERING.iter().find(|(f, _)| *f == tz).map(|&(_, d)| d);
         let unequal: Vec<_> = glibc
             .iter()
             .zip(&losat)
-            .filter(|&(&(_, offset), losat)| losat.unwrap_or(0) != offset)
+            .filter(|&(&(_, glibc), losat)| losat.unwrap_or_default() != glibc)
             .map(|(&(t, offset), losat)| (t, offset, *losat))
             .collect();
         match differing {
@@ -283,10 +329,12 @@ mod tests {
                 glibc.len(),
                 &unequal[..unequal.len().min(3)]
             )),
-            Some(_) if unequal.is_empty() => Some(format!("{form:?} is glibc's time: drop it from DIFFERING")),
+            Some(_) if unequal.is_empty() => {
+                Some(format!("{tz:?} is glibc's time: drop it from DIFFERING"))
+            }
             Some(Differs::Utc) if losat.iter().all(Option::is_none) => None,
             Some(Differs::Jiff) if losat.iter().all(Option::is_some) => None,
-            Some(differs) => Some(format!("{form:?} is not {differs:?}: LOSAT {losat:?}")),
+            Some(differs) => Some(format!("{tz:?} is not {differs:?}: LOSAT {losat:?}")),
         }
     }
 
@@ -295,7 +343,7 @@ mod tests {
         let vectors = vectors();
         let failures: Vec<String> = vectors
             .iter()
-            .filter_map(|(tz, tzdir, glibc)| compare(tz, Some(tz.as_str()), tzdir.as_deref(), glibc))
+            .filter_map(|(tz, tzdir, glibc)| compare(tz, tzdir.as_deref(), glibc))
             .collect();
         assert!(failures.is_empty(), "{}", failures.join("\n"));
         for (form, _) in DIFFERING {
@@ -304,90 +352,5 @@ mod tests {
                 "{form:?} of DIFFERING is not a form of the vectors"
             );
         }
-    }
-
-    /// The host's glibc against LOSAT, on Linux: the forms of the vectors, the forms of the host
-    /// (`TZ` unset, names under /usr/share/zoneinfo) and each zone file there (Python's
-    /// `time.localtime` through scripts/local_time_glibc_vectors.py --serve).
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn local_time_is_the_hosts_glibcs() {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../scripts/local_time_glibc_vectors.py");
-        let libc = Command::new("python3")
-            .args(["-I", "-c", "import platform; print(platform.libc_ver()[0])"])
-            .output()
-            .expect("python3 runs");
-        if String::from_utf8_lossy(&libc.stdout).trim() != "glibc" {
-            eprintln!("skipped: the C library of this Linux is not glibc");
-            return;
-        }
-        let mut jobs: Vec<(Option<String>, Option<String>)> = vectors()
-            .into_iter()
-            .map(|(tz, tzdir, _)| (Some(tz), tzdir))
-            .collect();
-        for tz in [
-            None,
-            Some("Asia/Tokyo"),
-            Some(":Asia/Tokyo"),
-            Some("asia/tokyo"),
-            Some("/usr/share/zoneinfo/Asia/Tokyo"),
-            Some("../zoneinfo/Asia/Tokyo"),
-            Some("localtime"),
-            Some("posixrules"),
-            Some("/etc/localtime"),
-            Some("/dev/null"),
-            Some("/dev/zero"),
-        ] {
-            jobs.push((tz.map(str::to_owned), None));
-        }
-        jobs.push((Some("Asia/Tokyo".to_owned()), Some(String::new())));
-        let root = std::path::Path::new("/usr/share/zoneinfo");
-        let mut dirs = vec![root.to_path_buf()];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-                let path = entry.path();
-                // Not through a link to a directory (Debian's `posix` -> `.`).
-                if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                    dirs.push(path);
-                } else if std::fs::read(&path).is_ok_and(|data| data.starts_with(b"TZif")) {
-                    let name = path.strip_prefix(root).unwrap().to_str().unwrap().to_owned();
-                    jobs.push((Some(name), None));
-                }
-            }
-        }
-        let input: String = jobs
-            .iter()
-            .map(|(tz, tzdir)| {
-                let field = |v: &Option<String>| v.clone().unwrap_or_else(|| "\0".to_owned());
-                format!("{}\t{}\t*\t*\n", field(tz), field(tzdir))
-            })
-            .collect();
-        let mut server = Command::new("python3")
-            .args(["-I", script, "--serve"])
-            .env_remove("TZ")
-            .env_remove("TZDIR")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("python3 runs");
-        let mut stdin = server.stdin.take().unwrap();
-        let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
-        let output = server.wait_with_output().unwrap();
-        writer.join().unwrap().unwrap();
-        assert!(output.status.success());
-        let rows = String::from_utf8(output.stdout).unwrap();
-        let rows: Vec<&str> = rows.lines().collect();
-        assert_eq!(rows.len(), jobs.len());
-        let failures: Vec<String> = jobs
-            .iter()
-            .zip(rows)
-            .filter_map(|((tz, tzdir), row)| {
-                let form = tz.as_deref().unwrap_or("<unset>");
-                compare(form, tz.as_deref(), tzdir.as_deref(), &points(row))
-            })
-            .collect();
-        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }

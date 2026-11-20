@@ -207,6 +207,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
         reduced_cutoff_scores,
         score_matrix,
         nucl_score_table,
+        exact_ungapped,
         debug_enabled,
         debug_window,
         blastn_trace_enabled,
@@ -743,7 +744,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 } else {
                     None
                 };
-                let ungapped = if safe_k < 11 {
+                let ungapped = if exact_ungapped {
                     extend_hit_ungapped_exact_ncbi(
                         encoded_query_concat_blastna,
                         search_seq_packed,

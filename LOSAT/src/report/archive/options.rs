@@ -487,6 +487,19 @@ fn task_calls(task: &str) -> Vec<Param> {
             // `ClearFilterOptions` ends with `SetMaskAtHash(false)` (api/blast_options_cxx.cpp:1022-1031).
             p("MaskAtHash", Boolean(false)),
         ],
+        // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:365-370
+        // ```c++
+        //         }else if ( !NStr::CompareNocase(task, "rmblastn") )
+        //         {
+        //             // -RMH- This blastn only supports full matrix scoring.
+        //             opts->SetMatchReward(0);
+        //             opts->SetMismatchPenalty(0);
+        //         }
+        // ```
+        "rmblastn" => vec![
+            p("MatchReward", Integer(0)),
+            p("MismatchPenalty", Integer(0)),
+        ],
         "dc-megablast" => vec![
             p("MBTemplateType", Integer(0)),
             p("MBTemplateLength", Integer(18)),

@@ -142,8 +142,8 @@ Strategy files:
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-task rmblastn` | Refused. |
-| `-reward 0` | Refused (exit status 1). The message is shown below the table. |
+| `-reward 0` with a penalty other than 0 | Refused (exit status 1). The message is shown below the table. `-reward 0 -penalty 0` (the scores of `-task rmblastn`) runs. |
+| `-reward 0 -penalty 0` with `-task megablast` and its greedy extension (without `-no_greedy`; also with `-ungapped` when the gap costs are 0 and 0) | Refused. NCBI divides by zero (exit status 136) or does not finish. |
 | `-ungapped` with `-outfmt 17` (SAM) | Refused. |
 | `-filtering_db`, `-index_name` | Refused. |
 | `-use_index true` with a megablast search of a database that has a MegaBLAST index (made by `makembindex`) | Refused. |
@@ -156,10 +156,10 @@ Strategy files:
 | `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused. |
 | `-window_masker_taxid` with a counts file whose unit size is 17 to 251 | Refused. NCBI's result is undefined. |
 
-The message for `-reward 0` is:
+The message for `-reward 0` with the default penalty of `-task megablast` is:
 
 ```text
-Error: a reward of 0 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN
+Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for which no query has Karlin-Altschul values, is not supported by LOSAT's BLASTN; reward 0 needs penalty 0 (matrix-only scoring, as -task rmblastn)
 ```
 
 <details>

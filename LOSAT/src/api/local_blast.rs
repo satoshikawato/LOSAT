@@ -494,8 +494,8 @@ pub struct ReportedSubject {
     /// The sequence's OID in the database (the `n` of `gnl|BL_ORD_ID|n`), the same in every
     /// search of the database, also one that a taxid or Seq-id list restricts.
     pub oid: u32,
-    /// The `saccver` of the default tabular report.
-    pub id: std::sync::Arc<str>,
+    /// The `saccver` of the default tabular report, its bytes.
+    pub id: crate::api::Id,
     /// Its letters.
     pub length: usize,
 }

@@ -18,12 +18,13 @@ fn unix(bytes: &[u8]) -> RegistryRead {
     read_registry_with(bytes, Layer::SystemWide, LineEnds::Unix).unwrap()
 }
 
-/// The message, the line of the throw, its kind and the position of the read's error.
+/// The message, the line of the throw, its kind and the position of the read's error (NCBI's
+/// `(m_Pos = <n>)`, which LOSAT writes as `(position <n>)`).
 fn failure(read: &RegistryRead) -> (String, u32, &'static str, String) {
     let error = read.error.as_ref().expect("an error");
     let what = error.what();
     let pos = what
-        .rsplit_once("(m_Pos = ")
+        .rsplit_once(crate::wording::POSITION)
         .map(|(_, rest)| rest.trim_end_matches(")\n").to_string())
         .unwrap_or_default();
     (
@@ -161,10 +162,11 @@ fn the_report_is_ncbis() {
     let read = unix(b"garbage\n");
     assert_eq!(
         read.error.unwrap().what(),
-        format!(
+        // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
+        crate::wording::losat_text(&format!(
             "NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = 1)\n",
             crate::ncbi_exception::NCBI_BUILD_ROOT
-        )
+        ))
     );
 }
 
@@ -426,10 +428,12 @@ fn backslashed_counts_the_backslashes_before() {
 #[test]
 fn the_notice_and_the_last_value_are_ncbis() {
     let read = unix(b"garbage\n");
+    // NCBI's post in LOSAT's words (`crate::wording::losat_text`).
     let notice = |root: &str| {
-        format!(
+        crate::wording::losat_text(&format!(
             "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = 1)\n\n",
-        )
+        ))
+        .into_owned()
     };
     assert_eq!(
         syntax_error_notice(read.error.as_ref().unwrap(), "blastn"),

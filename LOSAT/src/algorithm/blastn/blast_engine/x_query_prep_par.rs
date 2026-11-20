@@ -840,8 +840,12 @@ mod tests {
     /// until a second worker has called it, the first call that waits 10 s in vain ends all
     /// waiting, so that the spread does not depend on the scheduler; a serial map has no second
     /// worker and fails after those 10 s.) With the switch off, on a pool of one thread, or for one
-    /// item, the probe is never called.
-    #[cfg(feature = "parallel")]
+    /// item, the probe is never called. Only where the pool has threads, as `place`: wasm32 without
+    /// `wasm-threads` has no second worker to find.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     #[test]
     fn steps_run_on_the_pool_threads() {
         use std::collections::BTreeSet;

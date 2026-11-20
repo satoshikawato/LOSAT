@@ -2363,7 +2363,7 @@ mod tests {
         assert_eq!(
             error("6", good, no_defline),
             "BLAST query/options error: Query input doesn't start with a defline or comment, line \
-             1\0\nPlease refer to the BLAST+ user manual."
+             1\0\nPlease refer to the LOSAT user manual."
         );
         assert_eq!(
             error("6", no_defline, b"\n"),
@@ -2761,13 +2761,13 @@ mod tests {
         }
         assert_eq!(
             custom("blastn", "abc").unwrap_err(),
-            "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
         );
         assert_eq!(
             custom("blastn", "99").unwrap_err(),
             "Error: Formatting choice is out of range\n"
         );
-        assert_eq!(custom("blastp", "17").unwrap_err(), "BLAST query/options error: SAM format is only applicable to blastn\nPlease refer to the BLAST+ user manual.\n");
+        assert_eq!(custom("blastp", "17").unwrap_err(), "BLAST query/options error: SAM format is only applicable to blastn\nPlease refer to the LOSAT user manual.\n");
         assert_eq!(custom("blastn", "17 SQ"), Ok(Some("17 SQ".to_string())));
     }
 
@@ -4083,7 +4083,7 @@ mod tests {
 
     // The CLI's standard error for `-outfmt 6` with `-num_descriptions 3`: the formatting
     // handler's two warnings, then NCBI's error for a hit list of 0 (`-num_alignments 0`).
-    const ERR6_ND3_NA0: &str = "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n";
+    const ERR6_ND3_NA0: &str = "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n";
     const SPLIT_ND3_NA0_OUT0: &[u8] =
         include_bytes!("../../../LOSAT/tests/fixtures/outfmt0/numdesc.blastn.split_nd3_na0.out");
     const SPLIT_ND3_NA0_ERR0: &[u8] =
@@ -4123,14 +4123,15 @@ mod tests {
         }
         // The host is told that streams 6 and 7 failed (stream 9; line WQA's sweep, D7, 2026-11-19).
         assert_eq!(discarded(&streams), [6, 7]);
-        assert!(ERR6_ND3_NA0.contains(&text(SPLIT_ND3_NA0_ERR0)));
+        // NCBI's frozen bytes and texts in LOSAT's words (AGENTS.md rule 8).
+        assert!(ERR6_ND3_NA0.contains(&text(&losat::web_adapter::losat_bytes(SPLIT_ND3_NA0_ERR0))));
         assert_eq!(
             text(&streams[&3]),
-            format!(
+            losat::web_adapter::losat_text(&format!(
                 "{}{}",
                 text(SPLIT_ND3_NA0_ERR0),
                 "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
-            )
+            ))
         );
         // Both formats' hit lists of 0 fail every format, as the CLI does.
         let both = [
@@ -4218,7 +4219,7 @@ mod tests {
         let (error, failed) = failed_streams(&both, &query, &subject);
         assert_eq!(
             format!("{}{error}", diagnostics_of(&failed)),
-            "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+            "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
         assert_eq!(validate(&both).unwrap_err(), error);
     }
@@ -4256,7 +4257,7 @@ mod tests {
                 "-num_alignments",
                 "0",
             ];
-            let cli = format!("Warning: [{program}] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n");
+            let cli = format!("Warning: [{program}] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n");
             for outfmt in ["6", "7", "6 qseqid sseqid"] {
                 let argv = [&words[..], &["-outfmt", outfmt]].concat();
                 let label = format!("{program} -outfmt {outfmt}");
@@ -4525,7 +4526,7 @@ mod tests {
         // The CLI's standard error for `-outfmt 6`: the hit list size's warning, then NCBI's error.
         assert_eq!(
             text(&zero[&3]),
-            "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+            "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
         // Both searches fail, each for its own reason (the tabular formats' hit list is checked
         // before the e-value): the run fails with the error of the argv's own search, as validate,
@@ -4535,14 +4536,14 @@ mod tests {
         let (error, failed) = failed_streams(&both, &query, &subject);
         assert_eq!(
             format!("{}{error}", diagnostics_of(&failed)),
-            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n"
         );
         assert_eq!(validate(&both).unwrap_err(), error);
         let tabular = [&both[..], &["-outfmt", "6"]].concat();
         let (error, failed) = failed_streams(&tabular, &query, &subject);
         assert_eq!(
             format!("{}{error}", diagnostics_of(&failed)),
-            "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+            "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
         assert_eq!(validate(&tabular).unwrap_err(), error);
     }
@@ -5464,7 +5465,7 @@ mod tests {
         assert_eq!(file_of(&completed), log(""));
         assert_eq!(
             diagnostics_of(&completed),
-            "Warning: [tblastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+            "Warning: [tblastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
         assert!(!completed[&0].is_empty());
         assert!(completed.get(&6).is_none_or(Vec::is_empty));
@@ -5493,7 +5494,7 @@ mod tests {
     #[test]
     fn validate_checks_the_options_with_the_argv_s_format() {
         let no_hits =
-            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n";
+            "BLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n";
         for program in ["blastp", "tblastn", "tblastx", "blastn", "blastx"] {
             let (query, subject) = ranged_inputs(program);
             for outfmt in [

@@ -129,7 +129,8 @@ fn records_past_32_bits_end_as_makeblastdb_ends() {
         assert_eq!(output.status.code(), Some(case.status), "{}", case.name);
         assert_eq!(
             String::from_utf8_lossy(&output.stderr),
-            case.stderr.replace("{ROOT}", ROOT),
+            // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            losat::wording::losat_text(&case.stderr.replace("{ROOT}", ROOT)),
             "{}",
             case.name
         );

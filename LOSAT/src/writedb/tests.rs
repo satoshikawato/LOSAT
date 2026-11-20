@@ -550,7 +550,8 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         let err = replace_bytes(&err, input.as_bytes(), b"<IN>");
         let err = replace_bytes(&err, base.as_bytes(), b"<OUT>");
         assert!(
-            err == case.stderr,
+            // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+            crate::wording::losat_bytes(case.stderr) == err,
             "{name}: standard error\n{}\nexpected\n{}",
             show(&err),
             show(case.stderr)
@@ -915,12 +916,14 @@ fn a_late_error_removes_the_volumes_already_written() {
 }
 
 /// `Error: ` and the exception's report, as makeblastdb's general handler prints it: the build
-/// tree of the official Linux x64 release of 2.17.0 and the file below it.
+/// tree of the official Linux x64 release of 2.17.0 and the file below it; in LOSAT's words
+/// (`crate::wording::losat_text`).
 fn ncbi_report(file: &str, rest: &str) -> String {
-    format!(
+    crate::wording::losat_text(&format!(
         "Error: NCBI C++ Exception:\n    T0 \"{}/src/{file}\", line {rest}\n\n",
         crate::ncbi_exception::NCBI_BUILD_ROOT
-    )
+    ))
+    .into_owned()
 }
 
 /// The report of `CBuildDatabase::CreateDirectories`' exception at `line` with `message`.
@@ -1472,7 +1475,8 @@ fn run_v5_case(case: &V5Case) {
         );
         let (out, err) = (v5_markers(&out, &dir), v5_markers(&err, &dir));
         assert!(
-            err == run.stderr,
+            // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+            crate::wording::losat_bytes(run.stderr) == err,
             "{name} run {k}: standard error\n{}\nexpected\n{}",
             show(&err),
             show(run.stderr)
@@ -1707,7 +1711,12 @@ fn run_parse_case(case: &ParseCase) {
     );
     let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let (out, err) = (v5_markers(&out, &dir), v5_markers(&err, &dir));
-    assert!(err == case.stderr, "{name}: standard error\n{}", show(&err));
+    // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+    assert!(
+        crate::wording::losat_bytes(case.stderr) == err,
+        "{name}: standard error\n{}",
+        show(&err)
+    );
     assert!(
         out == case.stdout,
         "{name}: standard output\n{}\nexpected\n{}",
@@ -1826,7 +1835,8 @@ fn run_fix_case(case: &FixCase) {
         return;
     }
     assert!(
-        err == build_tree_masked(case.stderr),
+        // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+        crate::wording::losat_bytes(&build_tree_masked(case.stderr)) == err,
         "{name}: standard error\n{}\nexpected\n{}",
         show(&err),
         show(case.stderr)

@@ -526,7 +526,11 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
                 assert!(refused(&result), "{file}: {result:?}");
                 // makeblastdb's line for it (the end-to-end tests compare all of the text)
                 let line = format!("{}\n", result.unwrap_err());
-                assert!(run.stderr.contains(&line), "{file}: {line}");
+                // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
+                assert!(
+                    crate::wording::losat_text(&run.stderr).contains(&line),
+                    "{file}: {line}"
+                );
             }
             Outcome::NoDb => {
                 assert!(

@@ -193,7 +193,7 @@ test('a command line whose own -outfmt has no hit list is refused with the comma
   writeFileSync(join(directory, 'subject.fa'), subject);
   const cli = spawnSync(NATIVE, ['blastp', '-query', 'query.fa', '-subject', 'subject.fa', '-num_alignments', '0', '-evalue', '0', '-outfmt', '6', '-num_threads', '1'], { cwd: directory });
   expect(cli.status).toBe(1);
-  expect(String(cli.stderr)).toBe(`Warning: [blastp] Examining 5 or more matches is recommended\n${error}\nPlease refer to the BLAST+ user manual.\n`);
+  expect(String(cli.stderr)).toBe(`Warning: [blastp] Examining 5 or more matches is recommended\n${error}\nPlease refer to the LOSAT user manual.\n`);
 });
 
 // The formatting handler warns of -line_length for output formats above 4 only (NCBI's

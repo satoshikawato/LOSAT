@@ -43,7 +43,10 @@ fn the_start_reads_the_programs_ini_and_ncbirc() {
     let words = ["blastp", "-query", "q", "-subject", "s", "-outfmt", "6"];
     run::validate(&words).unwrap();
     let ini = register("blastp.ini", b"[x\n");
-    let report = SECTION_REPORT.repeat(2).trim_end().to_string();
+    // NCBI's text in LOSAT's words (`losat::web_adapter::losat_text`, AGENTS.md rule 8).
+    let report = losat::web_adapter::losat_text(&SECTION_REPORT.repeat(2))
+        .trim_end()
+        .to_string();
     assert_eq!(run::validate(&words).unwrap_err(), report);
     assert_eq!(run_blastp(&words).unwrap_err(), report);
     let good = register("e1w3a_other.ini", b"[BLAST]\n");

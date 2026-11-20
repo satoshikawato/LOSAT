@@ -448,7 +448,8 @@ fn check<'a>(cases: impl IntoIterator<Item = &'a Case>) {
         let want = (
             case.status,
             case.stdout.to_string(),
-            case.stderr.to_string(),
+            // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            losat::wording::losat_text(case.stderr).into_owned(),
             case.files.to_string(),
         );
         if got != want {

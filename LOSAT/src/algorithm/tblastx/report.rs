@@ -1086,12 +1086,12 @@ pub(crate) fn xml_query_masks(
 /// frame the record gives the same letters: NCBI then shows a mask of another frame on the row
 /// (`locFrame == frame`), and so does LOSAT.
 ///
-/// The scan of a frame's ranges (graduated 2026-10-27, the switch was `LOSAT_X_TBXMASKSEEK`)
-/// starts at the first range whose end, or the end of a range before it, reaches `low`, and stops
-/// at the first range that starts after `high`; the ranges it leaves out are the ones a scan of
-/// all the ranges skips (that scan is the reference of the unit test
+/// The scan of a frame's ranges (`MaskSeek::for_each_meeting`; graduated 2026-10-27, the switch
+/// was `LOSAT_X_TBXMASKSEEK`) starts at the first range whose end, or the end of a range before
+/// it, reaches `low`, and stops at the first range that starts after `high`; the ranges it leaves
+/// out are the ones a scan of all the ranges skips (that scan is the reference of the unit test
 /// `mask_seek_lowercases_the_letters_of_the_full_scan`). The ranges it keeps go back into the
-/// order of the shown masks (`FrameMasks::ranges`).
+/// order of the shown masks (each range's place in the list, which `MaskSeek` holds).
 fn query_row_masks(
     row: &mut [u8],
     frame: i8,
@@ -1101,17 +1101,12 @@ fn query_row_masks(
 ) -> Option<Box<crate::report::query_anchored::HspMasks>> {
     let mut shown: Vec<(u32, crate::report::query_anchored::Mask)> = Vec::new();
     for frame_masks in masks.iter().filter(|masks| masks.frame == frame) {
-        let first_range = frame_masks.ends_max.partition_point(|&end| end < low);
         let start = shown.len();
-        for &(from, to, index) in &frame_masks.ranges[first_range..] {
-            if from > high {
-                break;
-            }
-            if to < low {
-                continue;
-            }
-            shown.push((index, (from.max(0) as u32, to.max(0) as u32, frame)));
-        }
+        frame_masks
+            .seek
+            .for_each_meeting(low, high, |from, to, index| {
+                shown.push((index, (from.max(0) as u32, to.max(0) as u32, frame)));
+            });
         shown[start..].sort_unstable_by_key(|&(index, _)| index);
     }
     if shown.is_empty() {
@@ -1247,40 +1242,18 @@ pub(crate) fn set_row_positives(hits: &mut [PairwiseHit], matrix: ScoringMatrix)
     }
 }
 
-// No NCBI counterpart: the masks of `shown_query_masks` arranged for `query_row_masks`. A
-// frame's ranges are sorted by start, and the running maximum of their ends lets the row's scan
-// start at the first range that can reach it (`LOSAT_X_TBXMASKSEEK`, graduated 2026-10-27).
-// Before, every row scanned all ranges of its frame: in TBLASTX of two ~650 kb genomes that scan
-// was most of the row's time. Each range keeps its place in the shown list, the order of the
-// masks the row hands to `x_FillLocList` (`query_row_masks`).
-/// The shown SEG masks of one frame of a query, sorted by start.
+/// The shown SEG masks of one frame of a query (`shown_query_masks`), arranged for the scans of
+/// the rows (`query_anchored::MaskSeek`, which holds each mask's place in the frame's shown list).
 struct FrameMasks {
     frame: i8,
-    /// The masks `(from, to, index)`, `index` the mask's place in the frame's shown list.
-    ranges: Vec<(i32, i32, u32)>,
-    /// `ends_max[i]`: the largest end of `ranges[..=i]` (non-decreasing).
-    ends_max: Vec<i32>,
+    seek: crate::report::query_anchored::MaskSeek<i32>,
 }
 
 impl FrameMasks {
     fn new(frame: i8, ranges: Vec<(i32, i32)>) -> Self {
-        let mut ranges: Vec<(i32, i32, u32)> = ranges
-            .into_iter()
-            .zip(0..)
-            .map(|((from, to), index)| (from, to, index))
-            .collect();
-        ranges.sort_unstable();
-        let ends_max = ranges
-            .iter()
-            .scan(i32::MIN, |max, &(_, to, _)| {
-                *max = (*max).max(to);
-                Some(*max)
-            })
-            .collect();
         Self {
             frame,
-            ranges,
-            ends_max,
+            seek: crate::report::query_anchored::MaskSeek::new(ranges),
         }
     }
 }
@@ -2518,7 +2491,7 @@ mod tests {
             column.clamp(0, columns - 1)
         };
         for frame_masks in masks.iter().filter(|masks| masks.frame == frame) {
-            for &(from, to, _) in &frame_masks.ranges {
+            for &(from, to, _) in frame_masks.seek.ranges() {
                 if to < low || from > high {
                     continue;
                 }

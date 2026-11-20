@@ -119,3 +119,37 @@ fn row_loc_list_matches_fill_loc_list() {
         }
     }
 }
+
+// No NCBI counterpart: `MaskSeek::for_each_meeting` against the scan of the whole list (the masks
+// with `to >= low && from <= high`, what `fill_row_loc_list` keeps of a list), for lists in any
+// order with overlaps, nested masks and repeats; sorted by `index` they are in the list's order.
+#[test]
+fn mask_seek_keeps_the_full_scan() {
+    let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+    for _ in 0..5_000 {
+        let masks: Vec<(u32, u32)> = (0..rng.below(12))
+            .map(|_| {
+                let from = rng.below(60);
+                let longest = if rng.below(4) == 0 { 40 } else { 6 };
+                (from, from + rng.below(longest))
+            })
+            .collect();
+        let seek = super::MaskSeek::new(masks.iter().copied());
+        assert_eq!(seek.ranges().len(), masks.len());
+        for _ in 0..8 {
+            let low = rng.below(70);
+            let high = low + rng.below(30);
+            let mut found: Vec<(u32, (u32, u32))> = Vec::new();
+            seek.for_each_meeting(low, high, |from, to, index| found.push((index, (from, to))));
+            found.sort_unstable_by_key(|&(index, _)| index);
+            let scan: Vec<(u32, (u32, u32))> = masks
+                .iter()
+                .copied()
+                .zip(0..)
+                .filter(|&((from, to), _)| to >= low && from <= high)
+                .map(|(mask, index)| (index, mask))
+                .collect();
+            assert_eq!(found, scan, "masks {masks:?}, row {low}..={high}");
+        }
+    }
+}

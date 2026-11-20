@@ -1356,7 +1356,9 @@ fn fill_loc_list(
 /// The masks of an outfmt 0 HSP's two rows, the query's and the subject's
 /// (`alnRoInfo->masked_regions[row]`): each row's `x_FillLocList` list (`fill_row_loc_list`, in
 /// the masks' order, not merged, each with its frame) and the row's frame (`x_OutputSeq`'s
-/// `frame`), which `output_seq` reads. A `PairwiseHit` holds one only when a mask meets a row.
+/// `frame`), which `output_seq` reads. A translated query's row (BLASTX, TBLASTX) holds only the
+/// masks of its frame: `x_OutputSeq` passes over a mask of another frame, so the list without
+/// them writes the same row. A `PairwiseHit` holds one only when such a mask meets a row.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct HspMasks {
     lists: [Vec<(i64, i64, i8)>; 2],
@@ -1403,6 +1405,63 @@ impl HspMasks {
         if let Some((list, frame)) = self.row(row) {
             lower_masked(letters, 0, list, frame);
         }
+    }
+}
+
+// No NCBI counterpart: the masks of one list (a frame of a query, a subject's shown masks)
+// arranged for the scans of outfmt 0's rows. The masks are sorted by start, and the running
+// maximum of their ends lets a row's scan start at the first mask that can reach the row and stop
+// at the first that starts after it. A scan of the whole list for every row costs masks × HSPs:
+// in TBLASTX of two ~650 kb genomes it was most of the rows' time (`LOSAT_X_TBXMASKSEEK`,
+// graduated 2026-10-27). Each mask keeps its place in the list, the order of the masks a row
+// hands to `x_FillLocList` (`HspMasks::set_row`).
+/// The masks of one list, sorted by start, for the rows that take the masks that meet them.
+#[derive(Debug, Clone)]
+pub(crate) struct MaskSeek<P> {
+    /// The masks `(from, to, index)` (`from..=to`), `index` the mask's place in the list.
+    ranges: Vec<(P, P, u32)>,
+    /// `ends_max[i]`: the largest end of `ranges[..=i]` (non-decreasing).
+    ends_max: Vec<P>,
+}
+
+impl<P: Copy + Ord> MaskSeek<P> {
+    /// The masks `masks` (`from..=to` each), in the list's order.
+    pub(crate) fn new(masks: impl IntoIterator<Item = (P, P)>) -> Self {
+        let mut ranges: Vec<(P, P, u32)> = masks
+            .into_iter()
+            .zip(0..)
+            .map(|((from, to), index)| (from, to, index))
+            .collect();
+        ranges.sort_unstable();
+        let mut ends_max: Vec<P> = Vec::with_capacity(ranges.len());
+        for &(_, to, _) in &ranges {
+            let max = ends_max.last().map_or(to, |&last| last.max(to));
+            ends_max.push(max);
+        }
+        Self { ranges, ends_max }
+    }
+
+    /// Calls `found(from, to, index)` for each mask that meets `low..=high`, by start: the masks
+    /// a scan of the whole list keeps (unit test `tests_t4a1::mask_seek_keeps_the_full_scan`).
+    /// The caller puts them back into the list's order (by `index`).
+    #[inline(always)]
+    pub(crate) fn for_each_meeting(&self, low: P, high: P, mut found: impl FnMut(P, P, u32)) {
+        let first = self.ends_max.partition_point(|&end| end < low);
+        for &(from, to, index) in &self.ranges[first..] {
+            if from > high {
+                break;
+            }
+            if to < low {
+                continue;
+            }
+            found(from, to, index);
+        }
+    }
+
+    /// The masks `(from, to, index)`, by start.
+    #[cfg(test)]
+    pub(crate) fn ranges(&self) -> &[(P, P, u32)] {
+        &self.ranges
     }
 }
 

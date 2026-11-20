@@ -29,6 +29,7 @@ use crate::{common::GapEditOp, report::query_warnings::EMPTY_DATABASE_MESSAGE};
 // ```
 use super::empty_rows::SubjectLoc;
 use crate::cli::NativeError;
+use crate::report::query_anchored::MaskSeek;
 use crate::utils::matrix::protein_display_score;
 use anyhow::{ensure, Result};
 use std::{io::Write, path::Path};
@@ -1445,11 +1446,11 @@ pub(super) fn pairwise_hits(
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let absolute = batch.query_ordinal + qidx;
             let query = &queries[absolute];
-            // The query's masks of every frame, as the query-anchored reports read them.
+            // The query's masks (as the query-anchored reports read them), by frame.
             let query_masks = if lists.is_empty() {
                 Vec::new()
             } else {
-                super::anchored::query_record_masks(batch, qidx, query)
+                masks_by_frame(&super::anchored::query_record_masks(batch, qidx, query))
             };
             for list in lists {
                 let subject = &subjects[list.oid];
@@ -1590,38 +1591,76 @@ pub(super) fn pairwise_hits(
 // ```
 /// The outfmt 0 query row `row` of a display alignment (`DisplayAlignment::qseq`, of the 1-based
 /// record positions `ends`, `qstart` and `qend`, on the frame `frame`) and the HSP's masks
-/// (`PairwiseHit::masks`, `None` when none meets the row): the query masks `query_masks` of every
-/// frame (`anchored::query_record_masks`, record positions) at the row's columns of
-/// `x_FillLocList` (`query_anchored::fill_row_loc_list`: the row's nucleotides from its first to its
-/// last, three a residue, on the frame's strand), which `x_OutputSeq` puts in lower case where
-/// the mask's frame is the row's (`frame`, the record's). The row comes back so, as the hit
-/// records that the library API and LOSAT Web hand out show it. An HSP without query letters (an
-/// ungapped HSP of length 0, `-window_size 0`) has no mask.
+/// (`PairwiseHit::masks`, `None` when none meets the row): the query's masks of the row's frame
+/// (`query_masks`, `masks_by_frame`; record positions) at the row's columns of `x_FillLocList`
+/// (`query_anchored::fill_row_loc_list`: the row's nucleotides from its first to its last, three
+/// a residue, on the frame's strand), in the masks' order, which `x_OutputSeq` puts in lower
+/// case. A mask of another frame never shows on the row (`x_OutputSeq` passes over it), so the
+/// row does not hold it. The row comes back so, as the hit records that the library API and
+/// LOSAT Web hand out show it. An HSP without query letters (an ungapped HSP of length 0,
+/// `-window_size 0`) has no mask.
 fn query_row_masks(
     row: String,
     ends: (i32, i32),
     frame: i8,
-    query_masks: &[crate::report::query_anchored::Mask],
+    query_masks: &[(i8, MaskSeek<u32>)],
 ) -> (String, Option<Box<crate::report::query_anchored::HspMasks>>) {
-    if query_masks.is_empty() || row.is_empty() {
+    let Some((_, seek)) = query_masks
+        .iter()
+        .find(|(masks_frame, _)| *masks_frame == frame)
+    else {
+        return (row, None);
+    };
+    if row.is_empty() {
         return (row, None);
     }
+    let (first, last) = (ends.0.min(ends.1), ends.0.max(ends.1));
+    let range = ((first - 1) as u32, (last - 1) as u32);
+    let mut shown: Vec<(u32, crate::report::query_anchored::Mask)> = Vec::new();
+    seek.for_each_meeting(range.0, range.1, |from, to, index| {
+        shown.push((index, (from, to, frame)));
+    });
+    if shown.is_empty() {
+        return (row, None);
+    }
+    shown.sort_unstable_by_key(|&(index, _)| index);
     let mut row = row.into_bytes();
     let mut masks = crate::report::query_anchored::HspMasks::default();
-    let (first, last) = (ends.0.min(ends.1), ends.0.max(ends.1));
     masks.set_row(
         0,
         frame,
         &row,
         |column| row[column] != b'-',
-        ((first - 1) as u32, (last - 1) as u32),
+        range,
         frame > 0,
         3,
-        query_masks.iter().copied(),
+        shown.into_iter().map(|(_, mask)| mask),
     );
     masks.lower_row(0, &mut row);
     let row = String::from_utf8(row).expect("ASCII alignment row");
     (row, (!masks.is_empty()).then(|| Box::new(masks)))
+}
+
+/// The masks `masks` of a query (every frame's, `anchored::query_record_masks`) by frame, each
+/// frame's in their order, arranged for the scans of the rows (`MaskSeek`): a row reads only its
+/// frame's masks (`query_row_masks`).
+fn masks_by_frame(masks: &[crate::report::query_anchored::Mask]) -> Vec<(i8, MaskSeek<u32>)> {
+    let mut frames: Vec<i8> = Vec::new();
+    for &(_, _, frame) in masks {
+        if !frames.contains(&frame) {
+            frames.push(frame);
+        }
+    }
+    frames
+        .into_iter()
+        .map(|frame| {
+            let of_frame = masks
+                .iter()
+                .filter(|mask| mask.2 == frame)
+                .map(|&(from, to, _)| (from, to));
+            (frame, MaskSeek::new(of_frame))
+        })
+        .collect()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:226-244

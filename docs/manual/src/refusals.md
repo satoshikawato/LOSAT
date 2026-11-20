@@ -144,7 +144,7 @@ Strategy files:
 | :--- | :--- |
 | `-task rmblastn` | Refused. |
 | `-reward 0` | Refused (exit status 1). The message is shown below the table. |
-| `-ungapped` with `-outfmt` 8, 9, 11, 12 or 17 | Refused. |
+| `-ungapped` with `-outfmt 17` (SAM) | Refused. |
 | `-filtering_db`, `-index_name` | Refused. |
 | `-use_index true` with a megablast search of a database that has a MegaBLAST index (made by `makembindex`) | Refused. |
 | `-use_index true` with a `-db` value that has a comma (old-style index volumes) | Refused. |

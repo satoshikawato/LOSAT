@@ -300,7 +300,8 @@ pub(crate) fn ungapped_beta(reward: i32, penalty: i32) -> f64 {
 ///        linear[0][2] /= divisor;
 ///        linear[0][5] /= divisor;
 /// ```
-/// The command line accepts no reward of 0, so the divisor is at least 1.
+/// The pair is the engine's (1/-3 under matrix-only scoring, never a reward of 0), so the divisor
+/// is at least 1.
 pub struct NuclValues {
     /// The affine gap costs of the table, with their values.
     normal: Vec<ParamEntry>,

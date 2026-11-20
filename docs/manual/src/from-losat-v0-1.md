@@ -33,7 +33,7 @@ A search that v0.1.0 supported gives NCBI BLAST+ 2.17.0's output in v0.2.0 too. 
 | Database tools | none | `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, and `rpsbproc` for domain annotation |
 | Databases | `-query` against a `-subject` FASTA file only | `-db` searches BLAST databases made by `losat makeblastdb` or NCBI's `makeblastdb`, including NCBI's distributed databases |
 | Standard input | not available | `-query -` in every search program |
-| Tasks | `megablast` and `blastn` for `blastn`; `blastp` for `blastp` | Also `dc-megablast`, `blastn-short`, `blastp-fast`, `blastp-short`, `blastx-fast`, `tblastn-fast` |
+| Tasks | `megablast` and `blastn` for `blastn`; `blastp` for `blastp` | Also `dc-megablast`, `blastn-short`, `rmblastn`, `blastp-fast`, `blastp-short`, `blastx-fast`, `tblastn-fast` |
 | Output formats | Tabular (`-outfmt 6`, `7`) for `blastn`, plus pairwise text (`-outfmt 0`) for `blastp` | The NCBI formats, including pairwise text, XML, JSON, ASN.1, SAM and custom tabular fields. See [Output formats](output-formats.md) |
 | NCBI program names | none | `losat --install-shims` links `blastn`, `makeblastdb` and the other names to `losat` ([Coming from NCBI BLAST+](from-ncbi-blast.md)) |
 | Genetic codes | The 26 codes of NCBI's `-db_gencode` for `tblastx` | The same, and `tblastn` also accepts code 32 |

@@ -120,7 +120,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 
 | Program | What it does | Output formats (`-outfmt`) | Manual |
 | --- | --- | --- | --- |
-| `blastn` | Nucleotide against nucleotide (`megablast`, `blastn`, `dc-megablast`, `blastn-short`) | `0`–`18`, `20` | [blastn](docs/manual/src/programs/blastn.md) |
+| `blastn` | Nucleotide against nucleotide (`megablast`, `blastn`, `dc-megablast`, `blastn-short`, `rmblastn`) | `0`–`18`, `20` | [blastn](docs/manual/src/programs/blastn.md) |
 | `blastp` | Protein against protein (`blastp`, `blastp-fast`, `blastp-short`) | `0`–`16`, `18`, `20` | [blastp](docs/manual/src/programs/blastp.md) |
 | `blastx` | Translated nucleotide against protein (`blastx`, `blastx-fast`) | `0`–`16`, `18`, `20` | [blastx](docs/manual/src/programs/blastx.md) |
 | `tblastn` | Protein or PSSM (`-in_pssm`) against translated nucleotide (`tblastn`, `tblastn-fast`) | `0`–`16`, `18`, `20` | [tblastn](docs/manual/src/programs/tblastn.md) |

@@ -9,7 +9,7 @@ line NP M/DECISIONS.md 14); other builds differ in that path only.
 
 - make_counts(): writes the counts files of the cases to LOSAT/target/winmask_blastn/ from
   tests/winmask/counts/mg1655_u9.obinary, and the -window_masker_taxid directory taxid/ (562 and -1:
-  that file, 7: the unit size 17, 8: unreadable, 9606: a directory in its place, 10: ascii counts, 11-59:
+  that file, 7: the unit size 17, 8: unreadable, 9606: a directory in its place, 10: ascii counts, 11-160:
   the ascii and optimized ascii counts of tests/winmask/text_counts.tsv)
   with the registry files home_rc/.ncbirc, cfg_inidont/{blastn.ini,.ncbirc} and the malformed
   .ncbirc files of cfg_rcbad, cfg_rcbadapp, cfg_rcpre and cfg_rcbom, the files with an entry set again
@@ -18,6 +18,9 @@ line NP M/DECISIONS.md 14); other builds differ in that path only.
 - freeze --ncbi-bin DIR [--cases NAME ...]: runs `DIR/blastn <args> -num_threads 1` from LOSAT/ for
   each row of cases.tsv (or the rows named) with the row's environment and writes <case>.out,
   <case>.err and <case>.rc.
+
+The cases taxid_oascii_uint_M_minus1 and _M_u32max (M = UINT_MAX: NCBI allocates 8 GiB per load of the masker) are frozen
+under `prlimit --as=137438953472`; with 21 GiB the third load ends in std::bad_alloc.
 
 Usage: make_blastn_error_fixtures.py freeze --ncbi-bin /path/to/ncbi-blast-2.17.0+/bin
 """

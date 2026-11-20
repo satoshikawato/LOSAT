@@ -34,8 +34,8 @@ class BlastnOptions(TypedDict, total=False):
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
-    task: Literal['megablast', 'dc-megablast', 'blastn', 'blastn-short']
-    """Task to execute: megablast, blastn, dc-megablast or blastn-short"""
+    task: Literal['megablast', 'dc-megablast', 'blastn', 'blastn-short', 'rmblastn']
+    """Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn"""
     template_type: str
     """Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal"""
     template_length: int
@@ -77,9 +77,10 @@ class BlastnOptions(TypedDict, total=False):
     """Percent query coverage per hsp"""
     reward: int
     """Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn
-    and dc-megablast; LOSAT does not support 0)"""
+    and dc-megablast, 0 for rmblastn; 0 needs penalty 0)"""
     penalty: int
-    """Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for the other tasks)"""
+    """Penalty for a nucleotide mismatch (default: -2 for megablast, 0 for rmblastn, -3 for the
+    other tasks)"""
     gapopen: int
     """Cost to open a gap (default: 0 for megablast, 5 for the other tasks)"""
     gapextend: int
@@ -482,6 +483,7 @@ class TblastxOptions(TypedDict, total=False):
     sum_stats: bool
     """Use sum statistics [default: true]"""
     lcase_masking: bool
+    strand: Literal['both', 'plus', 'minus']
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     window_size: int

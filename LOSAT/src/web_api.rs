@@ -483,6 +483,8 @@ fn parse_tblastx_args(
         soft_masking: None,
         sum_stats: None,
         lcase_masking: false,
+        // The frozen web ABI v1 (plan TD-1) searches both strands of the query.
+        strand: "both".to_string(),
         xdrop_ungap: None,
         window_size: None,
         outfmt: "6".to_string(),

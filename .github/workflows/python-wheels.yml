@@ -318,10 +318,13 @@ jobs:
           PY
 
       # The action checks the metadata of every file (twine check) and uploads the files with their
-      # attestations (PEP 740), which name this repository, workflow and commit.
+      # attestations (PEP 740), which name this repository, workflow and commit. `skip-existing`: when
+      # an upload stopped after some of the files, "Re-run failed jobs" uploads the rest of the same
+      # artifacts instead of failing on the first file that PyPI already holds.
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist
+          skip-existing: true
           repository-url: ${{ inputs.publish == 'pypi' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
 
   dev:

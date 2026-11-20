@@ -346,7 +346,7 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
 fn the_start_json_tells_the_files_and_the_dry_run() {
     assert_eq!(
         start_json(&["blastn", "-outfmt", "6"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false}"#
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":null}"#
     );
     assert_eq!(
         start_json(&[
@@ -359,16 +359,42 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "-dryrun"
         ])
         .unwrap(),
-        r#"{"conffile":"c.ini","log_file":"x.log","dry_run":true,"register_inputs":false}"#
+        r#"{"conffile":"c.ini","log_file":"x.log","dry_run":true,"register_inputs":false,"prints":null}"#
     );
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false}"#
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":null}"#
     );
-    let version = start_json(&["blastn", "-version"]).unwrap_err();
-    assert_eq!(version, parse(&["blastn", "-version"]).unwrap_err());
-    assert!(version.contains("-version"), "{version}");
+    // A run that prints the command line's text (line WQA's D14, 2026-11-20): a version word, read
+    // before the arguments and the configuration (no `-conffile` to register, not a dry run), or a
+    // help word that stops the arguments' reader.
+    assert_eq!(
+        start_json(&[
+            "blastn",
+            "-dryrun",
+            "-conffile",
+            "c.ini",
+            "-version",
+            "-logfile",
+            "v.log"
+        ])
+        .unwrap(),
+        r#"{"conffile":null,"log_file":"v.log","dry_run":false,"register_inputs":false,"prints":"version"}"#
+    );
+    assert_eq!(
+        start_json(&["tblastn", "-conffile", "c.ini", "-dryrun", "-h"]).unwrap(),
+        r#"{"conffile":"c.ini","log_file":null,"dry_run":false,"register_inputs":false,"prints":"help"}"#
+    );
+    assert_eq!(
+        start_json(&["blastx", "-parse_deflines", "-xmlhelp"]).unwrap(),
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":"help"}"#
+    );
+    // The words before a help word are read first: an error there is the run's.
+    assert_eq!(
+        start_json(&["blastp", "-evalue", "x", "-help"]).unwrap(),
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":null}"#
+    );
     assert_eq!(
         start_json(&["psiblast"]).unwrap_err(),
         "psiblast is not available in the browser (ABI v2)"
@@ -539,4 +565,115 @@ fn the_engines_list_of_web_programs_is_the_adapters() {
             "{name}"
         );
     }
+}
+
+/// The bytes that `run` of `words` emitted on each stream, with no input: a run that prints reads
+/// none (`losat_web2_run` passes it none).
+fn printing_run(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
+    crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+    let result = run(words, &[], &[]);
+    let mut streams = BTreeMap::new();
+    crate::emit::EMITTED.with(|emitted| {
+        for (stream, bytes) in emitted.borrow().iter() {
+            streams
+                .entry(*stream)
+                .or_insert_with(Vec::new)
+                .extend_from_slice(bytes);
+        }
+    });
+    (result, streams)
+}
+
+// Line WQA's D14 (2026-11-20): the help and version words print what the command line prints to
+// its standard output (the parser's help, the XML of `-xmlhelp`, NCBI's version texts with LOSAT's
+// values: `printed_text` and `ncbi_version_request`, the command line's own producers), on stream
+// 11, with no input and no search; `validate` accepts them. `web/adapter/tests/v_abi.js` compares
+// the bytes with the native command line.
+#[test]
+fn help_and_version_words_print_the_command_lines_text() {
+    for (program, _, _) in SEARCHES {
+        for word in [
+            "-h",
+            "-help",
+            "-help-full",
+            "--help",
+            "-xmlhelp",
+            "-version",
+            "-version-full",
+            "-version-full-xml",
+            "-version-full-json",
+        ] {
+            let words = argv(program, &["-evalue", "1", word, "-bogus"]);
+            validate(&words).unwrap();
+            let (result, streams) = printing_run(&words);
+            result.unwrap();
+            assert_eq!(
+                streams.keys().copied().collect::<Vec<u32>>(),
+                [STREAM_MESSAGES, crate::emit::STREAM_PRINTED],
+                "{program} {word}"
+            );
+            let text = stream_text(&streams, crate::emit::STREAM_PRINTED);
+            let expected = match word {
+                // NCBI's forms with LOSAT's values (`ncbi_version::print`; v_abi.js compares the
+                // bytes with the command line's).
+                "-version" | "-version-full" => {
+                    assert!(text.starts_with(&format!("{program}: 2.17.0+\n Package: LOSAT ")));
+                    text.clone()
+                }
+                "-version-full-xml" => assert_xml(&text),
+                "-version-full-json" => {
+                    assert!(
+                        text.contains(&format!("\"appname\": \"{program}\"")),
+                        "{text}"
+                    );
+                    text.clone()
+                }
+                "-xmlhelp" => assert_xml(&text),
+                _ => {
+                    let error = losat::web_adapter::try_parse_cli(
+                        std::iter::once("losat").chain(words.iter().copied()),
+                    )
+                    .unwrap_err();
+                    losat::web_adapter::printed_text(&error, false).unwrap()
+                }
+            };
+            assert_eq!(text, expected, "{program} {word}");
+        }
+        // The words before a help word are read first, as the command line reads them.
+        let refused = argv(program, &["-evalue", "x", "-h"]);
+        assert!(validate(&refused).is_err(), "{program}");
+        assert!(printing_run(&refused).0.is_err(), "{program}");
+    }
+}
+
+/// `text` as an XML document (its first line), returned as it is.
+fn assert_xml(text: &str) -> String {
+    assert!(text.starts_with("<?xml version=\"1.0\"?>\n"), "{text}");
+    text.to_string()
+}
+
+// NCBI BLAST+ 2.17.0 and the command line (line WQA's D14 probes, 2026-11-20): a version is printed
+// after the `-logfile` file is opened and before the configuration is loaded, so a `-conffile` of
+// no file does not stop it; the help comes after the load, which the missing file ends (exit
+// status 255 on the command line).
+#[test]
+fn a_version_comes_before_the_configuration_and_the_help_after_it() {
+    let version = argv("blastn", &["-version", "-conffile", "d14_missing.ini"]);
+    validate(&version).unwrap();
+    let (result, streams) = printing_run(&version);
+    result.unwrap();
+    assert!(stream_text(&streams, crate::emit::STREAM_PRINTED).starts_with("blastn: 2.17.0+\n"));
+    let help = argv("blastn", &["-h", "-conffile", "d14_missing.ini"]);
+    let critical = "Critical: (106.23) Registry file \"d14_missing.ini\" not found, aborting.";
+    assert_eq!(validate(&help).unwrap_err(), critical);
+    let (result, streams) = printing_run(&help);
+    assert_eq!(result.unwrap_err(), critical);
+    assert!(!streams.contains_key(&crate::emit::STREAM_PRINTED));
+    // The file of `-logfile` is made, empty, as the command line makes it.
+    let (result, streams) = printing_run(&argv("tblastx", &["-version", "-logfile", "v.log"]));
+    result.unwrap();
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![("v.log".to_string(), String::new())])
+    );
 }

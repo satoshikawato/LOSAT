@@ -1,4 +1,4 @@
-import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type RunOutput } from 'losat/domain';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type PrintedKind, type RunOutput } from 'losat/domain';
 // The compatibility outputs that LOSAT Web stores and exports byte for byte: the formats that every
 // run writes, and the output of the argv's own -outfmt: any other format that the CLI writes, and
 // 6 or 7 with fields (WA2-OP-03 and W11, Owner 2026-11-05; docs/web/abi_v2.md §5, §7).
@@ -171,6 +171,15 @@ function exportPrefix(run: ExportedRun): string {
   const time = new Date(run.queuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
   const task = run.task === undefined ? '' : `-${run.task}`;
   return `losat-run${run.number}-${run.program}${task}-${time}`;
+}
+
+/**
+ * The file name of the text that a run printed in place of a search (the command line's help or version; line WQA's
+ * D14, 2026-11-20): the run's start of the names of its files, then `help` or `version`
+ * (`losat-run3-blastn-megablast-20261104T111530Z.help.txt`).
+ */
+export function printedFileName(run: ExportedRun, kind: PrintedKind): string {
+  return `${exportPrefix(run)}.${kind}.txt`;
 }
 
 /**

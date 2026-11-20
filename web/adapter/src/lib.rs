@@ -70,14 +70,16 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 4 since `losat_web2_register_inputs`, which
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 5 since a run prints the text that the command
+/// line prints in place of a run (its help, the XML of `-xmlhelp`, its versions) on stream 11, and
+/// the *start* field `prints` (line WQA's D14, 2026-11-20); 4 since `losat_web2_register_inputs`, which
 /// reads the inputs of a run with `-parse_deflines`, and the signal of stream 9 for every output
 /// stream that failed (line WQA's sweep, D7, 2026-11-19); 3 since the signal of stream 9, which
 /// makes the host discard a stream that failed alone after a chunk of it was sent (line RG item
 /// T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    4
+    5
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -381,6 +383,12 @@ pub unsafe extern "C" fn losat_web2_run(
     guarded(|| {
         let argv = words(text(argv_ptr, argv_len, "argv")?);
         let program = run::Program::parse(argv.first().copied().unwrap_or(""))?;
+        // A run that prints a text in place of a search reads no input, as the command line reads
+        // no file for it: its handles are not read (docs/web/abi_v2.md §4; line WQA's D14).
+        if run::prints(&argv).is_some() {
+            run::run(&argv, &[], &[])?;
+            return Ok(0);
+        }
         store::with_inputs(
             program,
             query_handle,

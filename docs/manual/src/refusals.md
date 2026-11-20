@@ -213,7 +213,7 @@ Error: a reward of 0 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of 
 - A query batch whose search fails after a first batch that NCBI does not search (its queries give no Karlin-Altschul parameters) is refused in some cases. `-searchsp` or `OLD_FSC` with subjects of fewer letters than sequences, a database without sequences, and a database whose sequence file cannot be read, are examples.
 - For `-outfmt` 0 to 4, 6, 7 and 10, `blastp` writes NCBI's report of that first batch and then the error. With the other formats it refuses before the first byte.
 - With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, or a small query and database) can reach it.
-- With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, as in LOSAT.
+- With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, as in LOSAT. A later match of a database sequence that `-negative_seqidlist` keeps without any of its definition lines (NCBI skips its alignment) clears that failure, as in NCBI, unless the batch's hit lists are already full.
 - For both, LOSAT writes the results of the query batches before and then stops with the error.
 
 </details>

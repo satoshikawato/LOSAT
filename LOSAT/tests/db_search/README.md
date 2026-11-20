@@ -1231,6 +1231,15 @@ NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and t
 traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
 Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
 
+`x4excl/`: rows `db.x4excl.*` (line RG item X4-excl, BLASTP `-use_sw_tback`). `x4excl/make_x4excl.py` (its docstring has
+the usage and the records) writes the version 5 databases `x4excl/fwd` (sexact, sfail, sok1 and sx_frag, whose only line
+has a ti) and `x4excl/rev` (sx_strong, ti only, then sfail) with `makeblastdb -parse_seqids` from
+`tests/fasta/rps/tks_w.faa` and `tests/fasta/x4/sw_subjects.faa`, and the lists `neg.txt` (an id no database holds) and
+`neg_exact.txt` (also sexact's accession, which the OID mask removes). The negative list keeps the ti-only subjects
+without a line, and NCBI's fetch of the Smith-Waterman redo excludes them after the early termination test of their
+match, which sets the redo's status back to 0: a failed match before such a match does not fail the batch. On version 4
+the list masks a gi-only sequence, which is then never searched, hence version 5 (as `ll2/prot_v5`).
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like

@@ -1547,7 +1547,12 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   above (fixture rows `db.x4.sw.fail.c.*` and `db.x4.sw.fail.h.*`, whose outfmt 0 and 7 stdout is
   NCBI's of a near input that fails at the same step, rows `db.x4.sw.fail.f.0` and
   `db.x4.sw.fail.h_anchor.*`; `db.x4.sw.fail.f.6` and `db.x4.sw.fail.g.6`, whose first query holds
-  none, end in `Traceback failed`).
+  none, end in `Traceback failed`). The batch's status is that of the last match the redo reaches: a
+  match whose subject NCBI's fetch excludes (a subject that a `-negative_seqidlist` keeps without
+  any of its lines) sets it back to 0, unless the redo skips that match because the batch's heaps
+  are full (`blast_kappa.c:3525-3575`), so a failure before such a match neither fails the batch
+  nor crashes NCBI, and LOSAT reproduces that (rule 2; 2026-11-20, line RG item X4-excl, rows
+  `db.x4excl.*`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

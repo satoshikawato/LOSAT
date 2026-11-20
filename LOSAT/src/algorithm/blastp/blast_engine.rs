@@ -11403,28 +11403,11 @@ fn run_call(
         }
     }
 
-    // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
-    // and stand for the subject set in the redo; the hit lists name them by their rank
-    // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
-    // definition lines are read after the redo (`ListedSubjects::read_titles`).
-    // The listed subjects have no copy of their residues (`ListedSubjects::x_list`); the redo
-    // reads each match's subject from the database.
     let t_search = crate::utils::xtiming::clock();
-    let mut listed_subjects = match database {
-        Some(database) => Some(database::ListedSubjects::x_list(
-            database,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-        )?),
-        None => None,
-    };
-    // The subject set of a `-subject` search, which the reports read after the redo.
-    let subject_set: &[EncodedProtein] = subjects;
-    let subjects = match (listed_subjects.as_ref(), database) {
-        (Some(listed), Some(database)) => listed.redo_subjects(database),
-        _ => super::x_redo_subjects::XRedoSubjects::Encoded(subject_set),
-    };
-
+    // The lists in the order in which the redo reads them, before a database's subjects are
+    // listed: the lists that its fetch excludes keep their place in that order as marks
+    // (`database::exclude_fetched`, line RG item X4-excl). The sort's last key, the subject, gives
+    // the same order by ordinal id as by rank (ranks are the listed ordinal ids in order).
     let merge_sort_start = blastp_timing_start(timing_enabled);
     // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order, which
     // NCBI sorts nowhere after.)
@@ -11446,6 +11429,27 @@ fn run_call(
             merge_sort_start,
         );
     }
+
+    // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
+    // and stand for the subject set in the redo; the hit lists name them by their rank
+    // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
+    // definition lines are read after the redo (`ListedSubjects::read_titles`).
+    // The listed subjects have no copy of their residues (`ListedSubjects::x_list`); the redo
+    // reads each match's subject from the database.
+    let mut listed_subjects = match database {
+        Some(database) => Some(database::ListedSubjects::x_list(
+            database,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+        )?),
+        None => None,
+    };
+    // The subject set of a `-subject` search, which the reports read after the redo.
+    let subject_set: &[EncodedProtein] = subjects;
+    let subjects = match (listed_subjects.as_ref(), database) {
+        (Some(listed), Some(database)) => listed.redo_subjects(database),
+        _ => super::x_redo_subjects::XRedoSubjects::Encoded(subject_set),
+    };
     // The redo reads lists of full HSPs. With more than one thread its parallel paths read the
     // lists of all queries, so all are expanded here (but for the windows of the redo below); the
     // one-thread loop (`redo_run::one_thread_redo`) expands each query's list when it reaches it.
@@ -11581,6 +11585,9 @@ fn run_call(
         gapped_gumbel: &gapped_gumbel,
         kappa_query_batches: &kappa_query_batches,
         build_redo_align_params: &build_redo_align_params,
+        fetch_excluded: listed_subjects
+            .as_ref()
+            .map_or(&[][..], |listed| listed.fetch_excluded.as_slice()),
         x_win_expand,
         ordinary_traceback,
         #[cfg(all(

@@ -1222,12 +1222,34 @@ impl<'a> FetchExcluded<'a> {
         items: &mut Vec<T>,
         ordinal: impl Fn(&T) -> Option<u32>,
     ) -> Result<(), (u32, SeqDbError)> {
+        self.retain_reached(items, ordinal, |_, _| {})
+    }
+
+    /// `retain`, which also passes each item it removes to `reached`, in the order of `items`,
+    /// with the number of items kept before it: the place where a loop over `items` in their
+    /// order reaches the item and the fetch excludes its subject (BLASTP's composition-based
+    /// redo, `blastp::blast_engine::database::exclude_fetched`). Nothing is passed when a header
+    /// cannot be read.
+    pub(crate) fn retain_reached<T>(
+        &self,
+        items: &mut Vec<T>,
+        ordinal: impl Fn(&T) -> Option<u32>,
+        mut reached: impl FnMut(usize, &T),
+    ) -> Result<(), (u32, SeqDbError)> {
         let mut keep = Vec::with_capacity(items.len());
         for item in items.iter() {
             keep.push(match ordinal(item) {
                 Some(ordinal) => !self.excludes(ordinal).map_err(|error| (ordinal, error))?,
                 None => true,
             });
+        }
+        let mut kept = 0;
+        for (item, &kept_item) in items.iter().zip(&keep) {
+            if kept_item {
+                kept += 1;
+            } else {
+                reached(kept, item);
+            }
         }
         let mut keep = keep.into_iter();
         items.retain(|_| keep.next().unwrap_or(true));

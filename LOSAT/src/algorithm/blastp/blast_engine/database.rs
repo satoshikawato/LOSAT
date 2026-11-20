@@ -810,6 +810,20 @@ pub(super) struct ListedSubjects {
     /// Whether a read of the redo or of the first Newton problems found a pyrrolysine (O) or a
     /// gap character, by rank (`x_list`).
     x_recounted: Vec<std::sync::atomic::AtomicBool>,
+    /// The places of the lists that the redo reaches and its fetch excludes, which left the
+    /// preliminary hit lists (`exclude_fetched`), by query and place.
+    pub(super) fetch_excluded: Vec<FetchExcludedMatch>,
+}
+
+/// A preliminary hit list that NCBI's composition-based redo reaches in its stream and whose
+/// subject the redo's fetch then excludes (`exclude_fetched`): the list leaves the query's hit
+/// list, and this mark keeps its place, `position` kept lists of the query before it, with what
+/// the redo reads of it there (its best e-value, the early termination test's).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct FetchExcludedMatch {
+    pub(super) query: usize,
+    pub(super) position: usize,
+    pub(super) best_evalue: f64,
 }
 
 impl ListedSubjects {
@@ -1042,35 +1056,82 @@ impl ListedSubjects {
 // list keeps without a line (`shared::FetchExcluded`) leaves the redo or the traceback before
 // it is aligned, after the early termination test of its match (which reads only the heaps,
 // where it never enters), so it takes no place in the final hit lists. LOSAT removes it from
-// the preliminary hit lists before they are listed (after the trim of `ADAPTIVE_CBS`); blastp
-// and psiblast are gapped here (`-ungapped` is refused).
-/// The preliminary hit lists of a call (subjects named by ordinal id) without the subjects
-/// that NCBI's fetches of the redo or the traceback exclude, in their order; LOSAT's refusal
-/// where a subject's header cannot be read there (`shared::FetchExcluded::refusal`).
+// the preliminary hit lists before they are listed (after the trim of `ADAPTIVE_CBS` and the
+// sort into the redo's order); blastp and psiblast are gapped here (`-ungapped` is refused).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-313
+// The redo's loop reaches such a list in its stream: when the early termination test holds it
+// frees the list and goes on, and otherwise the excluded fetch sets the status back to 0
+// (blast_kappa.c:3560-3575). With `-use_sw_tback` the status of the batch is the last reached
+// match's (`redo_run::one_thread_redo`), so the list's place counts: each removed list leaves a
+// mark (`FetchExcludedMatch`) with its place in its query's list, in the order the redo reads
+// them (the lists are sorted before they are listed). Shown on ws with NCBI 2.17.0 (rows
+// `db.x4excl.*`: an excluded match after a failed Smith-Waterman redo ends the batch with
+// status 0).
+/// The preliminary hit lists of a call (subjects named by ordinal id, each list in the redo's
+/// order) without the subjects that NCBI's fetches of the redo or the traceback exclude, in
+/// their order, and the marks of the removed lists, by query and place; LOSAT's refusal where a
+/// subject's header cannot be read there (`shared::FetchExcluded::refusal`).
 fn exclude_fetched(
     database: &BlastpDatabase,
     hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-) -> Result<()> {
+) -> Result<Vec<FetchExcludedMatch>> {
     let Some(excluded) = shared::FetchExcluded::of(&database.db) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let refused = |failed| shared::FetchExcluded::refusal(failed, database.program);
-    for hit_list in hit_lists.iter_mut().flatten() {
+    let mut marks = Vec::new();
+    for (query, hit_list) in hit_lists.iter_mut().enumerate() {
+        let Some(hit_list) = hit_list else {
+            continue;
+        };
+        // The redo reads a query's compact list where it has one (`x_expand_hit_list`).
+        let read = x_compact_hit_lists
+            .get(query)
+            .is_none_or(|compact| compact.is_none());
         hit_list.hsplist_array.truncate(hit_list.hsplist_count);
         excluded
-            .retain(&mut hit_list.hsplist_array, |list| Some(list.oid))
+            .retain_reached(
+                &mut hit_list.hsplist_array,
+                |list| Some(list.oid),
+                |position, list| {
+                    if read {
+                        marks.push(FetchExcludedMatch {
+                            query,
+                            position,
+                            best_evalue: list.best_evalue,
+                        });
+                    }
+                },
+            )
             .map_err(refused)?;
         hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
-    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+    for (query, hit_list) in x_compact_hit_lists.iter_mut().enumerate() {
+        let Some(hit_list) = hit_list else {
+            continue;
+        };
         hit_list.hsplist_array.truncate(hit_list.hsplist_count);
         excluded
-            .retain(&mut hit_list.hsplist_array, |list| Some(list.oid))
+            .retain_reached(
+                &mut hit_list.hsplist_array,
+                |list| Some(list.oid),
+                |position, list| {
+                    marks.push(FetchExcludedMatch {
+                        query,
+                        position,
+                        best_evalue: list.best_evalue,
+                    })
+                },
+            )
             .map_err(refused)?;
         hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
-    Ok(())
+    // By query; the marks of a query are in place order already (a stable sort).
+    marks.sort_by_key(|mark| mark.query);
+    Ok(marks)
 }
 
 /// The ordinal ids of the subjects of `hit_lists` and `x_compact_hit_lists`, ascending, each once.
@@ -3941,6 +4002,71 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    // Line RG item X4-excl: under the negative seqid list of the rows `db.x4excl.*`
+    // (`tests/db_search/x4excl/fwd`), sx_frag (ordinal 3, a ti-only line) is kept without a line,
+    // so the redo's fetch excludes it (`exclude_fetched`): its lists leave the hit lists and leave
+    // marks of their places, by query, each with the number of kept lists before it in its
+    // query's order. Without the list nothing leaves and there is no mark.
+    #[test]
+    fn excluded_lists_leave_marks_of_their_places() {
+        let name = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/db_search/x4excl/fwd");
+        let mut warnings = Vec::new();
+        let negative = crate::seqdb::DbList::Seqids(crate::seqdb::SeqidList {
+            negative: true,
+            file: crate::seqdb::seqidlist::read_si_list(b"XX999999.1\n", &mut warnings).unwrap(),
+        });
+        let settings = ApplicationSettings::default();
+        let list = |oid: u32, raw_score: i32, best_evalue: f64| BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![test_hsp(oid, raw_score)],
+            best_evalue,
+        };
+        // Query 0: sexact, sfail, sx_frag; query 2: sx_frag, sok1; query 1 has no list.
+        let make = || {
+            let mut first = BlastpHitList::new(10);
+            for (oid, score, evalue) in [(0, 430, 1e-49), (1, 419, 1e-47), (3, 26, 0.04)] {
+                first.update(list(oid, score, evalue));
+            }
+            let mut third = BlastpHitList::new(10);
+            for (oid, score, evalue) in [(3, 90, 1e-9), (2, 60, 1e-5)] {
+                third.update(list(oid, score, evalue));
+            }
+            vec![Some(first), None, Some(third)]
+        };
+        let oids = |lists: &[Option<BlastpHitList>]| -> Vec<Vec<u32>> {
+            lists
+                .iter()
+                .flatten()
+                .map(|hit_list| hit_list.hsplist_array.iter().map(|l| l.oid).collect())
+                .collect()
+        };
+        let database = BlastpDatabase::open_restricted(
+            name,
+            &settings,
+            "BLASTP",
+            Some(&negative),
+            &mut std::io::sink(),
+        )
+        .unwrap();
+        let mut lists = make();
+        let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+        assert_eq!(listed.ordinals, [0, 1, 2]);
+        assert_eq!(oids(&lists), [vec![0, 1], vec![2]]);
+        let mark = |query, position, best_evalue| FetchExcludedMatch {
+            query,
+            position,
+            best_evalue,
+        };
+        assert_eq!(listed.fetch_excluded, [mark(0, 2, 0.04), mark(2, 0, 1e-9)]);
+        let database = BlastpDatabase::open(name, &settings, "BLASTP").unwrap();
+        let mut lists = make();
+        let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+        assert_eq!(listed.ordinals, [0, 1, 2, 3]);
+        assert_eq!(oids(&lists), [vec![0, 1, 3], vec![3, 2]]);
+        assert!(listed.fetch_excluded.is_empty());
     }
 
     // `x_list` lists the subjects and renames them to their ranks with the stored lengths and no

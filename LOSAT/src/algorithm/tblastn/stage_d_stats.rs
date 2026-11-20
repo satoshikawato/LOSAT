@@ -82,26 +82,9 @@ pub(super) struct LocalParameterOptions<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527
-// ```c
-//        if (scoring_options->gapped_calculation) {
-//           status =
-//               Blast_ScoreBlkKbpGappedCalc(sbp, scoring_options, program_number,
-//                                           query_info, blast_message);
-//        } else {
-//           ASSERT(sbp->kbp_gap == NULL);
-//           /* for ungapped cases we do not have gbp filled */
-//           if (sbp->gbp) {
-//               sfree(sbp->gbp);
-//               sbp->gbp=NULL;
-//           }
-//        }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1372-1374
-// ```c
-//     BlastInitialWordParametersNew(program_number, word_options,
-//       hit_params, lookup_wrap, sbp, query_info,
-//       BlastSeqSrcGetAvgSeqLen(seq_src), &word_params);
-// ```
+// NCBI computes the gapped Karlin blocks only for a gapped search and drops the Gumbel block of
+// an ungapped one; the word parameters take the sequence source's average subject length.
 /// What an ungapped search (`-ungapped`) changes in `local_parameters_for_blocks`: its score
 /// block has no gapped blocks and no Gumbel block, so the cutoffs and the linking read the
 /// ungapped `kbp` (the caller's `LocalKarlinBlocks::gapped`), the sum statistics do not lower the
@@ -372,15 +355,8 @@ pub(super) fn local_parameters_for_blocks(
         // or the linking is off; an ungapped search's is at least 0, and 0 links with even gaps
         // (`stage_d_linking::link_even_gap_translated`).
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:609-615
-        // ```c
-        //    if (program_number == eBlastTypeBlastn || !gapped_calculation) {
-        //       params->gap_prob = BLAST_GAP_PROB;
-        //       params->gap_decay_rate = BLAST_GAP_DECAY_RATE;
-        //    } else {
-        //       params->gap_prob = BLAST_GAP_PROB_GAPPED;
-        //       params->gap_decay_rate = BLAST_GAP_DECAY_RATE_GAPPED;
-        //    }
-        // ```
+        // An ungapped search links with the ungapped gap probability and decay rate (0.5), a
+        // gapped one with the gapped values (0.1).
         crate::core::link_hsps::translated_longest_intron(options.max_intron_length, gapped).map(
             |intron| LocalLinkParameters {
                 gap_decay_rate: if gapped {
@@ -443,10 +419,8 @@ pub(super) fn local_parameters_for_blocks(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:952
-    // ```c
-    //       if (params->link_hsp_params && gapped_calculation) {
-    // ```
-    // An ungapped search keeps the cutoffs of its e-value.
+    // NCBI lowers the hit cutoffs for sum statistics in a gapped search only: an ungapped search
+    // keeps the cutoffs of its e-value.
     if let Some(link_params) = link.filter(|_| gapped) {
         // NCBI c++/src/algo/blast/core/blast_parameters.c:950-976:
         // concat_qlen = last.query_offset + last.query_length;
@@ -498,22 +472,9 @@ pub(super) fn local_parameters_for_blocks(
         let new_cutoff = match options.ungapped {
             None => gap_trigger,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-367
-            // ```c
-            //       if (!gapped_calculation || sbp->matrix_only_scoring) {
-            //          double cutoff_e = s_GetCutoffEvalue(program_number);
-            //          Int4 query_length = query_info->contexts[context].query_length;
-            // ...
-            //          kbp = kbp_array[context];
-            //          ASSERT(s_BlastKarlinBlkIsValid(kbp));
-            //          BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
-            //                        MIN((Uint8)subj_length,
-            //                            (Uint8)query_length)*((Uint8)subj_length),
-            //                        TRUE, gap_decay_rate);
-            //
-            //          /* Perform this check for compatibility with the old code */
-            //          if (program_number != eBlastTypeBlastn)
-            //             new_cutoff = MIN(new_cutoff, gap_trigger);
-            // ```
+            // An ungapped search's word cutoff is the score of e-value 1 (`CUTOFF_E_TBLASTN`) in
+            // the space MIN(subject, query) * subject with the linking's gap decay, at most the
+            // gap trigger (`ungapped_word_cutoff`).
             // `kbp_array` is `kbp_std` without gapped blocks (blast_parameters.c:298-302),
             // `gap_decay_rate` the linking's, 0 without sum statistics (blast_parameters.c:288,
             // 310-311).
@@ -564,31 +525,9 @@ pub(super) fn local_parameters_for_blocks(
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:79
-// ```c
-// #define CUTOFF_E_TBLASTN 1.0 /**< default evalue (ungapped tblastn) */
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4129
-// ```c
-//    es = 1;
-//    esave = e;
-//    if (e > 0.)
-//    {
-//         if (dodecay) {
-// ...
-//             if( gap_decay_rate > 0 && gap_decay_rate < 1 ) {
-//                 e *= BLAST_GapDecayDivisor(gap_decay_rate, 1);
-//             }
-//         }
-//         es = BlastKarlinEtoS_simple(e, kbp, searchsp);
-//    }
-// ...
-//    if (es > s) {
-//       s_changed = TRUE;
-//       *S = s = es;
-//    }
-// ```
 /// The `BLAST_Cutoffs` of an ungapped TBLASTN search's word cutoff (`local_parameters_for_blocks`,
-/// which quotes the call): the score of e-value `CUTOFF_E_TBLASTN` (1.0) with the gap decay
+/// which cites the call): the score of e-value `CUTOFF_E_TBLASTN` (1.0) with the gap decay
 /// `gap_decay_rate` in the search space `MIN(subj_length, query_length) * subj_length` of NCBI's
 /// `Uint8` (the subject length is NCBI's `Uint4` argument, in nucleotides), at least the cutoff of
 /// 1 that NCBI passes in. `cutoff_score_from_evalue` is NCBI's `BlastKarlinEtoS_simple`.

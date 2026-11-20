@@ -374,12 +374,6 @@ pub(super) fn link_preliminary_hsps_on(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1779-1782
-// ```c
-//     if (link_hsp_params->longest_intron <= 0) {
-//         s_BlastEvenGapLinkHSPs(program_number, hsp_list, query_info,
-//                               subject_length, sbp, link_hsp_params,
-//                               gapped_calculation);
-// ```
 /// The linking of an ungapped search with a `longest_intron` of 0 (`-max_intron_length` 4 or
 /// less): `s_BlastEvenGapLinkHSPs` (`core::link_hsps::even_gap_link_hsps`) of the HSPs of `input`
 /// on their subject frames, with the ungapped Karlin blocks `kbp` (`sbp->kbp`), the contexts'

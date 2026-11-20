@@ -868,15 +868,8 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
         anyhow::bail!("{}", ungapped_pssm_refusal());
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:449-464
-    // ```c
-    //    /* Set gapped X-dropoffs only if it is a gapped search. */
-    // ...
-    //    if (sbp->kbp_gap) {
-    //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
-    //       params->gap_x_dropoff = (Int4)
-    //           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-    // ```
-    // An ungapped search has no gapped Karlin block (blast_setup.c:517-527), so it reads neither
+    // NCBI converts the gapped X-drops to raw scores only when the search has gapped Karlin
+    // blocks (with the smallest gapped Lambda). An ungapped search has no gapped Karlin block (blast_setup.c:517-527), so it reads neither
     // gapped X-drop nor the gap costs.
     // The gapped X-drops that NCBI's kernels cannot size are refused where the search starts
     // (`core::x_drop::check_gapped_x_dropoffs`), at the search's gapped Lambda: the matrix's, or a

@@ -1647,11 +1647,9 @@ fn write_pairwise(
         gumbel,
         gapped: scoring.gapped,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:165-167
-        // ```c++
-        //     if (use_sum_statistics && m_IsUngappedSearch) {
-        //         m_ShowLinkedSetSize = true;
-        // ```
-        // (the link parameters are made with sum statistics, `local_subject_parameters`).
+        // The formatter shows the size of each linked set (the `N` column) when the search is
+        // ungapped and uses sum statistics (the link parameters are made with sum statistics,
+        // `local_subject_parameters`).
         show_linked_set_size: !scoring.gapped && parameters.link.is_some(),
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2913-2927
         // ```c

@@ -801,14 +801,8 @@ pub(super) fn preliminary_protein_hsps_for_search<S: super::score::TbnScore>(
     // Dispatch point: `-window_size 0` (no `multiple_hits`) takes the one-hit word finder, in an
     // instance of its own (`ONE_HIT`), so that the two-hit units keep their code.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503,560-563
-    // ```c
-    //         if (score_options->gapped_calculation) {
-    // ...
-    //         } else {
-    //             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-    //                     hit_params->options, &hsp_list);
-    //         }
-    // ```
+    // NCBI extends the initial HSPs with gaps only in a gapped search; an ungapped search keeps
+    // them as the unit's HSPs (`ungapped_chunk_hsps`).
     // Dispatch point: `-ungapped` takes the units that save the initial HSPs, in instances of
     // their own (`UNGAPPED`), so that the gapped units keep their code.
     macro_rules! units {
@@ -1979,40 +1973,7 @@ pub(super) fn scan_profile(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4742-4772
-// ```c
-//    for (index = 0; index < init_hitlist->total; ++index) {
-// ...
-//       init_hsp = &init_hitlist->init_hsp_array[index];
-//       if (!init_hsp->ungapped_data)
-//          continue;
-// ...
-//       context = s_GetUngappedHSPContext(query_info, init_hsp);
-//       s_AdjustInitialHSPOffsets(init_hsp,
-//                                 query_info->contexts[context].query_offset);
-//       ungapped_data = init_hsp->ungapped_data;
-//       Blast_HSPInit(ungapped_data->q_start,
-//                     ungapped_data->length+ungapped_data->q_start,
-//                     ungapped_data->s_start,
-//                     ungapped_data->length+ungapped_data->s_start,
-//                     init_hsp->offsets.qs_offsets.q_off,
-//                     init_hsp->offsets.qs_offsets.s_off,
-//                     context, query_info->contexts[context].frame,
-//                     subject->frame, ungapped_data->score, NULL, &new_hsp);
-//       Blast_HSPListSaveHSP(hsp_list, new_hsp);
-//    }
-//
-//    /* Sort the HSP array by score */
-//    Blast_HSPListSortByScore(hsp_list);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2371-2394
-// ```c
-//     return BSearchContextInfo(init_hsp->offsets.qs_offsets.q_off, query_info);
-// ...
-//     init_hsp->offsets.qs_offsets.q_off -= query_start;
-//     if (init_hsp->ungapped_data) {
-//         init_hsp->ungapped_data->q_start -= query_start;
-//     }
-// ```
 /// The HSPs of an ungapped search's (frame, chunk) unit (`BLAST_GetUngappedHSPList`): each initial
 /// HSP of `hits` (sorted by `XTwoHit::sort`, as NCBI's word finder leaves them) in its query
 /// context (the context of its word's query offset), with the query offsets made the context's

@@ -284,19 +284,6 @@ impl SubjectSetNumbers {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266
-    // ```c++
-    // s_MultiSeqGetAvgLength(void* multiseq_handle, void*)
-    // {
-    //     Int8 total_length = 0;
-    //     Uint4 num_seqs = 0;
-    //     Uint4 avg_length;
-    // ...
-    //     if ((num_seqs = (*seq_info)->GetNumSeqs()) == 0)
-    //         return 0;
-    //     for (index = 0; index < num_seqs; ++index)
-    //         total_length += (Int8) (*seq_info)->GetSeqBlk(index)->length;
-    //     avg_length = (Uint4) (total_length / num_seqs);
-    // ```
     /// `BlastSeqSrcGetAvgSeqLen` in nucleotides: a database's (`DatabaseNumbers::average`), or the
     /// FASTA subjects' total over their number (NCBI's `Uint4`, given back as the `Int4` of the
     /// sequence source's interface).
@@ -1520,11 +1507,7 @@ fn run_local_search_with_pool(
     // `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split; the sizes above are
     // still read, as NCBI's query splitter reads them first.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61
-    // ```c++
-    //     /* No split for ungapped mode JIRA SB-1082 */
-    //     if (!options->GetGappedMode()) m_NumChunks = 1;
-    // ```
-    // Nor is the query set of an ungapped search.
+    // NCBI does not split the queries of an ungapped search either.
     let split = match profile.pssm {
         None if scoring.gapped => split_protein_batch(&batch_lengths, protein_split),
         _ => None,
@@ -3022,21 +3005,7 @@ fn query_set_setup<'a>(
     };
     let recipe = match inputs.profile.pssm {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:766-768,814-819
-        // ```c
-        //    kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
-        // ...
-        //          BLAST_GetAlphaBeta(sbp->name, &alpha, &beta,
-        //                             scoring_options->gapped_calculation,
-        //                             scoring_options->gap_open,
-        //                             scoring_options->gap_extend,
-        //                             sbp->kbp_std[index]);
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3128-3130
-        // ```c
-        //    else if (num_values > 0) {
-        //      (*alpha) = alpha_arr[0];
-        //      (*beta) = beta_arr[0];
-        // ```
         // An ungapped search (`-ungapped`) has no gapped blocks (blast_setup.c:517-527): the
         // cutoffs, the linking, the e-values and the bit scores read each context's `kbp`
         // (`kbp_array = sbp->kbp`, blast_parameters.c:859-864; link_hsps.c:1637-1641), and the
@@ -3529,26 +3498,18 @@ fn run_preliminary_subjects_into(
                     )),
                 }
             };
-        // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-        // if (subject->length > 0) stat_length = subject->length;
-        // Blast_HSPListGetEvalues(..., stat_length, ...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887
+        // The preliminary e-values take the subject's length as their statistical length when it
+        // is positive (`initial_translated_stat_length`).
         let mut linked = link_or_evalues(
             &preliminary,
             initial_translated_stat_length(subject.len()),
         )?;
         reap_by_evalue(&mut linked, inputs.prelim_evalue);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480-1482
-        // ```c
-        //       if (hsp_list && hsp_list->hspcnt > 0) {
-        //          int query_index=0; /* Used to loop over queries below. */
-        //          if (!gapped_calculation) {
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1446,1466-1467
-        // ```c
-        //       stat_length = seq_arg.seq->length;
-        // ...
-        //           stat_length /= CODON_LENGTH;
-        // ```
+        // In an ungapped search a subject whose list kept HSPs goes through the re-evaluation and
+        // the steps after it, whose e-values take the subject's length over the codon length.
         if let (Some(steps), false) = (inputs.ungapped, linked.hsps.is_empty()) {
             linked = ungapped_subject_steps(steps, inputs, x_oid, subject, &linked, |input| {
                 link_or_evalues(input, subject.len() / 3)
@@ -3817,29 +3778,9 @@ fn direct_local_evalues(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1456
-// ```c
-//       /* Calculate cutoff scores for linking HSPs. Do this only for
-//          ungapped protein searches and ungapped translated
-//          searches. */
-//       if (hit_params->link_hsp_params && !kNucleotide &&
-//           !gapped_calculation) {
-//           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
-//             hit_params->link_hsp_params, word_params, db_length,
-//             seq_arg.seq->length);
-//       }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1012-1026
-// ```c
-//     /* Get KarlinBlk for context with smallest lambda (still greater than zero) */
-//     s_BlastFindSmallestLambda(sbp->kbp, query_info, &kbp);
-//     if (!kbp)
-//         return;
-// ...
-//     query_length =
-//         (query_info->contexts[query_info->last_context].query_offset +
-//         query_info->contexts[query_info->last_context].query_length - 1)
-//         / (query_info->last_context + 1);
-// ```
+// NCBI computes the linking's cutoffs of each subject only in an ungapped search of protein
+// letters, from the context with the smallest positive Lambda and the queries' average length.
 /// What an ungapped search (`-ungapped`) reads at the end of the preliminary search of each
 /// subject (`ungapped_subject_steps`) and in its results (`finish_local_ungapped`): the linking's
 /// cutoffs of each subject (`CalculateLinkHSPCutoffs`), the re-evaluation and the queries' letters
@@ -3935,70 +3876,8 @@ impl<'a> UngappedSubjectSteps<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1491-1541
-// ```c
-//                status =
-//                   Blast_HSPListReevaluateUngapped(
-//                             program_number, hsp_list, query,
-//                             seq_arg.seq, word_params, hit_params,
-//                             query_info, sbp, score_params, seq_src,
-//                             seq_arg.seq->gen_code_string);
-// ...
-//                if (hit_params->link_hsp_params) {
-//                    status =
-//                        BLAST_LinkHsps(program_number, hsp_list, query_info,
-//                                       seq_arg.seq->length, sbp,
-//                                       hit_params->link_hsp_params,
-//                                       gapped_calculation);
-//                } else {
-//                   Blast_HSPListGetEvalues(program_number, query_info,
-//                                           stat_length, hsp_list,
-//                                           gapped_calculation, FALSE,
-//                                           sbp, 0, 1.0);
-//                }
-// ...
-//         	   status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
-// ...
-//                Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
-//             /* Calculate and fill the bit scores, since there will be no
-//                traceback stage where this can be done. */
-//             Blast_HSPListGetBitScores(hsp_list, gapped_calculation, sbp);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2648-2667
-// ```c
-//       	seq_arg.check_oid_exclusion = TRUE;
-// ...
-//       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-//       		for (index = 0; index < hspcnt; ++index) {
-//       			 hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-//       		}
-//       		Blast_HSPListPurgeNullHSPs(hsp_list);
-//       		return 0;
-//       	}
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2686-2734
-// ```c
-//       context = hsp->context;
-//
-//       query_start = query_blk->sequence +
-//           query_info->contexts[context].query_offset;
-//
-//       if (kTranslateSubject)
-//          subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
-//
-//       if (kNucleotideSubject) {
-//          delete_hsp =
-//              Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
-//                 subject_start, word_params, sbp, kTranslateSubject);
-//       }
-// ...
-//            delete_hsp = Blast_HSPTest(hsp, hit_params->options, align_length);
-// ...
-//    if (purge)
-//       Blast_HSPListPurgeNullHSPs(hsp_list);
-//
-//    /* Sort the HSP array by score (scores may have changed!) */
-//    Blast_HSPListSortByScore(hsp_list);
-// ```
 /// The steps of an ungapped search after the preliminary search of subject `oid` whose list
 /// `linked` kept HSPs: the re-evaluation (`Blast_HSPListReevaluateUngapped`: a subject that the
 /// fetch excludes loses its HSPs; each HSP is scored again on the working query, `frames`, and the
@@ -4105,25 +3984,6 @@ fn ungapped_subject_steps(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1691-1706
-// ```c
-//                 } else {
-//                     /* traceback skipped; compute bit scores for searches
-//                        where the traceback phase is seperated from the
-//                        preliminary search. */
-//                     Blast_HSPListGetBitScores(hsp_list, FALSE, sbp);
-//                 }
-//
-//                 /* Free HSP list if all HSPs have been deleted. */
-//
-//                 batch->hsplist_array[hsplist_itr] = NULL;
-//                 if (hsp_list->hspcnt == 0) {
-//                     hsp_list = Blast_HSPListFree(hsp_list);
-//                 }
-//                 else {
-//                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
-//                                   hit_params->options->hitlist_size);
-//                 }
-// ```
 /// The results of an ungapped search, which has no traceback: each preliminary list in the order
 /// of the traceback's batches, with each HSP's bit score of its context's ungapped block `kbp` and
 /// its identities and positives, counted on the query without its masks and the translation of the
@@ -4171,13 +4031,7 @@ fn finish_local_ungapped(
                         steps.matrix,
                     )?;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1918-1928
-                // ```c
-                //    kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-                // ...
-                //       hsp->bit_score =
-                //          (hsp->score*kbp[hsp->context]->Lambda - kbp[hsp->context]->logK) /
-                //          NCBIMATH_LN2;
-                // ```
+                // The bit score of the context's ungapped block: (score * Lambda - ln K) / ln 2.
                 Ok(KappaHspPayload {
                     bit_score: (hsp.score as f64 * kbp[context].lambda - kbp[context].k.glibc_ln())
                         / std::f64::consts::LN_2,

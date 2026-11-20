@@ -1782,11 +1782,8 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:528-531
-    // ```c
-    //             ((H->hsp->context/strand_factor) !=
-    // 	     (H->prev->hsp->context/strand_factor) ||
-    //              (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
-    // ```
+    // A new query frame of the linking starts where the context's query frame or the sign of the
+    // subject frame changes.
     #[test]
     fn hsps_on_subject_frames_of_opposite_signs_link_apart() {
         // The pair of `two_hsps_in_order_on_both_sequences_link_into_one_set`, on subject frames
@@ -1817,17 +1814,8 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:563-571
-    // ```c
-    //       subject_length = subject_length_orig; /* in nucleotides even for tblast[nx] */
-    //       /* If subject is translated, length adjustment is given in nucleotide
-    //          scale. */
-    //       if (Blast_SubjectIsTranslated(program_number))
-    //       {
-    //          length_adjustment /= CODON_LENGTH;
-    //          subject_length /= CODON_LENGTH;
-    //       }
-    //       subject_length = MAX(subject_length - length_adjustment, 1);
-    // ```
+    // A translated subject's length and the length adjustment, both in nucleotides, are divided
+    // by the codon length before the adjustment is subtracted (at least 1 letter is left).
     #[test]
     fn a_translated_subject_divides_its_length_and_the_adjustment_by_three() {
         // A set of two takes the subject length into its e-value: 3,001 nucleotides and the

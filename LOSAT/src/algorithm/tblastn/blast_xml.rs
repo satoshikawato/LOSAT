@@ -153,17 +153,9 @@ pub(super) struct PreparedXml {
 /// without a valid context.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:241-248
-/// ```c++
-///     const Blast_KarlinBlk *kbp =
-///                    m_AncillaryData[query_index]->GetGappedKarlinBlk();
-///     if (kbp)
-///         return kbp->Lambda;
-///
-///     kbp = m_AncillaryData[query_index]->GetUngappedKarlinBlk();
-///     if (kbp)
-///         return kbp->Lambda;
-/// ```
-/// An ungapped search makes no gapped block, so its statistics are the ungapped block's.
+/// The XML's Karlin-Altschul values are those of the query's gapped block, or of its ungapped
+/// block when it has no gapped one. An ungapped search makes no gapped block, so its statistics
+/// are the ungapped block's (XML2's are read the same way, data4xml2format.cpp:258-273).
 pub(super) fn query_stats(
     parameters: &LocalSubjectParameters,
     query_validity: &[bool],

@@ -2809,9 +2809,7 @@ fn write_blastp_final_footer<W: Write>(
     }
     write_matrix_line(writer, report.matrix_name.as_deref())?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2269
-    // ```c++
-    //     if (options.GetGappedMode() == true) {
-    // ```
+    // The epilog names the gap costs of a gapped search only.
     if report.gapped {
         writeln!(
             writer,

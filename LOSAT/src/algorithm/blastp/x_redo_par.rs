@@ -3660,8 +3660,9 @@ mod tests {
         let count = fixture.lists.len();
         // Two sets of heaps that keep two lists. The first: by query, empty, one list, and full
         // above the cutoff (worst E 0.5). The second: full within the cutoff (worst E 1e-25), but
-        // for each batch's first query, which stays empty so that no batch ends early: there every
-        // test of an E-value above the cutoff is FALSE for certain.
+        // for each batch's last query, which stays empty so that no batch ends early: there every
+        // test of an E-value above the cutoff is FALSE for certain (the fixture asks such tests of
+        // the first query of each batch).
         let heap_sets: Vec<Vec<BlastCompoHeap>> = [false, true]
             .into_iter()
             .map(|within| {
@@ -3669,7 +3670,7 @@ mod tests {
                 for (q_idx, heap) in heaps.iter_mut().enumerate() {
                     let kept: &[(f64, i32)] = if !within {
                         &[(1e-30, 300), (0.5, 60)][..q_idx % 3]
-                    } else if fixture.batches[q_idx].start == q_idx {
+                    } else if q_idx + 1 == fixture.batches[q_idx].end {
                         &[]
                     } else {
                         &[(1e-30, 300), (1e-25, 250)]

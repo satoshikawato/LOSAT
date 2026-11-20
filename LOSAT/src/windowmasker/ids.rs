@@ -220,7 +220,11 @@ pub(super) fn fill_id_list(name: &str) -> Result<TextMatchIds, EmptyId> {
             .position(|&byte| byte == b' ' || byte == b'\t')
             .unwrap_or(line.len());
         let start = usize::from(line[0] == b'>');
-        let id = if stop >= start { &line[start..stop] } else { &[][..] };
+        let id = if stop >= start {
+            &line[start..stop]
+        } else {
+            &[][..]
+        };
         ids.insert(id)?;
     }
     Ok(ids)
@@ -492,11 +496,11 @@ mod tests {
             Title::Text(b"rec4".to_vec())
         );
         assert_eq!(
-            get_title(&[tpg.clone()], Some(b"third party"), false),
+            get_title(std::slice::from_ref(&tpg), Some(b"third party"), false),
             Title::Text(b"TPA: third party".to_vec())
         );
         assert_eq!(
-            get_title(&[tpg.clone()], Some(b"tpa: x"), false),
+            get_title(std::slice::from_ref(&tpg), Some(b"tpa: x"), false),
             Title::Text(b"tpa: x".to_vec())
         );
         assert_eq!(get_title(&[tpg], None, false), Title::Text(Vec::new()));

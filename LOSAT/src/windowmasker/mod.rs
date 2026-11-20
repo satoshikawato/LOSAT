@@ -152,7 +152,12 @@ const DESCS: &[Desc] = &[
         Some(Constraint::Integers(1, INT_MAX)),
     ),
     key("meta", Kind::Text, Some(""), None),
-    key("unit", Kind::Integer, None, Some(Constraint::Integers(1, 16))),
+    key(
+        "unit",
+        Kind::Integer,
+        None,
+        Some(Constraint::Integers(1, 16)),
+    ),
     key("genome_size", Kind::Integer, None, None),
     key(
         "window",
@@ -229,7 +234,9 @@ const DESCS: &[Desc] = &[
         "sformat",
         Kind::Text,
         Some("ascii"),
-        Some(Constraint::Strings(&["ascii", "binary", "oascii", "obinary"])),
+        Some(Constraint::Strings(&[
+            "ascii", "binary", "oascii", "obinary",
+        ])),
     ),
     key("smem", Kind::Integer, Some("512"), None),
     key("dust", Kind::Boolean, Some("F"), None),

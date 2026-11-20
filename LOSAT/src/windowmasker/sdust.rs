@@ -100,7 +100,7 @@ impl SDustMasker {
             let start = current;
             while e
                 .peek()
-                .is_some_and(|&&(first, second)| u64::from(second - first) + 1 <= window)
+                .is_some_and(|&&(first, second)| u64::from(second - first) < window)
             {
                 e.next();
             }

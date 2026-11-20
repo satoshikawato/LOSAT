@@ -488,7 +488,12 @@ fn dustmasker_posts_where_ncbi_does_in_one_file() {
 // on Windows too, where the row would need its own standard output).
 #[test]
 fn the_rows_that_read_a_directory_are_the_ones_ncbi_read_as_one() {
-    for program in ["dustmasker", "segmasker", "windowmasker", "convert2blastmask"] {
+    for program in [
+        "dustmasker",
+        "segmasker",
+        "windowmasker",
+        "convert2blastmask",
+    ] {
         let (missing, _) = missing_input(program);
         let (missing_out, _, _) = expected_row(program, missing);
         for case in cases(program) {

@@ -297,7 +297,12 @@ mod tests {
 
     #[test]
     fn text_formats_read_every_line_and_binary_ones_the_first() {
-        let md = lines(&["##note:x", "##pct: 0 0", "##pct: 1 89.7027", "##pct: 2 1e-05 extra"]);
+        let md = lines(&[
+            "##note:x",
+            "##pct: 0 0",
+            "##pct: 1 89.7027",
+            "##pct: 2 1e-05 extra",
+        ]);
         assert_eq!(
             count_map(&md, StatType::Ascii).unwrap(),
             vec![0.0, 89.7027, 1e-05]

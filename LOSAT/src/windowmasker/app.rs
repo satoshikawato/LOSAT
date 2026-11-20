@@ -120,7 +120,10 @@ fn options<'a>(args: &'a Args, settings: &'a ApplicationSettings) -> Options<'a>
         parse_seqids: args.flag("parse_seqids"),
         params,
         pct,
-        dust_level: dust.then(|| args.integer("dust_level").expect("-dust_level has a default")),
+        dust_level: dust.then(|| {
+            args.integer("dust_level")
+                .expect("-dust_level has a default")
+        }),
         blastdb_registry: match &settings.blastdb {
             Ok(value) => Ok(value.as_deref()),
             Err(reason) => Err(reason.as_str()),
@@ -228,7 +231,9 @@ fn id_lists(args: &Args, infmt: &str) -> Result<IdLists, Failure> {
             "only one of -ids or -exclude_ids can be specified",
         )));
     }
-    let text_match = args.boolean("text_match").expect("-text_match has a default");
+    let text_match = args
+        .boolean("text_match")
+        .expect("-text_match has a default");
     let list = |name: &str, line: u32| -> Result<Option<_>, Failure> {
         if name.is_empty() {
             return Ok(None);

@@ -54,8 +54,14 @@ fn the_library_refuses_xmlhelp_as_blastdbcmd_does() {
 #[test]
 fn mk_counts_and_convert_are_refused() {
     for (word, what) in [
-        ("-mk_counts", "-mk_counts (the making of a unit counts file)"),
-        ("-convert", "-convert (the conversion of a unit counts file)"),
+        (
+            "-mk_counts",
+            "-mk_counts (the making of a unit counts file)",
+        ),
+        (
+            "-convert",
+            "-convert (the conversion of a unit counts file)",
+        ),
     ] {
         assert_eq!(
             run_words(&[word]),
@@ -77,12 +83,22 @@ fn the_keys_read_as_ncbi_s() {
         |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
     let args = crate::ncbi_app::args::parse(
         &TOOL,
-        &words(&["-ustat", "u", "-t_thres_pct", "99.5", "-window", "0x14", "-dust", "yes"]),
+        &words(&[
+            "-ustat",
+            "u",
+            "-t_thres_pct",
+            "99.5",
+            "-window",
+            "0x14",
+            "-dust",
+            "yes",
+        ]),
     )
     .unwrap();
     assert_eq!(args.boolean("dust"), Some(true));
     assert_eq!(args.boolean("text_match"), Some(true));
-    assert_eq!(args.boolean("checkdup"), Some(false));
+    // `-ustat` excludes `-checkdup`: NCBI adds a `CArg_ExcludedValue`, not the default.
+    assert_eq!(args.boolean("checkdup"), None);
     assert_eq!(args.double("t_thres_pct"), Some(99.5));
     assert_eq!(args.double("t_low_pct"), None);
     assert_eq!(args.integer("window"), Some(20));

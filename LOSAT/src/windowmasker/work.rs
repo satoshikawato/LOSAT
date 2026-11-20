@@ -193,8 +193,8 @@ pub(super) fn reader<'a, R: Read + 'a>(
 ) -> Result<Option<Box<dyn SequenceSource + 'a>>, Failure> {
     match (options.infmt, input) {
         ("fasta", Some(input)) => {
-            let reader = MaskFastaReader::new(input, false, options.parse_seqids)
-                .map_err(read_failure)?;
+            let reader =
+                MaskFastaReader::new(input, false, options.parse_seqids).map_err(read_failure)?;
             Ok(Some(Box::new(FastaSource { reader })))
         }
         ("blastdb", _) => Ok(Some(Box::new(DatabaseSource::open(
@@ -324,9 +324,8 @@ impl SequenceSource for DatabaseSource {
 /// empty string: windowmasker has none of `locut`, `hicut`, `window` with `level` and
 /// `linker`, mask_writer_blastdb_maskinfo.cpp:180-202.)
 pub(super) fn writer(outfmt: &str) -> MaskWriter {
-    let mask_info = |serial| {
-        MaskWriter::mask_info(Some(serial), 3, FilterProgram::Windowmasker, Vec::new())
-    };
+    let mask_info =
+        |serial| MaskWriter::mask_info(Some(serial), 3, FilterProgram::Windowmasker, Vec::new());
     match outfmt {
         "interval" => MaskWriter::Interval,
         "fasta" => MaskWriter::Fasta {

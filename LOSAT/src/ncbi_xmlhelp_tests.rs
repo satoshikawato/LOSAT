@@ -183,7 +183,6 @@ fn the_filter_leaves_whole_elements() {
             "{program}"
         );
     }
-    assert_eq!(print("windowmasker", |_| false), None);
 }
 
 // One refused name: its element and the dependencies naming it go, the rest stays (NCBI blastn:

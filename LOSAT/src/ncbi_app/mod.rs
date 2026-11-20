@@ -41,7 +41,8 @@ pub(crate) struct Tool {
     /// NCBI's `multimap` of them).
     pub(crate) dependencies: fn() -> Vec<(&'static str, Dep, &'static str)>,
     /// The prefix of the program's diagnostics (`SetDiagPostPrefix`), if it sets one.
-    pub(crate) post_prefix: Option<&'static str>,    /// The components of its full versions (`CVersionAPI::AddComponentVersion`; windowmasker's).
+    pub(crate) post_prefix: Option<&'static str>,
+    /// The components of its full versions (`CVersionAPI::AddComponentVersion`; windowmasker's).
     pub(crate) components: &'static [crate::ncbi_version::Component],
 }
 

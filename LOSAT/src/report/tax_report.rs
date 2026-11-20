@@ -679,6 +679,9 @@ pub struct TaxLookups {
     looked_up: bool,
     /// `<@taxBrowserURL@>` (`tax_browser_url`).
     browser_url: Vec<u8>,
+    /// `m_Protocol` (`CAlignFormatUtil::GetProtocol`, `formatter_registry::protocol`), which the
+    /// HTML rows put in (`row_html`); borrowed where `./.ncbirc` is absent.
+    protocol: std::borrow::Cow<'static, [u8]>,
     /// What one read of `./.ncbirc` by the report posts (`read_ncbirc`); the report of each query
     /// reads it twice.
     registry_posts: Vec<u8>,
@@ -711,6 +714,12 @@ impl TaxLookups {
                 super::formatter_registry::registry_posts(read, &lower)
             }),
             browser_url: tax_browser_url(registry),
+            protocol: match registry {
+                None => std::borrow::Cow::Borrowed(super::reference::DEFAULT_PROTOCOL),
+                Some(_) => super::formatter_registry::protocol(registry)
+                    .to_vec()
+                    .into(),
+            },
             lower,
             answers: Default::default(),
             open: Vec::new(),
@@ -820,17 +829,52 @@ fn tax_browser_url(registry: Option<&crate::blastinput::ncbi_registry::RegistryR
 /// The template (`ORG_REPORT_TXT_ORG_HEADER_NO_TAX_CON`, taxFormat.cpp:98) has no
 /// `<@blast_name_link@>`: its replacement changes nothing.
 fn organism_line(names: &TaxNames) -> Text {
+    let line = with_names(
+        b"<@scientific_name@> <@common_name@> [<@blast_name@>]",
+        names,
+    )
+    .flat();
+    add_spaces(&line, u64::from(LINE_LENGTH), Place::Center, true, true)
+}
+
+/// The names of `names` put in `template` (`x_MapTaxInfoTemplate` up to its `AddSpaces`).
+fn with_names(template: &[u8], names: &TaxNames) -> Text {
     let common: Vec<u8> = if names.common_name != names.scientific_name {
         [b"(", names.common_name.as_slice(), b")"].concat()
     } else {
         Vec::new()
     };
-    let line = Text::of(b"<@scientific_name@> <@common_name@> [<@blast_name@>]")
+    Text::of(template)
         .map_bytes("scientific_name", &names.scientific_name)
         .map_bytes("common_name", &common)
         .map_bytes("blast_name", &names.blast_name)
-        .flat();
-    add_spaces(&line, u64::from(LINE_LENGTH), Place::Center, true, true)
+}
+
+// NCBI reference (2.17.0): c++/src/objtools/align_format/taxFormat.cpp:66, 70, 74, 76 (`kMapTagToString`)
+// ```c++
+//     { "ORG_REPORT_TABLE", "<table><caption><h2>Organism Report</h2></caption><tr><th>Accession</th><th>Descr</th><th>Score</th><th>E-value</th></tr><@table_rows@></table><@taxidToSeqsMap@>"},
+//     { "ORG_REPORT_ORG_HEADER_NO_TAX_CON", "<tr><th colspan=\"4\"><a href=\"<@taxBrowserURL@>?id=<@taxid@>\" name=\"<@taxid@>\" title=\"Show taxonomy info for <@scientific_name@> (taxid <@taxid@>)\" target=\"lnktx<@rid@>\"><@scientific_name@> <@common_name@> [<@blast_name@>]</th></tr>"},
+//     { "ORG_REPORT_TABLE_ROW",  "<tr><td><a title=\"Show report for <@acc@>\" target=\"lnktx<@rid@>\" href=\"<@protocol@>//www.ncbi.nlm.nih.gov/protein/<@acc@>?report=fwwwtax&amp;log$=taxrep&amp;RID=<@rid@>\"><@acc@></a></td><td><@descr_abbr@></td><td><@score@></td><td><@evalue@></td></tr>"},
+//     { "TAXID_TO_SEQ_MAP", "<input type=\"hidden\" id=\"txForSeq_<@taxid@>\" value=\"<@giList@>\" />"},
+// ```
+// The HTML report (`-html`, `CTaxFormat::eHtml`) without the taxonomy server: its organism header
+// (DisplayOrgReport, taxFormat.cpp:462-463) leaves its `<a>` open (line RG T4 probes
+// `*.f18*.h`), and its rows hold `/protein/` also for nucleotide subjects.
+const ORG_REPORT_TABLE: &[u8] = b"<table><caption><h2>Organism Report</h2></caption><tr><th>Accession</th><th>Descr</th><th>Score</th><th>E-value</th></tr><@table_rows@></table><@taxidToSeqsMap@>";
+const ORG_REPORT_ORG_HEADER_NO_TAX_CON: &[u8] = b"<tr><th colspan=\"4\"><a href=\"<@taxBrowserURL@>?id=<@taxid@>\" name=\"<@taxid@>\" title=\"Show taxonomy info for <@scientific_name@> (taxid <@taxid@>)\" target=\"lnktx<@rid@>\"><@scientific_name@> <@common_name@> [<@blast_name@>]</th></tr>";
+const ORG_REPORT_TABLE_ROW: &[u8] = b"<tr><td><a title=\"Show report for <@acc@>\" target=\"lnktx<@rid@>\" href=\"<@protocol@>//www.ncbi.nlm.nih.gov/protein/<@acc@>?report=fwwwtax&amp;log$=taxrep&amp;RID=<@rid@>\"><@acc@></a></td><td><@descr_abbr@></td><td><@score@></td><td><@evalue@></td></tr>";
+const TAXID_TO_SEQ_MAP: &[u8] =
+    b"<input type=\"hidden\" id=\"txForSeq_<@taxid@>\" value=\"<@giList@>\" />";
+
+/// The organism header of `names` before the replacements after the names, in the text report
+/// (`organism_line`) or, `html`, in the HTML one (no centring: `x_MapTaxInfoTemplate` centres
+/// only `eText`).
+fn organism_header(names: &TaxNames, html: bool) -> Text {
+    if html {
+        with_names(ORG_REPORT_ORG_HEADER_NO_TAX_CON, names)
+    } else {
+        organism_line(names)
+    }
 }
 
 /// A row of the table (`SSeqInfo` as the text report shows it).
@@ -953,7 +997,7 @@ impl TaxReport {
                 query
                     .hsps
                     .as_ref()
-                    .map(|hsps| organism_report(hsps, subjects, &mut lookups))
+                    .map(|hsps| organism_report(hsps, subjects, &mut lookups, html))
                     .transpose()
             })
             .collect::<Result<_>>()?;
@@ -1207,11 +1251,13 @@ pub fn report_batch<'a>(
 /// (`TaxSubjects::throws`, the load of `GetBioseqHandle` where its batch's prefetch is off) is
 /// left out at the load, and is not the previous id either. LOSAT's refusals: a title that it does
 /// not write as NCBI where NCBI makes it (or, `shown_only`, shows it), and an organism line that
-/// holds `<@bl_taxid@>` (NCBI writes an uninitialised `int` there).
+/// holds `<@bl_taxid@>` (NCBI writes an uninitialised `int` there). `html`: the HTML report
+/// (`org_report_html`), else the text one (`org_report_text`).
 fn organism_report(
     hsps: &[TaxHsp],
     subjects: &dyn TaxSubjects,
     lookups: &mut TaxLookups,
+    html: bool,
 ) -> Result<(Vec<Step>, Text)> {
     let mut widths = Widths::default();
     let mut groups: Vec<Group<'_>> = Vec::new();
@@ -1259,7 +1305,7 @@ fn organism_report(
                         threw = true;
                         break;
                     };
-                    let line = organism_line(names);
+                    let line = organism_header(names, html);
                     if line.contains(b"<@bl_taxid@>") {
                         return Err(TaxReportRefusal(format!(
                             "the taxonomy database names taxid {} with the template token <@bl_taxid@>, which NCBI BLAST+'s organism report (outfmt 18) replaces with an uninitialised number; this is not supported by LOSAT's {}",
@@ -1290,8 +1336,54 @@ fn organism_report(
             previous = Some(hsp.subject);
         }
     }
-    let text = org_report_text(&groups, widths, &lookups.browser_url);
+    let text = if html {
+        org_report_html(&groups, &lookups.browser_url, &lookups.protocol)
+    } else {
+        org_report_text(&groups, widths, &lookups.browser_url)
+    };
     Ok((steps, text))
+}
+
+/// The organism header of `groups[i]` (its `Group::line`) with the replacements after the names
+/// (`x_MapTaxInfoTemplate` after `AddSpaces`, then `DisplayOrgReport`'s); `browser_url` replaces
+/// `<@taxBrowserURL@>`. One form for the text and the HTML report.
+fn org_header(groups: &[Group<'_>], i: usize, browser_url: &[u8]) -> Text {
+    const DISABLED: &[u8] = b"disabled=\"disabled\"";
+    let group = &groups[i];
+    let last = i + 1 == groups.len();
+    let number = |index: usize| groups[index].taxid.to_string().into_bytes();
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1172-1187
+    // ```c++
+    //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"bl_taxid",taxInfo.blNameTaxid);
+    //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"taxid",TAX_ID_TO(int, taxInfo.taxid));
+    //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"taxBrowserURL",m_TaxBrowserURL);
+    //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"rid",m_Rid);
+    //     int numHits = taxInfo.seqInfoList.size();
+    //     numHits = (numHits > 0) ? numHits : taxInfo.numHits;
+    //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"numhits",numHits);
+    //
+    //     string shift;
+    //     for(size_t i = 0; i < depth; i++) {
+    //         shift += ".";
+    //     }
+    //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"depth",shift);
+    // ```
+    // `<@bl_taxid@>` is refused where the group is made (`organism_report`); the line holds none.
+    group
+        .line
+        .map_bytes("taxid", group.taxid.to_string().as_bytes())
+        .map_bytes("taxBrowserURL", browser_url)
+        .map_bytes("rid", b"0")
+        .map_bytes("numhits", group.rows.len().to_string().as_bytes())
+        .map_bytes("depth", b"")
+        .map_bytes("next_taxid", &if last { Vec::new() } else { number(i + 1) })
+        .map_bytes("disable_nexttaxid", if last { DISABLED } else { b"" })
+        .map_bytes(
+            "prev_taxid",
+            &if i == 0 { Vec::new() } else { number(i - 1) },
+        )
+        .map_bytes("disable_prevtaxid", if i == 0 { DISABLED } else { b"" })
+        .map_bytes("disable_top", if i == 0 { DISABLED } else { b"" })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:450-517 (`DisplayOrgReport`)
@@ -1335,44 +1427,9 @@ fn organism_report(
 /// The text of the organism report of `groups` with the widths `widths`; `browser_url` replaces
 /// `<@taxBrowserURL@>`.
 fn org_report_text(groups: &[Group<'_>], widths: Widths, browser_url: &[u8]) -> Text {
-    const DISABLED: &[u8] = b"disabled=\"disabled\"";
     let mut data = Text::default();
     for (i, group) in groups.iter().enumerate() {
-        let last = i + 1 == groups.len();
-        let number = |index: usize| groups[index].taxid.to_string().into_bytes();
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1172-1187
-        // ```c++
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"bl_taxid",taxInfo.blNameTaxid);
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"taxid",TAX_ID_TO(int, taxInfo.taxid));
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"taxBrowserURL",m_TaxBrowserURL);
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"rid",m_Rid);
-        //     int numHits = taxInfo.seqInfoList.size();
-        //     numHits = (numHits > 0) ? numHits : taxInfo.numHits;
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"numhits",numHits);
-        //
-        //     string shift;
-        //     for(size_t i = 0; i < depth; i++) {
-        //         shift += ".";
-        //     }
-        //     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"depth",shift);
-        // ```
-        // `<@bl_taxid@>` is refused where the group is made (`organism_report`); the line holds none.
-        let header = group
-            .line
-            .map_bytes("taxid", group.taxid.to_string().as_bytes())
-            .map_bytes("taxBrowserURL", browser_url)
-            .map_bytes("rid", b"0")
-            .map_bytes("numhits", group.rows.len().to_string().as_bytes())
-            .map_bytes("depth", b"")
-            .map_bytes("next_taxid", &if last { Vec::new() } else { number(i + 1) })
-            .map_bytes("disable_nexttaxid", if last { DISABLED } else { b"" })
-            .map_bytes(
-                "prev_taxid",
-                &if i == 0 { Vec::new() } else { number(i - 1) },
-            )
-            .map_bytes("disable_prevtaxid", if i == 0 { DISABLED } else { b"" })
-            .map_bytes("disable_top", if i == 0 { DISABLED } else { b"" });
-        data.push_text(&header);
+        data.push_text(&org_header(groups, i, browser_url));
         for row in &group.rows {
             data.push_text(&row_text(row, widths));
         }
@@ -1454,6 +1511,88 @@ fn row_text(row: &Row<'_>, widths: Widths) -> Text {
         .map("descr_text", &column(row.title, widths.descr))
         .map("score", &column(&row.bit_score, widths.score))
         .map("evalue", &column(&row.evalue, widths.evalue))
+}
+
+// NCBI reference (2.17.0): c++/src/objtools/align_format/taxFormat.cpp:706-714
+// ```c++
+// void CTaxFormat::x_InitTaxIdToSeqsMap(void)
+// {
+//     for(size_t i = 0; i < m_BlastResTaxInfo->orderedTaxids.size(); i++) {
+//         ...
+//         string taxIdToSeqsRow = CAlignFormatUtil::MapTemplate(m_TaxFormatTemplates->taxIdToSeqsMap,"giList",seqsForTaxID.accList);
+//         taxIdToSeqsRow = CAlignFormatUtil::MapTemplate(taxIdToSeqsRow,"taxid", TAX_ID_TO(TIntId, taxid));
+//         m_TaxIdToSeqsMap += taxIdToSeqsRow;
+// ```
+// NCBI reference (2.17.0): c++/src/objtools/align_format/taxFormat.cpp:1073-1074 (`x_InitBlastDBTaxInfo`)
+// ```c++
+//         m_BlastResTaxInfo->seqTaxInfoMap[taxid].accList += ", ";
+//         m_BlastResTaxInfo->seqTaxInfoMap[taxid].accList += seqInfo->label;
+// ```
+// NCBI reference (2.17.0): c++/src/objtools/align_format/taxFormat.cpp:510-514
+// ```c++
+//     else {
+//         orgReportData = CAlignFormatUtil::MapTemplate(orgReportData,"taxidToSeqsMap",m_TaxIdToSeqsMap);
+//     }
+//     out << orgReportData;
+// ```
+/// The HTML organism report (`-html`) of `groups`: the table of the organism headers
+/// (`org_header`) and their rows (`row_html`), then one hidden input per taxid with the labels of
+/// its rows (`accList`, joined by ", "). `browser_url` replaces `<@taxBrowserURL@>`, `protocol`
+/// the rows' `<@protocol@>`. No newline anywhere: queries follow each other on one line (line RG
+/// T4 probes `*.f18*.h`; a query without hits gets the table's header row only).
+fn org_report_html(groups: &[Group<'_>], browser_url: &[u8], protocol: &[u8]) -> Text {
+    let mut data = Text::default();
+    let mut inputs = Text::default();
+    for (i, group) in groups.iter().enumerate() {
+        data.push_text(&org_header(groups, i, browser_url));
+        let mut acc_list = Vec::new();
+        for row in &group.rows {
+            data.push_text(&row_html(row, protocol));
+            if !acc_list.is_empty() {
+                acc_list.extend_from_slice(b", ");
+            }
+            acc_list.extend_from_slice(row.label);
+        }
+        inputs.push_text(
+            &Text::of(TAXID_TO_SEQ_MAP)
+                .map_bytes("giList", &acc_list)
+                .map_bytes("taxid", group.taxid.to_string().as_bytes()),
+        );
+    }
+    Text::of(ORG_REPORT_TABLE)
+        .map("table_rows", &data)
+        .map("taxidToSeqsMap", &inputs)
+}
+
+// NCBI reference (2.17.0): c++/src/objtools/align_format/taxFormat.cpp:1130-1157 (`x_MapSeqTemplate`)
+// ```c++
+//     string reportTableRow = CAlignFormatUtil::MapTemplate(seqTemplate,"gi",NStr::NumericToString(seqInfo->gi));
+//     ...
+//     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"descr_abbr",seqInfo->title.substr(0,60));//for standalone output
+//     reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"rid",m_Rid);
+//     ...
+//     else {
+//         reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"acc",seqInfo->label);
+//         reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"descr",seqInfo->title);
+//         reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"score",seqInfo->bit_score);
+//         reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"evalue",seqInfo->evalue);
+//         reportTableRow = CAlignFormatUtil::MapTemplate(reportTableRow,"protocol",m_Protocol);
+//     }
+// ```
+/// One HTML row (`ORG_REPORT_TABLE_ROW`): the first 60 bytes of the title, not escaped, then the
+/// replacements in NCBI's order, so that a title's own tags of a later replacement are filled
+/// (`subject five <@score@> s` gives `subject five 131 s`, probe `bp.di.f18.tax.h`). The
+/// replacements of `gi` and `disp_gi` come before any value is put in and the template holds
+/// neither: they change nothing.
+fn row_html(row: &Row<'_>, protocol: &[u8]) -> Text {
+    Text::of(ORG_REPORT_TABLE_ROW)
+        .map_bytes("descr_abbr", &row.title[..row.title.len().min(60)])
+        .map_bytes("rid", b"0")
+        .map_bytes("acc", row.label)
+        .map_bytes("descr", row.title)
+        .map_bytes("score", &row.bit_score)
+        .map_bytes("evalue", &row.evalue)
+        .map_bytes("protocol", protocol)
 }
 
 #[cfg(test)]

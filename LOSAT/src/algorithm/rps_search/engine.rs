@@ -675,6 +675,7 @@ impl RpsRun<'_> {
                 gap_extend: files.aux.gap_extend,
                 x_drop_final_bits: self.x_drop_final_bits,
                 smith_waterman: self.options.use_sw_tback,
+                program: self.program,
             }),
         };
         let prelim_karlin = KarlinParams {
@@ -1053,11 +1054,12 @@ impl RpsWorkers {
 
 /// The gapped K that the outfmt 0 footer of each query prints: for the first query of a batch,
 /// `RPS_K_MULT` times the `.aux` K of the last list the batch's traceback reads, else the
-/// table's K; every other query prints the table's K. Without composition-based statistics the
-/// lists of the batch are read by ordinal id and only those whose rescaled PSSM exists write
-/// the K (the mark is the highest); with them the lists are read query by query in the order of
-/// `s_EvalueCompareHSPLists` and each writes it (the mark is that of the last query that has
-/// one).
+/// table's K; every other query prints the table's K. Where the stream sorts by score
+/// (`by_score`: rpsblast with composition-based statistics, `stream_lists`) the lists are read
+/// query by query in the order of `s_EvalueCompareHSPLists` and each writes the K (the mark is
+/// that of the last query that has one); else the lists of the batch are read by ordinal id
+/// (the mark is the highest): without composition-based statistics only those whose rescaled
+/// PSSM exists write it, and with them (rpstblastn's redo) each does.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1234-1235
 /// ```c
@@ -1088,7 +1090,7 @@ pub(crate) fn batch_gapped_k(
     k_marks: &[Option<u32>],
     karlin_k: &[f64],
     table_k: f64,
-    composition_based: bool,
+    by_score: bool,
 ) -> Vec<f64> {
     let mut gapped_k = vec![table_k; k_marks.len()];
     for batch in batches {
@@ -1096,7 +1098,7 @@ pub(crate) fn batch_gapped_k(
             continue;
         }
         let marks = &k_marks[batch.clone()];
-        let mark = if composition_based {
+        let mark = if by_score {
             marks.iter().flatten().next_back()
         } else {
             marks.iter().flatten().max()
@@ -1492,8 +1494,8 @@ mod tests {
         assert_eq!(k[2], 0.041);
         assert_eq!(k[3], 0.041);
         assert_eq!(k[5], RPS_K_MULT * 0.02);
-        // With composition-based statistics: the mark of the last query that has one, whatever
-        // its ordinal id.
+        // Read by score (rpsblast with composition-based statistics): the mark of the last query
+        // that has one, whatever its ordinal id.
         let marks = [Some(5), None, Some(2), None, None, Some(1)];
         let k = batch_gapped_k(&[0..3, 3..5, 5..6], &marks, &karlin_k, 0.041, true);
         assert_eq!(k[0], RPS_K_MULT * 0.03);

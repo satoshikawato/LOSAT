@@ -44,7 +44,7 @@ use crate::algorithm::blastx::query_setup::{
 use crate::algorithm::blastx::results::{Hsp, HspList};
 use crate::algorithm::blastx::runtime::BatchResults;
 use crate::algorithm::rps_search::engine::{
-    RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers, NUM_FRAMES,
+    batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers, NUM_FRAMES,
 };
 use crate::algorithm::rps_search::volumes::{
     mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, Consensus,
@@ -65,8 +65,8 @@ pub(crate) struct TranslatedRpsSearch {
     /// `-ungapped` (with composition-based statistics 0: NCBI's options error at the others is
     /// BLASTX's `resolve`).
     pub(crate) ungapped: bool,
-    /// `-use_sw_tback` and `-comp_based_stats` as given: the composition-based statistics of
-    /// later items are refused per run (`check_options`).
+    /// `-use_sw_tback` and `-comp_based_stats` as given: `-use_sw_tback` with composition-based
+    /// statistics (a later item) is refused per run (`check_options`).
     pub(crate) use_sw_tback: bool,
     pub(crate) comp_based_stats: String,
     /// Whether the database has several volumes, whose results NCBI merges
@@ -115,7 +115,8 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_window`), and the options' refusals below wait for the files to open.
         let volumes = RpsVolumeSet::with_order(database.x_seqdb(), units.order().to_vec());
-        let mut setup = RpsVolumeSetup::new(PROGRAM);
+        let mut setup =
+            RpsVolumeSetup::new(PROGRAM).with_database(database.name(), volumes.volumes.len());
         let mut faulty_files = false;
         for &index in &volumes.order {
             if setup.check(&volumes.volumes[index], false)?.is_err() {
@@ -365,6 +366,29 @@ impl TranslatedRpsSearch {
         if batches.is_empty() {
             return outcome;
         }
+        // The composition-based statistics mode (`-comp_based_stats`; 1 by default), and with
+        // it BLOSUM62's score block for the redo's matrix information (rpsblast's,
+        // `rps_hooks::rps_search`), before any batch.
+        let cbs = self.search.requested_cbs;
+        let gapped = gapped_karlin(options);
+        let sbp = if cbs > 0 {
+            match crate::algorithm::rps_search::redo::redo_score_block(
+                options.scoring,
+                crate::core::psi::KarlinBlk {
+                    lambda: gapped.lambda,
+                    k: gapped.k,
+                    h: gapped.h,
+                },
+            ) {
+                Ok(sbp) => Some(sbp),
+                Err(error) => {
+                    outcome[0] = Some(Err(error));
+                    return outcome;
+                }
+            }
+        } else {
+            None
+        };
         // The batches [0, states.len()) have not failed; a failing batch ends the window's search
         // there (`fail`), as its error ends NCBI's loop.
         let mut states: Vec<WindowBatch> = Vec::with_capacity(batches.len());
@@ -405,7 +429,6 @@ impl TranslatedRpsSearch {
         //       (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
         //        program == eBlastTypeRpsTblastn);
         // ```
-        let gapped = gapped_karlin(options);
         let x_drops = self.search.x_drop_bits();
         // Volume after volume, each mapped for the window's search alone, as NCBI's
         // `CLocalRPSBlast` searches each query batch.
@@ -417,10 +440,22 @@ impl TranslatedRpsSearch {
             // The unit's Gumbel block and `avg_subject_length` of the hit cutoff (the shortest
             // length, as rpsblast's `cutoff_subject_length`).
             let gumbel = gumbel_block(options, units.gumbel_length(unit));
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:932-940
+            // ```c
+            //     int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
+            //     params->prelim_evalue = cbs_stretch*evalue;
+            // ```
+            // (The stretch is NCBI's only inside the Gumbel block's branch: blast_parameters.c:922-945.)
+            let prelim_evalue = if cbs > 1 && gumbel.is_some() {
+                5.0 * options.evalue
+            } else {
+                options.evalue
+            };
             let cutoff_subject_length = unit.min_length;
             let (db_length, db_count) = units.eff_lengths(unit);
             // The volume's files: the same for every batch, so their error is the first batch's.
-            let files = match setup.reopen(volume, false) {
+            // With composition-based statistics the volume's frequency ratios (`.freq`) open too.
+            let files = match setup.reopen(volume, cbs > 0) {
                 Ok(Ok(files)) => files,
                 Ok(Err(RpsVolumeError::Files(text))) => {
                     fail(
@@ -574,9 +609,9 @@ impl TranslatedRpsSearch {
                 gumbel: gumbel.as_ref(),
                 cutoff_subject_length,
                 evalue: options.evalue,
-                prelim_evalue: options.evalue,
-                cbs: 0,
-                sbp: None,
+                prelim_evalue,
+                cbs,
+                sbp: sbp.as_ref(),
                 hitlist_size: options.hitlist_size.max(1) as usize,
                 prelim_hitlist_size: crate::algorithm::blastx::results::prelim_hitlist_size(
                     options,
@@ -602,7 +637,6 @@ impl TranslatedRpsSearch {
             );
             drop(run);
             drop(masks);
-            drop(files);
             let traced = match traced {
                 Ok(traced) => traced,
                 // The volume's refusal: the first batch that searches it meets it. The batches
@@ -624,6 +658,7 @@ impl TranslatedRpsSearch {
                         break;
                     }
                 };
+                let k_marks: Vec<Option<u32>> = lists.iter().map(|traced| traced.k_mark).collect();
                 let mut lists: Vec<Option<BlastpHitList>> = lists
                     .into_iter()
                     .map(|traced| {
@@ -638,11 +673,26 @@ impl TranslatedRpsSearch {
                 let state = &mut states[batch];
                 if position == 0 {
                     std::mem::swap(&mut state.hit_lists, &mut lists);
+                    // The K of the footers: volume 0's marks and `.aux` Ks, as rpsblast's
+                    // (`thread_results[0]`).
+                    if cbs > 0 {
+                        state.gapped_k = Some(footer_gapped_k(
+                            &k_marks,
+                            &files.aux.karlin_k,
+                            gapped.k,
+                            state
+                                .parameters
+                                .as_deref()
+                                .is_some_and(|parameters| parameters[0].valid),
+                        ));
+                    }
                 } else {
                     merge_volume(&mut state.hit_lists, lists);
                 }
                 state.searched = true;
             }
+            // The volume's files close after the batches' footer K, read from `files.aux` in place.
+            drop(files);
         }
         // The reports look the profiles up by ordinal id (`report_ordinal_ids`), batch after batch
         // as NCBI's loop reports them: a profile that they would not find among those they report
@@ -684,14 +734,6 @@ impl TranslatedRpsSearch {
         if self.use_sw_tback && requested_cbs > 0 {
             bail!(
                 "-use_sw_tback with composition-based statistics is not supported by LOSAT's {PROGRAM} yet"
-            );
-        }
-        // NCBI's options error of an ungapped search with composition-based statistics comes
-        // from BLASTX's `resolve`; the refusal of the modes LOSAT does not run yet follows it.
-        if requested_cbs > 0 && !self.ungapped {
-            bail!(
-                "-comp_based_stats {} is not supported by LOSAT's {PROGRAM} yet",
-                self.comp_based_stats
             );
         }
         if self.search.sum_stats {
@@ -784,6 +826,8 @@ struct WindowBatch {
     /// The HSPs of each query's profiles that left its merged list past the formatter's cut
     /// (`report_ordinal_ids`; `BatchResults::unlisted`).
     unlisted: Vec<usize>,
+    /// The queries' footer K with composition-based statistics (`footer_gapped_k`).
+    gapped_k: Option<Vec<f64>>,
 }
 
 impl WindowBatch {
@@ -797,6 +841,7 @@ impl WindowBatch {
             request_space: None,
             lengths: None,
             unlisted: Vec::new(),
+            gapped_k: None,
         }
     }
 
@@ -856,8 +901,42 @@ impl WindowBatch {
             request_space: self.request_space,
             unlisted: self.unlisted,
             shown: Vec::new(),
+            gapped_k: self.gapped_k,
         }
     }
+}
+
+/// The gapped K of the footers of a batch's queries with composition-based statistics: the
+/// redo of each list writes `kbp_gap[0]`, and the stream of a translated query's lists reads
+/// them by ordinal id (`stream_lists`), so the batch's highest mark leaves it
+/// (`RpsTraced::k_mark`, `batch_gapped_k` of the batch). Only a footer that reads `kbp_gap[0]`
+/// shows it: the first query's, where its first valid context is 0 (frame +1,
+/// `first_frame_valid`); every other footer shows the table's K `table_k`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-104
+/// ```c++
+///     // find the first valid context corresponding to this query
+///     for (i = 0; i < context_per_query; i++) {
+///         BlastContextInfo *ctx = query_info->contexts +
+///                                 query_number * context_per_query + i;
+///         if (ctx->is_valid) {
+///             ...
+///     const int ctx_index = query_number * context_per_query + i;
+///     ...
+///     if (sbp->kbp_gap) {
+///         s_InitializeKarlinBlk(sbp->kbp_gap[ctx_index], &m_GappedKarlinBlk);
+///     }
+/// ```
+fn footer_gapped_k(
+    k_marks: &[Option<u32>],
+    karlin_k: &[f64],
+    table_k: f64,
+    first_frame_valid: bool,
+) -> Vec<f64> {
+    if !first_frame_valid {
+        return vec![table_k; k_marks.len()];
+    }
+    batch_gapped_k(&[0..k_marks.len()], k_marks, karlin_k, table_k, false)
 }
 
 /// Each batch of a window prepared (`prepare_batch`), the batches at the same time on the run's
@@ -923,6 +1002,7 @@ fn unsearched_batch(
         request_space: None,
         unlisted: Vec::new(),
         shown: Vec::new(),
+        gapped_k: None,
     }
 }
 
@@ -977,7 +1057,8 @@ pub(crate) fn frame_queries<'a>(
 /// user query's frame, in protein letters; the subject side the profile's consensus), so the
 /// coordinates become BLASTX's 0-based half-open ones on the frame and the profile, the context
 /// is the query's frame context, and the scores, the e-value, the counts, the edit script and
-/// the composition-based method are the traceback's.
+/// the composition-based method are the traceback's. The ends stay the HSP's, which NCBI's sort
+/// before the Seq-aligns reads; the reports print the Seq-align's (`Hsp::seqalign_ends`).
 fn blastx_hsp(hsp: &BlastpHsp, query_index: usize) -> Hsp {
     let to_i32 = |value: usize| i32::try_from(value).expect("a position below 2^31");
     Hsp {
@@ -1281,6 +1362,40 @@ mod tests {
         let mut method = hsp(1, 1, (1, 2), (1, 2));
         method.comp_adjustment_method = 1;
         assert_eq!(blastx_hsp(&method, 0).composition_method, 1);
+        // `found_end` FALSE (blast_gapalign.c:4650-4653, quoted at `Hsp::seqalign_ends`): the
+        // HSP's ends stop before its starts while its edit script runs on. The HSP keeps them; its
+        // Seq-align ends where the script does.
+        let mut short = hsp(-2, 41, (11, 30), (3, 23));
+        short.q_end = 10;
+        short.s_end = 2;
+        let converted = blastx_hsp(&short, 0);
+        assert_eq!((converted.hsp.q_end, converted.hsp.s_end), (10, 2));
+        assert_eq!(converted.seqalign_ends(), (30, 23));
+    }
+
+    // NCBI sorts a list's HSPs before it makes their Seq-aligns (`Blast_HSPListSortByEvalue`,
+    // blast_seqalign.cpp:1577), on the HSPs' own ends. Of two HSPs with the same e-value, score
+    // and starts, the one whose profile end is higher comes first (`ScoreCompareHSPs`): here the
+    // HSP that ends on profile letter 22, before the `found_end` FALSE HSP whose Seq-align ends
+    // on letter 23 but whose own end is letter 2.
+    #[test]
+    fn the_sort_before_the_seqaligns_reads_the_hsps_own_ends() {
+        let mut short = hsp(-2, 41, (11, 30), (3, 23));
+        short.q_end = 10;
+        short.s_end = 2;
+        let mut whole = hsp(-2, 41, (11, 30), (3, 22));
+        whole.gap_info = Some(vec![GapEditOp::Sub(20)]);
+        for order in [[&short, &whole], [&whole, &short]] {
+            let mut list = HspList {
+                query_index: 0,
+                oid: 0,
+                hsps: order.iter().map(|h| blastx_hsp(h, 0)).collect(),
+                best_evalue: 0.0,
+            };
+            list.sort_evalue();
+            let ends: Vec<_> = list.hsps.iter().map(Hsp::seqalign_ends).collect();
+            assert_eq!(ends, [(30, 22), (30, 23)]);
+        }
     }
 
     // A query's hit list: one BLASTX list per profile with HSPs, in the hit list's order, named
@@ -1774,5 +1889,21 @@ mod tests {
         );
         assert!(outcome[1].is_none(), "{outcome:?}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // blast_results.cpp:82-104 (quoted at `footer_gapped_k`): only the first query's footer reads
+    // `kbp_gap[0]`, which the batch's last redo wrote (the highest profile: the stream reads the
+    // lists by ordinal id), and only where frame +1 is valid.
+    #[test]
+    fn only_the_first_footer_shows_the_redos_k() {
+        let marks = [Some(2), None, Some(0)];
+        let karlin_k = [0.1, 0.2, 0.3];
+        let k = footer_gapped_k(&marks, &karlin_k, 0.041, true);
+        assert_eq!(k, [1.2 * 0.3, 0.041, 0.041]);
+        assert_eq!(footer_gapped_k(&marks, &karlin_k, 0.041, false), [0.041; 3]);
+        assert_eq!(
+            footer_gapped_k(&[None, None], &karlin_k, 0.041, true),
+            [0.041; 2]
+        );
     }
 }

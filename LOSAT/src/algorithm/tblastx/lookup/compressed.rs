@@ -8,6 +8,7 @@ use crate::algorithm::tblastx::scan::OffsetPair;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::build_matrix_info;
 use crate::stats::{compute_std_aa_composition, lookup_protein_params_ungapped};
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 
 // EXPERIMENT (LOSAT_X_BPCLUT; BPCLUT is a strict-set switch): this file's table built flat
@@ -1330,7 +1331,11 @@ fn compressed_score_matrix_of(
             for &aa in group {
                 val += matrix_info.start_freq_ratios[q][aa] * compressed_prob[aa];
             }
-            let val = if val < 1.0e-8 { min_freq } else { val.ln() };
+            let val = if val < 1.0e-8 {
+                min_freq
+            } else {
+                val.glibc_ln()
+            };
             scores[q][s] = blast_nint(val * matrix_scale_factor);
         }
     }

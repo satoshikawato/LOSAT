@@ -341,6 +341,21 @@ pub fn effective_lengths(
     };
     let gapped = gapped_karlin(options);
     for (i, (c, p)) in batch.contexts.iter().zip(parameters).enumerate() {
+        // NCBI's loop starts at the batch's first context (3 with `-strand minus`): the contexts
+        // before it keep the zeros of `BlastQueryInfoNew`'s `calloc`, which RPSTBLASTN's redo
+        // reads for the first query's frame +1 (`one_query_info->contexts[0]`).
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:770-772
+        // ```c
+        //    for (index = query_info->first_context;
+        //         index <= query_info->last_context;
+        //         index++) {
+        // ```
+        if i < batch.first_context {
+            p.length_adjustment = 0;
+            p.search_space = 0;
+            continue;
+        }
         let space = fixed_spaces.map_or(options_space, |spaces| spaces[i]);
         if !p.valid {
             p.length_adjustment = 0;

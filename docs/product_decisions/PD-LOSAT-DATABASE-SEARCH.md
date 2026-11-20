@@ -656,10 +656,16 @@ Undefined behaviour of NCBI that is not reproduced:
 - The test whether an input looks like FASTA does not read past the bytes it sampled.
 
 The creation date is the local time, found without the C library: the zone comes from `TZ`,
-`TZDIR` and `/etc/localtime` as glibc reads them. On Windows and under WASI, and when no
-zone can be read, the date is UTC. Zone files with leap-second records give a time 27
-seconds later than the C library's, and a `TZ` value with a daylight-saving name but no
-rule follows the United States rules unless `posixrules` says otherwise.
+`TZDIR` and `/etc/localtime` as glibc reads them, under WASI from the environment and the
+directories that the host gives the module, and on Windows from `TZ` and the system zone as
+Microsoft's C runtime (UCRT) reads them for NCBI's Windows build. A `TZ` offset beyond 596,523
+hours overflows UCRT's 32-bit arithmetic (undefined in C++); LOSAT takes the mathematical value.
+When no zone can be read, the date is UTC; so it is on Windows where UCRT's `localtime` fails (a
+`TZ` offset that puts the local time before 1969-12-31 12:00 or after 3001-01-19 21:59:59, where
+NCBI's `CTime` throws).
+Zone files with leap-second records give a time 27 seconds later than the C library's, and a
+`TZ` value with a daylight-saving name but no rule follows the United States rules unless
+`posixrules` says otherwise.
 
 A database of 1,000 volumes or more is not in FASTA order when it is read, with makeblastdb
 and with `losat makeblastdb` alike: NCBI opens volumes in the sorted order of their names, and
@@ -934,8 +940,10 @@ opener, the reader's error texts and the title rules are those of BLASTP's `-db`
   `-db` until stage DB-7.
 
 Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same rules apply to the
-database's sequences and titles): a database sequence longer than 5,000,000 residues (NCBI searches it
-in overlapping parts; refused at the first query batch with a valid context, as the reader's errors),
+database's sequences and titles): a database sequence longer than 5,000,000 residues, as with
+`-subject` a record (NCBI searches it in overlapping parts; refused at the first query batch with a
+valid context, as the reader's errors, in one form, `database sequence N has M residues; ...` or
+`subject sequence N has M residues; ...`, exit status 1),
 `-searchsp`, `-db_soft_mask`, `-db_hard_mask`, the id and taxonomy lists, and the options BLASTX
 rejects with `-subject`.
 

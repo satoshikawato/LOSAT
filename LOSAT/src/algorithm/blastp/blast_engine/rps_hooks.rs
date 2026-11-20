@@ -382,7 +382,7 @@ pub(super) fn rps_search(
     let lambda = run.gapped_params.lambda;
     // BLOSUM62's score block for the matrix information of the redo.
     let sbp = if cbs > 0 {
-        Some(crate::algorithm::pssm_search::in_pssm::score_block(
+        Some(crate::algorithm::rps_search::redo::redo_score_block(
             args.scoring.matrix,
             crate::core::psi::KarlinBlk {
                 lambda,
@@ -439,7 +439,8 @@ pub(super) fn rps_search(
         }
     }
     let mut gapped_k = Vec::new();
-    let mut setup = RpsVolumeSetup::new("RPSBLAST");
+    let mut setup =
+        RpsVolumeSetup::new("RPSBLAST").with_database(database.name(), db_volumes.len());
     // The workers' scratch, kept from volume to volume (`RpsWorkers`).
     let workers = RpsWorkers::new(pool.threads());
     // The first failing batch (its number and error) of the volumes searched so far.

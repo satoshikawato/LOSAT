@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.52
+- Version: 1.53
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -176,7 +176,11 @@
   `sacc`, `saccver` or `staxid`, where NCBI stops or prints an uninitialised number as in 1.37;
   line DBID item pfoff-2, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
   numbered after 1.49);
-  1.51 2026-11-17 (RPSBLAST and RPSTBLASTN: a reported hit of a profile that an alias file's
+  1.51 2026-11-18 (TBLASTX, the explicit rejection of the ungapped re-evaluation of HSPs on a subject
+  of fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3, and
+  names X-short-bat open in 1.46; line RG item X-short-tbx, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.50, line DBID item pfoff-2);
+  1.52 2026-11-17 (RPSBLAST and RPSTBLASTN: a reported hit of a profile that an alias file's
   `FIRST_OID` and `LAST_OID` leave out, which NCBI's report does not find, refused in every format,
   within the classes of 1.10, rule 2, where NCBI writes `Unknown` and exits 0, and of 1.37, rule 3,
   where it stops with a null pointer exception: reported sequences only; and the explicit
@@ -190,12 +194,12 @@
   subject in the cut, and a reported profile out of the range is written as the included copy of
   its record that NCBI's report finds by its Seq-id; fix round 3: that copy has the same letters
   too, else it is refused; numbered after 1.46 at the merge of dev, then after 1.48 and
-  1.49 at fix round 4's two merges of dev, then after 1.50 at fix round 7's merge of dev);
-  1.52 2026-11-17 (approved exception 16, the Owner's decision of 2026-11-17 on line RG's question
+  1.49 at fix round 4's two merges of dev, then after 1.50 at fix round 7's merge of dev, then
+  after 1.51 at the merge of dev before the pull request);
+  1.53 2026-11-17 (approved exception 16, the Owner's decision of 2026-11-17 on line RG's question
   D1a-3 Q1, 「A 正しい数を書く (推奨)」: a database length or `-dbsize` of exactly -2^63, which NCBI's
   serial writer prints as `-0`, written as `-9223372036854775808`; the rule-3 refusal of that one
-  value removed; numbered after the D1a-4 entry at fix round 4's and fix round 7's merges of
-  dev)
+  value removed; numbered after the D1a-4 entry at each of its merges of dev)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1610,13 +1614,14 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   the searched range's) of fewer than 12 bases that reaches the traceback (version 1.46,
   2026-11-17, line RG item X-short, Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07). `Blast_HSPGetTargetTranslation` translates a frame only when `start || stop <
-  length/3 - 3` (`blast_hits.c:1161-1163`), false from the start for 11 bases or fewer, so it
+  length/3 - 3` (`blast_hits.c:1162-1164`), false from the start for 11 bases or fewer, so it
   returns the translation it never made (`calloc`'d to NULL, `blast_util.c:1284`) plus 1
-  (`:1233-1234`), and every caller reads from that address on next: the traceback's gapped start
+  (`:1234-1235`), and every caller reads from that address on next: the traceback's gapped start
   and `ALIGN_EX` (`blast_traceback.c:429-440,509-512`), the identities after the composition-based
   redo (`blast_kappa.c:527-528`, which run only for an alignment left by the redo's E-value purge,
   `:3677-3700`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; LOSAT's TBLASTN refuses
-  `-ungapped`). NCBI BLAST+ 2.17.0 dies with SIGSEGV in every such run of ours (ws and the local
+  `-ungapped`; TBLASTX reaches it in every search, version 1.51 below). NCBI BLAST+ 2.17.0 dies
+  with SIGSEGV in every such run of ours (ws and the local
   official binary, 2026-11-17: 11 bases in frames +1 and -1, `-subject`, `-subject_loc` and `-db`,
   a matrix query at `-comp_based_stats` 0 to 3, `-in_pssm`, `-outfmt` 0, 5 and 6, a second query, a
   12-base subject before or after it; gdb: `s_Blast_HSPGetNumIdentitiesAndPositives` under
@@ -1631,7 +1636,70 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   translates in the selected code (the approved deviation PD-TLOSAN-LOCAL-GENCODE-32, whose
   reference is NCBI's `-db` search) and refuses where NCBI's `-db` search crashes, although NCBI's
   `-subject` search, translating in code 1, may find nothing there. LOSAT's TBLASTN refusals write
-  no report, also where NCBI writes the reports of query batches before its crash (`BATCH_SIZE`).
+  no report, also where NCBI has written the reports of the query batches before when it crashes
+  (but for what its output buffer still holds; 20,000 query letters a batch by default, or
+  `BATCH_SIZE`; open for this refusal, line RG item X-short-bat, version 1.51 below).
+
+- TBLASTX, HSPs on a subject (or its `-subject_loc` range) of fewer than 12 bases that reach the
+  ungapped re-evaluation (version 1.51, 2026-11-17, line RG item X-short-tbx, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07). TBLASTX is always ungapped: after the
+  first linking call and the preliminary E-value (`s_BlastSearchEngineCore`,
+  `blast_engine.c:870-899`), `BLAST_PreliminarySearchEngine` re-evaluates the HSPs of every subject
+  that has some (`Blast_HSPListReevaluateUngapped`, `blast_engine.c:1493`,
+  `blast_hits.c:2609-2737`). It fetches the subject, then takes the translation of each HSP's frame
+  from `Blast_HSPGetTargetTranslation` (`:2700`), which for 11 bases or fewer is the translation it
+  never made plus 1 (the TBLASTN item above), and `Blast_HSPReevaluateWithAmbiguitiesUngapped`
+  reads the HSP's letters from there (`:692-700`). NCBI BLAST+ 2.17.0 dies there with SIGSEGV in
+  every such run of ours whose HSPs pass its first linking call (ws, 2026-11-17: 11 bases in all six
+  frames, `-subject`, `-subject_loc` and
+  `-db` of format versions 4 and 5, `-word_size` 2 (8 to 10 bases too) and 3, `-threshold 1`,
+  `-matrix PAM30`, the default SEG, `-outfmt` 0, 5, 6 and 7, `-max_target_seqs 1`,
+  `-culling_limit 1`, `-num_threads 4`, ambiguous bases, several subjects, a 12-base subject before
+  or after; gdb: `Blast_HSPReevaluateWithAmbiguitiesUngapped` under
+  `Blast_HSPListReevaluateUngapped` under `BLAST_PreliminarySearchEngine`; the short queries at the
+  end of this item die before, in that linking call). LOSAT refuses there
+  (`SubjectEmit::refuse_untranslated_frame`, the predicate and the message shared with the TBLASTN
+  item, `core::blast_hits`), where LOSAT wrote rows before this version. A subject that leaves no
+  HSP to that point searches as NCBI's: 9 or 10 bases at the default word size, which NCBI does not
+  search (fewer than `3 * word_size + 2` bases, `blast_engine.c:1318-1330,1429`), the default
+  two-hit window (no frame of three letters holds two words that do not overlap), no HSP out of the
+  ungapped extension (`-evalue 1e-30`: the gap trigger caps the cutoff above the HSP's score), and
+  HSPs that the preliminary E-value removes (`-evalue 1e-4`: the empty list is freed,
+  `blast_engine.c:899,903-904`, and not re-evaluated, `:1480`); so does a subject that the
+  re-evaluation's fetch excludes (a `-negative_seqidlist` that names each of its ids, which leaves it
+  no definition line: NCBI frees its HSPs before
+  it reads the subject's letters or translates them, `blast_hits.c:2659-2665`, and LOSAT drops them
+  at that step, `SubjectEmit::reevaluation_fetch_keeps`); 12 bases are translated (rows
+  `db.xs.tblastx.*`). Under such a list a subject header that this fetch cannot read (line DBID
+  item lineless2, above) ends NCBI's search with a `BLAST engine error` (exit 3) after it has
+  printed the query batches before; LOSAT's TBLASTX refusal there now comes after the same reports,
+  in the form below (`subject_loop::x_fetch_keeps`; before this version LOSAT wrote none of them).
+  The other programs' fetch refusals still come before any report: open (line RG item
+  X-short-bat). The refusal is the error of the earliest such subject at every
+  `-num_threads`, and the run writes what it writes for the X2c refusal above, as after an NCBI
+  error of a batch: the reports of the query batches before, whole and without the epilog, or,
+  when the first batch fails, its prologs (`-outfmt 0`'s, and the first lines of the XML2 and JSON
+  documents and of `-outfmt 20`), then the failing batch's messages and the error; nothing of the
+  failing batch's reports (`tests/tblastx_short_subject.rs`). NCBI has formatted the same when it
+  dies, and its crash loses what its output buffer still holds: in our `BATCH_SIZE=1` probes its
+  `-outfmt 6` output was as long as the first query's own report (11,318 bytes), its `-outfmt 0`
+  output ended a few bytes into that report's footer (50,001 bytes), and in one batch it wrote
+  nothing with `-outfmt 6` and the first 18 bytes of the prolog with `-outfmt 0`. Those cuts are
+  NCBI's buffer, not a result: LOSAT writes the reports and prologs whole. LOSAT's TBLASTN refusal
+  of the same read (the item above) writes no report, although NCBI's TBLASTN searches and prints
+  each query batch before it reads the next (`tblastn_app.cpp:275-304`, as TBLASTX's
+  `tblastx_app.cpp:176-207`) and so has formatted the reports of the batches before when it dies
+  (line RG X-short review 1: with `BATCH_SIZE=1`, NCBI wrote the first query's 43-byte row before
+  its SIGSEGV, LOSAT nothing); that difference is open (line RG item X-short-bat). With `-subject`
+  and a `-db_gencode` other than 1, LOSAT translates in the selected code
+  (PD-TBLASTX-LOCAL-SUBJECT-GENCODE) and refuses where those HSPs reach the re-evaluation. TBLASTX
+  translates the query whole before the search, so a short query reaches no such read; but in our
+  probes a query of 10 or 11 bases against a subject of 12 to 14 bases, a query of 11 or 12 bases
+  against a subject of 11 bases, and 9 bases against 12 or 13 at `-word_size 2` make NCBI die
+  earlier, in its first linking call (`BLAST_LinkHsps` under `s_BlastSearchEngineCore`, gdb on ws,
+  2026-11-17 and 2026-11-18). Against 12 to 14 bases LOSAT writes rows; against 11 bases LOSAT
+  refuses with this item's message, at a later step than NCBI's. Both are open (line RG item
+  X-short-tbx-link).
 
 - RPSBLAST and RPSTBLASTN over an alias file whose `FIRST_OID` and `LAST_OID` leave out profiles of
   its volumes (2026-11-17, line RG item D1a-4, Owner-delegated): NCBI's RPS search

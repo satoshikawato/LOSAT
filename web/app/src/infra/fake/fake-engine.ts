@@ -51,10 +51,11 @@ export class FakeEngine implements EngineGateway {
 
   /**
    * NCBI's application start is not imitated: no registry file, no file of the run, no dry run (its
-   * `validate` refuses `-conffile`, `-logfile` and `-dryrun`, which `describe` does not list).
+   * `validate` refuses `-conffile`, `-logfile` and `-dryrun`, which `describe` does not list), and no
+   * inputs read together (a run of `-parse_deflines` reads its records as one without it).
    */
   async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } };
   }
 
   /**
@@ -75,7 +76,7 @@ export class FakeEngine implements EngineGateway {
       }
       const [flag, value] = word.split(/=(.*)/s, 2);
       const option = parameters.find((p) => p.flag === flag);
-      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help for CLI v2 syntax` };
+      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help for CLI v2 syntax\n` };
       if (option.takesValue && value === undefined) i++;
     }
     return { ok: true };
@@ -101,7 +102,8 @@ export class FakeEngine implements EngineGateway {
     const writer = new RunOutputWriter(output);
     this.writeOutputs(request, writer);
     writer.end();
-    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', ...(windowMasker === undefined ? {} : { windowMasker }) };
+    // Its warning goes to the diagnostics (stream 3), as without -logfile.
+    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', messages: 'diagnostics', ...(windowMasker === undefined ? {} : { windowMasker }) };
   }
 
   cancel(runId: string): void {

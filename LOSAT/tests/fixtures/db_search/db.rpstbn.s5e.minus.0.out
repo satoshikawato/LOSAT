@@ -1,0 +1,72 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= s5e
+
+Length=219
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  11.2    6.5  
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...   8.9    43   
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 11.2 bits (18),  Expect = 6.5, Method: Composition-based stats.
+ Identities = 1/7 (14%), Positives = 1/7 (14%), Gaps = 0/7 (0%)
+ Frame = -1
+
+Query  180  GVLHNLG  160
+                 L 
+Sbjct  107  VKARALF  113
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score =  8.9 bits (12),  Expect = 43, Method: Composition-based stats.
+ Identities = 0/2 (0%), Positives = 0/2 (0%), Gaps = 0/2 (0%)
+ Frame = -1
+
+Query  117  *F  112
+              
+Sbjct  131  FS  132
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27162
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

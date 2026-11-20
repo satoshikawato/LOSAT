@@ -492,8 +492,8 @@ fn split_reals(bytes: &[u8]) -> (Vec<u8>, Vec<Real<'_>>) {
 /// tokens whose exponents are equal and whose mantissas have 15 digits and differ by exactly 1.
 /// Apple's libm `exp` and `log` differ from glibc's by 1 ULP in some E values, which moves the last
 /// of the 15 digits (`PD-LOSAT-PLATFORM-LIBM`); NCBI built on macOS has the same property. A shorter
-/// mantissa (NCBI drops its trailing zeros) 1 away is not that. The Python copy of the rule, for
-/// the WASI guard, is `libm_last_digit_differences` in `LOSAT/tests/xinclude_fixtures.py`.
+/// mantissa (NCBI drops its trailing zeros) 1 away is not that. WASI has no such rule: its output
+/// is compared byte for byte.
 pub(crate) fn archives_match_allowing_libm_last_digit(
     got: &[u8],
     want: &[u8],

@@ -19,6 +19,7 @@ use super::{
     subjects::Subjects,
 };
 use crate::core::blast_hits::{reap_by_query_coverage, trim_by_max_hsps};
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 // The redo of a batch's matches with composition-based statistics (a child module, so that it uses
 // the private types of this file).
@@ -120,6 +121,17 @@ pub struct BatchResults {
     /// `common::database::joined_cut`). Empty where the reports take
     /// `ResolvedOptions::shown_lists` (`BatchResults::cut_lists`).
     pub shown: Vec<usize>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:102-104
+    // ```c++
+    //     if (sbp->kbp_gap) {
+    //         s_InitializeKarlinBlk(sbp->kbp_gap[ctx_index], &m_GappedKarlinBlk);
+    //     }
+    // ```
+    /// The gapped K of each query's footer where it is not the table's (`kbp_gap` of the query's
+    /// first valid context): an RPSTBLASTN search with composition-based statistics writes NCBI's
+    /// `kbp_gap[0]` (series PR, item PS12b, `rps_search::engine::batch_gapped_k`); `None` in
+    /// BLASTX's results.
+    pub gapped_k: Option<Vec<f64>>,
 }
 
 impl BatchResults {
@@ -1177,7 +1189,7 @@ impl Runtime<'_> {
                     let p = &params[h.hsp.context];
                     let mut payload = payloads[h.source_index].clone();
                     payload.bit_score = (h.hsp.score as f64 * p.ungapped.lambda
-                        - p.ungapped.k.ln())
+                        - p.ungapped.k.glibc_ln())
                         / std::f64::consts::LN_2;
                     payload.hsp = h.hsp;
                     payload.num = h.num;
@@ -1332,6 +1344,7 @@ impl PreliminarySink for Runtime<'_> {
             request_space: None,
             unlisted: Vec::new(),
             shown: Vec::new(),
+            gapped_k: None,
         });
         Ok(())
     }
@@ -1865,7 +1878,8 @@ impl PreliminarySink for Runtime<'_> {
                 for mut list in lists {
                     for h in &mut list.hsps {
                         let p = &full[h.hsp.context];
-                        h.bit_score = (h.hsp.score as f64 * p.ungapped.lambda - p.ungapped.k.ln())
+                        h.bit_score = (h.hsp.score as f64 * p.ungapped.lambda
+                            - p.ungapped.k.glibc_ln())
                             / std::f64::consts::LN_2;
                     }
                     queries[list.query_index].update_observed(list, self.observer);
@@ -2269,6 +2283,7 @@ impl PreliminarySink for Runtime<'_> {
             request_space: None,
             unlisted: Vec::new(),
             shown: Vec::new(),
+            gapped_k: None,
         });
         super::x_timing::end(XEnd::Finish, x_t_finish);
         Ok(())

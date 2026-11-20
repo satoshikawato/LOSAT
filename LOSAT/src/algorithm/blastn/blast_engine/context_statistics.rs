@@ -344,7 +344,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         }
     }
     if check_subjects {
-        let total_length = seq_data.db_len_total as i64;
+        let total_length = seq_data.db_len_total;
         let (total_length, num_seqs) = if total_length > 0 {
             (total_length, seq_data.db_num_seqs)
         } else {
@@ -426,7 +426,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     let db_len_total_i64 = if args.db_length() > 0 {
         args.db_length()
     } else {
-        seq_data.db_len_total as i64
+        seq_data.db_len_total
     };
     let db_num_seqs = seq_data.db_num_seqs;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:778-786

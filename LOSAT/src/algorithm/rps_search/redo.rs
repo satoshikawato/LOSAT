@@ -10,6 +10,12 @@
 //! composition based stats"); their difference from mode 1 is the preliminary stage's E-value
 //! threshold (`engine.rs`).
 //!
+//! rpstblastn's redo is the same with the user query's six frames as the subject (series PR,
+//! item PS12b): NCBI's `one_query` is the query's translation buffer, the redo's subject is
+//! translated (`subject_is_translated`: windows in the frames, `RedoMatch::redo_windows` with a
+//! `FrameSubject`), its subject length for the e-values is `s_GetSubjectLength`'s and every list
+//! writes `kbp_gap[0]`'s K, the one the query's batch may print.
+//!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1238-1260
 //! ```c
 //!       if (ext_params->options->compositionBasedStats > 0) {
@@ -31,18 +37,19 @@
 //!           s_BlastHSPListRPSUpdate(program_number, hsp_list);
 //! ```
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::traceback::{sort_by_score, swap_roles, RpsTraceScratch, RpsTraceback, RpsTraced};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
-use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHitList};
+use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHitList, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::smith_waterman::SwEndless;
-use crate::algorithm::pssm_search::redo1::{RedoMatch, RedoRun, SCALING_FACTOR};
+use crate::algorithm::pssm_search::redo1::{RedoMatch, RedoRun, RedoSubject, SCALING_FACTOR};
 use crate::algorithm::pssm_search::rows::QueryPssm;
-use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
+use crate::core::composition_adjustment::compo_scale::{PosMatrixInfo, RedoInstance};
 use crate::core::psi::PsiScoreBlk;
 use crate::seqdb::rps::RpsVolumeFiles;
 use crate::stats::KarlinParams;
@@ -54,6 +61,16 @@ use crate::stats::KarlinParams;
 /// The inclusion threshold of rpsblast's PSI options (`PSIBlastOptionsNew`), the e-value cutoff of
 /// the redo's heaps (blast_kappa.c:3074-3076).
 const PSI_INCLUSION_ETHRESH: f64 = 0.002;
+
+/// The score block of the redo's matrix information (`RpsRedoParams::sbp`) of RPS-BLAST and
+/// RPS-TBLASTN: the matrix's frequency ratios with the search's gapped block `gapped`
+/// (`in_pssm::score_block`, psiblast's), made once per run before any batch.
+pub(crate) fn redo_score_block(
+    matrix: crate::config::ScoringMatrix,
+    gapped: crate::core::psi::KarlinBlk,
+) -> Result<PsiScoreBlk> {
+    crate::algorithm::pssm_search::in_pssm::score_block(matrix, gapped)
+}
 
 /// What the redo of every profile reads besides the traceback's values: the volume's frequency
 /// ratios, BLOSUM62's score block (the matrix information of the position-based adjustment),
@@ -85,6 +102,8 @@ pub(crate) struct RpsRedoParams<'a> {
     ///        m_ExtnOpts->eTbackExt = eSmithWatermanTbck;
     /// ```
     pub(crate) smith_waterman: bool,
+    /// The program of LOSAT's refusals (`RPSBLAST`, `RPSTBLASTN`).
+    pub(crate) program: &'static str,
 }
 
 /// The statistics the traceback of one query reads: the batch's ungapped Karlin block and the
@@ -93,15 +112,20 @@ pub(crate) struct RpsRedoParams<'a> {
 pub(super) struct RpsQueryStats<'a> {
     pub(super) batch_kbp: &'a KarlinParams,
     pub(super) stats: EvalueStats<'a>,
+    /// Whether the user query's context 0 (frame +1; a protein query's only one) is valid: the
+    /// only context the redo's query information keeps (`RedoRun::without_valid_context`).
+    pub(super) context_0_valid: bool,
 }
 
 impl RpsTraceback<'_> {
-    /// The redo of the query of letters `query` (without sentinels) from its preliminary hit
-    /// list. NCBI reads the lists in the order of the stream: sorted by best E-value, then the
-    /// first HSP's score (down), then the ordinal id (down) (`Blast_HSPResultsReverseSort`
-    /// reads from the end, `s_EvalueCompareHSPLists`); each list writes the profile's K
-    /// (`RPS_K_MULT` times the `.aux` K) before its redo, so the last list read leaves the K
-    /// that the query's batch may print (`k_mark`).
+    /// The redo of the query `query` (a protein query's letters without sentinels, or a
+    /// translated query's translation buffer with its frames in `kind`) from its preliminary
+    /// lists `lists`, in the order NCBI's stream reads them (`stream_lists`): a protein query's
+    /// sorted by best E-value, then the first HSP's score (down), then the ordinal id (down)
+    /// (`Blast_HSPResultsReverseSort` reads from the end, `s_EvalueCompareHSPLists`), a
+    /// translated query's by ordinal id. Each list writes the profile's K (`RPS_K_MULT` times
+    /// the `.aux` K) before its redo, so the last list read leaves the K that the query's batch
+    /// may print (`k_mark`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1203-1208
     /// ```c
@@ -117,18 +141,22 @@ impl RpsTraceback<'_> {
     /// its Lambda over the scaling factor (`s_RescaleSearch`); the first valid query of the
     /// batch gives the ungapped block that stays where the profile has no score frequencies
     /// (`kbp_psi[0]`).
-    pub(super) fn trace_query_redo(
+    pub(super) fn trace_query_redo<'q, S: RedoSubject<'q>>(
         &self,
         redo: &RpsRedoParams<'_>,
-        mut prelim: BlastpHitList<XPrelimHsp>,
-        query: &[u8],
+        lists: Vec<BlastpHspList<XPrelimHsp>>,
+        query: &'q [u8],
+        kind: S,
         q_idx: u32,
         statistics: RpsQueryStats<'_>,
         scratch: &mut RpsTraceScratch,
     ) -> Result<RpsTraced> {
-        let RpsQueryStats { batch_kbp, stats } = statistics;
-        prelim.sort_by_evalue();
-        let count = prelim.hsplist_count;
+        let RpsQueryStats {
+            batch_kbp,
+            stats,
+            context_0_valid,
+        } = statistics;
+        let program = redo.program;
         let mut hit_list: Option<BlastpHitList> = None;
         let mut k_mark: Option<u32> = None;
         // The heap of redone matches that the Smith-Waterman redo's first alignment asks
@@ -162,7 +190,7 @@ impl RpsTraceback<'_> {
             k: batch_kbp.k,
             h: batch_kbp.h,
         };
-        for list in prelim.hsplist_array.into_iter().take(count) {
+        for list in lists {
             let oid = list.oid as usize;
             let start = self.offsets[oid] as usize;
             let length = (self.offsets[oid + 1] - self.offsets[oid] - 1) as usize;
@@ -174,7 +202,7 @@ impl RpsTraceback<'_> {
             redo.files
                 .freq_ratios(start, length, &mut scratch.freq_bytes, &mut scratch.ratios)
                 .map_err(|error| {
-                    anyhow::anyhow!("a profile database whose .freq file cannot be read ({error}) is not supported by LOSAT's RPSBLAST")
+                    anyhow::anyhow!("a profile database whose .freq file cannot be read ({error}) is not supported by LOSAT's {program}")
                 })?;
             let Some(info) = PosMatrixInfo::new(
                 consensus,
@@ -184,7 +212,7 @@ impl RpsTraceback<'_> {
                 kbp_psi,
             ) else {
                 anyhow::bail!(
-                    "a profile whose position-based scaling for the composition-based statistics gives no Karlin-Altschul parameters (NCBI BLAST+ 2.17.0 goes on with a Lambda of -1) is not supported by LOSAT's RPSBLAST"
+                    "a profile whose position-based scaling for the composition-based statistics gives no Karlin-Altschul parameters (NCBI BLAST+ 2.17.0 goes on with a Lambda of -1) is not supported by LOSAT's {program}"
                 );
             };
             // The best scores of the scaled start matrix's rows sum to the most an alignment can
@@ -196,7 +224,7 @@ impl RpsTraceback<'_> {
                 .sum();
             if bound > i64::from(i32::MAX) {
                 anyhow::bail!(
-                    "a profile whose scaled scores can add up to {bound} (above 2147483647, where NCBI BLAST+'s 32-bit scores overflow) is not supported by LOSAT's RPSBLAST"
+                    "a profile whose scaled scores can add up to {bound} (above 2147483647, where NCBI BLAST+'s 32-bit scores overflow) is not supported by LOSAT's {program}"
                 );
             }
             // The zero PSSM of the redo's copy.
@@ -222,13 +250,16 @@ impl RpsTraceback<'_> {
                     k,
                     ..self.gapped
                 },
-                k.ln(),
+                k.glibc_ln(),
                 (redo.gap_open, redo.gap_extend),
                 (redo.x_drop_final_bits, self.x_drop_final),
                 matrix,
                 std::mem::take(&mut scratch.gap),
             )
             .with_bound_check();
+            if !context_0_valid {
+                run = run.without_valid_context();
+            }
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
             let redo_match = RedoMatch {
                 info: &info,
@@ -241,12 +272,15 @@ impl RpsTraceback<'_> {
                 expect_value: self.expect_value,
                 query_length: length as i32,
                 rps_roles: true,
-                // rpsblast's databases are BLOSUM62's (the others are refused).
+                // rpsblast's and rpstblastn's databases are BLOSUM62's (the others are refused).
                 matrix: crate::config::ScoringMatrix::Blosum62,
-                // rpsblast refuses `-sum_stats true`.
+                // rpsblast and rpstblastn refuse `-sum_stats true`.
                 link: None,
             };
-            let redone = if redo.smith_waterman {
+            // rpstblastn refuses `-use_sw_tback` with composition-based statistics (series PR,
+            // item PS12c).
+            debug_assert!(!(S::Instance::SUBJECT_IS_TRANSLATED && redo.smith_waterman));
+            let redone = if redo.smith_waterman && !S::Instance::SUBJECT_IS_TRANSLATED {
                 let heap = sw_heap.get_or_insert_with(|| {
                     BlastCompoHeap::new(self.hitlist_size, PSI_INCLUSION_ETHRESH)
                 });
@@ -259,19 +293,19 @@ impl RpsTraceback<'_> {
                     query,
                 )
             } else {
-                Ok(redo_match.redo_match(&mut run, list.oid, &hsps, query))
+                Ok(kind.redo(&redo_match, &mut run, list.oid, &hsps, query))
             };
             let exceeded = run.bound_exceeded();
             let (matrix, gap) = run.into_buffers();
             // The bound of every matrix the adjustments built (`RedoRun::with_bound_check`).
             if let Some(bound) = exceeded {
                 anyhow::bail!(
-                    "a profile whose composition-adjusted scores can add up to {bound} (above 2147483647, where NCBI BLAST+'s 32-bit scores overflow) is not supported by LOSAT's RPSBLAST"
+                    "a profile whose composition-adjusted scores can add up to {bound} (above 2147483647, where NCBI BLAST+'s 32-bit scores overflow) is not supported by LOSAT's {program}"
                 );
             }
             let redone = redone.map_err(|SwEndless| {
                 anyhow::anyhow!(
-                    "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs and its first position scores the query's first letter above 0) is not supported by LOSAT's RPSBLAST"
+                    "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs and its first position scores the query's first letter above 0) is not supported by LOSAT's {program}"
                 )
             })?;
             scratch.pssm.rows = matrix.rows;
@@ -282,7 +316,10 @@ impl RpsTraceback<'_> {
                 continue;
             };
             hsp_list.query_index = q_idx;
-            swap_roles(&mut hsp_list, |_| query.len());
+            // A frame's HSPs take the frame's length (a protein query's: its length).
+            swap_roles(&mut hsp_list, |frame| {
+                kind.frame_letters(query, frame).len()
+            });
             sort_by_score(&mut hsp_list.hsps);
             if hsp_list.hsps.is_empty() {
                 continue;

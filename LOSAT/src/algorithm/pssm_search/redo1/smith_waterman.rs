@@ -52,6 +52,7 @@ use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
 use crate::core::composition_adjustment::smith_waterman::{
     row_column, smith_waterman_find_start, smith_waterman_score_only, ForbiddenRanges, SwScratch,
 };
+use crate::utils::glibc_fma_libm::GlibcLibm;
 
 /// What the Smith-Waterman redo keeps from one match to the next: the forbidden ranges (NCBI's
 /// thread-local `forbidden_tld`), the scans' memory and the subject's letters between NCBI's two
@@ -96,7 +97,7 @@ pub(crate) struct SwEndless;
 /// }
 /// ```
 fn evalue_from_score(score: i32, lambda: f64, log_k: f64, searchsp: f64) -> f64 {
-    searchsp * (-(lambda * f64::from(score)) + log_k).exp()
+    searchsp * (-(lambda * f64::from(score)) + log_k).glibc_exp()
 }
 
 impl RedoMatch<'_> {

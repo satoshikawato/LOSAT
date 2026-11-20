@@ -12592,7 +12592,7 @@ fn read_db_seq_ranges(
     // Every hard chunk carries its range inline, so the full range is not written.
     let mut none = std::mem::take(&mut subject_scratch.db_soft_ranges);
     none.clear();
-    subject_scratch.db_hard_split.start(s_len_full, ranges);
+    subject_scratch.db_hard_split.start(s_len_full, ranges, true);
     Some(none)
 }
 

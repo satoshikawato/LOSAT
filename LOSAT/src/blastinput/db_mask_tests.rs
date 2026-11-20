@@ -281,7 +281,7 @@ fn each_name_of_the_list_needs_the_id_in_its_own_database() {
     // The search's table puts `a5` first (NCBI sorts the volumes by name): its 11 is `a5`'s
     // dust, which `b5`'s volume does not have (NCBI's stale volume-algorithm cache, M/DECISIONS
     // 9): LOSAT refuses the search (decision D5).
-    let error = resolved.check_losat_limits(&db, "BLASTN", 11).unwrap_err();
+    let error = resolved.check_losat_limits(&db, "BLASTN", HardScan::Nucleotide { scanned_word: 11 }).unwrap_err();
     assert!(
         format!("{error:#}")
             .contains("the volume has mask data without the filtering algorithm 11"),
@@ -352,7 +352,7 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
     };
     let refusal = |db: &SeqDb, id, word| {
         mask(MaskKind::Hard, id)
-            .check_losat_limits(db, "BLASTN", word)
+            .check_losat_limits(db, "BLASTN", HardScan::Nucleotide { scanned_word: word })
             .map_err(|error| error.to_string())
     };
     let (a5, _) = open(&[dbmask("a5")]);
@@ -373,7 +373,7 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
         refusal(&a5, 11, word).unwrap();
     }
     mask(MaskKind::Soft, 11)
-        .check_losat_limits(&a5, "BLASTN", 7)
+        .check_losat_limits(&a5, "BLASTN", HardScan::Nucleotide { scanned_word: 7 })
         .unwrap();
     let (edge1, _) = open(&[dbmask("edge1")]);
     for word in [7, 11] {
@@ -405,7 +405,7 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
     }
     for id in 11..=16 {
         mask(MaskKind::Soft, id)
-            .check_losat_limits(&edge2, "BLASTN", 7)
+            .check_losat_limits(&edge2, "BLASTN", HardScan::Nucleotide { scanned_word: 7 })
             .unwrap();
     }
 }
@@ -646,7 +646,7 @@ fn a_volume_without_the_algorithm_is_refused_only_where_the_search_reads_its_mas
             ]
         );
         resolved
-            .check_losat_limits(db, "BLASTN", 11)
+            .check_losat_limits(db, "BLASTN", HardScan::Nucleotide { scanned_word: 11 })
             .err()
             .map(|error| format!("{error:#}"))
     };

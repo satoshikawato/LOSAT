@@ -86,7 +86,7 @@ pub fn complement_masks(masks: &[(u32, u32)], length: usize, ranges: &mut Vec<(i
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HardChunk {
     /// `backup->offset`: the chunk's first letter in the subject, a multiple of
-    /// `COMPRESSION_RATIO`.
+    /// `COMPRESSION_RATIO` in BLASTN (`next` itself in the protein programs).
     pub offset: usize,
     /// `subject->length`: the chunk's letters.
     pub length: usize,
@@ -159,17 +159,23 @@ pub struct HardSplitState {
     pub ranges: Vec<(i32, i32)>,
     hm_index: usize,
     next: i32,
+    /// `is_nucleotide` (`Blast_ProgramIsNucleotide`): BLASTN's chunks start at a multiple of
+    /// `COMPRESSION_RATIO`, those of the protein programs (`residual` 0) at the range's left.
+    nucleotide: bool,
 }
 
 impl HardSplitState {
     /// The hard ranges `ranges` (never empty: the complement has one range more than the masks)
-    /// of a subject of `subject_len` letters, from its first chunk.
-    pub fn start(&mut self, subject_len: usize, ranges: Vec<(i32, i32)>) {
+    /// of a subject of `subject_len` letters, from its first chunk; `nucleotide` is NCBI's
+    /// `is_nucleotide` of the program (BLASTN; not the protein programs, whose letters are not
+    /// packed: blast_engine.c:448, `Blast_ProgramIsNucleotide`).
+    pub fn start(&mut self, subject_len: usize, ranges: Vec<(i32, i32)>, nucleotide: bool) {
         debug_assert!(!ranges.is_empty());
         self.full_right = subject_len as i32;
         self.ranges = ranges;
         self.hm_index = 0;
         self.next = 0;
+        self.nucleotide = nucleotide;
     }
 
     /// The end of the subject's chunks: no hard ranges (the buffer is kept).
@@ -231,7 +237,7 @@ impl HardSplitState {
     // ```
     /// The next chunk of the subject (`None`: `SUBJECT_SPLIT_DONE`): one chunk per hard range (a
     /// range above `MAX_DBSEQ_LEN` in overlapping chunks of `MAX_DBSEQ_LEN` letters), from `next -
-    /// next % 4`, of `right - offset` letters (0 for a hard range of no letters: a mask at 0,
+    /// next % 4` (from `next` in a protein program), of `right - offset` letters (0 for a hard range of no letters: a mask at 0,
     /// masks that touch), scanned from the residual (NCBI scans the full range in the "no
     /// chunking" branch, [`HardChunk::full_range`]); with the overlap of the merge after it
     /// ([`HardChunk::overlap`], [`HardChunk::overlap_past_list`]). NCBI's `Int4` arithmetic: the
@@ -242,7 +248,11 @@ impl HardSplitState {
         if self.next >= self.full_right {
             return None;
         }
-        let residual = self.next % COMPRESSION_RATIO as i32;
+        let residual = if self.nucleotide {
+            self.next % COMPRESSION_RATIO as i32
+        } else {
+            0
+        };
         let offset = self.next - residual;
         let range = self.hm_index;
         let hard_right = self.ranges[range].1;
@@ -284,10 +294,14 @@ mod tests {
     use super::*;
 
     fn chunks(masks: &[(u32, u32)], length: usize) -> Vec<HardChunk> {
+        chunks_of(masks, length, true)
+    }
+
+    fn chunks_of(masks: &[(u32, u32)], length: usize, nucleotide: bool) -> Vec<HardChunk> {
         let mut ranges = Vec::new();
         complement_masks(masks, length, &mut ranges);
         let mut split = HardSplitState::default();
-        split.start(length, ranges);
+        split.start(length, ranges, nucleotide);
         std::iter::from_fn(|| split.next_chunk(DBSEQ_CHUNK_OVERLAP)).collect()
     }
 
@@ -323,5 +337,29 @@ mod tests {
                 (5_000_900, 299_100, 1, 100, true),
             ]
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 578-584 (quoted
+    // at `HardSplitState::next_chunk`)
+    // A protein program's chunks start at their hard range's left (`residual` 0), so the overlap
+    // that the merge after a chunk reads is the next range's left against that offset; the first
+    // mask running to the end takes the "no chunking" branch for the chunk before it.
+    #[test]
+    fn protein_chunks_start_at_their_range() {
+        let found = chunks_of(&[(150, 190)], 400, false);
+        assert_eq!(
+            found
+                .iter()
+                .map(|c| (c.offset, c.length, c.residual, c.range, c.overlap))
+                .collect::<Vec<_>>(),
+            [(0, 150, 0, 0, 100), (190, 210, 0, 1, 100)]
+        );
+        assert!(!found[0].full_range && !found[1].full_range);
+        let found = chunks_of(&[(300, 400)], 400, false);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].full_range && found[0].length == 300);
+        let found = chunks_of(&[(0, 400)], 400, false);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].full_range && found[0].length == 0);
     }
 }

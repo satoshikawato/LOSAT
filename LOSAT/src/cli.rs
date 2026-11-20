@@ -907,8 +907,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
 const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "gilist",
     "html",
@@ -941,7 +939,8 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
 /// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine does
-/// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
+/// not run either (`is_unported_blastp_arg`; psiblast has no database masks, NCBI's unknown
+/// arguments of its parser, and no `-mt_mode`).
 /// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
 /// of line RG).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
@@ -953,7 +952,7 @@ const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
 
 fn is_unported_psiblast_arg(name: &str) -> bool {
     UNPORTED_PSIBLAST_OWN_ARGS.contains(&name)
-        || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
+        || is_unported_blastp_arg(name)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
@@ -1534,8 +1533,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "gilist",
     "negative_gilist",
     "entrez_query",
-    "db_soft_mask",
-    "db_hard_mask",
     "ipglist",
     "negative_ipglist",
     "best_hit_overhang",

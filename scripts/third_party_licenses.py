@@ -894,7 +894,7 @@ def with_copies(files: dict[str, bytes]) -> dict[str, bytes]:
 # "THIRD_PARTY_NOTICES, section 2 (LMDB)"; the name must be in the heading of that number, so that a
 # new or moved section cannot leave a pointer at the wrong one.
 POINTER = re.compile(r"THIRD_PARTY_NOTICES(?:,| \()\s*section\s+(\d+)(?: \(([^)]*)\))?")
-POINTER_SUFFIXES = (".rs", ".toml", ".py", ".md", ".yml", ".yaml", ".sh", ".ts", ".js", ".txt")
+POINTER_SUFFIXES = (".rs", ".toml", ".py", ".md", ".yml", ".yaml", ".sh", ".ts", ".js", ".txt", ".vue", ".html", ".css")
 
 
 def notice_headings(text: str) -> dict[int, str]:

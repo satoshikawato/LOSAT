@@ -20,7 +20,7 @@
 // For more information please visit:  http://bitmagic.io
 //
 // BitMagic's licence file and the text of the Apache License 2.0 are in
-// THIRD_PARTY_NOTICES, section 9 (BitMagic).
+// THIRD_PARTY_NOTICES, section 10 (BitMagic).
 
 //! Tests of the BitMagic decoder. The streams named `w..`, `s..`, `m..` are the Q-BM probes of
 //! line RG; their expected sizes and bits are what NCBI's BitMagic 8.0.1 decoded (a harness

@@ -592,9 +592,9 @@ def main():
     # date, the volume paths). Each run's stdout, stderr and exit status must be the native command's
     # of the same directory and zone, with the times put aside (`local_times`); each time must be the local time
     # of its build in the zone that the C library finds for the run's TZ (Python's time.localtime; the clock moves
-    # between the runs, LOSAT has no fixed clock to test with); the files must have the native names. LOSAT reads
-    # the zone as glibc reads it on every target but Windows, on WASI from the environment and the directories the
-    # host gives (LOSAT/src/writedb/local_offset.rs), and makes a relative name absolute with wasi-libc's working
+    # between the runs, LOSAT has no fixed clock to test with); the files must have the native names. LOSAT finds
+    # the zone where glibc finds it on every target but Windows (the crate jiff reads it), on WASI from the
+    # environment and the directories the host gives (LOSAT/src/writedb/local_offset.rs), and makes a relative name absolute with wasi-libc's working
     # directory, which the command sets from the host's PWD (LOSAT/src/writedb/build_db.rs
     # `create_absolute_path`). Before, the WASI commands printed UTC and the name as given.
     def libc_offset(tz):

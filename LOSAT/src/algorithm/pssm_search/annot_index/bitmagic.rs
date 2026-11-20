@@ -21,7 +21,7 @@
 // For more information please visit:  http://bitmagic.io
 //
 // BitMagic's licence file and the text of the Apache License 2.0 are in
-// THIRD_PARTY_NOTICES, section 9 (BitMagic).
+// THIRD_PARTY_NOTICES, section 10 (BitMagic).
 
 //! BitMagic 8.0.1's deserialization as NCBI BLAST+ 2.17.0's object manager runs it on the data of
 //! a Seq-table's `BVector-data` (line RG Q-BM, `bm/SPEC.md`): `bm::deserialize` into a

@@ -7,4 +7,4 @@
   block that is not one is decoded, and its rows answered, where NCBI's scalar, SSE2 and SSE4.2 builds of BitMagic
   agree, and refused only where they differ, as NCBI's result then depends on the machine it was built for.
   The decoder is a Rust port of parts of BitMagic 8.0.1 (Apache-2.0, bundled in NCBI BLAST+); its notice and licence
-  text are in THIRD_PARTY_NOTICES, section 9 (BitMagic), and the License sentence of the READMEs now names BitMagic.
+  text are in THIRD_PARTY_NOTICES, section 10 (BitMagic), and the License sentence of the READMEs now names BitMagic.

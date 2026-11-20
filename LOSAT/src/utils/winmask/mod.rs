@@ -10,8 +10,10 @@
 //! `win_mask_config.cpp:336-343`). The `-t_*_pct` settings are read from the `##pct:` lines
 //! that NCBI's writers print (`pct`).
 
+mod gen_counts;
 mod istat;
 mod ncbi_report;
+mod ostat;
 mod pct;
 mod score;
 mod taxid;
@@ -26,9 +28,11 @@ use std::sync::Arc;
 
 use crate::ncbi_exception::NcbiException;
 
+pub use gen_counts::{generate, GenCountsSettings, GenError, GenomeSource, DEFAULT_TH};
 pub use istat::{
     discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
 };
+pub use ostat::{convert_counts, CountsFormat, CountsWriter, FinalizeError, StatAlgoVersion};
 pub use pct::PctSettings;
 pub use taxid::taxid_stat_file;
 

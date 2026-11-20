@@ -2,11 +2,15 @@
 //! masker of over-represented and low-complexity regions of nucleotide sequences by the counts
 //! of their units (WindowMasker, `utils::winmask`) and, with `-dust`, the symmetric DUST
 //! algorithm. Its command line is NCBI's (`ncbi_app`), not clap's: `main` hands it the words
-//! after `windowmasker`. LOSAT masks with a counts file (`-ustat`); the making of counts
-//! (`-mk_counts`) and their conversion (`-convert`) are refused. The work of its `Run` is in
-//! `app` (the configuration, `CWinMaskConfig`) and `work` (the masking).
+//! after `windowmasker`. Its three modes are the making of a counts file (`-mk_counts`, with
+//! `-checkdup` its check for duplicated sequences), the conversion of a counts file to another
+//! format (`-convert`) and the masking with a counts file (`-ustat`). The work of its `Run` is in
+//! `app` (the configuration, `CWinMaskConfig`), `counts` and `checkdup` (the counts) and `work`
+//! (the masking).
 
 mod app;
+mod checkdup;
+mod counts;
 mod ids;
 mod sdust;
 mod work;

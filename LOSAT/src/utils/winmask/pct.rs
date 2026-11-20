@@ -117,7 +117,10 @@ fn pct_line_refusal(line: &[u8]) -> WinMaskError {
 /// binary line must hold its `max_map_count + 1` values: else LOSAT refuses the line
 /// (`WinMaskError::PctLine`), as NCBI's reads of other words follow the C++ runtime's number
 /// parser. Words after those the stream reads are not read.
-fn count_map(metadata: &[Vec<u8>], stat_type: StatType) -> Result<Vec<f64>, WinMaskError> {
+pub(super) fn count_map(
+    metadata: &[Vec<u8>],
+    stat_type: StatType,
+) -> Result<Vec<f64>, WinMaskError> {
     let mut pct_lines = metadata.iter().filter(|line| line.starts_with(b"##pct:"));
     let mut map = Vec::new();
     match stat_type {

@@ -159,18 +159,39 @@ pub(super) fn reader<'a, R: Read + 'a>(
     input: Option<R>,
 ) -> Result<Option<Box<dyn SequenceSource + 'a>>, Failure> {
     match (options.infmt, input) {
-        ("fasta", Some(input)) => {
-            let reader =
-                MaskFastaReader::new(input, false, options.parse_seqids).map_err(read_failure)?;
-            Ok(Some(Box::new(FastaSource { reader })))
-        }
-        ("blastdb", _) => Ok(Some(Box::new(DatabaseSource::open(
+        ("fasta", Some(input)) => fasta_source(input, options.parse_seqids).map(Some),
+        ("blastdb", _) => database_source(
             options.input,
             options.blastdb_registry,
             prints_title(options.outfmt),
-        )?))),
+        )
+        .map(Some),
         _ => Ok(None),
     }
+}
+
+/// `CMaskFastaReader( input, true, parse_seqids )`: a failed first read is the stream's
+/// `std::ios_base::failure`.
+pub(super) fn fasta_source<'a, R: Read + 'a>(
+    input: R,
+    parse_seqids: bool,
+) -> Result<Box<dyn SequenceSource + 'a>, Failure> {
+    let reader = MaskFastaReader::new(input, false, parse_seqids).map_err(read_failure)?;
+    Ok(Box::new(FastaSource { reader }))
+}
+
+/// `CMaskBDBReader( name )` of the nucleotide database `name` on the search path of `registry`
+/// (`Options::blastdb_registry`); `title_printed` as `MaskBdbReader::open`'s.
+pub(super) fn database_source(
+    name: &str,
+    registry: Result<Option<&str>, &str>,
+    title_printed: bool,
+) -> Result<Box<dyn SequenceSource>, Failure> {
+    Ok(Box::new(DatabaseSource::open(
+        name,
+        registry,
+        title_printed,
+    )?))
 }
 
 /// A failed read of `-in`: the `std::ios_base::failure` of NCBI's stream.
@@ -331,26 +352,37 @@ pub(super) fn run(
 ///
 /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:208-232
 fn masker(options: &Options<'_>, diag: &mut Diag) -> Result<SeqMasker, Failure> {
-    let counts = UnitCounts::open_with_pct(
-        Path::new(options.ustat),
-        &options.params,
-        &options.pct,
-        &mut |warning| diag.warning_post(&warning),
-    );
+    let file = format!("-ustat {}", options.ustat);
+    let counts = open_counts(options.ustat, &file, &options.params, &options.pct, diag)?;
+    SeqMasker::new(Arc::new(counts), &options.params).map_err(|error| winmask_failure(&file, error))
+}
+
+/// `CSeqMaskerIstatFactory::create( name, ... )` with the thresholds `params` and the
+/// percentages `pct`, its warnings posted as NCBI posts them: the factory's at once, the
+/// readers' after. `file` names the file in LOSAT's refusals (`-ustat <name>`).
+pub(super) fn open_counts(
+    name: &str,
+    file: &str,
+    params: &MaskerParams,
+    pct: &PctSettings,
+    diag: &mut Diag,
+) -> Result<UnitCounts, Failure> {
+    let counts = UnitCounts::open_with_pct(Path::new(name), params, pct, &mut |warning| {
+        diag.warning_post(&warning)
+    });
     let counts = match counts {
         Ok(counts) => counts,
         Err(error) => {
             for warning in error.warnings() {
                 diag.warning_post(warning);
             }
-            return Err(winmask_failure(options.ustat, error));
+            return Err(winmask_failure(file, error));
         }
     };
     for warning in counts.warnings() {
         diag.warning_post(warning);
     }
-    SeqMasker::new(Arc::new(counts), &options.params)
-        .map_err(|error| winmask_failure(options.ustat, error))
+    Ok(counts)
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:94-100
@@ -362,9 +394,9 @@ const BAD_INDEX: ThrowSite = ThrowSite {
     function: Some("ncbi::CSeqMaskerUsetHash::get_info"),
 };
 
-/// An error of the counts file `ustat` or of the masker: NCBI's exception, or LOSAT's refusal
-/// where NCBI's result is undefined.
-fn winmask_failure(ustat: &str, error: WinMaskError) -> Failure {
+/// An error of the counts file `file` (`-ustat <name>`, `-in <name>`) or of the masker: NCBI's
+/// exception, or LOSAT's refusal where NCBI's result is undefined.
+pub(super) fn winmask_failure(file: &str, error: WinMaskError) -> Failure {
     if let Some(exception) = error.create_exception() {
         return Failure::Ncbi(exception);
     }
@@ -373,10 +405,10 @@ fn winmask_failure(ustat: &str, error: WinMaskError) -> Failure {
             Failure::Ncbi(NcbiException::new(BAD_INDEX, error.to_string()))
         }
         WinMaskError::PctLine { .. } => Failure::Refused(unsupported(&format!(
-            "-ustat {ustat} with a -t_*_pct setting: {error};"
+            "{file} with a -t_*_pct setting or -convert: {error};"
         ))),
         _ => Failure::Refused(unsupported(&format!(
-            "-ustat {ustat}, which gives an error that NCBI BLAST+ does not report as such ({error}),"
+            "{file}, which gives an error that NCBI BLAST+ does not report as such ({error}),"
         ))),
     }
 }
@@ -400,7 +432,7 @@ fn mask_input(
         }
         let mut mask = masker
             .mask(&record.iupac)
-            .map_err(|error| winmask_failure(options.ustat, error))?;
+            .map_err(|error| winmask_failure(&format!("-ustat {}", options.ustat), error))?;
         if let Some(duster) = duster.as_mut() {
             let dust = duster.mask(&record.iupac, &mask);
             merge_mask_info(&mut mask, &dust);
@@ -420,7 +452,7 @@ fn mask_input(
 }
 
 /// `CWinMaskUtil::consider` of `record`, which asks for its title only when a list is used.
-fn considered(lists: &IdLists, record: &Record) -> Result<bool, Failure> {
+pub(super) fn considered(lists: &IdLists, record: &Record) -> Result<bool, Failure> {
     if !lists.active() {
         return Ok(true);
     }

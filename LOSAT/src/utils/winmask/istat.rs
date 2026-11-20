@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use super::ostat::StatAlgoVersion;
 use super::pct::{apply_pct, PctSettings};
 use super::{MaskerParams, WinMaskError};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
@@ -464,6 +465,10 @@ pub struct UnitCounts {
     uset: Uset,
     metadata: Vec<Vec<u8>>,
     warnings: Vec<String>,
+    /// The format of the file.
+    stat_type: StatType,
+    /// The counts algorithm's version that the metadata names (`GetStatAlgoVersion`).
+    algo_version: StatAlgoVersion,
 }
 
 enum Uset {
@@ -578,6 +583,8 @@ impl UnitCounts {
             }),
             metadata: found.metadata,
             warnings: Vec::new(),
+            stat_type: found.stat_type,
+            algo_version: StatAlgoVersion::default(),
         };
         let start_line = counts.metadata.len();
         match found.stat_type {
@@ -591,7 +598,8 @@ impl UnitCounts {
                 })
             }
         }
-        check_stat_algo_version(&counts.metadata).map_err(|e| counts.exception(e))?;
+        counts.algo_version =
+            check_stat_algo_version(&counts.metadata).map_err(|e| counts.exception(e))?;
         Ok(counts)
     }
 
@@ -1413,6 +1421,37 @@ impl UnitCounts {
         &self.warnings
     }
 
+    /// The counts algorithm's version that the file names (`GetStatAlgoVersion`).
+    pub fn stat_algo_version(&self) -> StatAlgoVersion {
+        self.algo_version
+    }
+
+    /// The text of the file's first `##note:` line (`GetMetaData`, `ExtractMetaDataStr`): what
+    /// follows the first `:` after the line's `##` of the first line whose name is `note`; empty
+    /// for none.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:149-162
+    pub fn note(&self) -> &[u8] {
+        for line in &self.metadata {
+            let Some(at) = line.iter().skip(2).position(|&b| b == b':') else {
+                continue;
+            };
+            let pos = at + 2;
+            if &line[2..pos] == b"note" {
+                return &line[pos + 1..];
+            }
+        }
+        &[]
+    }
+
+    /// The percentage of each count from 0 that the file's `##pct:` lines hold (`GetCountMap`),
+    /// read as the factory reads them; empty for none.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:237-276
+    pub fn count_map(&self) -> Result<Vec<f64>, WinMaskError> {
+        super::pct::count_map(&self.metadata, self.stat_type)
+    }
+
     /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_istat.hpp:155-156
     /// ```c
     ///     const optimization_data * get_optimization_data() const
@@ -1824,8 +1863,9 @@ fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinM
 /// ```
 /// `CSeqMaskerIstatFactory::create` calls it after the reader (`:343-348`), inside its `try`:
 /// a part of digits that `StringToInt` cannot convert (empty, or beyond `int`) is its
-/// exception, which the factory rethrows. The version itself is not used by the masker.
-fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<(), NcbiException> {
+/// exception, which the factory rethrows. The masker does not use the version; `-convert`
+/// writes it into the converted file (1.0.0 when no line names one).
+fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<StatAlgoVersion, NcbiException> {
     const NAME: &[u8] = b"windowmasker-statistics-algorithm-version";
     let digits = |t: &[u8]| t.iter().all(u8::is_ascii_digit);
     let find = |line: &[u8], c: u8, from: usize| {
@@ -1849,7 +1889,7 @@ fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<(), NcbiException> {
         if !digits(t) {
             continue;
         }
-        ncbi_str::string_to_int(t, 0)?;
+        let major = ncbi_str::string_to_int(t, 0)?;
         let pp = p + 1;
         let Some(p) = find(line, b'.', pp) else {
             continue;
@@ -1858,15 +1898,19 @@ fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<(), NcbiException> {
         if !digits(t) {
             continue;
         }
-        ncbi_str::string_to_int(t, 0)?;
+        let minor = ncbi_str::string_to_int(t, 0)?;
         let t = &line[p + 1..];
         if !digits(t) {
             continue;
         }
-        ncbi_str::string_to_int(t, 0)?;
-        return Ok(());
+        let patch = ncbi_str::string_to_int(t, 0)?;
+        return Ok(StatAlgoVersion {
+            major,
+            minor,
+            patch,
+        });
     }
-    Ok(())
+    Ok(StatAlgoVersion::default())
 }
 
 /// The function of the ascii reader's throws.

@@ -9,8 +9,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::ncbi_registry::{
-    error_reading_post, last_value, read_registry, repeated_entry_post, running_error_reading_post,
-    running_syntax_error_notice, syntax_error_notice, Layer, RegistryEntry, RegistryRead,
+    error_reading_post, last_value, read_registry, registry_text, repeated_entry_post,
+    running_error_reading_post, running_syntax_error_notice, syntax_error_notice, Layer,
+    RegistryEntry, RegistryRead,
 };
 use crate::ncbi_str::string_to_bool;
 use crate::report::diag_log::{Posts, CRITICAL, ERROR, WARNING};
@@ -3295,7 +3296,7 @@ fn application_start(
             let report = error.report_default_ex(106, 15, "Application's initialization failed");
             start.config = match &environment_refusal {
                 Some(reason) => Err(reason.clone()),
-                None => Ok(ConfigLoad::Failed(report)),
+                None => Ok(ConfigLoad::Failed(registry_text(report))),
             };
             return ended(start);
         }

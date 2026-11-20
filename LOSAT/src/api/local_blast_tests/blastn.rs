@@ -141,6 +141,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -183,6 +184,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -389,6 +391,7 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
                 sink: OutputSink::Writer(&mut output),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -442,6 +445,7 @@ fn run_local_outputs(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -504,6 +508,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -577,6 +582,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -599,6 +605,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -890,6 +897,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
                     sink: OutputSink::Writer(&mut report),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: Some(&mut on_hits),
                 observer: Some(&mut extensions),
             };
@@ -968,6 +976,7 @@ fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_ca
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };

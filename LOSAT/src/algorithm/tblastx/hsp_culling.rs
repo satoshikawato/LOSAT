@@ -56,8 +56,10 @@ pub(crate) fn tblastx_context(frame: i32) -> usize {
 ///     return (nucleotide_length - context % CODON_LENGTH) / CODON_LENGTH;
 /// }
 /// ```
-/// TBLASTX's queries are searched on both strands (`eNa_strand_both`), so every context
-/// has this length.
+/// These are the lengths of a query searched on both strands (`eNa_strand_both`). With
+/// `-strand plus` or `minus` NCBI gives the contexts of the other strand length 0
+/// (blast_setup_cxx.cpp:200-215), but those contexts hold no HSP, and the culling reads the
+/// length of an HSP's own context only (`CullingWriter::run`), which is the same.
 pub(crate) fn tblastx_context_lengths(nucleotide_length: usize) -> [i32; 6] {
     let mut lengths = [0; 6];
     for (context, slot) in lengths.iter_mut().enumerate() {

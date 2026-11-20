@@ -154,7 +154,7 @@ pub fn caught_post<D: StructuredXml + ?Sized>(
                 Ok(Some(crate::ncbi_exception::error_post_line(
                     None,
                     Some(program),
-                    document.caught_message(&exception).as_bytes(),
+                    &document.caught_message(&exception),
                 )))
             }
             Err(error) => Err(error),
@@ -217,8 +217,7 @@ impl std::error::Error for IterationThrew {}
 fn iteration_post(at: usize, program: &str, thrown: &XmlThrow) -> DocumentPost {
     let message = thrown
         .exception()
-        .what_after("Failed s_BlastXMLAddIteration Q(0/1")
-        .into_bytes();
+        .what_after(b"Failed s_BlastXMLAddIteration Q(0/1");
     DocumentPost {
         at,
         text: crate::ncbi_exception::error_post_line(None, Some(program), &message),
@@ -341,7 +340,7 @@ pub trait StructuredXml {
     /// The message that NCBI posts (`ERR_POST(Error << ...)`, after the program's `Error: [name] `
     /// prefix) for a query whose report raised `exception` (`CaughtException`): the XML2 and JSON
     /// documents' `GetMsg()` and `what()`.
-    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
+    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> Vec<u8> {
         exception.what_after(exception.get_msg())
     }
 
@@ -485,8 +484,8 @@ impl StructuredXml for BlastXmlWriter {
     /// BLAST XML's message: NCBI formats one query per call (blast_format.cpp:708-740), so the
     /// label is always `Q(0/1` (without its `)`), then `what()`. The `Iteration` stays open after
     /// the `Hit`s written before the failed one (each written alone, `Xml5Hits`).
-    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
-        exception.what_after("Failed s_BlastXMLAddIteration Q(0/1")
+    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> Vec<u8> {
+        exception.what_after(b"Failed s_BlastXMLAddIteration Q(0/1")
     }
 
     /// Appends the `Iteration` of one query to `out` (before it the document's header, for the

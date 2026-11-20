@@ -88,20 +88,25 @@ fn exception(stop: Stop) -> (&'static str, u32, &'static str, String) {
     }
 }
 
-/// The archives of rpsbproc's tests that are edited copies of NCBI's (`fixtures/rpsbproc/
-/// README.md`): read whole, but their layout is not NCBI's writer's.
-const EDITED: [&str; 3] = [
+/// The archives of rpsbproc's tests that are copies of NCBI's edited by hand
+/// (`fixtures/rpsbproc/README.md`: a member id in brackets, `length -0`, an `org` descriptor, no
+/// `inst.length`, no query `seq-data`, a `delta` query): rpsbproc's own cases, not NCBI's writer's
+/// layout (`length -0` is not even read).
+const EDITED: [&str; 6] = [
+    "fixtures/rpsbproc/root/bracket_member.asn",
+    "fixtures/rpsbproc/root/neg0_length.asn",
+    "fixtures/rpsbproc/root/org_descr.asn",
+    "fixtures/rpsbproc/root/nolength.asn",
     "fixtures/rpsbproc/arch/q_nodata.asn",
     "fixtures/rpsbproc/arch/mfirst_delta.asn",
-    "fixtures/rpsbproc/root/org_descr.asn",
 ];
 
 /// Every archive among LOSAT's fixtures (the files under `LOSAT/tests` that start with an archive
 /// header: NCBI's `-outfmt 11` output and the files that LOSAT's tests freeze as NCBI's) is read
 /// whole, object by object, and its values written back are its bytes. Left out: the malformed
-/// archives of rpsbproc's tests (`fixtures/rpsbproc/arch/bad`) and the `.merged` files of
-/// `archive_replaced` (a run's stdout and stderr in one file, with NCBI's messages inside the
-/// archive's text); the edited copies (`EDITED`) are only read.
+/// archives of rpsbproc's tests (`fixtures/rpsbproc/arch/bad`), its copies edited by hand
+/// (`EDITED`), and the `.merged` files of `archive_replaced` (a run's stdout and stderr in one
+/// file, with NCBI's messages inside the archive's text).
 #[test]
 fn every_archive_of_the_fixtures_is_written_back_as_read() {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -124,11 +129,13 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
             {
                 continue;
             }
+            if EDITED.iter().any(|name| path.ends_with(name)) {
+                continue;
+            }
             let text = std::fs::read(&path).expect("a file");
             if !text.starts_with(b"Blast4-archive ::=") {
                 continue;
             }
-            let edited = EDITED.iter().any(|name| path.ends_with(name));
             files += 1;
             let mut stream = ObjectStream::new(&text[..], b"");
             let mut out = Vec::new();
@@ -151,7 +158,7 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
                     }
                 }
             }
-            if error.is_none() && !edited && out != text {
+            if error.is_none() && out != text {
                 let at = out
                     .iter()
                     .zip(&text)

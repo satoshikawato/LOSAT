@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.56
+- Version: 1.57
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -204,7 +204,11 @@
   questions = Q-X5); the rule-2 rejection of a batch in which a query is followed by a query
   without a search space, Owner-delegated (standing instruction 2026-09-29, restated 2026-10-07)
   and part of the option A that the Owner chose; numbered after 1.53, line RG item X4);
-  1.55 2026-11-17 (RPSBLAST and RPSTBLASTN: a reported hit of a profile that an alias file's
+  1.55 2026-11-20 (BLASTN, line RG item X6: reward 0 and penalty 0, NCBI's matrix-only scoring
+  of `-task rmblastn`, now runs; the explicit rejection of it with the greedy extension of
+  `-task megablast`, where NCBI divides by zero or does not finish, rule 3; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.54, line RG item X5);
+  1.56 2026-11-17 (RPSBLAST and RPSTBLASTN: a reported hit of a profile that an alias file's
   `FIRST_OID` and `LAST_OID` leave out, which NCBI's report does not find, refused in every format,
   within the classes of 1.10, rule 2, where NCBI writes `Unknown` and exits 0, and of 1.37, rule 3,
   where it stops with a null pointer exception: reported sequences only; and the explicit
@@ -219,9 +223,9 @@
   its record that NCBI's report finds by its Seq-id; fix round 3: that copy has the same letters
   too, else it is refused; numbered after 1.46 at the merge of dev, then after 1.48 and
   1.49 at fix round 4's two merges of dev, then after 1.50 at fix round 7's merge of dev, then
-  after 1.51 and after 1.52 at the two merges of dev before the pull request, then after 1.53 and
-  after 1.54 at the last two merges of dev);
-  1.56 2026-11-17 (approved exception 17, the Owner's decision of 2026-11-17 on line RG's question
+  after 1.51 and after 1.52 at the two merges of dev before the pull request, then after 1.53, 1.54
+  and 1.55 at the last three merges of dev);
+  1.57 2026-11-17 (approved exception 17, the Owner's decision of 2026-11-17 on line RG's question
   D1a-3 Q1, 「A 正しい数を書く (推奨)」: a database length or `-dbsize` of exactly -2^63, which NCBI's
   serial writer prints as `-0`, written as `-9223372036854775808`; the rule-3 refusal of that one
   value removed; numbered after the D1a-4 entry at each of its merges of dev; exception 16 until
@@ -1209,6 +1213,15 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   no hits, a deterministic result), stays an explicit rejection too.
 - Subjects of 2^31 letters or more in total: NCBI's 32-bit total wraps.
 - megablast gap costs above 32767: NCBI's 32-bit greedy distance arithmetic can wrap.
+- Reward 0 and penalty 0 (matrix-only scoring, the scores of `-task rmblastn`) with the greedy
+  extension of `-task megablast` (line RG X6, 2026-11-20, Owner-delegated): with gap costs 0
+  and 0 (megablast's own) NCBI divides by zero in the greedy set-up (`blast_gapalign.c:209`,
+  SIGFPE, exit status 136, also with `-ungapped`); with other gap costs the greedy alignment
+  converts an infinite quotient to `Int4` (`greedy_align.c:981`, undefined behaviour) and does
+  not finish on pairs of 60-100 kb. LOSAT refuses it where it checks the greedy gap costs (a
+  batch with a valid query), so a batch of invalid queries ends with NCBI's warning as in NCBI.
+  It differs from NCBI where NCBI finishes with other gap costs because no seed reaches the
+  greedy alignment (small inputs). `-no_greedy` and `-ungapped` with other gap costs run.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` that splits a query batch
   (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's `size_t` chunk ranges
   wrap; NCBI stops as in exception 1 where a chunk would be split again, and otherwise

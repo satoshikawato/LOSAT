@@ -18,6 +18,18 @@ exclude = [
     "**/*.pyc",
     "**/*.tmp",
     "**/*.orig",
+    # The source files that only unit tests read (`#[cfg(test)] mod x_tests;`, a table a test
+    # `include!`s): neither a build of the package, nor the one `cargo publish` verifies it with, nor
+    # docs.rs reads them, and they were 0.58 MiB of the 7.84 MiB crate (2026-11-20; crates.io takes
+    # 10 MiB). tests/check_crate_test_files.py (CI) fails when a file the build reads matches one
+    # of these, or when a file only tests read is packaged.
+    "src/**/*_tests.rs",
+    "src/**/tests.rs",
+    "src/**/tests_*.rs",
+    "src/**/*_tests/",
+    "src/utils/test_dir.rs",
+    "src/core/composition_adjustment/blosum62_joint_probs.inc.rs",
+    "src/core/composition_adjustment/blosum62_start_freq_ratios.inc.rs",
 ]
 
 # docs.rs documents the default features for Linux x86-64.

@@ -125,6 +125,42 @@ impl core::marker::Unpin for losat::api::ValueKind
 impl core::marker::UnsafeUnpin for losat::api::ValueKind
 impl core::panic::unwind_safe::RefUnwindSafe for losat::api::ValueKind
 impl core::panic::unwind_safe::UnwindSafe for losat::api::ValueKind
+pub struct losat::api::AccVer
+impl losat::api::AccVer
+pub fn losat::api::AccVer::as_bytes(&self) -> &[u8]
+pub fn losat::api::AccVer::to_str(&self) -> core::result::Result<&str, core::str::error::Utf8Error>
+pub fn losat::api::AccVer::to_string_lossy(&self) -> alloc::borrow::Cow<'_, str>
+impl core::clone::Clone for losat::api::AccVer
+pub fn losat::api::AccVer::clone(&self) -> losat::api::AccVer
+impl core::cmp::Eq for losat::api::AccVer
+impl core::cmp::Ord for losat::api::AccVer
+pub fn losat::api::AccVer::cmp(&self, &losat::api::AccVer) -> core::cmp::Ordering
+impl core::cmp::PartialEq for losat::api::AccVer
+pub fn losat::api::AccVer::eq(&self, &losat::api::AccVer) -> bool
+impl core::cmp::PartialEq<&str> for losat::api::AccVer
+pub fn losat::api::AccVer::eq(&self, &&str) -> bool
+impl core::cmp::PartialEq<[u8]> for losat::api::AccVer
+pub fn losat::api::AccVer::eq(&self, &[u8]) -> bool
+impl core::cmp::PartialEq<str> for losat::api::AccVer
+pub fn losat::api::AccVer::eq(&self, &str) -> bool
+impl core::cmp::PartialOrd for losat::api::AccVer
+pub fn losat::api::AccVer::partial_cmp(&self, &losat::api::AccVer) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::AsRef<[u8]> for losat::api::AccVer
+pub fn losat::api::AccVer::as_ref(&self) -> &[u8]
+impl core::fmt::Debug for losat::api::AccVer
+pub fn losat::api::AccVer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for losat::api::AccVer
+pub fn losat::api::AccVer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for losat::api::AccVer
+pub fn losat::api::AccVer::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for losat::api::AccVer
+impl core::marker::Freeze for losat::api::AccVer
+impl core::marker::Send for losat::api::AccVer
+impl core::marker::Sync for losat::api::AccVer
+impl core::marker::Unpin for losat::api::AccVer
+impl core::marker::UnsafeUnpin for losat::api::AccVer
+impl core::panic::unwind_safe::RefUnwindSafe for losat::api::AccVer
+impl core::panic::unwind_safe::UnwindSafe for losat::api::AccVer
 #[non_exhaustive] pub struct losat::api::Batch
 pub losat::api::Batch::diagnostics: alloc::vec::Vec<u8>
 pub losat::api::Batch::hsps: alloc::vec::Vec<losat::api::HspRecord>
@@ -222,7 +258,7 @@ pub losat::api::HspRecord::q_idx: usize
 pub losat::api::HspRecord::q_start: usize
 pub losat::api::HspRecord::query_aligned: core::option::Option<alloc::string::String>
 pub losat::api::HspRecord::query_frame: core::option::Option<i32>
-pub losat::api::HspRecord::query_id: alloc::sync::Arc<str>
+pub losat::api::HspRecord::query_id: losat::api::AccVer
 pub losat::api::HspRecord::query_length: usize
 pub losat::api::HspRecord::query_strand: core::option::Option<losat::api::Strand>
 pub losat::api::HspRecord::rank: usize
@@ -233,7 +269,7 @@ pub losat::api::HspRecord::s_idx: usize
 pub losat::api::HspRecord::s_start: usize
 pub losat::api::HspRecord::subject_aligned: core::option::Option<alloc::string::String>
 pub losat::api::HspRecord::subject_frame: core::option::Option<i32>
-pub losat::api::HspRecord::subject_id: alloc::sync::Arc<str>
+pub losat::api::HspRecord::subject_id: losat::api::AccVer
 pub losat::api::HspRecord::subject_length: usize
 pub losat::api::HspRecord::subject_strand: core::option::Option<losat::api::Strand>
 pub losat::api::HspRecord::sum_n: core::option::Option<i32>

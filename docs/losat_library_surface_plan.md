@@ -401,6 +401,8 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 | ファイルは bytes にしてからで、`.gz` は呼び出し側が開けない | `read_input_file(role, path)`。CLI の開き方と文言 | `open_file_input`、`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` の例外 8 |
 | エンジンの版が取れない（gbdraw の runtime 記録） | `api::VERSION` | `CBlastVersion`（`version.hpp`） |
 
+→ 2026-11-20（branch `fix/lib-hsp-id-bytes`、最初の公開の前）：`query_id`、`subject_id` の型を `Arc<str>` から `api::AccVer` に変えた。`Arc<str>` は `String::from_utf8_lossy` で作るので、題の最初の語の UTF-8 でない byte（Latin-1 の file など）が U+FFFD になり、報告の byte と違っていた（2026-11-16 の報告）。`AccVer` は表形式の報告が `qaccver`、`saccver` に書く byte をそのまま持つ（`as_bytes`。NCBI の id は `std::string` で、byte のまま書かれる）。text は `to_str`（UTF-8 のときだけ）と `to_string_lossy`・`Display`（U+FFFD）、比較は byte で `str`・`[u8]` とも比べられる。record ごとに 1 回作って HSP が共有するのは前と同じ。database の `saccver`（`ReportedSubject::id`）も同じ型にした。pylosat の列と `Hsp` の id は text のまま（U+FFFD、README と stub に書いた）。
+
 足さなかったもの：
 
 - 報告つきの検索は止まらない。`run_collect` は engine の 1 回の呼び出しで、バッチの境界を外に見せない。gbdraw は outfmt 6 の text が要るのでこの形になる。

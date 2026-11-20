@@ -37,7 +37,10 @@ fn floats(hsps: &[HspRecord], value: impl Fn(&HspRecord) -> f64) -> ArrayRef {
     Arc::new(Float64Array::from_iter_values(hsps.iter().map(value)))
 }
 
-fn texts<'a>(hsps: &'a [HspRecord], value: impl Fn(&'a HspRecord) -> Option<&'a str>) -> ArrayRef {
+fn texts<'a, T: AsRef<str>>(
+    hsps: &'a [HspRecord],
+    value: impl Fn(&'a HspRecord) -> Option<T>,
+) -> ArrayRef {
     Arc::new(hsps.iter().map(value).collect::<LargeStringArray>())
 }
 
@@ -51,9 +54,18 @@ fn strand_name(strand: Option<Strand>) -> Option<&'static str> {
 /// The table of `hsps`.
 pub fn of_records(hsps: &[HspRecord]) -> RecordBatch {
     RecordBatch::try_from_iter_with_nullable([
-        // The columns of `-outfmt 6`, in its order.
-        ("qaccver", texts(hsps, |hsp| Some(&hsp.query_id)), false),
-        ("saccver", texts(hsps, |hsp| Some(&hsp.subject_id)), false),
+        // The columns of `-outfmt 6`, in its order. The ids are text here: a byte that is not
+        // UTF-8 becomes U+FFFD (`AccVer::to_string_lossy`); the reports keep it.
+        (
+            "qaccver",
+            texts(hsps, |hsp| Some(hsp.query_id.to_string_lossy())),
+            false,
+        ),
+        (
+            "saccver",
+            texts(hsps, |hsp| Some(hsp.subject_id.to_string_lossy())),
+            false,
+        ),
         ("pident", floats(hsps, HspRecord::percent_identity), false),
         ("length", ints(hsps, |hsp| hsp.length), false),
         (

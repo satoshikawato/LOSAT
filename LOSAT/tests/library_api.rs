@@ -465,8 +465,8 @@ fn check_columns(context: &str, hsp: &HspRecord, row: &[u8]) {
     let fields: Vec<&str> = row.split('\t').collect();
     assert_eq!(fields.len(), 21, "{context}: {row}");
     assert_eq!(
-        (&*hsp.query_id, &*hsp.subject_id),
-        (fields[18], fields[19]),
+        (hsp.query_id.as_bytes(), hsp.subject_id.as_bytes()),
+        (fields[18].as_bytes(), fields[19].as_bytes()),
         "{context}: the ids of {row}"
     );
     assert_eq!(
@@ -1150,6 +1150,80 @@ fn parsed_ids_show_as_on_the_command_line() {
         let error = run_collect(&search, plain, &["6"]).unwrap_err();
         assert!(matches!(error, Error::Argv(_)), "{error}");
         assert!(run_batches(&search, plain).is_err());
+        let _ = std::fs::remove_file(&query_path);
+        let _ = std::fs::remove_file(&subject_path);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:214-217
+// ```c++
+// void CBlastTabularInfo::x_PrintQueryAccessionVersion()
+// {
+//     m_Ostream << s_GetSeqIdListString(m_QueryId, eAccVersion);
+// }
+// ```
+// The ids are bytes (`std::string`) that the report writes as they are.
+/// Titles whose first word holds bytes that are not UTF-8 (Latin-1's `é`, 0xE9; a continuation
+/// byte alone, 0x80; 0xFF) or UTF-8's own letters of two and three bytes (`é`, `€`): each record's
+/// id is the bytes of its column in the `-outfmt 6` row of the same run (`Report::spans`), which is
+/// the command line's row, for a nucleotide and a protein program.
+#[test]
+fn the_ids_are_the_bytes_of_the_tabular_report() {
+    let query_ids: [&[u8]; 2] = [b"q\xE9", "q\u{e9}".as_bytes()];
+    let subject_ids: [&[u8]; 2] = [b"s\x80\xFF", "s\u{e9}\u{20ac}".as_bytes()];
+    for program in [Program::Blastn, Program::Blastp] {
+        let fasta = |ids: &[&[u8]], role: Role| {
+            let mut fasta = Vec::new();
+            for id in ids {
+                fasta.extend_from_slice(b">");
+                fasta.extend_from_slice(id);
+                fasta.extend_from_slice(b" a title\n");
+                fasta.extend_from_slice(letters_of(program, role).as_bytes());
+                fasta.extend_from_slice(b"\n");
+            }
+            fasta
+        };
+        let (query, subject) = (
+            fasta(&query_ids, Role::Query),
+            fasta(&subject_ids, Role::Subject),
+        );
+        let (query_path, subject_path) = (temp_path("bytes_q.fa"), temp_path("bytes_s.fa"));
+        std::fs::write(&query_path, &query).unwrap();
+        std::fs::write(&subject_path, &subject).unwrap();
+        let case = Case {
+            program,
+            query: "",
+            subject: "",
+            options: &[],
+            formats: &[],
+        };
+        let search = validate(program, &[]).unwrap();
+        let (queries, subjects) = (
+            read_fasta(program, Role::Query, &query).unwrap(),
+            read_fasta(program, Role::Subject, &subject).unwrap(),
+        );
+        let outcome = run_collect(&search, Inputs::new(&queries, &subjects), &["6"]).unwrap();
+        let report = &outcome.reports[0];
+        let (cli, _) = cli(&case, &query_path, &subject_path, "6");
+        assert!(
+            report.bytes == cli,
+            "{program}: the report is the command line's"
+        );
+        let mut pairs = std::collections::BTreeSet::new();
+        for hsp in &outcome.hsps {
+            let row = &report.bytes[report.spans[hsp.index].clone().unwrap()];
+            let columns: Vec<&[u8]> = row.split(|&byte| byte == b'\t').collect();
+            assert_eq!(hsp.query_id.as_bytes(), columns[0], "{program}");
+            assert_eq!(hsp.subject_id.as_bytes(), columns[1], "{program}");
+            assert_eq!(hsp.query_id.as_bytes(), query_ids[hsp.q_idx], "{program}");
+            assert_eq!(
+                hsp.subject_id.as_bytes(),
+                subject_ids[hsp.s_idx],
+                "{program}"
+            );
+            pairs.insert((hsp.q_idx, hsp.s_idx));
+        }
+        assert_eq!(pairs.len(), 4, "{program}: every query hits every subject");
         let _ = std::fs::remove_file(&query_path);
         let _ = std::fs::remove_file(&subject_path);
     }

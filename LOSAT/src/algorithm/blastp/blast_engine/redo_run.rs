@@ -372,9 +372,11 @@ pub(super) enum RedoPath {
 /// NCBI chooses only the number of threads of its one loop (`actual_num_threads`); it has no
 /// counterpart of the choice among LOSAT's paths, each of which gives the output of the one loop.
 ///
-/// With `-use_sw_tback` (item X4) the one-thread loop runs: the Smith-Waterman redo of a match
-/// asks the query's heap before its first alignment (`BlastCompo_HeapWouldInsert`), so a match's
-/// redo reads the heap that the matches before it in the loop's order leave.
+/// With `-use_sw_tback` (item X4) the Smith-Waterman redo of a match asks the query's heap before
+/// its first alignment (`BlastCompo_HeapWouldInsert`), so a match's redo reads the heap that the
+/// matches before it in the loop's order leave: the windows replay that test in order where a job
+/// could not answer it (item X4-mt, `x_redo_par.rs`); the query- and match-parallel paths of
+/// `LOSAT_X_BPREDOPAR=0` do not, and leave such a search to the one-thread loop.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3079-3082
 /// ```c
@@ -507,7 +509,8 @@ pub(super) fn plan_redo_and_expand_lists<P>(
     // of all queries between its threads. With the switch, more than one thread and at least two
     // matches, the matches run on the pool in jobs of up to four matches of one query, and the
     // early termination test, the heap insertions and the error that ends the redo are replayed
-    // in the order of the one-thread loop below; it replaces both parallel paths
+    // in the order of the one-thread loop below (with `-use_sw_tback` also the heap tests that a
+    // job could not answer and the batches' status); it replaces both parallel paths
     // (`x_redo_par.rs`).
     #[cfg(all(
         feature = "parallel",
@@ -519,7 +522,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let x_redo_par_on = x_redo_par_switch
-        && !args.use_sw_tback
         && blastp_should_parallelize_stage(
             "kappa-redo-par",
             args.num_threads,
@@ -659,6 +661,12 @@ where
         build_redo_align_params,
         timing: timing_enabled,
         engine_positives: needs.seqalign,
+        // The errors of `one_thread_redo`'s Smith-Waterman batches, at the same matches and batch
+        // ends of the replay.
+        sw_errors: x_redo_par::XSwErrors {
+            batch_failed: sw_batch_failed,
+            endless: sw_endless,
+        },
     };
     // The parallel paths read the expanded lists of all queries (`plan_redo_and_expand_lists`
     // expands them before the paths), or the windows expand the compact lists as they reach them.

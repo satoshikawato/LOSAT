@@ -966,6 +966,39 @@ impl BlastCompoHeap {
         compo_heap_record_compare(&heap_array[1], &record)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:229-243
+    /// The answer of `would_insert` on the heap as it is, without its one side effect: an array
+    /// that has reached the threshold is not turned into its heap form (`convert_to_heap`). In
+    /// that form the root is the record of `array[1..=n]` that `compo_heap_record_compare` puts
+    /// above every other one, which is the root that the conversion makes: the comparison reads
+    /// only the E-value, the score and the subject index, and orders distinct keys strictly, so
+    /// every maximum has the root's key. The windows of the parallel redo ask it from many
+    /// threads on the heaps as a window's start left them (`x_redo_par.rs`).
+    pub(crate) fn would_insert_view(&self, evalue: f64, score: i32, subject_index: u32) -> bool {
+        if self.n < self.heap_threshold || evalue <= self.ecutoff || evalue < self.worst_evalue {
+            return true;
+        }
+        let record = BlastCompoHeapRecord {
+            best_evalue: evalue,
+            best_score: score,
+            subject_index,
+            hsplist: None,
+        };
+        let root = match (&self.heap_array, &self.array) {
+            (Some(heap_array), _) => &heap_array[1],
+            (None, Some(array)) => array[2..=self.n].iter().fold(&array[1], |root, other| {
+                if compo_heap_record_compare(other, root) {
+                    other
+                } else {
+                    root
+                }
+            }),
+            (None, None) => unreachable!("a compo heap holds its array or its heap array"),
+        };
+        compo_heap_record_compare(root, &record)
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:294-352
     // ```c
     // int
@@ -2577,6 +2610,85 @@ mod tests {
 
         assert!(heap.would_insert(1e-20, 50, 2));
         assert!(!heap.would_insert(1e-20, 50, 0));
+    }
+
+    /// A fixed xorshift sequence below `bound`.
+    fn xorshift_below(state: &mut u64, bound: usize) -> usize {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        (*state % bound as u64) as usize
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:329-400
+    /// `would_insert_view` answers as `would_insert` on random heaps of both forms (an array that
+    /// reached its threshold before any insert or test turned it into a heap, and a heap), ties of
+    /// keys included; and a FALSE stays FALSE after any later inserts, those the redo makes (after
+    /// a TRUE of `would_insert`) and any other. The windows of the parallel redo stop a
+    /// Smith-Waterman match at its first round on a FALSE of the heap as a window's start left it
+    /// (`x_redo_par.rs`), and rest on both.
+    #[test]
+    fn test_compo_heap_would_insert_view_equals_would_insert_and_a_false_stays_false() {
+        const ECUTOFF: f64 = 0.002;
+        // Around the cutoff, its stretch and the heap's comparison of E-values.
+        let evalues = [0.0, 1e-200, 1e-30, 1e-5, ECUTOFF, 0.004, 0.01, 1.0, 10.0];
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let list = |oid: u32, evalue: f64| {
+            let mut list = BlastpHspList {
+                oid,
+                query_index: 0,
+                hsps: vec![BlastpHsp::from_hit(make_hit(60, 1, 10, 1, 10))],
+                best_evalue: evalue,
+            };
+            list.hsps[0].e_value = evalue;
+            list
+        };
+        let (mut compared, mut array_form, mut false_kept) = (0, 0, 0);
+        for heap_threshold in [1, 2, 3, 5, 8] {
+            for _ in 0..100 {
+                let mut heap = BlastCompoHeap::new(heap_threshold, ECUTOFF);
+                let mut refused: Vec<(f64, i32, u32)> = Vec::new();
+                for _ in 0..30 {
+                    for _ in 0..4 {
+                        let evalue = evalues[xorshift_below(&mut state, evalues.len())];
+                        let score = xorshift_below(&mut state, 5) as i32;
+                        let oid = xorshift_below(&mut state, 12) as u32;
+                        let view = heap.would_insert_view(evalue, score, oid);
+                        assert_eq!(
+                            view,
+                            heap.clone().would_insert(evalue, score, oid),
+                            "{evalue} {score} {oid} on {heap:?}"
+                        );
+                        compared += 1;
+                        array_form +=
+                            usize::from(heap.heap_array.is_none() && heap.n >= heap_threshold);
+                        if !view {
+                            refused.push((evalue, score, oid));
+                        }
+                    }
+                    // Inserts within the cutoff more often, so that heaps fill to it.
+                    let evalue = evalues[xorshift_below(&mut state, 6)];
+                    let score = xorshift_below(&mut state, 5) as i32;
+                    let oid = xorshift_below(&mut state, 12) as u32;
+                    if xorshift_below(&mut state, 2) == 0 || heap.would_insert(evalue, score, oid) {
+                        heap.insert(list(oid, evalue), evalue, score, oid);
+                    }
+                    for &(evalue, score, oid) in &refused {
+                        assert!(
+                            !heap.would_insert_view(evalue, score, oid)
+                                && !heap.clone().would_insert(evalue, score, oid),
+                            "{evalue} {score} {oid}: FALSE before, TRUE on {heap:?}"
+                        );
+                        false_kept += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            compared > 50_000 && array_form > 500 && false_kept > 50_000,
+            "compared {compared} array form {array_form} FALSE kept {false_kept}"
+        );
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:391-414

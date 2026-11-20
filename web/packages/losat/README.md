@@ -110,8 +110,9 @@ second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. Wh
 run fails, `runFilesOf(error)` returns it. The engine reads a `-logfile` name as the command line on
 Linux reads it where the name's directories exist: the file's name is the whole name, which may
 contain `/` (`logs/run.log`, `/tmp/run.log`, `/dev/stdout`, `logs/`, which the command line makes as
-the file `logs`); show and save it as a name, not as a path. The standard error (`/dev/stderr`) and
-a directory (`.`, `logs/.`) give no file: their messages are on stream 3. `/dev/fd/2` and
+the file `logs`); show and save it as a name, not as a path. The standard error (`/dev/stderr`), a
+directory (`.`, `logs/.`) and a name where a user's command line cannot make or open a file
+(`/etc/run.log`, `/dev/run.log`, `//run.log`) give no file: their messages are on stream 3. `/dev/fd/2` and
 `/proc/self/fd/2` give no file and send the messages that go to the file nowhere, as `/dev/null`
 does: the command line writes nothing to a log on a file system without free space, which these
 are.

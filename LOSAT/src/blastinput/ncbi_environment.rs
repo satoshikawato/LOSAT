@@ -568,9 +568,8 @@ fn program_directories(arguments_set: bool) -> Result<Vec<PathBuf>, String> {
         let name = match (&argv0, arguments_set) {
             (Some(argv0), true) => {
                 let path_env = std::env::var_os("PATH").unwrap_or_default();
-                let cwd = std::env::current_dir()
-                    .map(PathBuf::into_os_string)
-                    .unwrap_or_default();
+                // `CDir::GetCwd`, "" for a working directory of 4095 bytes or more.
+                let cwd = ncbi_cwd().unwrap_or_default();
                 let is_file = |name: &[u8]| Path::new(OsStr::from_bytes(name)).is_file();
                 unix_program_name(
                     Some(argv0.as_bytes()),
@@ -710,8 +709,7 @@ fn unix_program_name(
                 app_path.clear();
             }
         } else {
-            // `given` does not start with '/', so it is not the lone "/" that `Reset` keeps.
-            let entry = trim_trailing_slashes(given);
+            let entry = PathRules::Unix.reset(given);
             let file = match entry.iter().rposition(|&byte| byte == b'/') {
                 Some(at) => &entry[at + 1..],
                 None => entry,
@@ -743,189 +741,642 @@ fn unix_program_name(
     normalize_path(name, None).expect("a path normalized without links has no link limit")
 }
 
-/// `path` without its trailing '/'s (`CDirEntry::DeleteTrailingPathSeparator` on Unix,
-/// ncbifile.cpp:465-472): empty when it has only '/'s.
-fn trim_trailing_slashes(path: &[u8]) -> &[u8] {
-    match path.iter().rposition(|&byte| byte != b'/') {
-        Some(at) => &path[..=at],
-        None => &[],
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:102-115
+// ```c++
+// #define DIR_PARENT  ".."
+// #define DIR_CURRENT "."
+// #define ALL_OS_SEPARATORS   ":/\\"
+//
+// #if defined(NCBI_OS_MSWIN)
+// #  define DIR_SEPARATOR     '\\'
+// #  define DIR_SEPARATOR_ALT '/'
+// #  define DISK_SEPARATOR    ':'
+// #  define DIR_SEPARATORS    "/\\"
+// #  define ALL_SEPARATORS    ":/\\"
+// #elif defined(NCBI_OS_UNIX)
+// #  define DIR_SEPARATOR     '/'
+// #  define DIR_SEPARATORS    "/"
+// #  define ALL_SEPARATORS    "/"
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-313, 439-452, 455-472, 487-505
+// ```c++
+// void CDirEntry::Reset(const string& path)
+// {
+//     m_Path = path;
+//     size_t len = path.length();
+//     // Root dir
+//     if ((len == 1)  &&  IsPathSeparator(path[0])) {
+//         return;
+//     }
+//     // Disk name
+// #  if defined(DISK_SEPARATOR)
+//     if ( (len == 2 || len == 3) && (path[1] == DISK_SEPARATOR) ) {
+//         return;
+//     }
+// #  endif
+//     m_Path = DeleteTrailingPathSeparator(path);
+// }
+// ...
+// bool CDirEntry::IsPathSeparator(const char c)
+// {
+// #if defined(DISK_SEPARATOR)
+//     if ( c == DISK_SEPARATOR ) {
+//         return true;
+//     }
+// #endif
+// #if defined(DIR_SEPARATOR_ALT)
+//     if ( c == DIR_SEPARATOR_ALT ) {
+//         return true;
+//     }
+// #endif
+//     return c == DIR_SEPARATOR;
+// }
+// ...
+// string CDirEntry::AddTrailingPathSeparator(const string& path)
+// {
+//     size_t len = path.length();
+//     if (len  &&  string(ALL_SEPARATORS).rfind(path.at(len - 1)) == NPOS) {
+//         return path + GetPathSeparator();
+//     }
+//     return path;
+// }
+//
+// string CDirEntry::DeleteTrailingPathSeparator(const string& path)
+// {
+//     size_t pos = path.find_last_not_of(DIR_SEPARATORS);
+//     if (pos + 1 < path.length()) {
+//         return path.substr(0, pos + 1);
+//     }
+//     return path;
+// }
+// ...
+// inline bool s_Win_IsDiskPath(const string& path)
+// {
+//     if ((isalpha((unsigned char)path[0]) && path[1] == ':')  &&
+//          (path[2] == '/' || path[2] == '\\')) {
+//         return true;
+//     }
+//     return false;
+// }
+//
+// // Windows:
+// inline bool s_Win_IsNetworkPath(const string& path)
+// {
+//     // Any combination of slashes in 2 first symbols
+//     if ((path[0] == '\\' || path[0] == '/')  &&
+//         (path[1] == '\\' || path[1] == '/')) {
+//         return true;
+//     }
+//     return false;
+// }
+// ```
+/// The rules by which NCBI's file API (`CDirEntry`) reads a path, which set its build for MS
+/// Windows (`NCBI_OS_MSWIN`) apart from its build for Unix (`NCBI_OS_UNIX`): the one reading of
+/// paths on every platform, `HOST` being the build's own (line WQA's D11 round 3, 2026-11-20).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PathRules {
+    /// '/' separates the directories, and is the only separator.
+    Unix,
+    /// '\\' separates the directories (`DIR_SEPARATOR`), so does '/' (`DIR_SEPARATOR_ALT`), and
+    /// ':' ends the name of a disk (`DISK_SEPARATOR`).
+    Windows,
+}
+
+impl PathRules {
+    /// The rules of the platform of this build.
+    pub(crate) const HOST: Self = if cfg!(windows) {
+        Self::Windows
+    } else {
+        Self::Unix
+    };
+
+    /// `DIR_SEPARATOR`.
+    fn separator(self) -> u8 {
+        match self {
+            Self::Unix => b'/',
+            Self::Windows => b'\\',
+        }
+    }
+
+    /// Whether `byte` is one of `DIR_SEPARATORS`.
+    fn is_dir_separator(self, byte: u8) -> bool {
+        byte == b'/' || (self == Self::Windows && byte == b'\\')
+    }
+
+    /// Whether `byte` is one of `ALL_SEPARATORS` (`CDirEntry::IsPathSeparator`).
+    fn is_separator(self, byte: u8) -> bool {
+        self.is_dir_separator(byte) || (self == Self::Windows && byte == b':')
+    }
+
+    /// `CDirEntry::DeleteTrailingPathSeparator`: `path` without its trailing `DIR_SEPARATORS`
+    /// (empty when it has nothing else).
+    fn delete_trailing_separators(self, path: &[u8]) -> &[u8] {
+        match path.iter().rposition(|&byte| !self.is_dir_separator(byte)) {
+            Some(at) => &path[..=at],
+            None => &[],
+        }
+    }
+
+    /// `CDirEntry::Reset`: the path of `CDirEntry(path)`, without its trailing separators, but a
+    /// lone separator and (Windows) a disk's name of 2 or 3 bytes (`C:`, `C:\`) kept: `//` and
+    /// `///` are empty, a path that no directory has.
+    fn reset(self, path: &[u8]) -> &[u8] {
+        if path.len() == 1 && self.is_separator(path[0]) {
+            return path;
+        }
+        if self == Self::Windows && matches!(path.len(), 2 | 3) && path[1] == b':' {
+            return path;
+        }
+        self.delete_trailing_separators(path)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-368, 475-483
+    // ```c++
+    // void CDirEntry::SplitPath(const string& path, string* dir,
+    //                           string* base, string* ext)
+    // {
+    //     // Get file name
+    //     size_t pos = path.find_last_of(ALL_SEPARATORS);
+    //     string filename = (pos == NPOS) ? path : path.substr(pos+1);
+    //
+    //     // Get dir
+    //     if ( dir ) {
+    //         *dir = (pos == NPOS) ? kEmptyStr : path.substr(0, pos+1);
+    //     }
+    // ...
+    // string CDirEntry::GetDir(EIfEmptyPath mode) const
+    // {
+    //     string dir;
+    //     SplitPath(GetPath(), &dir);
+    //     if ( dir.empty()  &&  mode == eIfEmptyPath_Current  &&  !GetPath().empty() ) {
+    //         return string(DIR_CURRENT) + DIR_SEPARATOR;
+    //     }
+    //     return dir;
+    // }
+    // ```
+    /// `CDirEntry(path).GetDir()`: the directory of `path` as `reset` leaves it, up to and with
+    /// its last separator (`SplitPath`); `./` (Windows `.\`) for a path without one; empty for an
+    /// empty one.
+    fn dir(self, path: &[u8]) -> Vec<u8> {
+        let path = self.reset(path);
+        match path.iter().rposition(|&byte| self.is_separator(byte)) {
+            Some(at) => path[..=at].to_vec(),
+            None if path.is_empty() => Vec::new(),
+            None => vec![b'.', self.separator()],
+        }
+    }
+
+    /// `s_Win_IsDiskPath`: `X:` and a separator. A byte past the end is the string's NUL.
+    fn is_disk_path(path: &[u8]) -> bool {
+        let at = |index: usize| path.get(index).copied().unwrap_or(0);
+        at(0).is_ascii_alphabetic() && at(1) == b':' && matches!(at(2), b'/' | b'\\')
+    }
+
+    /// `s_Win_IsNetworkPath`: two separators, of either kind.
+    fn is_network_path(path: &[u8]) -> bool {
+        let at = |index: usize| path.get(index).copied().unwrap_or(0);
+        matches!(at(0), b'/' | b'\\') && matches!(at(1), b'/' | b'\\')
+    }
+
+    /// `CDirEntry::IsAbsolutePath` (ncbifile.cpp:508-523): on Unix a path from '/', on Windows a
+    /// disk's or a network path.
+    fn is_absolute(self, path: &[u8]) -> bool {
+        match self {
+            Self::Unix => path.first() == Some(&b'/'),
+            Self::Windows => Self::is_disk_path(path) || Self::is_network_path(path),
+        }
+    }
+
+    /// `CDirEntry::IsAbsolutePathEx` (ncbifile.cpp:526-544), the same on every platform: a
+    /// Windows disk's or network path, or a path from '/'.
+    fn is_absolute_ex(path: &[u8]) -> bool {
+        Self::is_disk_path(path) || Self::is_network_path(path) || path.first() == Some(&b'/')
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:664-708, 776-788
+    // ```c++
+    // string CDirEntry::CreateAbsolutePath(const string& path, ERelativeToWhat rtw)
+    // {
+    //     if ( IsAbsolutePath(path) ) {
+    //         return NormalizePath(path);
+    //     }
+    //     string result;
+    //
+    // #if defined(NCBI_OS_MSWIN)
+    //     if ( path.find(DISK_SEPARATOR) != NPOS ) {
+    //         NCBI_THROW(CFileException, eRelativePath,
+    //                    "Path must not contain disk separator: " + path);
+    //     }
+    //     // Path started with slash
+    //     if (!path.empty() && (path[0] == '/' || path[0] == '\\')) {
+    //         // network path ?
+    //         if ( s_Win_IsNetworkPath(path) ) {
+    //             NCBI_THROW(CFileException, eRelativePath,
+    //                        "Cannot use network path: " + path);
+    //         }
+    //         // relative to current drive only
+    //         if (rtw != eRelativeToCwd) {
+    //             NCBI_THROW(CFileException, eRelativePath,
+    //                        "Path can be used as relative to current drive only: " + path);
+    //         }
+    //         return CDir::GetCwd().substr(0,3) + path;
+    //     }
+    // #endif
+    //
+    //     switch (rtw) {
+    //         case eRelativeToCwd:
+    //             result = ConcatPath(CDir::GetCwd(), path);
+    //             break;
+    // ...
+    //     return NormalizePath(result);
+    // ...
+    // string CDirEntry::ConcatPath(const string& first, const string& second)
+    // {
+    //     // Prepare first part of path
+    //     string path = AddTrailingPathSeparator(NStr::TruncateSpaces(first));
+    //     // Remove leading separator in "second" part
+    //     string part = NStr::TruncateSpaces(second);
+    //     if ( !path.empty()  &&  part.length() > 0  &&  part[0] == DIR_SEPARATOR ) {
+    //         part.erase(0,1);
+    //     }
+    //     // Add second part
+    //     path += part;
+    //     return path;
+    // }
+    // ```
+    /// `CDirEntry::CreateAbsolutePath(path)` (`eRelativeToCwd`) of a path that is not absolute
+    /// (`is_absolute`), in the working directory `cwd` (`CDir::GetCwd`, empty where it cannot be
+    /// read): `cwd` and `path`, the spaces at their ends cut, joined by a separator and
+    /// normalized; on Windows a path from a separator follows the first 3 bytes of `cwd` (its
+    /// disk, `C:\`) as it is. `None` where NCBI throws (`CFileException`): on Windows a path with
+    /// a disk's ':' (`C:run.log`), also where the cut of `cwd` would split a character.
+    fn absolute_path(self, path: &[u8], cwd: &[u8]) -> Option<Vec<u8>> {
+        if self == Self::Windows {
+            if path.contains(&b':') || Self::is_network_path(path) {
+                return None;
+            }
+            if matches!(path.first(), Some(b'/' | b'\\')) {
+                // The byte after the cut must start a character (UTF-8 and WTF-8 continuation
+                // bytes are 0x80-0xBF): NCBI's string would not be UTF-8 otherwise.
+                if cwd.get(3).is_some_and(|byte| (0x80..0xc0).contains(byte)) {
+                    return None;
+                }
+                return Some([cwd.get(..3).unwrap_or(cwd), path].concat());
+            }
+        }
+        let mut joined = crate::ncbi_str::truncate_spaces(cwd).to_vec();
+        if joined.last().is_some_and(|&byte| !self.is_separator(byte)) {
+            joined.push(self.separator());
+        }
+        let mut part = crate::ncbi_str::truncate_spaces(path);
+        if !joined.is_empty() && part.first() == Some(&self.separator()) {
+            part = &part[1..];
+        }
+        joined.extend_from_slice(part);
+        Some(
+            self.normalize(&joined, None)
+                .expect("a path normalized without links has no link limit"),
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:745-773
+    // ```c++
+    // string CDirEntry::ConvertToOSPath(const string& path)
+    // {
+    //     // Not process empty or absolute path
+    //     if ( path.empty()  ||  IsAbsolutePathEx(path)) {
+    //         return NormalizePath(path);
+    //     }
+    //     // Now we have relative "path"
+    //     string xpath = path;
+    //     // Add trailing separator if path ends with DIR_PARENT or DIR_CURRENT
+    // #if defined(DIR_PARENT)
+    //     if ( NStr::EndsWith(xpath, DIR_PARENT) )  {
+    //         xpath += DIR_SEPARATOR;
+    //     }
+    // #endif
+    // #if defined(DIR_CURRENT)
+    //     if ( NStr::EndsWith(xpath, DIR_CURRENT) )  {
+    //         xpath += DIR_SEPARATOR;
+    //     }
+    // #endif
+    //     // Replace each path separator with the current OS separator character
+    //     for (size_t i = 0; i < xpath.length(); i++) {
+    //         char c = xpath[i];
+    //         if ( c == '\\' || c == '/' ) {
+    //             xpath[i] = DIR_SEPARATOR;
+    //         }
+    //     }
+    //     xpath = NormalizePath(xpath);
+    //     return xpath;
+    // }
+    // ```
+    /// `CDirEntry::ConvertToOSPath(path)`: the path that the system opens, `path` normalized; a
+    /// relative one (also on Unix, where the working directory cannot be read) with each '\\'
+    /// and '/' made the platform's separator first (`a\b.log` is `a/b.log` on Unix).
+    fn os_path(self, path: &[u8]) -> Vec<u8> {
+        let normalize = |path: &[u8]| {
+            self.normalize(path, None)
+                .expect("a path normalized without links has no link limit")
+        };
+        if path.is_empty() || Self::is_absolute_ex(path) {
+            return normalize(path);
+        }
+        let mut relative = path.to_vec();
+        if relative.ends_with(b"..") {
+            relative.push(self.separator());
+        }
+        if relative.ends_with(b".") {
+            relative.push(self.separator());
+        }
+        for byte in &mut relative {
+            if matches!(*byte, b'\\' | b'/') {
+                *byte = self.separator();
+            }
+        }
+        normalize(&relative)
+    }
+
+    /// `CDirEntry::NormalizePath`: `path` without "." and empty parts, a ".." taking off the part
+    /// before it (none at the root, kept after another ".." or at the start of a relative path),
+    /// and on Unix with `read_link` (`eFollowLinks`) each link replaced by its target, which
+    /// restarts from the root when absolute. On Windows each '/' is a '\\' first; a path with a
+    /// disk's ':' keeps its trailing separators; `\\?\` and `\\?\UNC\` open a path as `\` and
+    /// `\\` (a network path) do; anything follows a disk's name (`C:` and `..` is `C:\..`); and
+    /// a ".." after a part with a ':' that does not end it keeps the part's first 2 bytes and
+    /// itself (`C:x\..` is `C:\..`: NCBI's `pos` takes the comparison `!= NPOS`, 1).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-971
+    /// ```c++
+    ///     if ( path.empty() ) {
+    ///         return path;
+    ///     }
+    /// ...
+    ///     // Delete trailing slash for all paths except similar to 'd:\'
+    /// #  ifdef DISK_SEPARATOR
+    ///     if ( path.find(DISK_SEPARATOR) == NPOS ) {
+    ///         current = DeleteTrailingPathSeparator(path);
+    ///     } else {
+    ///         current = path;
+    ///     }
+    /// #  else
+    ///     current = DeleteTrailingPathSeparator(path);
+    /// #  endif
+    ///
+    ///     if ( current.empty() ) {
+    ///         // root dir
+    ///         return string(1, DIR_SEPARATOR);
+    ///     }
+    ///
+    /// #ifdef NCBI_OS_MSWIN
+    ///     NStr::ReplaceInPlace(current, "/", "\\");
+    /// #endif
+    ///
+    ///     while ( !current.empty()  ||  !tail.empty() ) {
+    ///         std::list<string> pretail;
+    ///         if ( !current.empty() ) {
+    ///             NStr::Split(current, kSep, pretail);
+    ///             current.erase();
+    ///             if (pretail.front().empty()
+    /// #ifdef DISK_SEPARATOR
+    ///                 ||  pretail.front().find(DISK_SEPARATOR) != NPOS
+    /// #endif
+    ///                 ) {
+    ///                 // Absolute path
+    ///                 head.clear();
+    /// #ifdef NCBI_OS_MSWIN
+    ///                 // Remove leading "\\?\". Replace leading "\\?\UNC\" with "\\".
+    ///                 static const char* const kUNC[] = { "", "", "?", "UNC" };
+    ///                 std::list<string>::iterator it = pretail.begin();
+    ///                 unsigned int matched = 0;
+    ///                 while (matched < 4  &&  it != pretail.end()
+    ///                        &&  !NStr::CompareNocase(*it, kUNC[matched])) {
+    ///                     ++it;
+    ///                     ++matched;
+    ///                 }
+    ///                 pretail.erase(pretail.begin(), it);
+    ///                 switch (matched) {
+    ///                 case 2: case 4: // got a UNC path (\\... or \\?\UNC\...)
+    ///                     head.push_back(kEmptyStr);
+    ///                     // fall through
+    ///                 case 1:         // normal volume-less absolute path
+    ///                     head.push_back(kEmptyStr);
+    ///                     break;
+    ///                 case 3/*?*/:    // normal path, absolute or relative
+    ///                     break;
+    ///                 }
+    /// #endif
+    ///             }
+    ///             tail.splice(tail.begin(), pretail);
+    ///         }
+    ///
+    ///         string next;
+    ///         if (!tail.empty()) {
+    ///             next = tail.front();
+    ///             tail.pop_front();
+    ///         }
+    ///         if ( !head.empty() ) { // empty heads should accept anything
+    ///             string& last = head.back();
+    ///             if (last == DIR_CURRENT) {
+    ///                 if (!next.empty()) {
+    ///                     head.pop_back();
+    ///                 }
+    /// #ifdef DISK_SEPARATOR
+    ///             } else if (!last.empty() && last[last.size()-1] == DISK_SEPARATOR) {
+    ///                 // Allow almost anything right after a volume specification
+    /// #endif
+    ///             } else if (next == DIR_CURRENT) {
+    ///                 // Leave out, since we already have content
+    ///                 continue;
+    ///             } else if (next.empty()) {
+    ///                 continue; // leave out empty components in most cases
+    ///             } else if (next == DIR_PARENT) {
+    /// #ifdef DISK_SEPARATOR
+    ///                 SIZE_TYPE pos;
+    /// #endif
+    ///                 // Back up if possible, assuming existing path to be "physical"
+    ///                 if (last.empty()) {
+    ///                     // Already at the root; .. is a no-op
+    ///                     continue;
+    /// #ifdef DISK_SEPARATOR
+    ///                 } else if ((pos = last.find(DISK_SEPARATOR) != NPOS)) {
+    ///                     last.erase(pos + 1);
+    /// #endif
+    ///                 } else if (last != DIR_PARENT) {
+    ///                     head.pop_back();
+    ///                     continue;
+    ///                 }
+    ///             }
+    ///         }
+    /// #ifdef NCBI_OS_UNIX
+    ///         // Is there a Windows equivalent for readlink?
+    ///         if ( follow_links ) {
+    ///             string s(head.empty() ? next : NStr::Join(head, string(1, DIR_SEPARATOR)) + DIR_SEPARATOR + next);
+    ///             char buf[PATH_MAX];
+    ///             int  length = (int)readlink(s.c_str(), buf, sizeof(buf));
+    ///             if (length > 0) {
+    ///                 current.assign(buf, length);
+    ///                 if (++link_depth >= 1024) {
+    /// ...
+    ///                     follow_links = eIgnoreLinks;
+    ///                 }
+    ///                 continue;
+    ///             }
+    ///         }
+    /// #endif
+    ///         // Normal case: just append the next element to head
+    ///         head.push_back(next);
+    ///     }
+    ///
+    ///     // Special cases
+    ///     if ( (head.size() == 0)  ||
+    ///          (head.size() == 2  &&  head.front() == DIR_CURRENT  &&  head.back().empty()) ) {
+    ///         // current dir
+    ///         return DIR_CURRENT;
+    ///     }
+    ///     if (head.size() == 1  &&  head.front().empty()) {
+    ///         // root dir
+    ///         return string(1, DIR_SEPARATOR);
+    ///     }
+    /// #ifdef DISK_SEPARATOR
+    ///     if (head.front().find(DISK_SEPARATOR) != NPOS) {
+    ///         if ((head.size() == 2  &&  head.back() == DIR_CURRENT) ||
+    ///             (head.size() == 3  &&  *(++head.begin()) == DIR_CURRENT  &&  head.back().empty()) ) {
+    ///             // root dir on drive X:
+    ///             return head.front() + DIR_SEPARATOR;
+    ///         }
+    ///     }
+    /// #endif
+    ///     // Compose path
+    ///     return NStr::Join(head, string(1, DIR_SEPARATOR));
+    /// ```
+    /// `NStr::Split` with no flag keeps the empty parts; `NStr::CompareNocase` folds ASCII
+    /// letters. At a depth of 1024 links NCBI posts a warning and stops following them: `None`
+    /// then (a loop of links; the path that the system resolved to run the program, within its
+    /// own limit of 40 links on Linux, never reaches it, but the name "ncbi" of a program before
+    /// its arguments are set can, `program_directories`). Without `read_link`, never `None`.
+    pub(crate) fn normalize(
+        self,
+        path: &[u8],
+        read_link: Option<&dyn Fn(&[u8]) -> Option<Vec<u8>>>,
+    ) -> Option<Vec<u8>> {
+        if path.is_empty() {
+            return Some(Vec::new());
+        }
+        let windows = self == Self::Windows;
+        let separator = self.separator();
+        let mut current = if windows && path.contains(&b':') {
+            path.to_vec()
+        } else {
+            self.delete_trailing_separators(path).to_vec()
+        };
+        if current.is_empty() {
+            return Some(vec![separator]);
+        }
+        if windows {
+            for byte in &mut current {
+                if *byte == b'/' {
+                    *byte = b'\\';
+                }
+            }
+        }
+        // NCBI follows links on Unix only.
+        let follow = if windows { None } else { read_link };
+        let mut link_depth = 0;
+        let mut head: Vec<Vec<u8>> = Vec::new();
+        let mut tail: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::new();
+        while !current.is_empty() || !tail.is_empty() {
+            if !current.is_empty() {
+                let mut pretail: std::collections::VecDeque<Vec<u8>> = current
+                    .split(|&byte| byte == separator)
+                    .map(<[u8]>::to_vec)
+                    .collect();
+                current.clear();
+                if pretail[0].is_empty() || (windows && pretail[0].contains(&b':')) {
+                    head.clear();
+                    if windows {
+                        const UNC: [&[u8]; 4] = [b"", b"", b"?", b"UNC"];
+                        let matched = pretail
+                            .iter()
+                            .zip(UNC)
+                            .take_while(|(part, unc)| part.eq_ignore_ascii_case(unc))
+                            .count();
+                        pretail.drain(..matched);
+                        let roots = match matched {
+                            2 | 4 => 2,
+                            1 => 1,
+                            _ => 0,
+                        };
+                        head.resize(roots, Vec::new());
+                    }
+                }
+                for part in pretail.into_iter().rev() {
+                    tail.push_front(part);
+                }
+            }
+            let next = tail.pop_front().unwrap_or_default();
+            if let Some(last) = head.last_mut() {
+                if last.as_slice() == b"." {
+                    if !next.is_empty() {
+                        head.pop();
+                    }
+                } else if windows && last.last() == Some(&b':') {
+                    // Anything follows a disk's name.
+                } else if next == b"." || next.is_empty() {
+                    continue;
+                } else if next == b".." {
+                    if last.is_empty() {
+                        continue;
+                    }
+                    if windows && last.contains(&b':') {
+                        last.truncate(2);
+                    } else if last.as_slice() != b".." {
+                        head.pop();
+                        continue;
+                    }
+                }
+            }
+            if let Some(read) = follow {
+                let link = if head.is_empty() {
+                    next.clone()
+                } else {
+                    [head.join(&separator).as_slice(), &[separator], &next].concat()
+                };
+                if let Some(target) = read(&link).filter(|target| !target.is_empty()) {
+                    current = target;
+                    link_depth += 1;
+                    if link_depth >= 1024 {
+                        return None;
+                    }
+                    continue;
+                }
+            }
+            head.push(next);
+        }
+        if head.is_empty() || (head.len() == 2 && head[0] == b"." && head[1].is_empty()) {
+            return Some(b".".to_vec());
+        }
+        if head.len() == 1 && head[0].is_empty() {
+            return Some(vec![separator]);
+        }
+        if windows
+            && head[0].contains(&b':')
+            && ((head.len() == 2 && head[1] == b".")
+                || (head.len() == 3 && head[1] == b"." && head[2].is_empty()))
+        {
+            return Some([head[0].as_slice(), &[separator]].concat());
+        }
+        Some(head.join(&separator))
     }
 }
 
-/// `CDirEntry::NormalizePath` on Unix: `path` without "." and empty parts, a ".." taking off
-/// the part before it (none at the root, kept after another ".." or at the start of a relative
-/// path), and with `read_link` (`eFollowLinks`) each link replaced by its target, which
-/// restarts from the root when absolute.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-971
-/// ```c++
-///     if ( path.empty() ) {
-///         return path;
-///     }
-/// ...
-///     current = DeleteTrailingPathSeparator(path);
-/// #  endif
-///
-///     if ( current.empty() ) {
-///         // root dir
-///         return string(1, DIR_SEPARATOR);
-///     }
-/// ...
-///     while ( !current.empty()  ||  !tail.empty() ) {
-///         std::list<string> pretail;
-///         if ( !current.empty() ) {
-///             NStr::Split(current, kSep, pretail);
-///             current.erase();
-///             if (pretail.front().empty()
-/// ...
-///                 ) {
-///                 // Absolute path
-///                 head.clear();
-/// ...
-///             tail.splice(tail.begin(), pretail);
-///         }
-///
-///         string next;
-///         if (!tail.empty()) {
-///             next = tail.front();
-///             tail.pop_front();
-///         }
-///         if ( !head.empty() ) { // empty heads should accept anything
-///             string& last = head.back();
-///             if (last == DIR_CURRENT) {
-///                 if (!next.empty()) {
-///                     head.pop_back();
-///                 }
-/// ...
-///             } else if (next == DIR_CURRENT) {
-///                 // Leave out, since we already have content
-///                 continue;
-///             } else if (next.empty()) {
-///                 continue; // leave out empty components in most cases
-///             } else if (next == DIR_PARENT) {
-/// ...
-///                 // Back up if possible, assuming existing path to be "physical"
-///                 if (last.empty()) {
-///                     // Already at the root; .. is a no-op
-///                     continue;
-/// ...
-///                 } else if (last != DIR_PARENT) {
-///                     head.pop_back();
-///                     continue;
-///                 }
-///             }
-///         }
-/// #ifdef NCBI_OS_UNIX
-///         // Is there a Windows equivalent for readlink?
-///         if ( follow_links ) {
-///             string s(head.empty() ? next : NStr::Join(head, string(1, DIR_SEPARATOR)) + DIR_SEPARATOR + next);
-///             char buf[PATH_MAX];
-///             int  length = (int)readlink(s.c_str(), buf, sizeof(buf));
-///             if (length > 0) {
-///                 current.assign(buf, length);
-///                 if (++link_depth >= 1024) {
-/// ...
-///                     follow_links = eIgnoreLinks;
-///                 }
-///                 continue;
-///             }
-///         }
-/// #endif
-///         // Normal case: just append the next element to head
-///         head.push_back(next);
-///     }
-///
-///     // Special cases
-///     if ( (head.size() == 0)  ||
-///          (head.size() == 2  &&  head.front() == DIR_CURRENT  &&  head.back().empty()) ) {
-///         // current dir
-///         return DIR_CURRENT;
-///     }
-///     if (head.size() == 1  &&  head.front().empty()) {
-///         // root dir
-///         return string(1, DIR_SEPARATOR);
-///     }
-/// ...
-///     // Compose path
-///     return NStr::Join(head, string(1, DIR_SEPARATOR));
-/// ```
-/// `NStr::Split` with no flag keeps the empty parts. At a depth of 1024 links NCBI posts a
-/// warning and stops following them: `None` then (a loop of links; the path that the system
-/// resolved to run the program, within its own limit of 40 links on Linux, never reaches it,
-/// but the name "ncbi" of a program before its arguments are set can, `program_directories`).
-/// Without `read_link`, never `None`. rpsbproc's launch path (`rpsbproc::program_paths`,
-/// `eIgnoreLinks`) is normalized here on every target.
+/// `CDirEntry::NormalizePath` on Unix (`PathRules::normalize`, where it is quoted). rpsbproc's
+/// launch path (`rpsbproc::program_paths`, `eIgnoreLinks`) is normalized here on every target.
 pub(crate) fn normalize_path(
     path: &[u8],
     read_link: Option<&dyn Fn(&[u8]) -> Option<Vec<u8>>>,
 ) -> Option<Vec<u8>> {
-    if path.is_empty() {
-        return Some(Vec::new());
-    }
-    let mut current = trim_trailing_slashes(path).to_vec();
-    if current.is_empty() {
-        return Some(b"/".to_vec());
-    }
-    let follow = read_link;
-    let mut link_depth = 0;
-    let mut head: Vec<Vec<u8>> = Vec::new();
-    let mut tail: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::new();
-    while !current.is_empty() || !tail.is_empty() {
-        if !current.is_empty() {
-            let pretail: Vec<Vec<u8>> = current
-                .split(|&byte| byte == b'/')
-                .map(<[u8]>::to_vec)
-                .collect();
-            current.clear();
-            if pretail[0].is_empty() {
-                head.clear();
-            }
-            for part in pretail.into_iter().rev() {
-                tail.push_front(part);
-            }
-        }
-        let next = tail.pop_front().unwrap_or_default();
-        if let Some(last) = head.last() {
-            if last == b"." {
-                if !next.is_empty() {
-                    head.pop();
-                }
-            } else if next == b"." || next.is_empty() {
-                continue;
-            } else if next == b".." {
-                if last.is_empty() {
-                    continue;
-                }
-                if last != b".." {
-                    head.pop();
-                    continue;
-                }
-            }
-        }
-        if let Some(read) = follow {
-            let link = if head.is_empty() {
-                next.clone()
-            } else {
-                [head.join(&b'/').as_slice(), b"/", &next].concat()
-            };
-            if let Some(target) = read(&link).filter(|target| !target.is_empty()) {
-                current = target;
-                link_depth += 1;
-                if link_depth >= 1024 {
-                    return None;
-                }
-                continue;
-            }
-        }
-        head.push(next);
-    }
-    if head.is_empty() || (head.len() == 2 && head[0] == b"." && head[1].is_empty()) {
-        return Some(b".".to_vec());
-    }
-    if head.len() == 1 && head[0].is_empty() {
-        return Some(b"/".to_vec());
-    }
-    Some(head.join(&b'/'))
+    PathRules::Unix.normalize(path, read_link)
 }
 
 /// The registry file that NCBI loads under `file_name` (the first one on the search path that
@@ -2082,26 +2533,15 @@ impl Write for DiagStream<'_> {
 /// The target of the `-logfile` value `name` (a file NCBI fails to open leaves `cerr`). The file
 /// is opened (made when it does not exist) at once, as NCBI's first `SetupDiag` does, before
 /// `-version` (NCBI BLAST+ 2.17.0 makeblastdb and blastdbcmd `-version -logfile F` make `F`:
-/// g_reg probes `ver_log_ok`, `ver_log_ok2`). Outside Windows the file is the one NCBI opens
-/// (`log_file_name`): its directory must exist, and a file opened where the file system has less
-/// than 20 KiB free gets no message (`DiagTarget::Discard`; `/dev/fd/2`, `/proc/self/fd/2`, a
-/// terminal's `/dev/pts/N`). On Windows, whose paths NCBI reads by other rules, the name is opened
-/// as it is.
+/// g_reg probes `ver_log_ok`, `ver_log_ok2`). The file is the one NCBI opens, by the rules of the
+/// platform (`open_log_file`): its directory must exist, and a file opened where the file system
+/// has less than 20 KiB free gets no message (`DiagTarget::Discard`; `/dev/fd/2`,
+/// `/proc/self/fd/2`, a terminal's `/dev/pts/N`).
 pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
     match (special_log_target(name), name) {
         (Some(target), _) => target,
         (None, None) => DiagTarget::Stderr,
-        #[cfg(not(windows))]
         (None, Some(name)) => open_log_file(name),
-        #[cfg(windows)]
-        (None, Some(name)) => match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(name)
-        {
-            Ok(file) => DiagTarget::File(file),
-            Err(_) => DiagTarget::Stderr,
-        },
     }
 }
 
@@ -2125,7 +2565,8 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
 // }
 // ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6592-6614 (`Reopen`; the handle opens
-// `CFile::ConvertToOSPath(fname)` with `O_WRONLY | O_APPEND | O_CREAT`, 6502-6516)
+// `CFile::ConvertToOSPath(fname)` with `O_WRONLY | O_APPEND | O_CREAT`, on Windows also
+// `O_BINARY | O_NOINHERIT`, 6495-6520)
 // ```c++
 //     m_LowDiskSpace = false;
 //     CDiagFileHandleHolder* new_handle;
@@ -2155,41 +2596,26 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
 // `Reopen`, 65 seconds on, finds the space; `Valid` holds with `m_LowDiskSpace`, so the log is
 // set up (ncbidiag.hpp:2672-2677). A file system that reports no free space (procfs, sysfs,
 // devpts, mqueue) never has it: its messages are lost.
-// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:745-750, 665-669, 693-696, 776-788
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:870-878 (the first `SetupDiag`, which
+// sets up the log; an exception that it throws leaves `AppMain`, which BLAST+'s programs return
+// from `main`, e.g. c++/src/app/blast/tblastx_app.cpp:230)
 // ```c++
-// string CDirEntry::ConvertToOSPath(const string& path)
-// {
-//     // Not process empty or absolute path
-//     if ( path.empty()  ||  IsAbsolutePathEx(path)) {
-//         return NormalizePath(path);
-//     }
-// ...
-// string CDirEntry::CreateAbsolutePath(const string& path, ERelativeToWhat rtw)
-// {
-//     if ( IsAbsolutePath(path) ) {
-//         return NormalizePath(path);
-//     }
-// ...
-//         case eRelativeToCwd:
-//             result = ConcatPath(CDir::GetCwd(), path);
-// ...
-// string CDirEntry::ConcatPath(const string& first, const string& second)
-// {
-//     // Prepare first part of path
-//     string path = AddTrailingPathSeparator(NStr::TruncateSpaces(first));
-//     // Remove leading separator in "second" part
-//     string part = NStr::TruncateSpaces(second);
-//     if ( !path.empty()  &&  part.length() > 0  &&  part[0] == DIR_SEPARATOR ) {
-//         part.erase(0,1);
-//     }
+//     try {
+//         CDiagContext::SetupDiag(diag, 0, eDCM_NoChange, m_LogFile);
+//     } catch (const CException& e) {
+//         NCBI_RETHROW(e, CAppException, eSetupDiag,
+//                      "Application diagnostic stream's setup failed");
+//     } catch (const exception& e) {
 // ```
 /// The paths that NCBI reads from a `-logfile` name that is not `""`, `-` or `/dev/null`
-/// (`log_file_name`, on Unix).
+/// (`log_file_name`).
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct LogFileName {
-    /// `CFile(file_name).GetDir()` (`SetLogFile`, quoted at `diag_target`): unless it is a
-    /// directory, the log is not set up and the messages stay on `cerr`; empty: not checked.
-    pub directory: Vec<u8>,
+    /// `CDir(CFile(file_name).GetDir())`'s path (`SetLogFile`, quoted at `diag_target`), as
+    /// `CDirEntry::Reset` leaves it: unless it is a directory, the log is not set up and the
+    /// messages stay on `cerr`. Empty (the directory of `//run.log`): no directory; `None`: not
+    /// checked (a name of separators only, `///`).
+    pub directory: Option<Vec<u8>>,
     /// `ConvertToOSPath(GetLogName())`: the file that is opened, made where it does not exist; a
     /// directory cannot be opened (`cerr`).
     pub path: Vec<u8>,
@@ -2199,114 +2625,111 @@ pub(crate) struct LogFileName {
 }
 
 /// The free space under which NCBI's log file gets no message (`Reopen`, quoted above).
-#[cfg(not(windows))]
 const LOW_DISK_SPACE: u64 = 1024 * 20;
 
-/// NCBI's reading of the `-logfile` name `name` on Unix, in the working directory `cwd` (`None`
-/// where it cannot be read: `CDir::GetCwd` gives ""): the one reading of these names for the
-/// command line (`diag_target`) and LOSAT Web (`report::run_files::RunFiles::log_target`, in a
-/// working directory of its own). A relative name is made absolute with the spaces at its ends cut
-/// (` run.log` is `run.log`) and normalized (`logs/` is `logs`, `a/../run.log` is `run.log` also
-/// where `a` is a link); an absolute name is normalized only where it is opened, and its free space
-/// is that of its directory as written (`/dev/fd/2`: `/dev/fd/`, which is procfs). NCBI keeps 2047
-/// bytes of the name it makes. The checks of `directory`, of the opened `path` and of the free
-/// space at `space` are the caller's.
-pub(crate) fn log_file_name(name: &[u8], cwd: Option<&[u8]>) -> LogFileName {
-    let mut log_name = if name.first() == Some(&b'/') {
+/// NCBI's reading of the `-logfile` name `name` by the path rules `rules`, in the working
+/// directory `cwd` (`None` where `CDir::GetCwd` gives "", `ncbi_cwd`): the one reading of these
+/// names for the command line (`diag_target`, `PathRules::HOST`) and LOSAT Web
+/// (`report::run_files::RunFiles::log_target`, Unix's, in a working directory of its own). A name
+/// that is not absolute is made so (`PathRules::absolute_path`: ` run.log` is `run.log` there,
+/// and `a/../run.log` is `run.log` also where `a` is a link); without a working directory it
+/// stays relative and is opened as such (`PathRules::os_path`). An absolute name is normalized
+/// only where it is opened, and its free space is that of its directory as written (`/dev/fd/2`:
+/// `/dev/fd/`, which is procfs). NCBI keeps 2047 bytes of the name it makes. `None` where NCBI's
+/// `CreateAbsolutePath` throws (Windows: `C:run.log`), which ends NCBI's program in its C++
+/// runtime (`AppMain`, quoted above): how it ends is the runtime's, not ported (the license rule
+/// of 2026-11-20, rule 2), so the command line keeps the messages on `cerr` (unverified: no
+/// Windows run). The checks of `directory`, of the opened `path` and of the free space at
+/// `space` are the caller's.
+pub(crate) fn log_file_name(
+    rules: PathRules,
+    name: &[u8],
+    cwd: Option<&[u8]>,
+) -> Option<LogFileName> {
+    let mut log_name = if rules.is_absolute(name) {
         name.to_vec()
     } else {
-        let mut path = crate::ncbi_str::truncate_spaces(cwd.unwrap_or_default()).to_vec();
-        if path.last().is_some_and(|byte| *byte != b'/') {
-            path.push(b'/');
-        }
-        let mut part = crate::ncbi_str::truncate_spaces(name);
-        if !path.is_empty() {
-            part = part.strip_prefix(b"/").unwrap_or(part);
-        }
-        path.extend_from_slice(part);
-        normalize_path(&path, None).expect("a path normalized without links has no link limit")
+        rules.absolute_path(name, cwd.unwrap_or_default())?
     };
     log_name.truncate(2047);
-    LogFileName {
-        directory: dir_entry_dir(name),
-        path: normalize_path(&log_name, None)
-            .expect("a path normalized without links has no link limit"),
-        space: dir_entry_dir(&log_name),
-    }
+    let directory = rules.dir(name);
+    Some(LogFileName {
+        directory: (!directory.is_empty()).then(|| rules.reset(&directory).to_vec()),
+        path: rules.os_path(&log_name),
+        space: rules.dir(&log_name),
+    })
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-313, 358-368, 475-483
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3708-3716 (`NcbiSys_getcwd` is
+// `getcwd`, on Windows `_wgetcwd` in NCBI's Unicode build, c++/include/corelib/ncbisys.hpp:60,
+// 125; `TXChar` is then `wchar_t`)
 // ```c++
-// void CDirEntry::Reset(const string& path)
+// string CDir::GetCwd(void)
 // {
-//     m_Path = path;
-//     size_t len = path.length();
-//     // Root dir
-//     if ((len == 1)  &&  IsPathSeparator(path[0])) {
-//         return;
+//     TXChar buf[4096];
+//     if ( NcbiSys_getcwd(buf, sizeof(buf)/sizeof(TXChar) - 1) ) {
+//         return _T_CSTRING(buf);
 //     }
-// ...
-//     m_Path = DeleteTrailingPathSeparator(path);
-// }
-// ...
-//     size_t pos = path.find_last_of(ALL_SEPARATORS);
-//     string filename = (pos == NPOS) ? path : path.substr(pos+1);
-//
-//     // Get dir
-//     if ( dir ) {
-//         *dir = (pos == NPOS) ? kEmptyStr : path.substr(0, pos+1);
-//     }
-// ...
-// string CDirEntry::GetDir(EIfEmptyPath mode) const
-// {
-//     string dir;
-//     SplitPath(GetPath(), &dir);
-//     if ( dir.empty()  &&  mode == eIfEmptyPath_Current  &&  !GetPath().empty() ) {
-//         return string(DIR_CURRENT) + DIR_SEPARATOR;
-//     }
-//     return dir;
+//     LOG_ERROR_ERRNO(90, "CDir::GetCwd(): Cannot get current directory");
+//     return kEmptyCStr;
 // }
 // ```
-/// `CDirEntry(path).GetDir()` on Unix: the directory of `path` without its trailing '/'s, with its
-/// last '/' (`./` for a name without one; empty for a path of '/'s only, which `Reset` empties).
-fn dir_entry_dir(path: &[u8]) -> Vec<u8> {
-    let path = if path == b"/" {
-        path
-    } else {
-        trim_trailing_slashes(path)
-    };
-    match path.iter().rposition(|byte| *byte == b'/') {
-        Some(at) => path[..=at].to_vec(),
-        None if path.is_empty() => Vec::new(),
-        None => b"./".to_vec(),
-    }
+/// The working directory as `CDir::GetCwd` reads it: `None` where it cannot be read, and for one
+/// of 4095 characters or more (bytes; UTF-16 units on Windows), for which a buffer of 4095 has no
+/// room with the closing NUL (POSIX `getcwd`'s `ERANGE`). `LOG_ERROR_ERRNO` posts nothing unless
+/// the registry turns the file API's logging on, which a run of BLAST+ does not (line WQA's D11
+/// round 3, 2026-11-20: NCBI BLAST+ 2.17.0 tblastx `-logfile run.log` in a working directory of
+/// 4298 bytes writes `run.log` there, with nothing on the standard error).
+fn ncbi_cwd() -> Option<OsString> {
+    getcwd_reads(std::env::current_dir().ok()?.into_os_string())
+}
+
+/// The working directory `cwd` where `getcwd(buf, 4095)` reads it (`ncbi_cwd`).
+fn getcwd_reads(cwd: OsString) -> Option<OsString> {
+    #[cfg(windows)]
+    let length = std::os::windows::ffi::OsStrExt::encode_wide(cwd.as_os_str()).count();
+    #[cfg(not(windows))]
+    let length = cwd.len();
+    (length < 4095).then_some(cwd)
+}
+
+/// The path of the bytes `path` that `log_file_name` gives.
+fn log_path(path: &[u8]) -> &Path {
+    // SAFETY: each path that `log_file_name` gives is made of the bytes of the name and of the
+    // working directory, both of the platform's encoding, joined and cut at ASCII bytes
+    // (separators, ':', spaces) and at a cut of the working directory that starts a character
+    // (`PathRules::absolute_path`), all boundaries of it.
+    Path::new(unsafe { OsStr::from_encoded_bytes_unchecked(path) })
 }
 
 /// The target of the `-logfile` name `name` (not a special one) on the file system: the file that
 /// NCBI opens (`log_file_name`), `cerr` where its directory is not one or it cannot be opened, and
 /// no message where its file system has less than 20 KiB free (the file is made all the same).
-#[cfg(not(windows))]
 fn open_log_file(name: &OsStr) -> DiagTarget {
-    let cwd = std::env::current_dir().ok();
-    let file = log_file_name(
+    let cwd = ncbi_cwd();
+    let Some(file) = log_file_name(
+        PathRules::HOST,
         name.as_encoded_bytes(),
-        cwd.as_ref().map(|cwd| cwd.as_os_str().as_encoded_bytes()),
-    );
-    fn path(bytes: &[u8]) -> &Path {
-        // SAFETY: each path is made of the bytes of `name` and of the working directory, both of
-        // the platform's encoding, joined and cut at '/' and at ASCII spaces, which are boundaries
-        // of it.
-        Path::new(unsafe { OsStr::from_encoded_bytes_unchecked(bytes) })
-    }
-    if !file.directory.is_empty() && !path(&file.directory).is_dir() {
+        cwd.as_ref().map(|cwd| cwd.as_encoded_bytes()),
+    ) else {
+        return DiagTarget::Stderr;
+    };
+    if file
+        .directory
+        .as_ref()
+        .is_some_and(|directory| directory.is_empty() || !log_path(directory).is_dir())
+    {
         return DiagTarget::Stderr;
     }
     match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(path(&file.path))
+        .open(log_path(&file.path))
     {
-        Ok(_) if free_disk_space(path(&file.space)).is_some_and(|free| free < LOW_DISK_SPACE) => {
+        Ok(_)
+            if free_disk_space(&file.space, cwd.as_deref())
+                .is_some_and(|free| free < LOW_DISK_SPACE) =>
+        {
             DiagTarget::Discard
         }
         Ok(opened) => DiagTarget::File(opened),
@@ -2331,22 +2754,105 @@ fn open_log_file(name: &OsStr) -> DiagTarget {
 //
 //     GET_STATFS_INFO;
 // ```
-/// `CFileUtil::GetFreeDiskSpace(path)` on Linux and macOS: the bytes free to a user on the file
-/// system of `path` (`statfs`'s `f_bsize * f_bavail`); `None` where it cannot be read, as NCBI's
-/// exception, which `Reopen` ignores, and on the other platforms.
+/// `CFileUtil::GetFreeDiskSpace(directory)` on Linux and macOS: the bytes free to a user on the
+/// file system of `directory` (`statfs`'s `f_bsize * f_bavail` in 64 bits, which wraps as NCBI's
+/// `Uint8` product does: 2^64 bytes or more free is the product modulo 2^64); `None` where it
+/// cannot be read, as NCBI's exception, which `Reopen` ignores, and on the platforms that NCBI
+/// does not build for (WASI).
 #[cfg(not(windows))]
-fn free_disk_space(path: &Path) -> Option<u64> {
+fn free_disk_space(directory: &[u8], _cwd: Option<&OsStr>) -> Option<u64> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        let stat = rustix::fs::statfs(path).ok()?;
-        let free = i128::from(stat.f_bsize) * i128::from(stat.f_bavail);
-        Some(u64::try_from(free).unwrap_or(u64::MAX))
+        let stat = rustix::fs::statfs(log_path(directory)).ok()?;
+        // The fields' types differ between the platforms; `as` converts as C's `(Uint8)` does.
+        #[allow(clippy::unnecessary_cast)]
+        let (block_size, blocks) = (stat.f_bsize as u64, stat.f_bavail as u64);
+        Some(free_space(block_size, blocks))
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
-        let _ = path;
+        let _ = directory;
         None
     }
+}
+
+/// `(Uint8)st.f_bsize * st.f_bavail` (`GET_STATFS_INFO`, quoted above): the product of 64-bit
+/// unsigned integers, modulo 2^64.
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
+fn free_space(block_size: u64, blocks: u64) -> u64 {
+    block_size.wrapping_mul(blocks)
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5107-5122, 5146-5152
+// ```c++
+// #if defined(NCBI_OS_MSWIN)
+//     // Try to get a root disk directory from given path
+//     string xpath = path;
+//     // Not UNC path
+//     if (!s_Win_IsNetworkPath(path)) {
+//         if ( !isalpha((unsigned char)path[0]) || path[1] != DISK_SEPARATOR ) {
+//             // absolute or relative path without disk name -- current disk,
+//             // dir entry should exists
+//             if ( CDirEntry(path).Exists() ) {
+//                 xpath = CDir::GetCwd();
+//             }
+//         }
+//         // Get disk root directory name from the path
+//         xpath[2] = '\\';
+//         xpath.resize(3);
+//     }
+// ...
+//     if (flags & fFSI_DiskSpace) {
+//         if ( !::GetDiskFreeSpaceEx(_T_XCSTRING(xpath),
+//                                    (PULARGE_INTEGER)&info->free_space,
+//                                    (PULARGE_INTEGER)&info->total_space, 0) ) {
+//             NCBI_THROW(CFileErrnoException, eFileSystemInfo, string(msg) + path);
+//         }
+//     }
+// ```
+/// `CFileUtil::GetFreeDiskSpace(directory)` on Windows: the bytes free to the caller on the disk
+/// of `directory` (`GetDiskFreeSpaceEx` of its root, `C:\`; of the network path as it is), with
+/// the working directory `cwd` (`ncbi_cwd`) for a path without a disk's name; `None` where it
+/// cannot be read, as NCBI's exception, which `Reopen` ignores. A path of fewer than 3 bytes
+/// there (only without a working directory) has NCBI write past the end of its string, which
+/// the C++ library decides: not ported (the license rule of 2026-11-20, rule 2), no check.
+/// Unverified: no Windows run.
+#[cfg(windows)]
+fn free_disk_space(directory: &[u8], cwd: Option<&OsStr>) -> Option<u64> {
+    let mut root = directory.to_vec();
+    if !PathRules::is_network_path(directory) {
+        let disk = directory.first().is_some_and(u8::is_ascii_alphabetic)
+            && directory.get(1) == Some(&b':');
+        if !disk && std::fs::metadata(log_path(directory)).is_ok() {
+            root = cwd
+                .map(OsStr::as_encoded_bytes)
+                .unwrap_or_default()
+                .to_vec();
+        }
+        if root.len() < 3 {
+            return None;
+        }
+        root.truncate(3);
+        root[2] = b'\\';
+    }
+    let root: Vec<u16> = std::str::from_utf8(&root)
+        .ok()?
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut free = 0u64;
+    let mut total = 0u64;
+    // SAFETY: `root` is a NUL-terminated UTF-16 string, and `free` and `total` are writable
+    // 64-bit integers that outlive the call.
+    let read = unsafe {
+        windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+            root.as_ptr(),
+            &mut free,
+            &mut total,
+            std::ptr::null_mut(),
+        )
+    };
+    (read != 0).then_some(free)
 }
 
 /// The target of NCBI's special `-logfile` names (quoted at `diag_target`): `cerr` without a name
@@ -4459,62 +4965,83 @@ mod tests {
         ));
     }
 
-    /// NCBI's reading of a `-logfile` name (quoted at `log_file_name`): the directory that
+    /// NCBI's reading of a `-logfile` name on Unix (quoted at `log_file_name`): the directory that
     /// `SetLogFile` checks, the file that is opened and the directory whose free space counts
     /// (line WQA's D11 round 2, 2026-11-20; NCBI BLAST+ 2.17.0 makes `logs` for `logs/`,
     /// `run.log` for ` run.log`, `run.log` for `a/../run.log` where `a` is a link, and
-    /// `abs/run.log` for `<dir>/abs/run.log/`).
+    /// `abs/run.log` for `<dir>/abs/run.log/`). Round 3: the directory of `//run.log` is `//`,
+    /// which `CDirEntry::Reset` empties (NCBI keeps the messages on `cerr`, also where `/` is
+    /// writable); without a working directory a relative name is opened with its '\' made '/'.
     #[test]
     fn a_log_name_is_read_as_ncbi_reads_it() {
         let read = |name: &[u8], cwd: Option<&[u8]>| {
-            let file = log_file_name(name, cwd);
+            let file = log_file_name(PathRules::Unix, name, cwd).expect("Unix reads every name");
             (file.directory, file.path, file.space)
         };
-        let paths = |directory: &str, path: &str, space: &str| {
-            (directory.into(), path.into(), space.into())
+        let paths = |directory: Option<&str>, path: &str, space: &str| {
+            (directory.map(Into::into), path.into(), space.into())
         };
         let cwd = Some(&b"/w"[..]);
         for (name, read_as) in [
-            ("run.log", paths("./", "/w/run.log", "/w/")),
-            ("logs/", paths("./", "/w/logs", "/w/")),
-            ("logs//", paths("./", "/w/logs", "/w/")),
-            ("run.log/", paths("./", "/w/run.log", "/w/")),
-            ("a/b/", paths("a/", "/w/a/b", "/w/a/")),
-            ("a/./", paths("a/", "/w/a", "/w/")),
-            (" run.log", paths("./", "/w/run.log", "/w/")),
-            ("run.log\t", paths("./", "/w/run.log", "/w/")),
+            ("run.log", paths(Some("."), "/w/run.log", "/w/")),
+            ("logs/", paths(Some("."), "/w/logs", "/w/")),
+            ("logs//", paths(Some("."), "/w/logs", "/w/")),
+            ("run.log/", paths(Some("."), "/w/run.log", "/w/")),
+            ("a/b/", paths(Some("a"), "/w/a/b", "/w/a/")),
+            ("a/./", paths(Some("a"), "/w/a", "/w/")),
+            (" run.log", paths(Some("."), "/w/run.log", "/w/")),
+            ("run.log\t", paths(Some("."), "/w/run.log", "/w/")),
             (
                 " logs/run.log",
-                paths(" logs/", "/w/logs/run.log", "/w/logs/"),
+                paths(Some(" logs"), "/w/logs/run.log", "/w/logs/"),
             ),
-            (" /run.log", paths(" /", "/w/run.log", "/w/")),
-            ("a/../run.log", paths("a/../", "/w/run.log", "/w/")),
-            ("../run.log", paths("../", "/run.log", "/")),
-            (".", paths("./", "/w", "/")),
-            ("  ", paths("./", "/w", "/")),
+            (" /run.log", paths(Some(" "), "/w/run.log", "/w/")),
+            ("a/../run.log", paths(Some("a/.."), "/w/run.log", "/w/")),
+            ("../run.log", paths(Some(".."), "/run.log", "/")),
+            (".", paths(Some("."), "/w", "/")),
+            ("  ", paths(Some("."), "/w", "/")),
             (
                 "/tmp/abs/run.log/",
-                paths("/tmp/abs/", "/tmp/abs/run.log", "/tmp/abs/"),
+                paths(Some("/tmp/abs"), "/tmp/abs/run.log", "/tmp/abs/"),
             ),
-            ("/dev/fd/2", paths("/dev/fd/", "/dev/fd/2", "/dev/fd/")),
+            ("/dev/fd/2", paths(Some("/dev/fd"), "/dev/fd/2", "/dev/fd/")),
             (
                 "//dev/./stderr",
-                paths("//dev/./", "/dev/stderr", "//dev/./"),
+                paths(Some("//dev/."), "/dev/stderr", "//dev/./"),
             ),
             (
                 "/dev/fd/../stderr",
-                paths("/dev/fd/../", "/dev/stderr", "/dev/fd/../"),
+                paths(Some("/dev/fd/.."), "/dev/stderr", "/dev/fd/../"),
             ),
-            ("/", paths("/", "/", "/")),
-            ("///", paths("", "/", "")),
+            ("/", paths(Some("/"), "/", "/")),
+            ("///", paths(None, "/", "")),
+            // A directory of '/'s only is no directory (round 3, M1).
+            ("//run.log", paths(Some(""), "/run.log", "//")),
+            ("///run.log", paths(Some(""), "/run.log", "///")),
+            ("//", paths(None, "/", "")),
+            // On Unix '\' is a byte of a name, ':' too.
+            ("a\\b.log", paths(Some("."), "/w/a\\b.log", "/w/")),
+            ("C:run.log", paths(Some("."), "/w/C:run.log", "/w/")),
         ] {
             assert_eq!(read(name.as_bytes(), cwd), read_as, "{name:?}");
         }
-        // Without a working directory (`GetCwd` gives "") the name stays relative.
-        assert_eq!(
-            read(b"logs/", None),
-            (b"./".to_vec(), b"logs".to_vec(), b"./".to_vec())
-        );
+        // Without a working directory (`GetCwd` gives "") the name stays relative, and is opened
+        // by `ConvertToOSPath`'s relative branch: each '\' is a '/' (round 3, M2), unless the name
+        // is a Windows disk's or network path (`IsAbsolutePathEx`).
+        for (name, read_as) in [
+            ("logs/", paths(Some("."), "logs", "./")),
+            ("run.log", paths(Some("."), "run.log", "./")),
+            (" run.log ", paths(Some("."), "run.log", "./")),
+            ("a\\b.log", paths(Some("."), "a/b.log", "./")),
+            ("..\\run.log", paths(Some("."), "../run.log", "./")),
+            ("a/..\\run.log", paths(Some("a"), "run.log", "a/")),
+            ("x..", paths(Some("."), "x..", "./")),
+            ("C:\\run.log", paths(Some("."), "C:\\run.log", "./")),
+            ("\\\\run.log", paths(Some("."), "\\\\run.log", "./")),
+            ("/abs\\run.log", paths(Some("/"), "/abs\\run.log", "/")),
+        ] {
+            assert_eq!(read(name.as_bytes(), None), read_as, "{name:?}");
+        }
         // NCBI keeps 2047 bytes of the name that it makes.
         let long = vec![b'x'; 3000];
         let (_, path, space) = read(&long, cwd);
@@ -4522,12 +5049,122 @@ mod tests {
         assert_eq!(space, b"/w/");
     }
 
+    /// NCBI's reading of a `-logfile` name on Windows (by NCBI's source: line WQA's D11 round 3,
+    /// 2026-11-20; no Windows run): '\' and '/' both separate directories, a relative name is
+    /// joined to the working directory with '\' and normalized, a name from one separator is on
+    /// the working directory's disk (its first 3 bytes, as they are), and a relative name with a
+    /// disk's ':' is none that NCBI reads (`CreateAbsolutePath` throws).
+    #[test]
+    fn a_log_name_is_read_on_windows_as_ncbi_reads_it() {
+        let read = |name: &str, cwd: Option<&str>| {
+            log_file_name(PathRules::Windows, name.as_bytes(), cwd.map(str::as_bytes))
+                .map(|file| (file.directory, file.path, file.space))
+        };
+        let paths = |directory: Option<&str>, path: &str, space: &str| {
+            Some((directory.map(Into::into), path.into(), space.into()))
+        };
+        let cwd = Some("C:\\w");
+        for (name, read_as) in [
+            ("run.log", paths(Some("."), "C:\\w\\run.log", "C:\\w\\")),
+            ("logs/", paths(Some("."), "C:\\w\\logs", "C:\\w\\")),
+            ("logs\\", paths(Some("."), "C:\\w\\logs", "C:\\w\\")),
+            (" run.log", paths(Some("."), "C:\\w\\run.log", "C:\\w\\")),
+            (
+                "logs\\run.log",
+                paths(Some("logs"), "C:\\w\\logs\\run.log", "C:\\w\\logs\\"),
+            ),
+            (
+                "a/../run.log",
+                paths(Some("a/.."), "C:\\w\\run.log", "C:\\w\\"),
+            ),
+            // After the disk's name a ".." stays (`C:` and `..`).
+            (
+                "..\\..\\run.log",
+                paths(Some("..\\.."), "C:\\..\\run.log", "C:\\..\\"),
+            ),
+            ("\\run.log", paths(Some("\\"), "C:\\\\run.log", "C:\\\\")),
+            ("/run.log", paths(Some("/"), "C:\\\\run.log", "C:\\/")),
+            (
+                "C:\\logs\\run.log",
+                paths(Some("C:\\logs"), "C:\\logs\\run.log", "C:\\logs\\"),
+            ),
+            ("C:/run.log/", paths(Some("C:/"), "C:\\run.log", "C:/")),
+            ("C:\\", paths(Some("C:\\"), "C:\\", "C:\\")),
+            (
+                "\\\\srv\\share\\run.log",
+                paths(
+                    Some("\\\\srv\\share"),
+                    "\\\\srv\\share\\run.log",
+                    "\\\\srv\\share\\",
+                ),
+            ),
+            ("C:run.log", None),
+            ("logs\\a:b", None),
+            ("//run.log", paths(Some(""), "\\\\run.log", "//")),
+        ] {
+            assert_eq!(read(name, cwd), read_as, "{name:?}");
+        }
+        // Without a working directory a name from one separator stays as it is.
+        assert_eq!(
+            read("\\run.log", None),
+            paths(Some("\\"), "\\run.log", "\\")
+        );
+        assert_eq!(read("run.log", None), paths(Some("."), "run.log", ".\\"));
+        // NCBI's `NormalizePath` on Windows.
+        for (path, normalized) in [
+            ("a/b\\c", "a\\b\\c"),
+            ("a\\.\\b\\..\\c\\", "a\\c"),
+            ("\\\\?\\C:\\x\\.\\y", "C:\\x\\y"),
+            ("\\\\?\\UNC\\srv\\share\\x", "\\\\srv\\share\\x"),
+            ("\\\\srv\\share\\..\\x", "\\\\srv\\x"),
+            ("\\a\\..\\..\\b", "\\b"),
+            ("C:", "C:"),
+            ("C:.", "C:."),
+            ("C:\\.", "C:\\"),
+            ("C:\\.\\", "C:\\"),
+            ("C:\\..", "C:\\.."),
+            ("C:\\a:b\\..\\x", "C:\\a:\\..\\x"),
+            ("C:\\x\\..", "C:"),
+            ("/", "\\"),
+            ("//", "\\"),
+            ("..\\a", "..\\a"),
+        ] {
+            assert_eq!(
+                PathRules::Windows.normalize(path.as_bytes(), None),
+                Some(normalized.as_bytes().to_vec()),
+                "{path:?}"
+            );
+        }
+    }
+
+    /// `CDir::GetCwd` reads a working directory of up to 4094 characters (`getcwd(buf, 4095)`),
+    /// and NCBI's free space is its `Uint8` product, modulo 2^64: 2^64 bytes free is none (line
+    /// WQA's D11 round 3, 2026-11-20).
+    #[test]
+    fn the_working_directory_and_the_free_space_are_ncbi_s() {
+        let directory = |length: usize| {
+            let mut cwd = "/".to_string();
+            cwd.push_str(&"d".repeat(length - 1));
+            OsString::from(cwd)
+        };
+        assert_eq!(getcwd_reads(directory(4094)), Some(directory(4094)));
+        assert_eq!(getcwd_reads(directory(4095)), None);
+        assert_eq!(getcwd_reads(directory(4298)), None);
+        assert_eq!(free_space(4096, 5), LOW_DISK_SPACE);
+        assert_eq!(free_space(4096, 1 << 52), 0);
+        assert_eq!(free_space(4096, (1 << 52) + 4), 4 * 4096);
+        assert_eq!(free_space(u64::MAX, 2), u64::MAX - 1);
+    }
+
     /// The command line opens the file that NCBI opens (`log_file_name`) and drops the messages
     /// of a file whose file system reports no free space (line WQA's D11 round 2, 2026-11-20;
     /// NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/fd/2` and `/proc/self/fd/2` write no message).
+    /// The file that the test opens through procfs is one of its own, whatever its standard
+    /// streams are (round 3).
     #[cfg(target_os = "linux")]
     #[test]
     fn the_command_line_opens_the_file_that_ncbi_opens() {
+        use std::os::fd::AsRawFd;
         let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-ncbi-environment-log-name-{}",
             crate::utils::test_dir::process_id()
@@ -4549,18 +5186,34 @@ mod tests {
         assert!(matches!(target("a/../linked.log"), DiagTarget::File(_)));
         assert!(dir.join("linked.log").is_file());
         assert!(!dir.join("deep/linked.log").exists());
-        std::fs::remove_dir_all(&dir).unwrap();
-        // procfs reports no free space: the file is opened and gets nothing.
-        for name in ["/dev/fd/2", "/proc/self/fd/2", "/dev/fd/../stderr"] {
+        // A directory of '/'s only is none (round 3, M1): no file at the root.
+        let rooted = format!(
+            "//losat-ncbi-environment-{}.log",
+            crate::utils::test_dir::process_id()
+        );
+        assert!(matches!(
+            diag_target(Some(OsStr::new(&rooted))),
+            DiagTarget::Stderr
+        ));
+        assert!(!Path::new(&rooted).exists());
+        // procfs reports no free space: a file opened through it gets nothing. Through a link
+        // in a directory with free space, the same file gets the messages.
+        let own = std::fs::File::create(dir.join("own.log")).unwrap();
+        let fd = own.as_raw_fd();
+        std::os::unix::fs::symlink(format!("/proc/self/fd/{fd}"), dir.join("own-link")).unwrap();
+        for name in [
+            format!("/dev/fd/{fd}"),
+            format!("/proc/self/fd/{fd}"),
+            format!("/dev/fd/../fd/{fd}"),
+        ] {
             assert!(
-                matches!(diag_target(Some(OsStr::new(name))), DiagTarget::Discard),
+                matches!(diag_target(Some(OsStr::new(&name))), DiagTarget::Discard),
                 "{name}"
             );
         }
-        assert!(matches!(
-            diag_target(Some(OsStr::new("/dev/stderr"))),
-            DiagTarget::File(_)
-        ));
+        assert!(matches!(target("own-link"), DiagTarget::File(_)));
+        drop(own);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The writes of an application start on the standard error stream and on the file of a

@@ -172,7 +172,10 @@ impl Drop for Registered {
 // (`/dev/fd/2`, `/proc/self/fd/2`, `/proc/self/comm`: NCBI writes nothing to a log file with less
 // than 20 KiB free). NCBI BLAST+ 2.17.0 and LOSAT's command line: `fix-logfile-dir/native` and
 // `fix-logfile-dir/r2` of line WQA, D11, 2026-11-20; a name with a directory was refused before,
-// and round 2 read the last ones as NCBI does.
+// and round 2 read the last ones as NCBI does. Round 3 (`fix-logfile-dir/r3`): `//run.log` has no
+// directory (stream 3), a user's command line makes no file in a directory of root's (`/run.log`,
+// `/etc/run.log`, `/var/log/run.log`, `/dev/run.log`) and opens none of its devices
+// (`/dev/kmsg`), but a new terminal's master (`/dev/ptmx`), whose messages are lost.
 #[test]
 fn the_logfile_is_a_file_of_the_run() {
     for (program, _, _) in SEARCHES {
@@ -285,6 +288,13 @@ fn the_logfile_is_a_file_of_the_run() {
             ("/proc/self/status", false),
             ("/dev/pts/0", false),
             ("/dev/null/x", false),
+            ("/dev/ptmx", to_log),
+            ("//run.log", false),
+            ("/run.log", false),
+            ("/etc/run.log", false),
+            ("/var/log/run.log", false),
+            ("/dev/run.log", false),
+            ("/dev/kmsg", false),
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", value]);

@@ -712,7 +712,11 @@ const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>
   // name in a device), and what it opens otherwise than by the name: the standard input (the null device), a file of
   // procfs (no free space) and a file of the working directory through procfs.
   "/dev/fd/3", "/proc/self/status", "/dev/null/x", "/dev/stdout/../stderr", "/dev/stdin", "/dev/fd/0", "/proc/self/comm",
-  "/proc/self/cwd/run.log"];
+  "/proc/self/cwd/run.log",
+  // Round 3: a directory of '/'s only is none (`CDirEntry::Reset` empties `//`), a user makes no file in a directory of
+  // root's and opens none of its devices but those whose writes are lost (a new terminal's master).
+  "//run.log", "/run.log", "/etc/run.log", "/var/log/run.log", "/home/run.log", "/dev/run.log", "/dev/kmsg", "/dev/console",
+  "/dev/ptmx"];
 
 // The CLI's run with its standard output and error on pipes, as a shell's `|` or a terminal gives them: node's child
 // processes get sockets, which `/dev/stdout` and `/dev/stderr` cannot open (ENXIO), so that NCBI and the CLI send the

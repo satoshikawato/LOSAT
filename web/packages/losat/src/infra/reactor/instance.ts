@@ -4,6 +4,7 @@ import { sha256Hex } from '../digest.js';
 import { ABI_VERSION, ReactorAbi, type AbiExports } from './abi.js';
 import { inspectReactor, type ReactorArtifact } from './artifact.js';
 import type { ReactorAsset } from './assets.js';
+import type { RunDirectory } from './run-directory.js';
 import { createWasi, type WasiContext } from './wasi.js';
 
 export interface CompiledReactor {
@@ -88,9 +89,12 @@ function checkVersion(abi: ReactorAbi): ReactorAbi {
   return abi;
 }
 
-/** Instantiates the serial module and runs its `_initialize`. */
-export async function instantiateSerial(module: WebAssembly.Module): Promise<ReactorInstance> {
-  const wasi = createWasi();
+/**
+ * Instantiates the serial module and runs its `_initialize`; `directory`, the run's working directory of the instance
+ * (run-directory.ts), if it has one.
+ */
+export async function instantiateSerial(module: WebAssembly.Module, directory?: RunDirectory): Promise<ReactorInstance> {
+  const wasi = createWasi(directory);
   const bound: { abi?: ReactorAbi } = {};
   const instance = await WebAssembly.instantiate(module, {
     ...hostImports((stream, ptr, len) => bound.abi!.emit(stream, ptr, len)),
@@ -106,14 +110,16 @@ export async function instantiateSerial(module: WebAssembly.Module): Promise<Rea
 /**
  * Instantiates the threaded module on the thread that calls the exports (the Engine
  * worker), with the shared memory and the `wasi.thread-spawn` of a ThreadHost, and runs
- * its `_initialize`.
+ * its `_initialize`; `directory`, the run's working directory that the instance's threads
+ * share (run-directory.ts), if it has one.
  */
 export async function instantiateThreadedMain(
   module: WebAssembly.Module,
   memory: WebAssembly.Memory,
   spawn: (startArg: number) => number,
+  directory?: RunDirectory,
 ): Promise<ReactorInstance> {
-  const wasi = createWasi();
+  const wasi = createWasi(directory);
   const bound: { abi?: ReactorAbi } = {};
   const instance = await WebAssembly.instantiate(module, {
     ...hostImports((stream, ptr, len) => bound.abi!.emit(stream, ptr, len)),

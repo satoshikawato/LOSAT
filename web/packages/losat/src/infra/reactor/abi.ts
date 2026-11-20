@@ -11,7 +11,7 @@ import { FileReadError, type StartResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 4;
+export const ABI_VERSION = 6;
 /** Stream 2: the JSON response of describe, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -152,7 +152,8 @@ export interface RegisteredInput {
  */
 export interface RegisteredInputs {
   readonly query: RegisteredInput;
-  readonly subject: RegisteredInput;
+  /** None for a run of `-db`, whose subjects are the database's (*inputs* `subject` null). */
+  readonly subject: RegisteredInput | undefined;
   readonly shownIds: ShownIds;
 }
 
@@ -253,8 +254,8 @@ export class ReactorAbi {
 
   /**
    * The *start* JSON of an argv (ABI v2 §4 `losat_web2_start`, §9): the registry file of its
-   * `-conffile`, the file of its `-logfile`, whether it is a dry run and whether its inputs are read
-   * together (`registerInputs`); or the CLI's message for an argv that the engine cannot start (a
+   * `-conffile`, the file of its `-logfile`, whether it is a dry run, whether its inputs are read
+   * together (`registerInputs`) and whether it searches the database of `-db` (`database`); or the CLI's message for an argv that the engine cannot start (a
    * version word, a program that ABI v2 does not run).
    */
   start(argv: readonly string[]): StartResult {
@@ -265,10 +266,17 @@ export class ReactorAbi {
       log_file: string | null;
       dry_run: boolean;
       register_inputs: boolean;
+      database: boolean;
     };
     return {
       ok: true,
-      start: { conffile: json.conffile, logFile: json.log_file, dryRun: json.dry_run, registerInputs: json.register_inputs },
+      start: {
+        conffile: json.conffile,
+        logFile: json.log_file,
+        dryRun: json.dry_run,
+        registerInputs: json.register_inputs,
+        database: json.database,
+      },
     };
   }
 
@@ -294,11 +302,12 @@ export class ReactorAbi {
    * Reads the query and the subject of the run of `argv` together, as the CLI reads its `-query` and
    * `-subject` for that argv (ABI v2 §4 `losat_web2_register_inputs`): the inputs of a run whose
    * *start* JSON says `register_inputs` (`-parse_deflines`, line WQA's sweep, D7, 2026-11-19). Only
-   * the run of `argv` takes the two handles; the error is the CLI's message for these inputs.
+   * the run of `argv` takes the two handles; the error is the CLI's message for these inputs. A run of
+   * `-db` takes no subject: its `subject` is empty, and the query is read alone (line WQA D12a).
    */
   registerInputs(argv: readonly string[], query: Uint8Array, subject: Uint8Array): RegisteredInputs {
     this.check(this.call(this.exports.losat_web2_register_inputs, [encoder.encode(argv.join('\0')), query, subject]));
-    const response = this.response() as { query: RecordsResponse; subject: RecordsResponse };
+    const response = this.response() as { query: RecordsResponse; subject: RecordsResponse | null };
     const handles = [response?.query?.handle, response?.subject?.handle].filter((handle) => typeof handle === 'number');
     try {
       const read = (input: RecordsResponse) => ({
@@ -312,10 +321,11 @@ export class ReactorAbi {
             return shown_id;
           }),
         );
+      const subjects = response.subject;
       return {
         query: read(response.query),
-        subject: read(response.subject),
-        shownIds: Object.freeze({ query: shown(response.query), subject: shown(response.subject) }),
+        subject: subjects === null ? undefined : read(subjects),
+        shownIds: Object.freeze({ query: shown(response.query), subject: subjects === null ? Object.freeze([]) : shown(subjects) }),
       };
     } catch (error) {
       // Handles whose response cannot be read are not used: give their copies of the inputs back.

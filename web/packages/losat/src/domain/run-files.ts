@@ -12,6 +12,18 @@ export interface RegistryFile {
   readonly file: Blob;
 }
 
+/**
+ * A file of the run's working directory (docs/web/abi_v2.md §3): a file that the argv names, as the user gave
+ * it, under its path in that directory (`/` between the names of its folders; the argv names it so, as on the
+ * command line run from that directory): the files of a BLAST database of `-db` (`nt.nal`, `nt.00.nin`, ...,
+ * `taxdb.btd`), and the lists of its filters (`-seqidlist ids.txt`). The engine opens it by that name and reads it
+ * in place: a Blob crosses to a worker without a copy of its bytes (line WQA D12a, 2026-11-20).
+ */
+export interface DirectoryFile {
+  readonly name: string;
+  readonly file: Blob;
+}
+
 /** A file that a run made besides its outputs (stream 8): the file of `-logfile NAME`, named NAME. */
 export interface RunFile {
   readonly name: string;

@@ -6,7 +6,7 @@ import type { OutputFormat } from '../domain/output-format.js';
 import type { ResolvedDefault } from '../domain/parameters.js';
 import type { ProgramId } from '../domain/programs.js';
 import type { CountsFile, CountsUse } from '../domain/counts.js';
-import type { MessagePlace, RegistryFile, RunFile } from '../domain/run-files.js';
+import type { DirectoryFile, MessagePlace, RegistryFile, RunFile } from '../domain/run-files.js';
 
 export interface ParameterDescription {
   readonly flag: string;
@@ -50,6 +50,11 @@ export interface StartInfo {
    * Engine worker registers a run's inputs by it.
    */
   readonly registerInputs: boolean;
+  /**
+   * Whether a run of the argv searches the database of `-db`, which the engine opens in the run's working directory
+   * (`EngineRunRequest.files`), and takes no subject (line WQA D12a, 2026-11-20).
+   */
+  readonly database: boolean;
 }
 
 /** The engine's *start* of an argv, or the CLI's message for an argv that it cannot start (a version word). */
@@ -149,7 +154,15 @@ export interface EngineRunRequest {
   readonly runId: string;
   readonly argv: readonly string[];
   readonly query: EngineInput;
-  readonly subject: EngineInput;
+  /** The subject; none for a run of `-db` (`StartInfo.database`), which searches the database of `files`. */
+  readonly subject?: EngineInput;
+  /**
+   * The files of the run's working directory (docs/web/abi_v2.md §3), which the engine opens by the names that the argv
+   * gives, as the command line opens them in its directory: the files of the BLAST database of `-db`, `taxdb.*`, the
+   * lists of its filters (`-seqidlist`, `-taxidlist`, `-gilist` and their negatives). The engine reads each in place,
+   * the bytes that it asks for at a time; none is copied whole (line WQA D12a, 2026-11-20).
+   */
+  readonly files?: readonly DirectoryFile[];
   readonly requestedThreads: number | 'auto';
   /** The file of `-window_masker_db`, when the argv has it. */
   readonly windowMasker?: CountsFile;

@@ -17,6 +17,7 @@
 // pool spawns, and they cannot return while it waits, because the engine's thread library holds a
 // lock across `thread-spawn` that an ending thread needs (S09). A search of N threads therefore
 // has one set of N-1 thread workers, all ready before the search starts (`prepare`).
+import { RunDirectory, TABLE_BYTES } from '../reactor/run-directory.js';
 import { endWaits, growToMaximum } from '../reactor/shared-memory.js';
 import type { InstanceUse } from './instance-use.js';
 import type { MainLinks } from './link.js';
@@ -49,6 +50,12 @@ export interface ThreadHostOptions {
    * the memory.
    */
   readonly use: InstanceUse;
+  /**
+   * The run's working directory of the instance (run-directory.ts), on a table of descriptors in a SharedArrayBuffer:
+   * each thread worker shares the table, and each thread starts with the directory's files of the run that spawns it.
+   * An empty one of its own by default (an instance without files).
+   */
+  readonly directory?: RunDirectory;
   readonly createWorker?: () => Worker;
   /** Starts the keeper of the memory (tests may start a fake one). */
   readonly createKeeper?: () => Worker;
@@ -93,8 +100,10 @@ export class ThreadHost {
   private readonly keeper: Worker;
   private keeperReady = false;
   private keeperError: string | undefined;
+  private readonly directory: RunDirectory;
 
   constructor(private readonly options: ThreadHostOptions) {
+    this.directory = options.directory ?? new RunDirectory(new SharedArrayBuffer(TABLE_BYTES));
     this.keeper =
       options.createKeeper?.() ??
       new Worker(new URL('./memory-keeper-worker.js', import.meta.url), { type: 'module', name: 'losat-memory' });
@@ -151,7 +160,13 @@ export class ThreadHost {
     this.options.use.startThread();
     const tid = this.nextTid++;
     const started = new Int32Array(new SharedArrayBuffer(4));
-    const command: ThreadCommand = { type: 'start', tid, startArg, started: started.buffer as SharedArrayBuffer };
+    const command: ThreadCommand = {
+      type: 'start',
+      tid,
+      startArg,
+      started: started.buffer as SharedArrayBuffer,
+      files: this.directory.list,
+    };
     slot.worker.postMessage(command);
     // In slices: in WebKit a worker whose thread waits ends only when the wait returns, and keeps
     // the shared memory until then (shared-memory.ts, endWaits).
@@ -254,6 +269,7 @@ export class ThreadHost {
       slot: state.buffer as SharedArrayBuffer,
       faults,
       use: this.options.use.buffer,
+      directory: this.directory.table as SharedArrayBuffer,
     };
     worker.postMessage(command, [faults]);
     return slot;

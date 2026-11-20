@@ -16,7 +16,9 @@
 // -logfile, or nowhere) comes back with its result too (line WQA's sweep, D7, 2026-11-20). The
 // warnings of a run (stream 3) go to the Data worker; a run that the engine failed ends its output
 // with `fail`, so that the Data worker keeps those of a failed run (line WQA's sweep, D3,
-// 2026-11-19).
+// 2026-11-19). A run's files (`files`: the database of -db, the lists of its filters) are the
+// files of the instance's working directory for that run (run-directory.ts), which the engine
+// opens by name and reads in place; a run of -db takes no subject (line WQA D12a, 2026-11-20).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
 import { readStoredZip, type MessagePlace, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase } from '../../ports/engine.js';
@@ -40,11 +42,12 @@ import {
 } from '../reactor/abi.js';
 import type { ReactorArtifact } from '../reactor/artifact.js';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance.js';
+import { RunDirectory, TABLE_BYTES } from '../reactor/run-directory.js';
 import { createSharedMemory } from '../reactor/shared-memory.js';
 import { RunOutputWriter } from '../run-output/writer.js';
 import type { InstanceUse } from './instance-use.js';
 import type { MainLinks } from './link.js';
-import type { RuntimePath, WorkerCounts, WorkerRun, WorkerRunResult } from './protocol.js';
+import type { RuntimePath, WorkerCounts, WorkerInput, WorkerRun, WorkerRunResult } from './protocol.js';
 import { ThreadHost } from './thread-host.js';
 import { warmUp } from './warm-up.js';
 
@@ -83,6 +86,8 @@ interface HeldCounts {
 interface Loaded {
   readonly path: RuntimePath;
   readonly instance: ReactorInstance;
+  /** The run's working directory of the instance (run-directory.ts): the files of the run that it runs. */
+  readonly directory: RunDirectory;
   readonly threads?: ThreadHost;
   runs: number;
   retained: Retained | undefined;
@@ -207,10 +212,17 @@ export class EngineRuntime {
       }
     };
     try {
+      // The files that the argv names, opened by the engine from here on (validate checks some of them, as the CLI does).
+      loaded.directory.open(request.files ?? []);
       const invalid = abi.validate(argv);
       if (invalid !== undefined) throw new EngineCallError(invalid);
       const started = abi.start(argv);
       if (!started.ok) throw new EngineCallError(started.message);
+      // A run of -db searches the database of its directory: it has no subject, and the engine takes subject handle 0
+      // (ABI v2 §4). Any other run has one.
+      const database = started.start.database;
+      if (database && request.subject !== undefined) throw new EngineCallError('a run of -db has no subject: give no subject');
+      if (!database && request.subject === undefined) throw new EngineCallError('this run needs a subject (or -db)');
 
       // -parse_deflines (line WQA's sweep, D7, 2026-11-19): the CLI reads the subjects and then the
       // query of this argv in one scope of IDs, so the engine reads both inputs together for it, and
@@ -218,18 +230,23 @@ export class EngineRuntime {
       // released first: the instance does not hold two copies of the subject.
       let together: RegisteredInputs | undefined;
       if (started.start.registerInputs) {
-        this.releaseRetained(loaded);
-        together = abi.registerInputs(argv, request.query.bytes, request.subject.bytes);
-        ownSubject = together.subject.handle;
+        if (!database) this.releaseRetained(loaded);
+        together = abi.registerInputs(argv, request.query.bytes, request.subject?.bytes ?? new Uint8Array(0));
+        ownSubject = together.subject?.handle;
       }
       const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, request.query.bytes);
       query = registered.handle;
       const queryMismatch = recordMismatch(request.query.records, registered.records);
       if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
-      const subjectRetained = together === undefined && loaded.retained?.key === request.subject.key;
-      const subject = together?.subject ?? this.subject(loaded, request);
-      const subjectMismatch = recordMismatch(request.subject.records, subject.records);
-      if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
+      const given = request.subject;
+      const subjectRetained = given !== undefined && together === undefined && loaded.retained?.key === given.key;
+      let subjectHandle = 0;
+      if (given !== undefined) {
+        const subject = together?.subject ?? this.subject(loaded, given, request.program);
+        const subjectMismatch = recordMismatch(given.records, subject.records);
+        if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
+        subjectHandle = subject.handle;
+      }
       const shownIds = together?.shownIds;
 
       const writer = new RunOutputWriter(request.output);
@@ -241,7 +258,7 @@ export class EngineRuntime {
       const archive: Uint8Array[] = [];
       let messages: MessagePlace | undefined;
       try {
-        abi.run(argv, registered.handle, subject.handle, (stream, bytes) => {
+        abi.run(argv, registered.handle, subjectHandle, (stream, bytes) => {
           this.options.beforeOutput?.();
           if (stream === RUN_FILES_STREAM) archive.push(bytes.slice());
           else if (stream === MESSAGES_STREAM) messages = messagesPlace(bytes);
@@ -337,6 +354,8 @@ export class EngineRuntime {
     try {
       if (use !== undefined) this.options.onUse?.();
       loaded.ran.add(key);
+      // On built-in sequences, with no file.
+      loaded.directory.open([]);
       warmUp(loaded.instance.abi, argv);
       loaded.instance.wasi.clear();
     } finally {
@@ -399,12 +418,12 @@ export class EngineRuntime {
   }
 
   /** The subject handle: the retained one if its key matches, else a new registration. */
-  private subject(loaded: Loaded, request: WorkerRun): Retained {
+  private subject(loaded: Loaded, given: WorkerInput, program: string): Retained {
     const abi = loaded.instance.abi;
-    if (loaded.retained?.key === request.subject.key) return loaded.retained;
+    if (loaded.retained?.key === given.key) return loaded.retained;
     this.releaseRetained(loaded);
-    const registered = abi.register(request.program, ROLE_SUBJECT, request.subject.bytes);
-    loaded.retained = { key: request.subject.key, handle: registered.handle, records: registered.records };
+    const registered = abi.register(program, ROLE_SUBJECT, given.bytes);
+    loaded.retained = { key: given.key, handle: registered.handle, records: registered.records };
     return loaded.retained;
   }
 
@@ -422,8 +441,9 @@ export class EngineRuntime {
     // The Gateway asks the keeper whose link came last (gateway.ts): the keeper of the other memory ends first.
     if (!this.dispose()) throw new Error(ENDING);
     if (path === 'serial') {
-      const instance = await instantiateSerial(await this.options.serial());
-      this.loaded = { path, instance, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
+      const directory = new RunDirectory();
+      const instance = await instantiateSerial(await this.options.serial(), directory);
+      this.loaded = { path, instance, directory, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
       return this.loaded;
     }
     const unsupported = threadedSupport();
@@ -434,10 +454,12 @@ export class EngineRuntime {
     // The maximum that the module declares, or a smaller one where the browser cannot
     // reserve it; never a larger one (plan TD-7).
     const { memory, maximumPages } = createSharedMemory(artifact.memory);
-    const threads = new ThreadHost({ module, memory, maximumPages, main: this.options.main, use });
+    // The table of the directory's descriptors, which every thread of the instance shares.
+    const directory = new RunDirectory(new SharedArrayBuffer(TABLE_BYTES));
+    const threads = new ThreadHost({ module, memory, maximumPages, main: this.options.main, use, directory });
     try {
-      const instance = await instantiateThreadedMain(module, memory, threads.spawn);
-      this.loaded = { path, instance, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
+      const instance = await instantiateThreadedMain(module, memory, threads.spawn, directory);
+      this.loaded = { path, instance, directory, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
       return this.loaded;
     } catch (error) {
       threads.terminate();

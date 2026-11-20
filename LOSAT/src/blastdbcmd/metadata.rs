@@ -8,7 +8,7 @@ use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::Ostream;
 use crate::seqdb::date::iso8601_date_time;
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
-use crate::writedb::metadata::{db_files_metadata, DbMetadata};
+use crate::writedb::metadata::{db_files_metadata, metadata_user_path, DbMetadata};
 
 use super::{database_error, refusal, Diag};
 
@@ -93,13 +93,7 @@ pub(super) fn metadata(
     diag: &mut Diag,
     out: &mut Ostream<'_>,
 ) -> i32 {
-    let mut prefix = args
-        .value("metadata_output_prefix")
-        .unwrap_or("")
-        .to_string();
-    if !prefix.is_empty() && !prefix.ends_with(std::path::MAIN_SEPARATOR) {
-        prefix.push(std::path::MAIN_SEPARATOR);
-    }
+    let prefix = metadata_user_path(args.value("metadata_output_prefix"));
     let dbname: Vec<&str> = name
         .split(' ')
         .filter(|piece| !piece.is_empty())

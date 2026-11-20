@@ -1574,6 +1574,24 @@ fn the_metadata_files_of_version_5_are_makeblastdb_s() {
     run_v5_cases("J_");
 }
 
+/// `-metadata_output_prefix` as makeblastdb 2.17.0 has it: the prefix before each name of the
+/// metadata's `files`, with a separator added when it has none (`x`) and not when it has one
+/// (`/data/blast/`), nothing for the empty value, every volume and the alias file of a database
+/// of several volumes, version 4, a nucleotide database, and a quote, a backslash, a tab and
+/// UTF-8 in the value (line RG item D3a).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+#[cfg_attr(
+    windows,
+    ignore = "the separator added is `\\` on Windows (makeblastdb's too); the runs recorded are Linux's"
+)]
+fn metadata_output_prefix_runs_as_makeblastdb() {
+    run_v5_cases("P_");
+}
+
 /// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed
 /// name, sw8 probe 2026-11-13): after the warning that the file does "NOT appear to be FASTA",
 /// the build skips it, without its "Adding sequences" line, and ends with exit status 0; a build

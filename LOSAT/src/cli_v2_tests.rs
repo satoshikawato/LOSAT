@@ -393,7 +393,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
 
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in ["-gi_mask", "-gi_mask_name", "-randomize", "-oid_masks"] {
+    for option in ["-gi_mask", "-gi_mask_name", "-randomize"] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(

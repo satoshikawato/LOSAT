@@ -931,6 +931,12 @@ impl<'a> BuildDatabase<'a> {
     //     m_Taxids.Reset(& taxids);
     // }
     // ```
+    /// `oid_masks` of the `CBuildDatabase` constructor (`-oid_masks`): the OID mask files the
+    /// volumes write (`writedb::oid_list`).
+    pub fn set_oid_masks(&mut self, oid_masks: u64) {
+        self.output_db.set_oid_masks(oid_masks);
+    }
+
     /// `SetTaxids`: the taxids of `-taxid` or `-taxid_map`.
     pub fn set_taxids(&mut self, taxids: TaxIdSet) {
         self.taxids = taxids;

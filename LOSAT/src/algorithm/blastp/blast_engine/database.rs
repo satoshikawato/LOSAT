@@ -3620,6 +3620,7 @@ mod tests {
                 metadata_output_prefix: None,
                 logfile: None,
                 parse_seqids: false,
+                oid_masks: None,
                 hash_index: false,
                 taxid: None,
                 taxid_map: None,

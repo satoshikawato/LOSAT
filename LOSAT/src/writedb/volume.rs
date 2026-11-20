@@ -2,12 +2,14 @@
 //! `c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp`).
 
 use super::convert::find_sequence_length;
+use super::fasta_source::post_seq_id_warning;
 use super::files::{
     make_short_name, orig_num_digits, DbVersion, HeaderFile, IndexFile, OffsetArrays, SequenceFile,
 };
 use super::id_set::LabelSet;
 use super::isam::{GiIndex, IsamType, NumericIsam, PigIsam, StringIsam, StringIsamScratch};
 use super::mask_data::column::{Column, ColumnMeta};
+use super::oid_list::{is_model, OidList, EXCLUDE_MODEL};
 use super::WriteDbError;
 use crate::seqid::{label, ParsedSeqId};
 
@@ -74,6 +76,8 @@ pub(crate) struct Volume {
     open: bool,
     /// `m_Columns`: the mask column (`BlastDb/MaskData`) when the database has mask data.
     mask_column: Option<Column>,
+    /// `m_ExModelList`: the OIDs of models, for `-oid_masks` with `fExcludeModel`.
+    excluded_models: Option<OidList>,
 }
 
 /// The two blobs of the mask column for one sequence (the offsets in big-endian and in
@@ -174,6 +178,7 @@ impl Volume {
         arrays: OffsetArrays,
         indices: Indices,
         scratch: IndexScratch,
+        oid_masks: u64,
     ) -> Result<Self, WriteDbError> {
         // NCBI does not test whether the three files opened: a file that cannot be opened is
         // written to nowhere (`super::ofstream`) and the build goes on.
@@ -223,6 +228,8 @@ impl Volume {
             oid: 0,
             open: true,
             mask_column: None,
+            excluded_models: (oid_masks & EXCLUDE_MODEL != 0)
+                .then(|| OidList::exclude_model(dbname, protein, index, max_file_size)),
         })
     }
 
@@ -457,6 +464,7 @@ impl Volume {
         ids: &[ParsedSeqId],
         hash: u32,
         mask: MaskBlobs<'_>,
+        diagnostics: &mut Vec<u8>,
     ) -> Result<bool, WriteDbError> {
         if seq.is_empty() || binhdr.is_empty() {
             return Err(WriteDbError::Creation(
@@ -548,6 +556,18 @@ impl Volume {
         //         }
         //     }
         // ```
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:293-308
+        // `IdentifyAccession` posts its warnings again here, after those of the next sequence's
+        // definition line (makeblastdb 2.17.0, line RG item D3b probe `pg1`).
+        if let Some(models) = &mut self.excluded_models {
+            let mut post = |line: &[u8]| {
+                diagnostics.extend_from_slice(line);
+                diagnostics.push(b'\n');
+            };
+            if is_model(ids, &mut |warning| post_seq_id_warning(warning, &mut post)) {
+                models.add_oid(self.oid);
+            }
+        }
         // Every sequence adds its blobs to the column, empty ones too.
         if let Some(column) = &mut self.mask_column {
             column.add_blob(mask.blob, mask.blob2)?;
@@ -603,6 +623,10 @@ impl Volume {
                     hash.close()?;
                 }
                 indices.id_set.clear();
+            }
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:363-365
+            if let Some(models) = &mut self.excluded_models {
+                models.close(self.oid)?;
             }
             // The columns are closed after the other files (writedb_volume.cpp:362-367).
             if let Some(column) = &mut self.mask_column {
@@ -686,6 +710,9 @@ impl Volume {
                 hash.rename_single();
             }
         }
+        if let Some(models) = &mut self.excluded_models {
+            models.file_mut().rename_single();
+        }
         if let Some(column) = &mut self.mask_column {
             column.rename_single();
         }
@@ -749,6 +776,9 @@ impl Volume {
                 hash.rename_file_index(num_digits);
             }
         }
+        if let Some(models) = &mut self.excluded_models {
+            models.file_mut().rename_file_index(num_digits);
+        }
         if let Some(column) = &mut self.mask_column {
             column.rename_file_index(num_digits);
         }
@@ -801,6 +831,9 @@ impl Volume {
                 hash.list_files(files);
             }
             files.push(indices.gi_index.filename().to_string());
+        }
+        if let Some(models) = &self.excluded_models {
+            files.push(models.filename().to_string());
         }
         if let Some(column) = &self.mask_column {
             column.list_files(files);

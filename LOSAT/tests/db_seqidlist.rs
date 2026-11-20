@@ -81,17 +81,16 @@ fn a_list_file_off_the_search_path_is_ncbis_memory_map_error() {
         let err = String::from_utf8_lossy(&err);
         assert_eq!(rc, 255, "{program}: {err}");
         assert!(out.is_empty(), "{program}");
-        assert!(
-            err.starts_with("Error: NCBI C++ Exception:\n    T0 \""),
-            "{program}: {err}"
-        );
-        assert!(
-            err.ends_with(
-                "/src/corelib/ncbifile.cpp\", line 5754: Error: (CFileException::eMemoryMap) \
+        // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8; the mapping leaves
+        // out NCBI's build tree, which the test did not compare either).
+        assert_eq!(
+            err,
+            losat::wording::losat_text(
+                "Error: NCBI C++ Exception:\n    T0 \"/src/corelib/ncbifile.cpp\", line 5754: Error: (CFileException::eMemoryMap) \
                  ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory mapped the file must exist: \
                  ''\n\n"
             ),
-            "{program}: {err}"
+            "{program}"
         );
         let (_, err, rc) = search(
             program,

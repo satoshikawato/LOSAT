@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.22 (2026-11-20, Owner: the text of exception 11 is approved)
+- Version: 1.23 (pending: the Owner's review of exceptions 12 and 13, line NW's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -42,7 +42,11 @@
   2026-11-20; the Owner approved its text the same day, with no words: at 14:24 JST the Owner
   pressed "Ready for review" on pull request #1355, which its description named as the Owner's
   decision on the text; the bar is cleared at the end of each batch's search since this version,
-  Owner-delegated, the same standing instruction)
+  Owner-delegated, the same standing instruction); 1.23 2026-11-20 (exception 12:
+  messages in LOSAT's words; the Owner's instruction of 2026-11-20, line NW, NW DECISIONS 1, 5, 6;
+  exception 13: the SAM `@PG CL:` tag, recording `docs/decisions/OWNER_DECISIONS.md` entry 7 of
+  2026-10-19, Owner-delegated, which said the difference goes into a product decision; found by
+  line MAN's review)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -265,6 +269,48 @@ BLAST+.
    with `-num_threads` 2 or more and two subjects or more shows a progress bar on the standard
    error while it searches, where NCBI BLAST+ 2.17.0 shows none; the bar is cleared when the search
    of each query batch ends, and a standard error sent to a file or a pipe gets none of it.
+
+12. **Messages in LOSAT's words** (version 1.23, 2026-11-20). The Owner, 2026-11-20 (verbatim):
+   「てかメッセージとかで「BLAST+のマニュアルを参照してください」とかNCBIの文言がそのまま出てきてるやつ、全部LOSATに直しといて」;
+   the prefixes stay (the Owner's 「すべて推奨通り」 to keeping `BLAST query/options error:` and its
+   siblings, the same day). Where NCBI's messages name NCBI's product or show the internals of
+   NCBI's C++ Toolkit, LOSAT's say it in LOSAT's words, in standard error, in the library's and the
+   Web engine's errors and in an archive's messages (`Blast4-error.message`):
+   - the footer of the query, input, filtering, scoring, formatting, strategy, archive and
+     `blastdbcmd` taxonomy errors, `Please refer to the BLAST+ user manual.`, reads
+     `Please refer to the LOSAT user manual.`;
+   - an exception report (`CException::what()`, NCBI's `NCBI C++ Exception:` and one
+     `T0 "<NCBI's build tree>/<file>", line <n>: Error: (<class>::<code>) <function>() - <message>`
+     line for each exception of the chain) keeps the messages only: the first after the text
+     before the report, each further one on its own line with NCBI's indentation; a post of an
+     exception (`Error: (<class>::<code>) <message>`) drops the class and code, and inside a line
+     (`Application's initialization failed (<class>::<code>) <message>`) they become `: `, as does a
+     report glued to the text before it (NCBI's `<message>NCBI C++ Exception:` posts, which
+     read `<message>: <message>`);
+     `(m_Pos = <n>)` reads `(position <n>)`;
+   - LOSAT's refusals say `the option -logfile` where they said `the NCBI C++ Toolkit option
+     -logfile`, and LOSAT Web's notices no longer call the running program BLAST+.
+   The error category prefixes (`BLAST query/options error:`, `BLAST engine error:`,
+   `BLAST Database error:`, `BLAST options error:`), NCBI's diagnostic codes such as `(106.15)`,
+   the message bodies (also where they name an NCBI function, such as
+   `CSeq_align::GetSeqRange(): Row is empty`), every error condition, exit status and search
+   result, `-version`, `-help` and `-xmlhelp` stay NCBI's. LOSAT's refusals that name
+   `NCBI BLAST+` speak of NCBI's program and stay. One producer: `LOSAT/src/wording.rs`
+   (`USER_MANUAL_FOOTER`; `losat_text`, which `ncbi_exception::NcbiException` applies to the
+   report it builds as NCBI's, as do its posts, `post_line_in`). The comparisons with NCBI's
+   freezes apply the same function to the freeze (`losat_output_bytes`; AGENTS.md rule 8).
+   Release-notes sentence: Error messages refer to the LOSAT user manual and no longer show NCBI's
+   C++ exception reports (source paths, class names); the `BLAST ... error:` prefixes and exit
+   statuses are unchanged.
+
+13. **SAM `@PG CL:`** (version 1.23, 2026-11-20, Owner-delegated, recording the decision of
+   2026-10-19, `docs/decisions/OWNER_DECISIONS.md` entry 7). BLASTN `-outfmt 17` writes in the
+   `CL:` tag of the `@PG` line the command line LOSAT was run with, each argument (the program
+   name first) followed by one space, as NCBI's `GetCmdlineArgs` writes its own
+   (`LOSAT/src/cli.rs` `command_line_bytes`); a library call, which has no command line, writes no
+   `CL:` tag (`LOSAT/src/report/sam.rs` `SamDocument::finish`). The rest of the document is NCBI's
+   byte for byte; the fixture comparisons leave out this tag only (`strip_sam_cl` of
+   `LOSAT/tests/db_search_fixtures.py`, `LOSAT/tests/outfmt17_blastn.rs`).
 
 ## Decided handling that is not an exception
 

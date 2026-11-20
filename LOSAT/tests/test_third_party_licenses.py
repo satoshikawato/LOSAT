@@ -365,6 +365,26 @@ class RepositoryTests(unittest.TestCase):
                        "libc-top-half/musl/COPYRIGHT", "libc-bottom-half/cloudlibc/LICENSE"):
             self.assertIn(needle, text)
 
+    def test_pointers_into_the_notices_name_their_section(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rule = "=" * 79
+            (root / "THIRD_PARTY_NOTICES").write_text(
+                f"{rule}\n1. NCBI BLAST+\n{rule}\n\n1. not a heading\n{rule}\n2. LMDB 0.9.24\n{rule}\n", encoding="utf-8")
+            tpn = "THIRD_PARTY_" + "NOTICES"  # split, so that this file holds no pointer itself
+            (root / "a.rs").write_text(
+                f"// {tpn}, section 2 (LMDB).\n"     # right
+                f"// {tpn}, section 2.\n"            # no name
+                f"// {tpn}, section 1 (LMDB).\n"     # wrong name
+                f"// {tpn} (section 3 (Boost))\n",   # no such section
+                encoding="utf-8")
+            (root / "b.bin").write_text(f"{tpn}, section 9\n", encoding="utf-8")
+            problems = tpl.pointer_problems(root, ["a.rs", "b.bin", "missing.rs"])
+        self.assertEqual([p.split(":")[1] for p in problems], ["2", "3", "4"])
+
+    def test_the_repository_pointers_name_their_section(self) -> None:
+        self.assertEqual(tpl.pointer_problems(REPO_ROOT), [])
+
     def test_the_toolchain_channel_is_the_one_of_the_inputs(self) -> None:
         self.assertEqual(tpl.toolchain_channel(), tpl.RUST_VERSION)
 

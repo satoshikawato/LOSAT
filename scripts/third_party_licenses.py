@@ -211,14 +211,17 @@ NOTES = {
     "expression above.",
     "self_cell": "Used under Apache-2.0; the GPL-2.0-only alternative is not taken.",
 }
+# The numbers of the generated file's sections that other text refers to.
+NOTICE_SECTION = 4
+APACHE_SECTION = 5
 # Crates whose license file holds a second license after the chosen one: print up to the marker.
 CUT_BEFORE = {
     "chrono": "[2]: <http://www.apache.org/licenses/LICENSE-2.0>",  # MIT block, then the Apache text
 }
 # Crates whose license file holds the full Apache License 2.0 next to other text: the standard text
-# (printed once, in section 5) is cut out and a line says so; what comes before and after stays.
+# (printed once, in section APACHE_SECTION) is cut out and a line says so; what comes before and after stays.
 CUT_APACHE_BODY = frozenset({"libm"})
-APACHE_BODY_CUT_LINE = "[The Apache License 2.0 text of this file is printed once, in section 5.]"
+APACHE_BODY_CUT_LINE = f"[The Apache License 2.0 text of this file is printed once, in section {APACHE_SECTION}.]"
 # Crates that ship no license file for their license: the standard text of the license is the one
 # at the end of this file. name -> what to say.
 NO_LICENSE_FILE = {
@@ -666,8 +669,8 @@ def head(builds_text: list[str]) -> list[str]:
         "  1. Crates (Cargo dependencies)",
         "  2. The Rust standard library, linked into every build",
         "  3. wasi-libc, linked into the WASI builds and LOSAT Web",
-        "  4. NOTICE files of Apache-2.0 crates",
-        "  5. Apache License, Version 2.0",
+        f"  {NOTICE_SECTION}. NOTICE files of Apache-2.0 crates",
+        f"  {APACHE_SECTION}. Apache License, Version 2.0",
         "",
     ]
 
@@ -699,7 +702,7 @@ def render(linked: dict[tuple[str, str], set[Build]], metadata: dict[tuple[str, 
             group["crates"].append(f"{key[0]} {key[1]}")
         crates.append((key, package, expr, texts))
     notice_numbers = {flat: n for n, flat in enumerate(sorted(notice_groups), 1)}
-    notice_refs = {flat: f"see section 4, NOTICE {notice_numbers[flat]} (shared by {len(group['crates'])} crate"
+    notice_refs = {flat: f"see section {NOTICE_SECTION}, NOTICE {notice_numbers[flat]} (shared by {len(group['crates'])} crate"
                          f"{'s' if len(group['crates']) != 1 else ''})" for flat, group in notice_groups.items()}
 
     out = head(builds_lines())
@@ -714,7 +717,7 @@ def render(linked: dict[tuple[str, str], set[Build]], metadata: dict[tuple[str, 
     out += ["", "3. WASI-LIBC", ""]
     out += render_wasi(wasi_blocks)
 
-    out += ["", "4. NOTICE FILES OF APACHE-2.0 CRATES (Apache License 2.0, section 4(d))", ""]
+    out += ["", f"{NOTICE_SECTION}. NOTICE FILES OF APACHE-2.0 CRATES (Apache License 2.0, section 4(d))", ""]
     for flat, number in sorted(notice_numbers.items(), key=lambda item: item[1]):
         group = notice_groups[flat]
         out += [RULE, f"NOTICE {number}: the NOTICE file of {', '.join(group['crates'])}"]
@@ -723,7 +726,7 @@ def render(linked: dict[tuple[str, str], set[Build]], metadata: dict[tuple[str, 
     if not notice_groups:
         out += ["(none)", ""]
 
-    out += ["", "5. APACHE LICENSE, VERSION 2.0", "", RULE, "Apache License, Version 2.0 (the text the entries above refer to)"]
+    out += ["", f"{APACHE_SECTION}. APACHE LICENSE, VERSION 2.0", "", RULE, "Apache License, Version 2.0 (the text the entries above refer to)"]
     wrap(out, standard_apache, None)
     out.append("")
     return "\n".join(out)
@@ -775,7 +778,7 @@ def render_rust(blocks: list[tuple[dict, str]]) -> list[str]:
               "Note: the standard library links the compiler_builtins crate, Rust's port of LLVM compiler-rt's "
               "builtins and of libm routines (authors: Jorge Aparicio and contributors). Its license file "
               f"({builtins[0]['origin'].removeprefix(RUST_TAG_URL + '/')} of rust {RUST_VERSION}) is printed below, but for "
-              "the text of the Apache License 2.0, which is printed once, in section 5. The LLVM exception of "
+              f"the text of the Apache License 2.0, which is printed once, in section {APACHE_SECTION}. The LLVM exception of "
               "the Apache License 2.0 lifts sections 4(a), 4(b) and 4(d) for portions embedded in object code."]
     wrap(lines, cut_apache_body("compiler_builtins", builtins[0]["file"], builtins[1]), builtins[0]["file"])
     lines.append("")
@@ -838,6 +841,48 @@ def with_copies(files: dict[str, bytes]) -> dict[str, bytes]:
             source = path.read_bytes()
         result[copy] = source
     return result
+
+
+# A pointer into THIRD_PARTY_NOTICES gives the number and the name of the section, as in
+# "THIRD_PARTY_NOTICES, section 2 (LMDB)"; the name must be in the heading of that number, so that a
+# new or moved section cannot leave a pointer at the wrong one.
+POINTER = re.compile(r"THIRD_PARTY_NOTICES(?:,| \()\s*section\s+(\d+)(?: \(([^)]*)\))?")
+POINTER_SUFFIXES = (".rs", ".toml", ".py", ".md", ".yml", ".yaml", ".sh", ".ts", ".js", ".txt")
+
+
+def notice_headings(text: str) -> dict[int, str]:
+    """The sections of THIRD_PARTY_NOTICES: "N. title" lines right under a line of "="."""
+    lines = text.split("\n")
+    headings = {}
+    for above, line in zip(lines, lines[1:]):
+        match = re.fullmatch(r"(\d+)\. (.+)", line)
+        if match and above and set(above) == {"="}:
+            headings[int(match.group(1))] = match.group(2)
+    return headings
+
+
+def pointer_problems(root: Path, files: Iterable[str] | None = None) -> list[str]:
+    headings = notice_headings((root / "THIRD_PARTY_NOTICES").read_text(encoding="utf-8"))
+    if files is None:
+        files = subprocess.run(["git", "ls-files"], cwd=root, check=True, capture_output=True, text=True).stdout.split("\n")
+    problems = []
+    for relative in files:
+        if not relative.endswith(POINTER_SUFFIXES) or relative.startswith("docs/evidence/"):
+            continue
+        try:
+            text = (root / relative).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for number, line in enumerate(text.split("\n"), 1):
+            for match in POINTER.finditer(line):
+                section, name = int(match.group(1)), match.group(2)
+                if name is None:
+                    problems.append(f"{relative}:{number}: name the section, as in "
+                                    f"\"THIRD_PARTY_NOTICES, section {section} (<a word of its heading>)\"")
+                elif section not in headings or name not in headings[section]:
+                    problems.append(f"{relative}:{number}: THIRD_PARTY_NOTICES has no section {section} named {name!r} "
+                                    f"(heading {section}: {headings.get(section, 'none')!r})")
+    return problems
 
 
 def first_difference(expected: bytes, actual: bytes) -> str:
@@ -977,12 +1022,14 @@ def main(argv: list[str] | None = None) -> int:
     except LicenseError as error:
         print(f"third_party_licenses.py: {error}", file=sys.stderr)
         return 1
+    pointers = pointer_problems(ROOT)
     if args.check:
         problems = stale(expected, ROOT)
-        for problem in problems:
+        for problem in problems + pointers:
             print(problem)
         if problems:
             print("Regenerate with: python3 scripts/third_party_licenses.py (and commit the result)")
+        if problems or pointers:
             return 1
         print(f"{len(expected)} files up to date")
         return 0
@@ -991,7 +1038,9 @@ def main(argv: list[str] | None = None) -> int:
         if not path.is_file() or path.read_bytes() != data:
             path.write_bytes(data)
             print(f"wrote {relative}")
-    return 0
+    for problem in pointers:
+        print(problem)
+    return 1 if pointers else 0
 
 
 if __name__ == "__main__":

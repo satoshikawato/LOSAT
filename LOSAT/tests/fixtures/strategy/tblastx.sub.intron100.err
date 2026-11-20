@@ -1,0 +1,2 @@
+BLAST query/options error: Uneven gap linking of HSPs is allowed for blastx, tblastn, and psitblastn only
+Please refer to the BLAST+ user manual.

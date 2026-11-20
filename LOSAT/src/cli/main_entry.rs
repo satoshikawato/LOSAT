@@ -648,8 +648,8 @@ fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
 
 /// No NCBI counterpart: an error of LOSAT's argument parser (`cli::try_parse_from`) or one of its
 /// refusals, written as clap writes it, and its exit status. The help that stopped the parser, and
-/// the XML of `-xmlhelp` (NCBI's `PrintUsageXml(cout)`: ncbiapp.cpp:685-697, quoted at
-/// `ncbi_xmlhelp`), are written to the standard output, exit status 0 (`cli::printed_text`, which
+/// the XML of `-xmlhelp` (as NCBI's application writes them; reference at `cli::printed_text`), are
+/// written to the standard output, exit status 0 (`cli::printed_text`, which
 /// gives LOSAT Web's ABI v2 the same text).
 fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
     // rpsbproc's arguments are not the single-dash words of the BLAST programs. rpsbproc's

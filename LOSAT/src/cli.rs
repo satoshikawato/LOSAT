@@ -1365,8 +1365,9 @@ fn refusal_program_name(program: &str) -> String {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690
 // No NCBI counterpart: NCBI has no library API. NCBI's application prints the XML of `-xmlhelp`
-// (ncbiapp.cpp:685-690, quoted at `ncbi_xmlhelp`); LOSAT's library refuses it (line RG DECISIONS
+// (`ncbi_xmlhelp`); LOSAT's library refuses it (line RG DECISIONS
 // E2x-1, the Owner's choice of 2026-11-13). The command line's entries reach the XML
 // (`xml_help_text`, `ncbi_app::run`), and so does a run of the Web engine's ABI v2, which prints it
 // on its stream of the command line's standard output (`printed_text`; line WQA's D14 and Q-XML=A,
@@ -1409,8 +1410,9 @@ pub(crate) fn xml_help_program(error: &clap::Error) -> Option<&str> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-697 (quoted at `ncbi_xmlhelp`: the
-// help and the XML of `-xmlhelp` are written to `cout`, exit status 0)
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-697
+// NCBI's application writes the help and the XML of `-xmlhelp` to its standard output and exits
+// with status 0.
 /// What the command line prints to its standard output, exit status 0, where its argument reader
 /// stopped with `error` (`cli::main_entry`): the XML of `-xmlhelp` (`xml_help_program`,
 /// `xml_help_text`), or the help that stopped the reader (`-h`, `-help`, `-help-full`, `--help`;

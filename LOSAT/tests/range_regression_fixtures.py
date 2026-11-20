@@ -33,7 +33,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from blastn_regression_fixtures import FIELDS, REPORT_ENV, run_case, sha256  # noqa: E402
+from blastn_regression_fixtures import (  # noqa: E402
+    FIELDS,
+    REPORT_ENV,
+    expected_losat_bytes,
+    run_case,
+    sha256,
+)
 from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage report off)
 
 ENGINE = Path(__file__).resolve().parents[1]
@@ -187,6 +193,8 @@ def check_one(losat: str, row: dict[str, str]) -> tuple[str, str]:
     problems = []
     if sha256(expected_out) != row["stdout_sha256"]:
         problems.append("frozen stdout file does not match the manifest")
+    expected_out = expected_losat_bytes(expected_out)
+    expected_err = expected_losat_bytes(expected_err)
     if str(result.returncode) != row["exit"]:
         problems.append(f"exit {result.returncode}, expected {row['exit']}")
     if result.stdout != expected_out:

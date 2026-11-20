@@ -3176,10 +3176,11 @@ mod tests {
         assert_eq!(exception.get_msg(), "DB contains no accession info.");
         assert_eq!(
             exception.what(),
-            format!(
+            // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
+            crate::wording::losat_text(&format!(
                 "NCBI C++ Exception:\n    T0 \"{}/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp\", line 142: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi() - DB contains no accession info.\n",
                 crate::ncbi_exception::NCBI_BUILD_ROOT
-            )
+            ))
         );
         // LOSAT's own error, NCBI's text of a place that LOSAT does not know (the text of
         // `CATCH_ALL` for `eTooManyOpenFiles`), and the texts of NCBI's reader whose places LOSAT

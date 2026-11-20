@@ -83,7 +83,9 @@ needs a result later copies it out first.
   by `outfmt` (§7). The module adds no header and no terminator. An empty report has
   length `0`.
 - The error message is UTF-8 text. Engine errors are the error and its causes joined by
-  `: ` (`engine_error`, `LOSAT/src/web_api.rs:113-115`).
+  `: ` (`engine_error`, `LOSAT/src/web_api.rs:113-115`). Its words are the engine's, as on
+  the CLI: since v0.2.0 LOSAT's words (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12,
+  `LOSAT/src/wording.rs`), and an unknown option ends `use -help to list the options`.
 - A pointer is valid until the next call into the module that writes the same buffer
   (the table above). A host's view of the memory (`memory.buffer` in JavaScript) is
   replaced when the memory grows, and any call that allocates (`losat_web_alloc`

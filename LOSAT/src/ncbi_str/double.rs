@@ -958,11 +958,12 @@ fn round_binary(mantissa: u128, exponent: i64, sticky: bool) -> f64 {
 mod tests {
     use super::*;
 
-    /// The message, the line and the position of an error.
+    /// The message, the line and the position of an error (NCBI's `(m_Pos = <n>)`, which LOSAT
+    /// writes as `(position <n>)`).
     fn failure(e: NcbiException) -> (String, u32, String) {
         let what = e.what();
         let pos = what
-            .rsplit_once("(m_Pos = ")
+            .rsplit_once(crate::wording::POSITION)
             .map(|(_, rest)| rest.trim_end_matches(")\n").to_string())
             .unwrap_or_default();
         (e.get_msg().to_string(), e.site().line, pos)

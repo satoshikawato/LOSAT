@@ -343,15 +343,24 @@ const field: StepBody = async (walker, draws) => {
   await settle(page);
   await openParameters(page);
   // Every field of the form that the page shows, but the task (its own step) and the files of
-  // WindowMasker (which ask for a download).
+  // WindowMasker (which ask for a download). A row of two fields is one by its select; without one
+  // (its pair is outside NCBI's lists: ParameterPair) its two fields are the fields.
   const ids = await page.evaluate(() =>
     [...document.querySelectorAll('[data-testid="search-panel"] [data-testid$="-field"]')]
       .filter((element) => (element as HTMLElement).offsetParent !== null)
       .filter((element) => element.getAttribute('data-kind') !== 'file' && element.getAttribute('data-testid') !== 'param-task-field')
-      .map((element) => ({ id: element.getAttribute('data-testid')!.replace(/-field$/, ''), kind: element.getAttribute('data-kind') ?? '' })),
+      .map((element) => ({ id: element.getAttribute('data-testid')!.replace(/-field$/, ''), kind: element.getAttribute('data-kind') ?? '' }))
+      .filter(({ id }) => document.querySelector(`[data-testid="${id}"]`) !== null),
   );
   if (ids.length === 0) return 'no field';
   const { id, kind } = draws.pick(ids);
+  const note = await setField(page, id, kind, draws);
+  await settle(page);
+  return note;
+};
+
+/** Sets one field as a user does: a radio, a value of its select (and what the select's "Other" shows), its checkbox, or a value typed. */
+async function setField(page: Page, id: string, kind: string, draws: Draws): Promise<string> {
   const control = page.getByTestId(id);
   let note = `${id} (${kind})`;
   if (kind === 'radio') {
@@ -364,12 +373,7 @@ const field: StepBody = async (walker, draws) => {
     const value = draws.pick(options);
     await control.selectOption(value);
     note += ` = ${value}`;
-    if (value === 'other') {
-      const other = page.getByTestId(`${id}-other`);
-      const typed = valueFor(await other.getAttribute('inputmode'), draws);
-      await other.fill(typed);
-      note += ` ${JSON.stringify(typed)}`;
-    }
+    if (value === 'other') note += await fillOther(page, id, draws);
   } else if ((await control.getAttribute('type')) === 'checkbox') {
     await control.click();
     note += ` ${(await control.isChecked()) ? 'on' : 'off'}`;
@@ -384,9 +388,32 @@ const field: StepBody = async (walker, draws) => {
     await control.fill(typed);
     note += ` = ${JSON.stringify(typed)}`;
   }
-  await settle(page);
   return note;
-};
+}
+
+/**
+ * Fills what a select's "Other" shows in its row: the field's own text box (ParameterField, `<id>-other`), or the two
+ * fields of a row with NCBI's select of their pairs (ParameterPair: Gap Costs shows the fields of -gapopen and
+ * -gapextend, Match/Mismatch Scores those of -reward and -penalty), each set as the field it is. The walk expected a
+ * text box of its own for every select and waited for `param-gapcosts-other` (line WQA's sweep 2, W-1, 2026-11-20). A
+ * field that is gone when its turn comes (a row of two goes back to its select once both values are emptied) is left.
+ */
+async function fillOther(page: Page, id: string, draws: Draws): Promise<string> {
+  const own = page.getByTestId(`${id}-other`);
+  const fields = page.getByTestId(`${id}-field`).locator('[data-testid$="-field"]');
+  await expect(own.or(fields).first()).toBeVisible({ timeout: SETTLE_TIMEOUT });
+  if ((await own.count()) > 0) {
+    const typed = valueFor(await own.getAttribute('inputmode'), draws);
+    await own.fill(typed);
+    return ` ${JSON.stringify(typed)}`;
+  }
+  const shown = await fields.evaluateAll((list) =>
+    list.map((element) => ({ id: element.getAttribute('data-testid')!.replace(/-field$/, ''), kind: element.getAttribute('data-kind') ?? '' })),
+  );
+  const notes: string[] = [];
+  for (const { id: inner, kind } of shown) notes.push((await page.getByTestId(inner).isVisible()) ? await setField(page, inner, kind, draws) : `${inner} gone`);
+  return `: ${notes.join(', ')}`;
+}
 
 /** Additional options: options of the CLI that the form has no field for, a few it has, and words it refuses. */
 const EXTRAS = Object.freeze([

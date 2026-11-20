@@ -16,7 +16,7 @@ The command exits with status 2 and runs nothing. For an output format that NCBI
 
 **What can I do?** Look the option up in [What LOSAT refuses](refusals.md) and on the page of your program. Options that need NCBI's servers or its GI and IPG databases (`-remote`, `-entrez_query`, `-gilist`, `-ipglist`) are not available. For an option that is refused, use NCBI BLAST+ for that run. The [Introduction](introduction.md) lists the programs and options planned for a later release.
 
-A different message, `error: unknown option or argument '-xyz'; use -help for CLI v2 syntax`, means the option does not exist. Check the spelling with `losat <program> -help`. LOSAT takes NCBI's single-dash names (`-evalue`, not `--evalue`).
+A different message, `error: unknown option or argument '-xyz'; use -help to list the options`, means the option does not exist. Check the spelling with `losat <program> -help`. LOSAT takes NCBI's single-dash names (`-evalue`, not `--evalue`).
 
 ## `losat --install-shims` stops with "nothing was installed"
 
@@ -55,7 +55,7 @@ With a text file in `-seqidlist` or `-negative_seqidlist`, LOSAT writes NCBI's w
 
 A `-query`, `-subject` or `makeblastdb -in` file whose name ends in `.gz`, `.bz2` or `.zst` is decompressed by LOSAT, and the name alone decides. If the file is not really compressed, LOSAT stops before the search with a message such as `-query: 'x.fa.gz' is named .gz but is not gzip data` (exit status 1). Rename the file, or decompress it yourself.
 
-A search program writes the decompressed data into a temporary file next to the input first. If that folder refuses it or has no room, LOSAT uses the folder in `TMPDIR`, so point `TMPDIR` to one with room. `makeblastdb` streams and needs no copy. A WASI command has no temporary directory and stops instead; see [WASI host problems](#wasi-host-problems).
+A search program writes the decompressed data into a temporary file next to the input first. If that folder refuses it or has no room, LOSAT uses the folder in `TMPDIR`, so point `TMPDIR` to one with room. `makeblastdb` streams and needs no copy. A WASI command has no `TMPDIR` to fall back on: if the input's folder refuses the copy, it stops; see [WASI host problems](#wasi-host-problems).
 
 ## macOS blocks the downloaded program
 
@@ -85,7 +85,7 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 
 - **"File not found" for a file that exists.** The host must preopen the directory that holds it. The release tests give the module `/`.
 - **`makeblastdb` writes UTC times, or `New DB name:` shows `/...`.** The host did not pass `TZ` (or the zone files) and `PWD`. Pass both.
-- **A compressed input stops the search.** A WASI command has no temporary directory. Decompress the file first, or pipe the data to `-query -`.
+- **A compressed input stops the search.** The WASI command writes the decompressed copy beside the input and has no temporary directory to fall back on. Make the input's folder writable for the module, or pipe the data to `-query -`.
 - **A path with `..` works when it should not.** With Node.js, `..` is read as text without looking at the directory before it, so `-query gone/../q.fa` reads `q.fa` even if `gone` does not exist. NCBI BLAST+ and native LOSAT stop with an error.
 - **Calls fail with `EINVAL` on large runs.** A host that passes pointers as signed numbers breaks once the module uses 2 GiB or more of memory. Pass WASI parameters as unsigned 32-bit values; the repository's Node.js runner does.
 - **The threaded module will not start.** It needs a host with shared memory and WASI threads. It declares a shared memory of up to 4 GiB less one page, and a host that cannot reserve that much address space fails when it creates the memory. The repository's Node.js runner (`LOSAT/tests/run_losat_wasi_threads.js`) retries with smaller maximums.

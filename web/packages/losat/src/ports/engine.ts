@@ -228,6 +228,23 @@ export function withRunFiles<E extends Error>(error: E, runFiles: readonly RunFi
   return Object.assign(error, { runFiles });
 }
 
+/**
+ * Whether the engine ended the output of a failed run with `fail` (ports/run-output.ts), which the
+ * rejection of `EngineGateway.run` then says (`withRunOutputFailed`): the data layer has what the run
+ * wrote to the CLI's standard error before its error (ABI v2 §5: stream 3, which the host keeps with a
+ * failed run as it keeps stream 8), as NCBI's `Subject sequence contains no data` before `The average
+ * subject length is too short` (line WQA's sweep, D3, 2026-11-19), and reads it before it discards
+ * the run. False for a run that failed before it began to write, and for a trap's or a cancel's error.
+ */
+export function runOutputFailedOf(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { readonly outputFailed?: unknown }).outputFailed === true;
+}
+
+/** Says that the engine ended the output of the failed run with `fail` (`runOutputFailedOf`); the error's name and message stay. */
+export function withRunOutputFailed<E extends Error>(error: E): E {
+  return Object.assign(error, { outputFailed: true as const });
+}
+
 export interface EngineGateway {
   describe(program: ProgramId): Promise<ProgramDescription>;
   /**
@@ -246,7 +263,10 @@ export interface EngineGateway {
    * every stream, then `end`, all posted before the promise resolves. `output` comes from
    * `DataGateway.openRun` and may be transferred to a worker. Rejects on failure or cancel
    * without sending `end`; the data layer then discards what arrived. The files that a failed run
-   * made besides its outputs come with the rejection (`runFilesOf`).
+   * made besides its outputs come with the rejection (`runFilesOf`). A run that the engine failed
+   * after it began to write sends `fail` in place of `end` before it rejects, and its rejection says
+   * so (`runOutputFailedOf`): the data layer reads the warnings that it wrote before its error from
+   * what arrived, then discards it.
    */
   run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo>;
   /** Stops the run as soon as possible. Unknown or finished runs are ignored. */

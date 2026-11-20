@@ -50,6 +50,8 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-threshold` | 13 (or the matrix's suggestion) | Minimum score of a neighbouring word |
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-xdrop_ungap` | 7 | X-drop (in bits) for ungapped extensions |
+| `-sum_stats` | `true` | Use sum statistics for groups of alignments |
+| `-max_intron_length` | 0 | Only 0 runs: linking with uneven gaps is for blastx and tblastn, and any other value stops with an options error, as in NCBI BLAST+ |
 | `-seg` | `12 2.2 2.5` | Low-complexity filter |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
 | `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |
@@ -87,7 +89,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `tblastx` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-strand`, `-sum_stats`, `-max_intron_length` and `-subject_besthit`.
+- `-strand` and `-subject_besthit`.
 - `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-db_gencode 32` and `-query_gencode 32`.
 - An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension would pass into the next frame of the query.

@@ -124,7 +124,8 @@ fn walk(app: &App) {
         for pair in app.base.chunks(2) {
             let flag = pair[0];
             let replaced = (flag == "-db" && words.contains(&"-subject"))
-                || (flag == "-query" && words.contains(&"-in_pssm"))
+                || (flag == "-query"
+                    && (words.contains(&"-in_pssm") || words.contains(&"-in_msa")))
                 || words.contains(&flag);
             if !replaced {
                 line.extend_from_slice(pair);
@@ -399,6 +400,19 @@ const PSIBLAST: &[Case] = &[
     ("save_each_pssm", &["-save_each_pssm"], &[]),
     // A PSSM query's request records the same options (`p9.pp.db.itdef.f6`; the PSSM walk).
     ("in_pssm", &["-in_pssm", "p.asn"], &[]),
+    // An alignment query (`-in_msa`, line PS item PS6): the PSSM it makes is searched as a PSSM
+    // query's, and only `-ignore_msa_master` is a request option of its own.
+    ("in_msa", &["-in_msa", "m.aln"], &[]),
+    (
+        "msa_master_idx",
+        &["-in_msa", "m.aln", "-msa_master_idx", "2"],
+        &[],
+    ),
+    (
+        "ignore_msa_master",
+        &["-in_msa", "m.aln", "-ignore_msa_master"],
+        &[At("IgnoreMsaMaster", "Boolean(true)")],
+    ),
 ];
 
 /// psiblast's request of the base command line (`p9.ps.q.db.itdef.f6`, `p9.pp.db.itdef.f6`).
@@ -484,6 +498,9 @@ fn every_psiblast_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &[
                 ("query", &["-query", "q.faa"]),
                 ("query_loc", &["-query_loc", "1-10"]),
+                ("in_msa", &["-in_msa", "m.aln"]),
+                ("msa_master_idx", &["-msa_master_idx", "2"]),
+                ("ignore_msa_master", &["-ignore_msa_master"]),
             ],
         ),
         inputs: psiblast_inputs,

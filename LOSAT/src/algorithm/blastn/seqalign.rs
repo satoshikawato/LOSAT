@@ -88,10 +88,12 @@ use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, Subj
 use crate::report::serial::{write_hit_list_seqaligns, SerialFormat};
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it (`write_hit_list_seqaligns`).
+/// query's warnings before it (`write_hit_list_seqaligns`). `gapped`: the search is not
+/// `-ungapped` (an ungapped search's Seq-aligns are Dense-diags, one Seq-align per subject).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_blastn_seqalign(
     format: SerialFormat,
+    gapped: bool,
     hit_lists: &[Option<BlastnHitList>],
     queries: &QueryNames<'_>,
     subjects: SubjectNames<'_>,
@@ -102,7 +104,7 @@ pub(crate) fn write_blastn_seqalign(
     let run = RunRecord {
         program: Program::Blastn,
         db_title: subjects.db_title(),
-        gapped: true,
+        gapped,
     };
     write_hit_list_seqaligns(
         format,

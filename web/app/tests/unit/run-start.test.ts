@@ -19,12 +19,16 @@ import type { EngineCommand, EngineEvent, WorkerRun } from '../../../packages/lo
 import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import {
   discardedStream,
+  discardSignal,
   DISCARD_STREAM,
   EngineCallError,
   EngineStoppedError,
   FILE_CHUNK_BYTES,
   FILE_REGISTRY,
   loadFile,
+  MESSAGES_STREAM,
+  messagesSignal,
+  PLACE_NOWHERE,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,
@@ -169,7 +173,7 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; trap
         error = "error: unexpected argument '-version' found";
         return -1;
       }
-      respond(options.start ?? '{"conffile":"c.ini","log_file":"run.log","dry_run":true}');
+      respond(options.start ?? '{"conffile":"c.ini","log_file":"run.log","dry_run":true,"register_inputs":false}');
       return 0;
     },
     losat_web2_validate: (ptr: number, len: number) => {
@@ -207,10 +211,11 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; trap
 
 describe('the ABI binding of the start and of a registry file', () => {
   it('reads the start JSON of an argv, or the CLI message of one that the engine cannot start', () => {
-    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true } });
-    expect(fakeExports({ start: '{"conffile":null,"log_file":null,"dry_run":false}' }).abi.start(['blastn'])).toEqual({
+    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false } });
+    // -parse_deflines: the run's inputs are read together (line WQA's sweep, D7, 2026-11-19).
+    expect(fakeExports({ start: '{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":true}' }).abi.start(['blastn', '-parse_deflines'])).toEqual({
       ok: true,
-      start: { conffile: null, logFile: null, dryRun: false },
+      start: { conffile: null, logFile: null, dryRun: false, registerInputs: true },
     });
     expect(fakeExports({ start: 'fail' }).abi.start(['blastn', '-version'])).toEqual({ ok: false, message: "error: unexpected argument '-version' found" });
   });
@@ -351,7 +356,7 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
       ok: false,
       message: 'BLAST query/options error: bad',
     });
-    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true } });
+    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false } });
   });
 
   it('keeps the file away from every call of the shared instance, also from calls that wait with it for one opening of that instance', async () => {
@@ -439,7 +444,16 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
  * refuses it, as the adapter does. `discard`: after outfmt 6, the signal of stream 9 that discards
  * it (its bytes), then outfmt 7 (ABI v2 §5).
  */
-function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string; discard?: Uint8Array } = {}) {
+/** The signal of stream 10 (ABI v2 §5): the place of the run's messages, 4 bytes (line WQA's sweep, D7, 2026-11-20). */
+function placeSignal(place: number): Uint8Array {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, place, true);
+  return bytes;
+}
+
+function fakeAbi(
+  options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string; discard?: Uint8Array; messages?: Uint8Array | 'none' } = {},
+) {
   const calls: string[] = [];
   let handle = 100;
   let stopped: EngineStoppedError | undefined;
@@ -460,15 +474,29 @@ function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean
       calls.push(`validate ${argv.join(' ')}`);
       return undefined;
     },
+    // The start of an argv: -parse_deflines reads the inputs of the run together (line WQA's sweep, D7, 2026-11-19).
+    start: (argv: readonly string[]) => ({
+      ok: true,
+      start: { conffile: null, logFile: null, dryRun: false, registerInputs: argv.includes('-parse_deflines') },
+    }),
     memoryBytes: () => 1,
     register: (_program: string, role: number, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
       return { handle: ++handle, records: [{ id: role === ROLE_SUBJECT ? 's' : 'q', length: bytes.length }] };
     },
+    registerInputs: (argv: readonly string[], query: Uint8Array, subject: Uint8Array) => {
+      calls.push(`register inputs ${argv.join(' ')}`);
+      return {
+        query: { handle: ++handle, records: [{ id: 'q', length: query.length }] },
+        subject: { handle: ++handle, records: [{ id: 's', length: subject.length }] },
+        shownIds: { query: ['Q.1'], subject: ['S.1'] },
+      };
+    },
     release: (h: number) => void calls.push(`release ${h}`),
     fileRelease: (file: number) => void calls.push(`file release ${file}`),
     run: (_argv: readonly string[], _query: number, _subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
       calls.push('run');
+      if (options.messages !== 'none') sink(MESSAGES_STREAM, options.messages ?? placeSignal(3));
       sink(6, encode('q\ts\n'));
       if (options.discard !== undefined) {
         sink(DISCARD_STREAM, options.discard);
@@ -581,23 +609,107 @@ describe("the Engine worker's runtime and the files of a run", () => {
     next.close();
   });
 
-  it("forwards the engine's discard of an output (stream 9) to the Data worker, between the chunks in their order", async () => {
-    const { abi } = fakeAbi({ discard: new Uint8Array([6, 0, 0, 0]) });
-    const { run, delivered, close } = workerRun([]);
-    await runtimeWith(abi).run(run, () => undefined);
-    expect(await delivered()).toEqual([
-      { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
-      { type: 'discard', stream: 6 },
-      { type: 'chunk', stream: 7, bytes: encode('# 0 hits found\n') },
-      { type: 'end', chunks: 2, bytes: 19 },
+  // line WQA's sweep, D7, 2026-11-19: a run of -parse_deflines reads its inputs together for its argv, releases the
+  // subject that the instance retained, and releases both handles after the run.
+  it('reads the inputs of a -parse_deflines run together for its argv, and keeps no subject', async () => {
+    const { abi, calls } = fakeAbi();
+    const runtime = runtimeWith(abi);
+    const first = workerRun([]);
+    expect((await runtime.run(first.run, () => undefined)).subjectRetained).toBe(false);
+    first.close();
+    const parsed = workerRun(['-parse_deflines']);
+    const result = await runtime.run(parsed.run, () => undefined);
+    expect(result.subjectRetained).toBe(false);
+    expect(result.shownIds).toEqual({ query: ['Q.1'], subject: ['S.1'] });
+    parsed.close();
+    expect(calls).toEqual([
+      'validate tblastx -query q.fa -subject s.fa -num_threads 1',
+      'register query',
+      'register subject',
+      'run',
+      'release 101',
+      'validate tblastx -query q.fa -subject s.fa -parse_deflines -num_threads 1',
+      'release 102',
+      'register inputs tblastx -query q.fa -subject s.fa -parse_deflines -num_threads 1',
+      'run',
+      'release 103',
+      'release 104',
     ]);
-    close();
-    expect(discardedStream(new Uint8Array([7, 0, 0, 0]))).toBe(7);
-    expect(() => discardedStream(new Uint8Array([6, 0]))).toThrow('a signal of stream 9 has 2 bytes, not 4');
-    // A signal that names a stream which is not an output of a run breaks the ABI: the run fails.
-    for (const signal of [new Uint8Array([1, 0, 0, 0]), new Uint8Array([6, 0, 0, 1])]) {
+    // The next run without the option registers its subject again.
+    const again = workerRun([]);
+    expect((await runtime.run(again.run, () => undefined)).subjectRetained).toBe(false);
+    again.close();
+    expect(calls.slice(-5)).toEqual(['validate tblastx -query q.fa -subject s.fa -num_threads 1', 'register query', 'register subject', 'run', 'release 105']);
+  });
+
+  it("forwards the engine's discard of an output (stream 9) to the Data worker with where its error is, between the chunks in their order", async () => {
+    // The signal of 8 bytes: the stream, then the place of its error (stream 3, stream 8 for the file of -logfile, or
+    // 0xffffffff for nowhere; line WQA's sweep, D7, 2026-11-20).
+    const signal = (stream: number, place: number) => {
+      const bytes = new Uint8Array(8);
+      new DataView(bytes.buffer).setUint32(0, stream, true);
+      new DataView(bytes.buffer).setUint32(4, place, true);
+      return bytes;
+    };
+    for (const [place, error] of [
+      [3, 'diagnostics'],
+      [8, 'logfile'],
+      [PLACE_NOWHERE, 'nowhere'],
+    ] as const) {
+      const { abi } = fakeAbi({ discard: signal(6, place) });
+      const { run, delivered, close } = workerRun([]);
+      await runtimeWith(abi).run(run, () => undefined);
+      expect(await delivered()).toEqual([
+        { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
+        { type: 'discard', stream: 6, error },
+        { type: 'chunk', stream: 7, bytes: encode('# 0 hits found\n') },
+        { type: 'end', chunks: 2, bytes: 19 },
+      ]);
+      close();
+    }
+    expect(discardedStream(signal(7, 3))).toBe(7);
+    expect(discardSignal(signal(7, 8))).toEqual({ stream: 7, errorStream: 8 });
+    expect(discardSignal(signal(0, PLACE_NOWHERE))).toEqual({ stream: 0, errorStream: undefined });
+    expect(() => discardedStream(new Uint8Array([6, 0, 0, 0]))).toThrow('a signal of stream 9 has 4 bytes, not 8');
+    // A signal that names a stream which is not an output of a run, or a place that holds no error, breaks the ABI:
+    // the run fails.
+    for (const [bytes, error] of [
+      [signal(1, 3), 'which is not an output of a run'],
+      [signal(0x1000006, 3), 'which is not an output of a run'],
+      [signal(6, 6), 'on stream 6, which holds no error'],
+    ] as const) {
       const broken = workerRun([]);
-      await expect(runtimeWith(fakeAbi({ discard: signal }).abi).run(broken.run, () => undefined)).rejects.toThrow('which is not an output of a run');
+      await expect(runtimeWith(fakeAbi({ discard: bytes }).abi).run(broken.run, () => undefined)).rejects.toThrow(error);
+      broken.close();
+    }
+  });
+
+  // line WQA's sweep, D7, 2026-11-20: where the run's messages went is the engine's word (its signal of stream 10), which
+  // the run gives with its result, not a stream for the Data worker; a run without it, or with a place that holds no
+  // messages, breaks the ABI.
+  it("gives where the run's messages went (stream 10) with its result, and nothing of it to the Data worker", async () => {
+    for (const [place, messages] of [
+      [3, 'diagnostics'],
+      [8, 'logfile'],
+      [PLACE_NOWHERE, 'nowhere'],
+    ] as const) {
+      const { abi } = fakeAbi({ messages: placeSignal(place) });
+      const { run, delivered, close } = workerRun([]);
+      expect((await runtimeWith(abi).run(run, () => undefined)).messages).toBe(messages);
+      expect(await delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }, { type: 'end', chunks: 1, bytes: 4 }]);
+      close();
+    }
+    expect(messagesSignal(placeSignal(3))).toBe(3);
+    expect(messagesSignal(placeSignal(8))).toBe(8);
+    expect(messagesSignal(placeSignal(PLACE_NOWHERE))).toBeUndefined();
+    expect(() => messagesSignal(new Uint8Array(8))).toThrow('a signal of stream 10 has 8 bytes, not 4');
+    for (const [messages, error] of [
+      ['none', 'the engine did not say where the messages of the run go (stream 10)'],
+      [placeSignal(6), 'the engine put the messages of the run on stream 6, which holds no messages'],
+      [new Uint8Array(3), 'a signal of stream 10 has 3 bytes, not 4'],
+    ] as const) {
+      const broken = workerRun([]);
+      await expect(runtimeWith(fakeAbi({ messages }).abi).run(broken.run, () => undefined)).rejects.toThrow(error);
       broken.close();
     }
   });
@@ -706,7 +818,7 @@ describe('the gateway and the files of a run', () => {
     const posted = (await runPosted(1)).conffile!;
     expect(posted.name).toBe('c.ini');
     expect(posted.file).toBe(CONFFILE.file);
-    const result = { path: 'serial' as const, threads: 1, engineBuild: 'b', memory: { linearBytesBefore: 1, linearBytesAfter: 2, instanceRuns: 1 }, subjectRetained: false };
+    const result = { path: 'serial' as const, threads: 1, engineBuild: 'b', memory: { linearBytesBefore: 1, linearBytesAfter: 2, instanceRuns: 1 }, subjectRetained: false, messages: 'diagnostics' as const };
     send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: { ...result, runFiles: [LOG] } });
     expect((await completed).runFiles).toEqual([LOG]);
 
@@ -788,9 +900,12 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const { abi } = await instantiateSerial(module!);
     expect(abi.start(['tblastx', '-conffile', 'a.ini', '-conffile=c.ini', '-logfile', 'x.log', '-dryrun'])).toEqual({
       ok: true,
-      start: { conffile: 'c.ini', logFile: 'x.log', dryRun: true },
+      start: { conffile: 'c.ini', logFile: 'x.log', dryRun: true, registerInputs: false },
     });
     expect(abi.start(['blastn', '-version'])).toMatchObject({ ok: false });
+    // -parse_deflines reads the inputs of a run together, but not those of a dry run (line WQA's sweep, D7, 2026-11-19).
+    expect(abi.start(['blastn', '-query', 'q', '-subject', 's', '-parse_deflines'])).toMatchObject({ ok: true, start: { registerInputs: true } });
+    expect(abi.start(['blastn', '-query', 'q', '-subject', 's', '-parse_deflines', '-dryrun'])).toMatchObject({ ok: true, start: { registerInputs: false } });
 
     const warned = run(abi, ['-outfmt', '6', '-max_target_seqs', '1', '-logfile', 'run.log']);
     expect(warned.error).toBeUndefined();

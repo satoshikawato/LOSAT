@@ -2461,15 +2461,22 @@ fn write_tblastx_outputs(
         .iter()
         .map(|format| report::output_format(format.outfmt))
         .collect();
-    // Outfmt 0's refusal (formats 1 to 4 write a query's own record in its section,
-    // `query_anchored::aln_mix`, and end with NCBI's exception where NCBI's merge throws,
-    // `query_anchored::write_section`).
-    if args.parse_deflines
-        && output_formats.contains(&report::TblastxOutputFormat::Pairwise(
-            crate::report::pairwise::PairwiseView::Pairwise,
-        ))
-    {
-        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+    // Outfmt 0's refusal, each such output's (`refuse_shared_masks_in`; formats 1 to 4 write a
+    // query's own record in its section, `query_anchored::aln_mix`, and end with NCBI's exception
+    // where NCBI's merge throws, `query_anchored::write_section`).
+    if args.parse_deflines {
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
+            outputs
+                .formats
+                .iter_mut()
+                .zip(&output_formats)
+                .filter(|(_, output_format)| {
+                    **output_format
+                        == report::TblastxOutputFormat::Pairwise(
+                            crate::report::pairwise::PairwiseView::Pairwise,
+                        )
+                })
+                .map(|(format, _)| &mut format.refusal),
             run.queries,
             |query| {
                 run.query_stats

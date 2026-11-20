@@ -7,7 +7,9 @@ import { noHspReason, type ResultsState } from '../application/results';
 import { flagGiven } from '../domain/result-index';
 import { formatCount } from './format';
 import { NO_HSP_TEXT } from './no-hsp-text';
+import { placeParts } from './message-place-text';
 import OptionName from './OptionName.vue';
+import PlaceWords from './PlaceWords.vue';
 import { vScrollFocus } from './scroll-focus';
 
 const props = defineProps<{ state: ResultsState }>();
@@ -22,8 +24,16 @@ const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.arg
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 /** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
 const sorted = computed(() => props.state.loaded?.limits.sorted === true);
-/** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
-const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
+/** Where the error of outfmt 0 is, in words, when the run could not write it, as the engine said; undefined where it was written. */
+const outfmt0Error = computed(() => {
+  const loaded = props.state.loaded;
+  return loaded?.outfmt0Error === undefined ? undefined : placeParts(loaded.outfmt0Error, loaded.run);
+});
+/** Where the error of outfmt 6 and 7 is, in words, when the run could not write them, as the engine said; undefined where they were written. */
+const tabularError = computed(() => {
+  const loaded = props.state.loaded;
+  return loaded?.tabularError === undefined ? undefined : placeParts(loaded.tabularError, loaded.run);
+});
 /** Why the selected query shows no HSP (the Dot Plot tab says the same in place of its plot). */
 const reason = computed(() => noHspReason(props.state));
 /** What the engine wrote to the warnings (BLAST+'s "Query is Empty!"), as it wrote it. */
@@ -39,8 +49,12 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
       <pre v-if="engineWarnings !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>
     </div>
     <p v-else-if="reason === 'no-tabular-hits'" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
-      <OptionName name="-num_alignments" /> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error,
-      in the diagnostics), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.
+      <OptionName name="-num_alignments" /> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved"
+      error<template v-if="tabularError !== undefined">, <PlaceWords :parts="tabularError" /></template>), so this run has no HSP records; outfmt 0 is written as BLAST+
+      writes it.
+    </p>
+    <p v-else-if="reason === 'no-tabular-output'" class="notice" data-testid="results-notice" data-kind="no-tabular-output">
+      {{ NO_HSP_TEXT['no-tabular-output'] }} Their error is <PlaceWords :parts="tabularError ?? []" />.
     </p>
     <p v-else-if="reason === 'no-queries'" class="notice" data-testid="results-notice" data-kind="no-queries">
       {{ NO_HSP_TEXT['no-queries'] }}
@@ -63,8 +77,12 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
         ({{ limitGiven ? '' : 'the default of ' }}<OptionName :name="limitFlag" />: {{ formatCount(limit) }}). More
         subjects may match; a search with a larger <OptionName :name="limitFlag" /> would show them.
       </p>
+      <p v-if="totals.subjects > 0 && outfmt0Error !== undefined" class="notice" data-testid="results-notice" data-kind="outfmt0-failed">
+        outfmt 0 could not be written (its error is <PlaceWords :parts="outfmt0Error" />), so no alignment is linked to this query's
+        {{ plural(totals.subjects, 'subject') }}. outfmt 6 and 7 hold the HSPs.
+      </p>
       <p
-        v-if="totals.subjects > 0 && state.outfmt0Subjects < totals.subjects && outfmt0 === undefined"
+        v-else-if="totals.subjects > 0 && state.outfmt0Subjects < totals.subjects && outfmt0 === undefined"
         class="notice"
         data-testid="results-notice"
         data-kind="outfmt0-partial"
@@ -81,12 +99,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
         data-testid="results-notice"
         data-kind="outfmt0-partial"
       >
-        <template v-if="outfmt0Failed"
-          >The search of outfmt 0 failed (<OptionName name="-num_descriptions" /> and <OptionName name="-num_alignments" /> give
-          it a hit list of its own, and its error is in the diagnostics), so no alignment is linked to this query's
-          {{ plural(totals.subjects, 'subject') }}.
-        </template>
-        <template v-else-if="outfmt0.separate"
+        <template v-if="outfmt0.separate"
           >outfmt 0's alignments are linked to {{ formatCount(state.outfmt0Subjects) }} of this query's {{ plural(totals.subjects, 'subject') }}<template
             v-if="outfmt0.alignments !== undefined"
           >

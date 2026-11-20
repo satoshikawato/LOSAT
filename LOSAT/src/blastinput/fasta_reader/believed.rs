@@ -397,6 +397,30 @@ pub(crate) fn refuse_shared_masks(
     Ok(())
 }
 
+/// `refuse_shared_masks` as the refusal of outfmt 0 alone (`FormatRefusal::check`), in each
+/// outfmt 0 output of a call (`refusals`), before any format of the call is written: the command
+/// line's run of outfmt 0 stops with it, and a call of several formats in which outfmt 0 fails
+/// alone (LOSAT Web's outfmt 0 when the argv asks for another) writes the others, as the command
+/// line's run of each of them does (line WQA's sweep, D7, 2026-11-19). BLASTN, BLASTP and TBLASTX
+/// make it so.
+pub(crate) fn refuse_shared_masks_in<'r>(
+    refusals: impl IntoIterator<Item = &'r mut crate::api::local_blast::FormatRefusal>,
+    queries: &[super::FastaRecord],
+    masked: impl Fn(usize) -> bool,
+    lcase_masking: bool,
+    program: &str,
+) -> anyhow::Result<()> {
+    for refusal in refusals {
+        refusal.check(refuse_shared_masks(
+            queries,
+            &masked,
+            lcase_masking,
+            program,
+        ))?;
+    }
+    Ok(())
+}
+
 /// `CFastaReader::xSetSeqMol`: whether the first id whose accession names a molecule names a
 /// protein, `None` when none does.
 ///

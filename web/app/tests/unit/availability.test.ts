@@ -76,7 +76,7 @@ function setup(
       const failing = fail.validate === true;
       return gated(async () => {
         if (failing) throw new UnavailableError(SERIAL);
-        return { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+        return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } };
       }, hold.start === true);
     },
     validate: async () => ({ ok: true }) as const,

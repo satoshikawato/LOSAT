@@ -1836,18 +1836,40 @@ pub enum DiagTarget {
     Memory(std::sync::Mutex<Vec<u8>>),
 }
 
+/// Where the text written to a `DiagTarget` ends up (`DiagTarget::place`, which `write_text`
+/// follows). No NCBI counterpart: LOSAT Web tells its host where the error of an output that a run
+/// could not write is (line WQA's sweep, D7, 2026-11-20).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextPlace {
+    /// The standard error (`cerr`): the caller's diagnostics.
+    StandardError,
+    /// The file of `-logfile`, on disk or in memory.
+    LogFile,
+    /// Nowhere (`-logfile ""` and `-logfile /dev/null`).
+    Nowhere,
+}
+
 impl DiagTarget {
-    /// Writes `text` where the diagnostics go (`stderr` for `cerr`). A shared reference is enough:
-    /// makeblastdb writes its log through the target's file while its diagnostics go to the
+    /// Where the text written to this target ends up (`write_text`).
+    pub fn place(&self) -> TextPlace {
+        match self {
+            DiagTarget::Stderr => TextPlace::StandardError,
+            DiagTarget::File(_) | DiagTarget::Memory(_) => TextPlace::LogFile,
+            DiagTarget::Discard => TextPlace::Nowhere,
+        }
+    }
+
+    /// Writes `text` where the diagnostics go (`place`; `stderr` for `cerr`). A shared reference is
+    /// enough: makeblastdb writes its log through the target's file while its diagnostics go to the
     /// target (`writedb::makeblastdb::run_with`).
     pub fn write_text(&self, text: &[u8], stderr: &mut dyn Write) {
-        match self {
-            DiagTarget::File(_) | DiagTarget::Memory(_) => self.write_to_file(text),
-            DiagTarget::Stderr => {
+        match self.place() {
+            TextPlace::LogFile => self.write_to_file(text),
+            TextPlace::StandardError => {
                 let _ = stderr.write_all(text);
                 let _ = stderr.flush();
             }
-            DiagTarget::Discard => {}
+            TextPlace::Nowhere => {}
         }
     }
 

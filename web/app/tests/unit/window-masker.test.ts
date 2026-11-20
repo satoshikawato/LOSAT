@@ -29,6 +29,7 @@ import {
   EngineStoppedError,
   FILE_CHUNK_BYTES,
   FILE_WINDOW_MASKER_COUNTS,
+  MESSAGES_STREAM,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,
@@ -266,13 +267,18 @@ function fakeAbi(options: { failEnd?: boolean; stopOnBegin?: boolean } = {}) {
       calls.push('validate');
       return undefined;
     },
+    start: () => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } }),
     memoryBytes: () => 1,
     register: (_program: string, role: number, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
       return { handle: ++handle, records: role === ROLE_QUERY ? [{ id: 'q', length: bytes.length }] : [{ id: 's', length: bytes.length }] };
     },
     release: (h: number) => void calls.push(`release ${h}`),
-    run: () => void calls.push('run'),
+    // The run says where its messages go (stream 10: the diagnostics, 3), as every run of the engine does.
+    run: (_argv: readonly string[], _query: number, _subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
+      calls.push('run');
+      sink(MESSAGES_STREAM, new Uint8Array([3, 0, 0, 0]));
+    },
     fileBegin: (kind: number, name: string, size: number) => {
       calls.push(`begin ${kind} ${name} ${size}`);
       if (options.stopOnBegin) {

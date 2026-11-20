@@ -48,8 +48,10 @@ use std::io::{self, Write};
 /// Each requested `-outfmt` is read as on the command line, and NCBI's checks of the options and
 /// of the subjects come in the command line's order, before the search. The `-query` and
 /// `-subject` values of `args` are used only as display names. Each format is the command line's
-/// writer of it (`report::render_queries`); the side files of outfmt 13 and 14, `-db`, and
-/// `-parse_deflines` for records without their ids are refused. LOSAT Web asks for outfmt 0, 6 and
+/// writer of it (`report::render_queries`); the side files of outfmt 13 and 14 and `-db` are
+/// refused. Under `-parse_deflines` the records are those that the reader read with the ids of
+/// their deflines (`api::input::read_search_inputs`, which LOSAT Web reads them with too), as for
+/// the other programs. LOSAT Web asks for outfmt 0, 6 and
 /// 7, 6 and 7 with a custom field list or delimiter too. `-subject_loc` and `-query_loc` cut the records as the command line cuts them: each
 /// subject as it is read, each query as its batch is read (`native::run_inner`).
 ///
@@ -68,13 +70,7 @@ pub fn run_local(
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTX_TASK.check(&mut args.task)?;
     let requested = requested_formats(&args, outputs);
-    // LOSAT Web registers records before it knows the options: they keep no ids of their
-    // deflines. The library API's `read_inputs` reads them.
-    let ids_read = query_records
-        .iter()
-        .chain(subject_records)
-        .any(|record| record.believed().is_some());
-    let (choices, resolutions) = read_options(&args, &requested, ids_read)?;
+    let (choices, resolutions) = read_options(&args, &requested)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
     let archive = archive::handle_for(
@@ -1212,7 +1208,7 @@ fn search_database(
 /// (`OutputSink::Files`, which LOSAT Web gives them).
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
     let requested: Vec<(&str, bool)> = outfmts.iter().map(|&outfmt| (outfmt, true)).collect();
-    let (choices, resolutions) = read_options(args, &requested, false)?;
+    let (choices, resolutions) = read_options(args, &requested)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     check_filtering(args)?;
@@ -1274,17 +1270,15 @@ fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 fn read_options(
     args: &BlastxArgs,
     outfmts: &[(&str, bool)],
-    ids_read: bool,
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         bail!("-db (a database search) is not supported in the browser yet");
     }
-    // The records keep no ids read from their deflines (the host registers them before it knows
-    // the options).
-    if args.parse_deflines && !ids_read {
-        bail!("-parse_deflines is not supported in the browser yet");
-    }
+    // `-parse_deflines` is the records' (`run_local`): LOSAT Web reads them with the ids of their
+    // deflines since line WQA's sweep, D7, 2026-11-19 (`register_inputs`), so its refusal of
+    // records that kept none, which also refused two empty inputs that the command line ends with
+    // NCBI's `Empty CBlastQueryVector`, is gone.
     read_format_options(args, outfmts)
 }
 

@@ -3,6 +3,7 @@
 // not pass through the main thread. The engine side writes with RunOutputWriter
 // (src/infra/run-output/writer.ts); web/app/tests/contract/run-output.contract.ts is the contract.
 import type { RunOutput } from '../domain/output-format.js';
+import type { MessagePlace } from '../domain/run-files.js';
 
 export const HITS_STREAM = 1;
 export const DIAGNOSTICS_STREAM = 3;
@@ -18,15 +19,15 @@ export const OUTPUT_STREAMS: readonly OutputStream[] = Object.freeze([0, 6, 7, 4
 
 /**
  * The messages of one run, in order: any number of chunks and discards, then one `end` that
- * states how many chunks and bytes were sent. A `discard` drops what arrived of an output (the
- * engine's signal of stream 9, docs/web/abi_v2.md §5: the output failed alone after some of its
- * chunks were sent), which then stays empty; the totals of `end` count every chunk sent, discarded
- * or not. A run can be committed only after its `end` arrived and the totals agree; a run that
- * fails or is cancelled sends no `end` and is discarded.
+ * states how many chunks and bytes were sent. A `discard` says that an output failed and where its
+ * error is (the engine's signal of stream 9, docs/web/abi_v2.md §5: it failed alone, or its search
+ * failed in a run of two searches) and drops what arrived of it, which then stays empty; the totals
+ * of `end` count every chunk sent, discarded or not. A run can be committed only after its `end`
+ * arrived and the totals agree; a run that fails or is cancelled sends no `end` and is discarded.
  */
 export type RunOutputMessage =
   | { readonly type: 'chunk'; readonly stream: OutputStream; readonly bytes: Uint8Array }
-  | { readonly type: 'discard'; readonly stream: RunOutput }
+  | { readonly type: 'discard'; readonly stream: RunOutput; readonly error: MessagePlace }
   | { readonly type: 'end'; readonly chunks: number; readonly bytes: number };
 
 /** Whether `stream` is an output of a run (not the HSP records or the diagnostics): what a `discard` may name. */

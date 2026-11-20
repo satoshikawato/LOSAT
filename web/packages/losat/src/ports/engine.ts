@@ -1,12 +1,12 @@
 // Engine port: the application's only view of the search engine. The Wasm implementation
 // (src/infra/engine-worker/gateway.ts) follows docs/web/abi_v2.md; LOSAT Web's development
 // build has a FakeEngine of its own (web/app/src/infra/fake/fake-engine.ts).
-import type { RecordKey } from '../domain/dataset.js';
+import type { RecordKey, ShownIds } from '../domain/dataset.js';
 import type { OutputFormat } from '../domain/output-format.js';
 import type { ResolvedDefault } from '../domain/parameters.js';
 import type { ProgramId } from '../domain/programs.js';
 import type { CountsFile, CountsUse } from '../domain/counts.js';
-import type { RegistryFile, RunFile } from '../domain/run-files.js';
+import type { MessagePlace, RegistryFile, RunFile } from '../domain/run-files.js';
 
 export interface ParameterDescription {
   readonly flag: string;
@@ -43,6 +43,13 @@ export interface StartInfo {
   readonly conffile: string | null;
   readonly logFile: string | null;
   readonly dryRun: boolean;
+  /**
+   * Whether a run of the argv takes its query and subject read together for it
+   * (`losat_web2_register_inputs`, ABI v2 §4: an argv with -parse_deflines, which reads the ids of
+   * the deflines in one scope for both, and is not a dry run), not registered one at a time. The
+   * Engine worker registers a run's inputs by it.
+   */
+  readonly registerInputs: boolean;
 }
 
 /** The engine's *start* of an argv, or the CLI's message for an argv that it cannot start (a version word). */
@@ -103,6 +110,17 @@ export interface RuntimeInfo {
   readonly memory?: EngineMemory;
   /** The engine searched the subject that it held from an earlier search (plan §4.6 R1). */
   readonly subjectRetained?: boolean;
+  /**
+   * Where the run's messages go, as the engine said (ABI v2 §5, stream 10): the messages that the CLI writes to its
+   * standard error without -logfile. The diagnostics, or, for TBLASTX with -logfile, the file of -logfile or nowhere,
+   * as on the CLI (line WQA's sweep, D7, 2026-11-20).
+   */
+  readonly messages: MessagePlace;
+  /**
+   * The IDs that the run's outputs show for its records, where the engine read them from the
+   * deflines (-parse_deflines; line WQA's sweep, D7, 2026-11-19).
+   */
+  readonly shownIds?: ShownIds;
   /** The WindowMasker counts file of the run, when the argv has `-window_masker_db`. */
   readonly windowMasker?: CountsUse;
   /**

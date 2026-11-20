@@ -199,8 +199,8 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
       await writer.write(6, pattern(2 * MiB, 1));
       await writer.write(0, bytes('Query= q1\n'));
       await writer.write(6, pattern(MiB, 2));
-      // The engine's signal of stream 9 (ABI v2 §5): outfmt 6 failed alone after these chunks.
-      await writer.post({ type: 'discard', stream: 6 });
+      // The engine's signal of stream 9 (ABI v2 §5): outfmt 6 failed alone after these chunks, its error on stream 3.
+      await writer.post({ type: 'discard', stream: 6, error: 'diagnostics' });
       await writer.write(7, bytes('# BLASTN\n'));
       await writer.write(DIAGNOSTICS_STREAM, bytes('Error: refused\n'));
       await writer.write(0, bytes('Lambda\n'));
@@ -212,6 +212,7 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
       sameBytes(await env.data.readOutput('run-o', 7), bytes('# BLASTN\n'), 'outfmt 7');
       same(await env.data.readDiagnostics('run-o'), 'Error: refused\n', 'diagnostics');
       same(result.hitCount, 0, 'hitCount');
+      same(JSON.stringify(result.failed), JSON.stringify([{ output: 6, error: 'diagnostics' }]), 'failed');
       // The 3 MiB of outfmt 6 are not held: only the 41 bytes of the other streams.
       same(await env.usage(), baseline + 41, 'bytes held after the commit');
     },
@@ -221,9 +222,19 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
     async run(env) {
       const writer = await openWriter(env, 'run-p');
       await writer.write(HITS_STREAM, bytes(hitLine(0)));
-      await writer.post({ type: 'discard', stream: HITS_STREAM });
+      await writer.post({ type: 'discard', stream: HITS_STREAM, error: 'diagnostics' });
       await writer.end();
       await rejects(env.data.commitRun('run-p'), /incomplete/, 'commit');
+    },
+  },
+  {
+    name: 'a discard without a place of its error fails the commit',
+    async run(env) {
+      const writer = await openWriter(env, 'run-q');
+      await writer.write(6, bytes('row\n'));
+      await writer.post({ type: 'discard', stream: 6 });
+      await writer.end();
+      await rejects(env.data.commitRun('run-q'), /incomplete/, 'commit');
     },
   },
   {

@@ -195,7 +195,10 @@ CODE_LINE_RE = re.compile(
     r"|^\s*(?:break|continue)\s*;\s*$|\w(?:\+\+|--)\s*;\s*$"
     r"|^\s*\}\s*else\b|^\s*else\s*\{\s*$|^\s*case\s+[\w:]+\s*:\s*|^\s*default\s*:\s*$"
     r"|^\s*[\w*&>.\[\]-]*\w\([^`]*\)\s*;\s*$|^\s*[\w*&>.\[\]-]*\w\([^()`]*,\s*$"
+    r"|^\s*[\w.>-]*\w\([^`]*\)\s*,\s*$"
 )
+# Four lowercase words in a row: prose, which ends a quoted call's continuation lines.
+PROSE_RE = re.compile(r"\b[a-z]+ [a-z]+ [a-z]+ [a-z]+\b")
 # The indentation of a comment line's text (after its marker; a docstring's line as it is):
 # an indented block under a source label is quoted code even after a blank line.
 MARKER_RE = re.compile(r"^\s*(?://[/!]?|#!?)")
@@ -534,7 +537,7 @@ def check_text(
             continue
         citation = is_citation(text)
         if open_call is not None:
-            if text and not citation and not text.endswith("."):
+            if text and not citation and not text.endswith(".") and not PROSE_RE.search(text):
                 findings.append(Finding(rel, number, "QUOTE", open_call[0], open_call[1]))
                 if not text.endswith(","):
                     open_call = None
@@ -549,7 +552,7 @@ def check_text(
                 found = ("source text", f"cited at :{label[0]}: {label[1]}")
             if found is not None:
                 findings.append(Finding(rel, number, "QUOTE", found[0], found[1]))
-                if text.endswith(","):
+                if text.endswith(",") and text.count("(") > text.count(")"):
                     open_call = found
         if source_file and code_after_citation(text) is not None:
             findings.append(Finding(rel, number, "QUOTE", CODE_AFTER_CITATION, text))

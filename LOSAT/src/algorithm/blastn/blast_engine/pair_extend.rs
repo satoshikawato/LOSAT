@@ -567,7 +567,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             s_end_pos += extended;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:685-717
-            // for single word, also try off diagonals
+            // a single-word hit also probes the neighboring diagonals
             //         // Check diag + delta and diag - delta
             if word_type == 1 {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:686-687

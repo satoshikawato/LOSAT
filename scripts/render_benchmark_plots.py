@@ -97,8 +97,6 @@ TIMING_FIELDS = {
 }
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40,109-116
-# SFormatSpec("length", "Alignment length", eAlignmentLength),
-# SFormatSpec("pident", "Percentage of identical matches", ePercentIdentical),
 
 
 def file_sha256(path: Path) -> str:
@@ -173,7 +171,6 @@ def checked_alignment_values(row: dict[str, str]) -> tuple[str, str, float, int]
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:111-113
-# SFormatSpec("length", "Alignment length", eAlignmentLength),
 # Preserve the source alignment length; only derived plotting coordinates use
 # 12 significant digits to discard runner-dependent geomspace rounding noise.
 def canonical_plot_float(value: float) -> float:

@@ -138,7 +138,7 @@ pub(crate) fn s_blast_aa_scan_subject(
                     }
                     totalhits += numhits;
                 } else {
-                    // Not enough space in the destination array; return early
+                    // Output buffer is full: record where the scan stopped and return
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:118-123
                     s_range[1] = s as i32;
                     return totalhits;

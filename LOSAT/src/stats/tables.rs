@@ -103,8 +103,8 @@ const BLASTN_1_4: &[ParamEntry] = &[
 
 /// Parameters for reward=2, penalty=-7 (even scores only)
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:629-635 (blastn_values_2_7)
-/// Note: These parameters can only be applied to even scores. Any odd score must be
-/// rounded down to the nearest even number before calculating the e-value.
+/// Only even scores can use these parameters; an odd score is first lowered to the even value
+/// just below it, then the e-value is computed.
 const BLASTN_2_7: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 0.69, 0.73, 1.34, 0.515, 0.0),
     ParamEntry::new(2, 4, 0.68, 0.67, 1.2, 0.55, 0.0),
@@ -126,8 +126,8 @@ const BLASTN_1_3: &[ParamEntry] = &[
 
 /// Parameters for reward=2, penalty=-5 (even scores only)
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:651-657 (blastn_values_2_5)
-/// Note: These parameters can only be applied to even scores. Any odd score must be
-/// rounded down to the nearest even number before calculating the e-value.
+/// Only even scores can use these parameters; an odd score is first lowered to the even value
+/// just below it, then the e-value is computed.
 const BLASTN_2_5: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 0.675, 0.65, 1.1, 0.6, -1.0),
     ParamEntry::new(2, 4, 0.67, 0.59, 1.1, 0.6, -1.0),
@@ -150,8 +150,8 @@ const BLASTN_1_2: &[ParamEntry] = &[
 
 /// Parameters for reward=2, penalty=-3 (blastn task default)
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:674-684 (blastn_values_2_3)
-/// Note: These parameters can only be applied to even scores. Any odd score must be
-/// rounded down to the nearest even number before calculating the e-value.
+/// Only even scores can use these parameters; an odd score is first lowered to the even value
+/// just below it, then the e-value is computed.
 /// NCBI blastn task default: gap_open=5, gap_extend=2 → ParamEntry::new(5, 2, 0.625, 0.41, 0.78, 0.8, -2.0)
 const BLASTN_2_3: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 0.55, 0.21, 0.46, 1.2, -5.0),
@@ -167,8 +167,8 @@ const BLASTN_2_3: &[ParamEntry] = &[
 
 /// Parameters for reward=3, penalty=-4
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:687-694 (blastn_values_3_4)
-/// Note: These parameters can only be applied to even scores. Any odd score must be
-/// rounded down to the nearest even number before calculating the e-value.
+/// Only even scores can use these parameters; an odd score is first lowered to the even value
+/// just below it, then the e-value is computed.
 const BLASTN_3_4: &[ParamEntry] = &[
     ParamEntry::new(6, 3, 0.389, 0.25, 0.56, 0.7, -5.0),
     ParamEntry::new(5, 3, 0.375, 0.21, 0.47, 0.8, -6.0),

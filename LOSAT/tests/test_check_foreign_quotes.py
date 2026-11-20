@@ -279,6 +279,7 @@ class StatementTest(unittest.TestCase):
             "case eBlastp:",
             "default:",
             "Blast_HSPInit(..., &editScript, &new_hsp);",
+            'SFormatSpec("length", "Alignment length", eAlignmentLength),',
         ):
             self.assertEqual(self.quoted(self.CITE + "//     " + line + "\nfn f() {}\n"), [2], line)
 
@@ -290,6 +291,10 @@ class StatementTest(unittest.TestCase):
             "// Diagnostic (LOSAT_TIMING): the subject FASTA (utils/xtiming.rs);\n"
         )
         self.assertEqual(self.quoted(text), [2, 3])
+
+    def test_prose_after_a_closed_element_is_not_quoted(self) -> None:
+        text = self.CITE + '// SFormatSpec("length", "Alignment length", eAlignmentLength),\n// Keep the length the source gives, and use\n'
+        self.assertEqual(self.quoted(text), [2])
 
     def test_code_after_a_citation_is_cut(self) -> None:
         text = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-3: opt.SetDust(true);\nfn f() {}\n"

@@ -151,7 +151,7 @@ pub(super) fn traceback_post_purge(
 
     // Step 3: Re-evaluate trimmed HSPs
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:647-665
-    // The remaining part of the hsp may be extended further
+    // A trimmed HSP can still be extendable, so it is scored again
 
     for hit in local_hits.iter_mut().skip(extra_start) {
         // Get sequences for re-evaluation
@@ -382,10 +382,8 @@ pub(super) fn traceback_final_list(
     interval_tree.reserve_nodes_for_hsps(local_hits.len());
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:679-692
-    // Remove any HSPs that are contained within other HSPs.
-    // Since the list is sorted by score already, any HSP
-    // contained by a previous HSP is guaranteed to have a
-    // lower score, and may be purged.
+    // Purge HSPs that lie inside an earlier one. The list is in score order, so a contained
+    // HSP can never outscore its container.
     // No NCBI counterpart (memory placement only): the kept HSPs move to the front of the
     // same list, in order (`kept`), instead of into a second list of its length.
     let mut kept = 0usize;

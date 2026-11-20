@@ -16,7 +16,7 @@
 //     eQueryOnly,
 //     eQueryAndSubject,
 //     eQueryOnlyStrandIndifferent
-/// How HSPs added to an interval tree are indexed
+/// Which offsets an interval tree uses as the key for each HSP inserted into it
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IndexMethod {
     /// Index by query offset only
@@ -574,8 +574,8 @@ impl BlastIntervalTree {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:57-112 s_IntervalNodeInit
     ///
     /// CRITICAL: Right child uses midpt + 1, not midpt!
-    /// The two subregions do not overlap, may be of length one,
-    /// and must completely cover the parent region.
+    /// The two halves are disjoint, either may hold a single position, and together they span
+    /// the whole parent range.
     fn alloc_internal_node(&mut self, parent_idx: usize, which_half: IntervalDirection) -> usize {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:89-95
         let parent = &self.nodes[parent_idx];
@@ -621,8 +621,8 @@ impl BlastIntervalTree {
             .map(|index| &self.hsps[index as usize])
     }
 
-    /// Determine whether an input HSP shares a common start- or endpoint with
-    /// an HSP from an interval tree.
+    /// Check whether an incoming HSP has the same start or end coordinate as an HSP stored
+    /// in the tree, and say which of the two survives.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:241-301 s_HSPsHaveCommonEndpoint
     ///
@@ -641,7 +641,7 @@ impl BlastIntervalTree {
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:256-259
-        // check if alignments are from different subject strands
+        // HSPs on different subject strands never conflict
         if in_hsp.subject_frame_sign.signum() != tree_hsp.subject_frame_sign.signum() {
             return None;
         }
@@ -661,7 +661,7 @@ impl BlastIntervalTree {
 
         if match_found {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:273-278
-            // keep the higher scoring HSP
+            // the HSP with the higher score wins
             if in_hsp.score > tree_hsp.score {
                 return Some(EndpointResult::KeepInput);
             }
@@ -670,7 +670,7 @@ impl BlastIntervalTree {
             }
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:280-286
-            // for equal scores, pick the shorter HSP
+            // score tie: the smaller span wins (query span first, then subject span)
             let in_q_length = in_hsp.query_end - in_hsp.query_offset;
             let tree_q_length = tree_hsp.query_end - tree_hsp.query_offset;
             if in_q_length > tree_q_length {
@@ -691,22 +691,20 @@ impl BlastIntervalTree {
             }
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:295-297
-            // HSPs are identical; favor the one already in the tree
+            // complete tie: the HSP already stored stays
             return Some(EndpointResult::KeepTree);
         }
 
         None
     }
 
-    /// Determine whether a subtree of an interval tree contains an HSP that
-    /// shares a common endpoint with the input HSP. The subtree indexes subject
-    /// offsets, and represents the midpoint list of a tree node that indexes
-    /// query offsets.
+    /// Search a subtree for an HSP whose endpoint matches the input HSP's. The subtree is keyed
+    /// by subject offset and hangs off a query-keyed node as that node's midpoint list.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:318-411 s_MidpointTreeHasHSPEndpoint
     ///
-    /// Returns TRUE if the HSP should not be added to the tree because it shares
-    /// an existing endpoint with a 'better' HSP already there.
+    /// Returns true when the input HSP must not be inserted because a better HSP with the same
+    /// endpoint is already stored.
     ///
     /// Side effect: Removes worse HSPs from the tree.
     fn midpoint_tree_has_hsp_endpoint(
@@ -728,8 +726,7 @@ impl BlastIntervalTree {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:338 - while (1)
         loop {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:343-366
-            // First perform matching endpoint tests on all of the HSPs in the
-            // midpoint list for the current node.
+            // Compare against every HSP in this node's midpoint list first.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:350-365
             let mut list_idx = root_idx;
             let mut tmp_index = self.nodes[root_idx].midptr;
@@ -770,8 +767,7 @@ impl BlastIntervalTree {
             }
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:368-376
-            // Descend to the left or right subtree, whichever one contains the
-            // endpoint from in_hsp
+            // Continue into the child whose range holds in_hsp's endpoint
             let node = &self.nodes[root_idx];
             let midpt = ((node.leftend as i64 + node.rightend as i64) / 2) as i32;
 
@@ -806,7 +802,7 @@ impl BlastIntervalTree {
                     Some(EndpointResult::KeepTree) => return true,
                     Some(EndpointResult::KeepInput) => {
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:398-404
-                        // leaf gets removed
+                        // the stored HSP lost: detach it from the tree
                         if target_offset < midpt {
                             self.nodes[root_idx].leftptr = 0;
                         } else {
@@ -828,14 +824,13 @@ impl BlastIntervalTree {
         }
     }
 
-    /// Determine whether an interval tree contains one or more HSPs that share
-    /// a common endpoint with the input HSP. Remove from the tree all such HSPs
-    /// that are "worse" than the input.
+    /// Look for stored HSPs whose endpoint matches the input HSP's. Stored HSPs that rank
+    /// below the input are removed as the search goes.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:428-506 s_IntervalTreeHasHSPEndpoint
     ///
-    /// Returns TRUE if the HSP should not be added to the tree because it shares
-    /// an existing endpoint with a 'better' HSP already there.
+    /// Returns true when the input HSP must not be inserted because a better HSP with the same
+    /// endpoint is already stored.
     fn interval_tree_has_hsp_endpoint(
         &mut self,
         in_hsp: &TreeHsp,
@@ -854,8 +849,7 @@ impl BlastIntervalTree {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:447 - while (1)
         loop {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:455-461
-            // First perform matching endpoint tests on all of the HSPs in the
-            // midpoint tree for the current node
+            // Compare against every HSP in this node's midpoint tree first.
             let midptr = self.nodes[root_idx].midptr;
             if midptr != 0
                 && self.midpoint_tree_has_hsp_endpoint(
@@ -904,7 +898,7 @@ impl BlastIntervalTree {
                     Some(EndpointResult::KeepTree) => return true,
                     Some(EndpointResult::KeepInput) => {
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:493-499
-                        // leaf gets removed
+                        // the stored HSP lost: detach it from the tree
                         if target_offset < midpt {
                             self.nodes[root_idx].leftptr = 0;
                         } else {

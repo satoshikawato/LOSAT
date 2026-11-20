@@ -258,7 +258,6 @@ class RendererTests(unittest.TestCase):
             self.assertEqual(sha256(first / filename), sha256(second / filename))
 
     # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:111-113
-    # SFormatSpec("length", "Alignment length", eAlignmentLength),
     # Canonicalize derived coordinates only, preserving recorded lengths/weights.
     def test_derived_edge_neighboring_floats_serialize_identically(self) -> None:
         value = 532580.1009576048  # First differing edge in PR #105's push run.

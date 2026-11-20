@@ -1084,7 +1084,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
 
     // Score normalization (NCBI BLAST approach):
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:799-808
-    // Make sure bits of match_score don't disappear if divided by 2
+    // Scale the scores so that halving them later loses no low bits
     // IMPORTANT: In NCBI BLAST, mismatch_score is passed as -score_params->penalty,
     // where score_params->penalty is stored as a NEGATIVE value (e.g., -3).
     // So -(-3) = 3, meaning mismatch_score is the POSITIVE penalty magnitude.

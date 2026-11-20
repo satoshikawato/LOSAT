@@ -1420,9 +1420,9 @@ fn link_hsp_group_ncbi(
     let mut active_head: usize = if n > 0 { 0 } else { SENTINEL_IDX };
 
     // NCBI lh_helper array structure (lines 579-583):
-    // lh_helper[0] = empty = additional end marker
+    // slot 0 is an unused extra end marker
     // lh_helper[1] = hp_start = empty entry
-    // lh_helper[i] = hsp_array[i-2] for i >= 2
+    // slots from 2 on hold the HSPs, shifted by two
     // So: pool_hsp_links[j] <-> pool_lh_helpers[j+2]
     //
     // We allocate n+2 entries and use direct index calculation:

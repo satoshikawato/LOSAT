@@ -330,6 +330,6 @@ fn the_web_engine_prints_the_command_lines_help() {
         assert_eq!(printed_text(&refused, false), None, "{program}");
         // The library refuses `-xmlhelp`, naming the places that print it.
         assert!(xml_help_refusal(&program.to_ascii_uppercase())
-            .contains("runs on the command line and in the Web engine's ABI v2 of LOSAT's"));
+            .contains("runs on the command line and in LOSAT Web of LOSAT's"));
     }
 }

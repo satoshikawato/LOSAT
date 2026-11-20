@@ -33,7 +33,7 @@ import {
 } from 'losat/ports';
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
-import { outputFileName, outputMediaType, printedFileName, runFileName, runOutputs } from '../domain/output-format';
+import { outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
 import { fastaParser, programById } from '../domain/programs';
 import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
@@ -362,7 +362,7 @@ export class Coordinator {
     if (view?.status !== 'completed' || bytes === undefined || kind === undefined) throw new Error('the run printed no text');
     const { number, program, argv, queuedAt } = view.snapshot;
     const task = await this.taskOf(view.snapshot);
-    this.deps.downloader.save(printedFileName({ number, program, task, queuedAt, argv }, kind), bytes, 'text/plain');
+    this.deps.downloader.save(printedFileName({ number, program, task, queuedAt, argv }, kind, bytes), bytes, printedFileType(bytes).type);
   }
 
   /**

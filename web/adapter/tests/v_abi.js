@@ -796,6 +796,9 @@ function checkPrints(reactor, native) {
   // After a help word the CLI reads no value; a version word comes before -dryrun, the registry file (none is read) and
   // the file of -logfile, which the CLI makes empty.
   prints(["blastn", ...inputs, "-h", "-evalue", "abc", "-num_threads", "1"], "help");
+  // `-out`, which a run refuses, does not stop the help (line WQA's D14 review, 2026-11-20).
+  prints(["blastp", ...inputs, "-h", "-out", "x", "-num_threads", "1"], "help");
+  prints(["blastn", ...inputs, "-out", "x", "-xmlhelp", "-num_threads", "1"], "help");
   prints(["blastx", ...inputs, "-dryrun", "-help", "-num_threads", "1"], "help");
   assert.equal(prints(["blastp", ...inputs, "-version", "-conffile", "missing.ini", "-num_threads", "1"], "version").json.conffile, null);
   const logged = prints(["tblastx", ...inputs, "-version", "-logfile", "v.log", "-num_threads", "1"], "version");
@@ -803,7 +806,7 @@ function checkPrints(reactor, native) {
   const made = fs.readFileSync(path.join(dir, "v.log"));
   assert.deepEqual(storedZipEntries(logged.run.streams.get(8)).map(([name, bytes]) => [name, sha256(bytes)]), [["v.log", sha256(made)]],
                    "the file of -logfile (stream 8) is the CLI's");
-  count += 4;
+  count += 6;
   // What stops the CLI before its help: a value before the help word, and the registry file of -conffile, which the
   // command line reads before it reads its arguments.
   for (const argv of [["blastn", ...inputs, "-evalue", "abc", "-h", "-num_threads", "1"],

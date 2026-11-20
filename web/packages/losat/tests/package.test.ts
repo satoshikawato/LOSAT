@@ -119,6 +119,7 @@ describe.skipIf(!built)('the built package', () => {
     const abi = JSON.parse(readFileSync(join(DIST, 'abi.json'), 'utf8')) as { package: string; engine: string; abi_version: number };
     expect(abi).toEqual({ package: engineVersion(), engine: engineVersion(), abi_version: 5 });
     expect(README).toContain(`| ${abi.package} | ${abi.engine} | ${abi.abi_version} |`);
+    expect(README).toContain(`(ABI v2 at version ${abi.abi_version}, `);
   });
 
   it('resolves for a consumer: every entry of its exports', () => {

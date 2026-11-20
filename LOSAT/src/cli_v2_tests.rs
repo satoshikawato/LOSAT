@@ -2028,7 +2028,7 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(
                 error.contains(&format!(
-                    "the option {} runs on the command line and in the Web engine's ABI v2 of LOSAT's {upper} only",
+                    "the option {} runs on the command line and in LOSAT Web of LOSAT's {upper} only",
                     words.last().unwrap()
                 )),
                 "{program} {words:?}: {error}"
@@ -2151,7 +2151,7 @@ fn toolkit_file_options_need_an_application_start() {
         // (`api::start::CallerStart::version`; line WQA's D14, 2026-11-20).
         for word in ["-version", "-version-full-json"] {
             let text = format!(
-                "the option {word} runs on the command line and in the Web engine's ABI v2 of LOSAT's {upper} only: the library API and the Web engine's ABI v1 do not write NCBI's version text"
+                "the option {word} runs on the command line and in LOSAT Web of LOSAT's {upper} only: the library API does not write NCBI's version text"
             );
             for error in [
                 parse(program, &["-out", word]).unwrap_err(),
@@ -2480,7 +2480,7 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
     for (program, place) in [
         (
             "blastn",
-            "the command line and in the Web engine's ABI v2 of LOSAT's BLASTN",
+            "the command line and in LOSAT Web of LOSAT's BLASTN",
         ),
         ("makeblastdb", "the command line of LOSAT's"),
         ("rpsbproc", "the command line of LOSAT's"),

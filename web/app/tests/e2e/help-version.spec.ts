@@ -42,12 +42,12 @@ function nativeText(command: string): Buffer | undefined {
 }
 
 const CASES = [
-  { id: 'blastn', extra: '-help', kind: 'help', label: 'Help', starts: 'USAGE\n' },
-  { id: 'blastp', extra: '-xmlhelp', kind: 'help', label: 'Help', starts: '<?xml version="1.0"?>' },
-  { id: 'blastx', extra: '-version-full-json', kind: 'version', label: 'Version', starts: '{\n' },
+  { id: 'blastn', extra: '-help', kind: 'help', label: 'Help', starts: 'USAGE\n', ext: 'txt' },
+  { id: 'blastp', extra: '-xmlhelp', kind: 'help', label: 'Help', starts: '<?xml version="1.0"?>', ext: 'xml' },
+  { id: 'blastx', extra: '-version-full-json', kind: 'version', label: 'Version', starts: '{\n', ext: 'json' },
   // A toolkit word as the value of a free-text field (the Low complexity regions filter's arguments): the
   // command line prints its version for `-version` anywhere in its words.
-  { id: 'tblastx', seg: '-version', kind: 'version', label: 'Version', starts: 'tblastx: ' },
+  { id: 'tblastx', seg: '-version', kind: 'version', label: 'Version', starts: 'tblastx: ', ext: 'txt' },
 ] as const;
 
 test("help and version words print the command line's text without inputs, and search nothing", async ({ page }, testInfo) => {
@@ -81,7 +81,7 @@ test("help and version words print the command line's text without inputs, and s
     const command = (await page.getByTestId('result-command').textContent()) ?? '';
     expect(command.startsWith(`losat ${c.id} `), command).toBe(true);
     const saved = await downloaded(page, () => page.getByTestId('export-printed').click());
-    expect(saved.name).toMatch(new RegExp(`^losat-run${run}-${c.id}(-[a-z-]+)?-\\d{8}T\\d{6}Z\\.${c.kind}\\.txt$`));
+    expect(saved.name).toMatch(new RegExp(`^losat-run${run}-${c.id}(-[a-z-]+)?-\\d{8}T\\d{6}Z\\.${c.kind}\\.${c.ext}$`));
     expect(saved.bytes.toString('utf8').startsWith(c.starts), saved.bytes.toString('utf8').slice(0, 80)).toBe(true);
     await expect(page.getByTestId('printed-output')).toContainText(c.starts.trim());
     // "Download All" lists the text alone, and saves the same bytes under the same name.

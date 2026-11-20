@@ -211,8 +211,20 @@ enum Parsed {
 }
 
 /// `parse_words`, with the help that stopped the reader as its own outcome (`Parsed::Prints`; line
-/// WQA's D14, 2026-11-20).
+/// WQA's D14, 2026-11-20). The help is printed as the command line prints it, whatever the words
+/// around it (`-out` too: line WQA's D14 review, 2026-11-20); any other argv with `-out` is refused.
 fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
+    // The formats come from `Program::formats`, and every program accepts the CLI's
+    // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
+    // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
+    let argv = std::iter::once("losat").chain(words.iter().copied());
+    let parsed = losat::web_adapter::try_parse_cli(argv);
+    if let Err(error) = &parsed {
+        if let Some(text) = losat::web_adapter::printed_text(error, false) {
+            return Program::parse(words.first().copied().unwrap_or(""))
+                .map(|_| Parsed::Prints(text));
+        }
+    }
     for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
         if matches!(key, "-out" | "--out") {
@@ -221,20 +233,8 @@ fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
             ));
         }
     }
-    // The formats come from `Program::formats`, and every program accepts the CLI's
-    // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
-    // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
-    let argv = std::iter::once("losat").chain(words.iter().copied());
-    let cli: Cli = match losat::web_adapter::try_parse_cli(argv) {
-        Ok(cli) => cli,
-        Err(error) => {
-            return match losat::web_adapter::printed_text(&error, false) {
-                Some(text) => Program::parse(words.first().copied().unwrap_or(""))
-                    .map(|_| Parsed::Prints(text)),
-                None => Err(losat::web_adapter::command_line_message(&error, false)),
-            }
-        }
-    };
+    let cli: Cli =
+        parsed.map_err(|error| losat::web_adapter::command_line_message(&error, false))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
     Ok(Parsed::Command(program, Box::new(cli.command)))
 }
@@ -1861,6 +1861,17 @@ mod tests {
             let error = parse(&["blastp", "-query", "q", "-subject", "s", owned, "6"]).unwrap_err();
             assert!(error.contains("is not accepted"), "{owned}: {error}");
         }
+        // A help word prints the help, as on the command line (line WQA's D14 review).
+        for help in [["blastp", "-out", "x", "-h"], ["blastp", "-h", "-out", "x"]] {
+            assert!(
+                matches!(parse_printing(&help), Ok(Parsed::Prints(_))),
+                "{help:?}"
+            );
+        }
+        assert!(matches!(
+            parse_printing(&["blastp", "-out=x", "-help"]),
+            Ok(Parsed::Prints(_))
+        ));
         // -num_descriptions and -num_alignments are accepted (also as `-x=v`),
         // parsed as on the command line; -max_target_seqs excludes both (clap's conflict).
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {

@@ -550,8 +550,8 @@ fn the_configuration_help_and_version_come_as_without_dryrun() {
             assert_eq!(library.status.code(), Some(1), "{program}");
             assert!(
                 text(&library.stderr).contains("the option -version runs on the command line")
-                    && text(&library.stderr).contains("only: the library API and the Web engine")
-                    && text(&library.stderr).contains("do not write NCBI's version text"),
+                    && text(&library.stderr).contains("only: the library API")
+                    && text(&library.stderr).contains("not write NCBI's version text"),
                 "{program}: {library:?}"
             );
         }

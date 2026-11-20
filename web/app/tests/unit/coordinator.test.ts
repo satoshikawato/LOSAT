@@ -671,6 +671,21 @@ describe('Coordinator', () => {
     expect(new TextDecoder().decode(viewOf(coordinator, runId)!.record.printed)).toBe('blastn: 2.17.0+\n');
     await coordinator.exportPrinted(runId);
     expect(saved).toEqual([{ fileName: 'losat-run1-blastn-19700101T000001Z.version.txt', text: 'blastn: 2.17.0+\n', type: 'text/plain' }]);
+    // NCBI's XML and JSON are saved as what they are (the bytes unchanged).
+    for (const [word, kind, text, name, type] of [
+      ['-xmlhelp', 'help', '<?xml version="1.0"?>\n<ncbi_application/>\n', 'help.xml', 'application/xml'],
+      ['-version-full-json', 'version', '{\n  "appname": "blastn"\n}\n', 'version.json', 'application/json'],
+    ] as const) {
+      engine.printed = new TextEncoder().encode(text);
+      engine.startResult = startOf({ prints: kind });
+      const other = (await coordinator.enqueue({ ...request, query: { text: '' }, subject: { text: '' }, extra: [word] })).runId!;
+      await waitFor(coordinator, other, 'running');
+      engine.finish(other);
+      await waitFor(coordinator, other, 'completed');
+      saved.length = 0;
+      await coordinator.exportPrinted(other);
+      expect(saved).toEqual([{ fileName: expect.stringMatching(new RegExp(`\\.${name.replace('.', '\\.')}$`)), text, type }]);
+    }
 
     // A search has no printed text, and says nothing of one.
     engine.startResult = startOf({});

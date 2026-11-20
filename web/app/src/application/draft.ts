@@ -1484,8 +1484,8 @@ export class SearchDraft {
     let answered = false;
     try {
       // NCBI's application start first (line RG E1w-3b): the name of the registry file that the argv
-      // reads, under which the chosen file is checked. An argv that it cannot start (a version word)
-      // has the parser's message, as validate gives it.
+      // reads, under which the chosen file is checked. An argv that it cannot start (a program that
+      // ABI v2 does not run) has the engine's message, as validate gives it.
       const started = await this.deps.engine.start(argv);
       answered = true;
       // A newer change came meanwhile: its validation follows, and this one reads no file.

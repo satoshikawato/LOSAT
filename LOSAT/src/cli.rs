@@ -1341,10 +1341,9 @@ pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
     let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
     let (places, refusers) = match library_part(program) {
-        LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => (
-            "the command line and in the Web engine's ABI v2",
-            "the library API and the Web engine's ABI v1 do",
-        ),
+        LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
+            ("the command line and in LOSAT Web", "the library API does")
+        }
         LibraryPart::Search => ("the command line", "the library API and the Web engine do"),
         LibraryPart::Tool => (
             "the command line and in the library API",
@@ -1381,7 +1380,7 @@ pub(crate) fn xml_help_refusal(shown: &str) -> String {
         .any(|program| program.eq_ignore_ascii_case(shown));
     match web {
         true => format!(
-            "the option -xmlhelp runs on the command line and in the Web engine's ABI v2 of LOSAT's {shown} only: the library API and the Web engine's ABI v1 do not write NCBI's XML description of the arguments"
+            "the option -xmlhelp runs on the command line and in LOSAT Web of LOSAT's {shown} only: the library API does not write NCBI's XML description of the arguments"
         ),
         false => format!(
             "the option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"

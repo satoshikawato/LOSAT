@@ -397,7 +397,7 @@ fn the_alignments_are_grouped_by_query() {
 fn the_request_is_read_as_stored() {
     let archives = read_fixture("blastn_subject_mixnh.asn");
     let request = &search_of(&archives[0]).request;
-    assert_eq!(request.ident.as_deref(), Some(&b"2.17.0+"[..]));
+    assert_eq!(request.ident, b"2.17.0+");
     assert_eq!(
         (request.program.as_slice(), request.service.as_slice()),
         (&b"blastn"[..], &b"megablast"[..])
@@ -539,12 +539,32 @@ fn the_psiblast_archives_are_read() {
 /// A synthetic search request with the options `options` (written after the subject).
 fn request(queries: &str, subject: &str, options: &str) -> Request {
     let text = format!(
-        "Blast4-request ::= {{ body queue-search {{ program \"blastn\", service \"plain\", \
-         queries {queries}, subject {subject}{options} }} }}"
+        "Blast4-request ::= {{ ident \"x\", body queue-search {{ program \"blastn\", \
+         service \"plain\", queries {queries}, subject {subject}{options} }} }}"
     );
     Request::from_value(value(named::BLAST4_REQUEST, &text))
         .expect("a search")
         .expect("not an error request")
+}
+
+/// A search request without `ident` stops NCBI's archive reader (`GetCreatedBy`); an error
+/// archive's request needs none.
+#[test]
+fn a_search_request_has_an_ident() {
+    let text = "Blast4-request ::= { body queue-search { program \"blastn\", service \"plain\", \
+                queries seq-loc-list { whole local str \"q\" }, subject database \"db\" } }";
+    assert_eq!(
+        Request::from_value(value(named::BLAST4_REQUEST, text)).map(|request| request.is_some()),
+        Err(Stop::Unassigned {
+            type_name: "Blast4-request",
+            member: "ident",
+        })
+    );
+    let error = "Blast4-request ::= { body get-request-info { request-id \"Error\" } }";
+    assert!(matches!(
+        Request::from_value(value(named::BLAST4_REQUEST, error)),
+        Ok(None)
+    ));
 }
 
 /// The ids of the queries of a request (`x_ExtractQueryIds`), as FASTA labels.

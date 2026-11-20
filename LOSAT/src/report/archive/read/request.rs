@@ -43,8 +43,9 @@ use crate::seqid::ParsedSeqId;
 /// The request of a search.
 #[derive(Debug)]
 pub(crate) struct Request {
-    /// `ident` (`GetCreatedBy`): the version of the program that wrote the archive.
-    pub(crate) ident: Option<Vec<u8>>,
+    /// `ident` (`GetCreatedBy`): the version of the program that wrote the archive (set: NCBI's
+    /// archive reader stops on a search request without it, [`Request::from_value`]).
+    pub(crate) ident: Vec<u8>,
     /// `program` and `service` (`GetProgram`, `GetService`), as stored.
     pub(crate) program: Vec<u8>,
     pub(crate) service: Vec<u8>,
@@ -138,7 +139,8 @@ fn take_str(value: &mut Value) -> Vec<u8> {
 impl Request {
     /// The request of a `Blast4-request` value: `None` for an error archive's
     /// (`IsErrMsgArchive`: a `get-request-info` whose `request-id` is "Error"); a body that is not
-    /// a `queue-search` stops `CImportStrategy`.
+    /// a `queue-search` stops `CImportStrategy`, and then a request without `ident`
+    /// `GetCreatedBy` (`x_GetRequestInfoFromFile` asks for the program and service, then for it).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2683-2693
     // ```c++
     // bool CRemoteBlast::IsErrMsgArchive(void)
@@ -169,6 +171,26 @@ impl Request {
     //     m_Data.reset(new CImportStrategyData);
     // }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:164-168
+    // ```c++
+    // string
+    // CImportStrategy::GetCreatedBy() const
+    // {
+    //     return m_Request->GetIdent();
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/include/objects/blast/Blast4_request_.hpp:191-198
+    // ```c++
+    // inline
+    // const CBlast4_request_Base::TIdent& CBlast4_request_Base::GetIdent(void) const
+    // {
+    //     if (!CanGetIdent()) {
+    //         ThrowUnassigned(0);
+    //     }
+    //     return m_Ident;
+    // }
+    // ```
+    // (`GetProgram` and `GetService` read mandatory members of the `queue-search`.)
     pub(crate) fn from_value(mut request: Value) -> Result<Option<Request>, Stop> {
         let ty = named::BLAST4_REQUEST;
         let ident = take(&mut request, ty, "ident").map(|mut ident| take_str(&mut ident));
@@ -191,6 +213,12 @@ impl Request {
                 "No body in CBlast4_request",
             )));
         }
+        let Some(ident) = ident else {
+            return Err(Stop::Unassigned {
+                type_name: "Blast4-request",
+                member: "ident",
+            });
+        };
         let ty = named::BLAST4_QUEUE_SEARCH_REQUEST;
         let mut text = |name: &str| {
             let mut value = take(&mut search, ty, name).expect("a mandatory string");

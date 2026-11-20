@@ -19,8 +19,8 @@
 //
 // For more information please visit:  http://bitmagic.io
 //
-// The text of the Apache License 2.0 and BitMagic's own licence file are in
-// `BITMAGIC_LICENSE.txt`, next to this file.
+// BitMagic's licence file and the text of the Apache License 2.0 are in
+// THIRD_PARTY_NOTICES, section 9 (BitMagic).
 
 //! Tests of the BitMagic decoder. The streams named `w..`, `s..`, `m..` are the Q-BM probes of
 //! line RG; their expected sizes and bits are what NCBI's BitMagic 8.0.1 decoded (a harness
@@ -563,7 +563,6 @@ fn a_list_set_at_once_leaves_what_the_calls_leave() {
         ((state >> 33) % u64::from(n)) as u32
     };
     let mut bits: Box<Block> = Box::new([0; 1024]);
-    let (mut tail, mut entries) = (Vec::new(), Vec::new());
     // cases that stop at the 13-bit edge, and cases whose calls leave entries past the end
     let (mut stops, mut left) = (0, 0);
     for case in 0..2000 {
@@ -637,7 +636,7 @@ fn a_list_set_at_once_leaves_what_the_calls_leave() {
             }
         }
         let mut at_once = start.clone();
-        let done = gap_set_list(&mut at_once, val, &list, &mut bits, &mut tail, &mut entries);
+        let done = gap_set_list(&mut at_once, val, &list, &mut bits);
         let mut valid = true;
         let mut got = Ok(());
         for &pos in &list[done..] {
@@ -657,6 +656,58 @@ fn a_list_set_at_once_leaves_what_the_calls_leave() {
         left += usize::from(valid && by_bit.written()[end + 1..] != start.v[end + 1..by_bit.hw]);
     }
     assert!(stops > 20 && left > 200, "{stops} {left}");
+}
+
+#[test]
+fn a_list_after_an_end_on_the_bit_before_its_first_word() {
+    // the block's entries below the first word held stay where they are: an end on the last bit
+    // before that word (64 w - 1) is not one of them, since the run after it starts in the word
+    // (the stretch's first bit reads it); against `gap_set_value` bit by bit
+    let mut state = 9090u64;
+    let mut next = |n: u32| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((state >> 33) % u64::from(n)) as u32
+    };
+    let mut bits: Box<Block> = Box::new([0; 1024]);
+    for case in 0..3000 {
+        let w = 1 + next(1023);
+        let mut ends: Vec<u16> = (0..next(40)).map(|_| next(65535) as u16).collect();
+        ends.push((64 * w - 1) as u16);
+        if case % 2 == 0 && w > 1 {
+            // and a run of one bit ending there
+            ends.push((64 * w - 2) as u16);
+        }
+        ends.sort_unstable();
+        ends.dedup();
+        ends.push(65535);
+        let mut start = Arr::new(GAP_ENTRIES);
+        start.v[0] = (ends.len() as u16) << 3 | next(2) as u16;
+        start.v[1..=ends.len()].copy_from_slice(&ends);
+        start.hw = ends.len() + 1;
+        let val = next(2) == 1;
+        let list: Vec<u16> = (0..1 + next(6))
+            .map(|k| {
+                if k == 0 {
+                    (64 * w + next(3)) as u16
+                } else {
+                    (64 * w + next(65536 - 64 * w)) as u16
+                }
+            })
+            .collect();
+        let mut by_bit = start.clone();
+        let mut valid = true;
+        for &pos in &list {
+            let end = gap_set_value(&mut by_bit, val, pos, valid, None).unwrap();
+            valid &= end < 1 << 13;
+        }
+        let mut at_once = start.clone();
+        let done = gap_set_list(&mut at_once, val, &list, &mut bits);
+        assert_eq!(done, list.len(), "case {case}");
+        assert_eq!(at_once.hw, by_bit.hw, "case {case}");
+        assert!(at_once.written() == by_bit.written(), "case {case}");
+    }
 }
 
 #[test]

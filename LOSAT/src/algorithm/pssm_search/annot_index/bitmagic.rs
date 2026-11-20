@@ -20,8 +20,8 @@
 //
 // For more information please visit:  http://bitmagic.io
 //
-// The text of the Apache License 2.0 and BitMagic's own licence file are in
-// `BITMAGIC_LICENSE.txt`, next to this file.
+// BitMagic's licence file and the text of the Apache License 2.0 are in
+// THIRD_PARTY_NOTICES, section 9 (BitMagic).
 
 //! BitMagic 8.0.1's deserialization as NCBI BLAST+ 2.17.0's object manager runs it on the data of
 //! a Seq-table's `BVector-data` (line RG Q-BM, `bm/SPEC.md`): `bm::deserialize` into a
@@ -1919,7 +1919,7 @@ fn gap_set_value(
 /// (`gap`) holding a GAP block that is one, while its last index is below 8190 (so that the next
 /// position cannot take it past the header's 13 bits): the count of positions done. `gap` ends as
 /// those calls leave it, the entries past the block's new end included. `bits` is a work bitmap
-/// of which only the words of the positions are used, `tail` and `runs` work arrays.
+/// of which only the words of the positions are used.
 ///
 /// Why this is what the calls leave. On a GAP block that is one, `gap_set_value` (BitMagic 8.0.1:
 /// bmfunc.h:4075-4140, `gap_set_at` here) leaves the GAP block of the bits with `pos` set to
@@ -1934,20 +1934,26 @@ fn gap_set_value(
 /// index (its `memmove`s and stores end there), and the entries past it keep what they held: 65535
 /// at the old last index, and, where it joins runs, the end of the run before the last one at the
 /// index below it. So after the list an entry between the new last index and the highest one that
-/// the calls reached holds what the last call to drop it left there (`tail`), and the written
-/// entries reach that highest index. The cost is that of the list, the block's entries and the
-/// words held, whatever the list's order.
+/// the calls reached holds what the last call to drop it left there, and the written entries
+/// reach that highest index. The cost is that of the list, the block's entries and the words held,
+/// whatever the list's order.
+///
+/// Memory: two work arrays, each made here and freed at the return, and each within the block's
+/// 8192 indices: the entries past the new end (`tail`, one per index between the new last index
+/// and the highest one reached, grown as the calls drop the last index), and the new entries from
+/// the first one that can change up to the block's entries after the last word held (`runs`, made
+/// with the capacity of the new entries from there, at most 8191).
 fn gap_set_list(
     gap: &mut Arr,
     val: bool,
     list: &[u16],
     bits: &mut Block,
-    tail: &mut Vec<u16>,
-    runs: &mut Vec<u16>,
 ) -> usize {
     if list.is_empty() {
         return 0;
     }
+    // the entries past the end that the calls leave, from the highest index they reached down
+    let mut tail = Vec::new();
     let head = gap.v[0];
     let e0 = usize::from(head >> 3);
     let first_value = head & 1 != 0;
@@ -1993,7 +1999,7 @@ fn gap_set_list(
         u32::from(ends[e0 - 2]) + 1
     };
     let mut last_value = first_value ^ ((e0 - 1) & 1 != 0);
-    let (mut end, mut highest) = (e0, e0);
+    let mut end = e0;
     let v = u64::from(val);
     // a bit of a word held, or the block's in the others
     let held = |bits: &Block, q: u32| {
@@ -2004,7 +2010,7 @@ fn gap_set_list(
             u64::from(first_value ^ (ends.partition_point(|&e| u32::from(e) < q) & 1 != 0))
         }
     };
-    let mut done = 0;
+    let (mut done, mut rise) = (0, 0);
     while done < list.len() && end < (1 << 13) - 2 {
         // the positions that cannot take the last index to 8190 (each moves it by 2 at most)
         let to = list.len().min(done + ((1 << 13) - 1 - end) / 2);
@@ -2032,15 +2038,18 @@ fn gap_set_list(
                 grow
             };
             bits[w] = word ^ 1 << b;
+            // the entries past the end: a drop leaves 65535 at the old last index (and the end of
+            // the run before the last one below it); a rise takes indices back into the block
+            // (`rise` of them since the last drop, taken off at the next one)
             if grow < 0 {
-                highest = highest.max(end);
-                if tail.len() <= end {
-                    tail.resize(end + 1, 0);
-                }
-                tail[end] = 65535;
+                tail.truncate(tail.len().saturating_sub(rise));
+                rise = 0;
+                tail.push(65535);
                 if grow == -2 {
-                    tail[end - 1] = (start - 1) as u16;
+                    tail.push((start - 1) as u16);
                 }
+            } else {
+                rise += grow as usize;
             }
             if p + 1 >= start {
                 if p >= start {
@@ -2069,14 +2078,21 @@ fn gap_set_list(
         }
         done = to;
     }
-    let highest = highest.max(end);
-    // the new entries: the block's below the first word held stay; then, for each stretch of
-    // words held, the block's entries before it, the runs' ends in it, and the end at its last bit
-    // where the bit after it (the block's) differs; then the block's entries after the last
+    tail.truncate(tail.len().saturating_sub(rise));
+    let highest = end + tail.len();
+    let first = if words[0] & 1 != 0 {
+        bits[0] & 1 != 0
+    } else {
+        first_value
+    };
+    // The block's entries that end below the bit before the first word held stay. The new entries
+    // from there (`below`) up to the block's entries after the last stretch of words held: for
+    // each stretch, the block's entries before it, the runs' ends in it, and the end at its last
+    // bit where the bit after it (the block's) differs. They are made in `runs` while the block's
+    // entries are read (as many as the block's new entries from `below` at most, within its
+    // 8191; freed at the return).
     let below = ends.partition_point(|&e| u32::from(e) + 1 < (first_word as u32) << 6);
-    // at most 8191 entries (the last index stays below 8192)
-    runs.clear();
-    runs.reserve((e0 + 2 * list.len()).min(1 << 13));
+    let mut runs = Vec::with_capacity(end - below);
     let mut j = below;
     let mut carry = 0;
     let mut next = usize::MAX;
@@ -2087,7 +2103,7 @@ fn gap_set_list(
             m &= m - 1;
             if w != next {
                 if next != usize::MAX {
-                    close_stretch(runs, ends, first_value, &mut j, (next as u32) << 6, carry);
+                    close_stretch(&mut runs, ends, first_value, &mut j, (next as u32) << 6, carry);
                 }
                 let from = (w as u32) << 6;
                 while u32::from(ends[j]) + 1 < from {
@@ -2111,18 +2127,19 @@ fn gap_set_list(
             next = w + 1;
         }
     }
-    close_stretch(runs, ends, first_value, &mut j, (next as u32) << 6, carry);
-    runs.extend_from_slice(&ends[j..]);
-    debug_assert_eq!(below + runs.len(), end);
-    let first = if words[0] & 1 != 0 {
-        bits[0] & 1 != 0
-    } else {
-        first_value
-    };
-    gap.v[below + 1..=end].copy_from_slice(runs);
-    gap.v[0] = (head & 6) | u16::from(first) | (end as u16) << 3;
-    if highest > end {
-        gap.v[end + 1..=highest].copy_from_slice(&tail[end + 1..=highest]);
+    close_stretch(&mut runs, ends, first_value, &mut j, (next as u32) << 6, carry);
+    debug_assert_eq!(below + runs.len() + e0 - j, end);
+    // the block's entries after the last stretch move to their place, then the new ones go
+    // before them
+    let v = &mut gap.v[..];
+    let at = below + 1 + runs.len();
+    if at != j + 1 {
+        v.copy_within(j + 1..=e0, at);
+    }
+    v[below + 1..at].copy_from_slice(&runs);
+    v[0] = (head & 6) | u16::from(first) | (end as u16) << 3;
+    for (at, &entry) in v[end + 1..=highest].iter_mut().zip(tail.iter().rev()) {
+        *at = entry;
     }
     gap.hw = gap.hw.max(highest + 1);
     done
@@ -2823,10 +2840,6 @@ struct Scratch {
     ex1: Arr,
     wflags: Box<Block>,
     tmp: Box<Block>,
-    /// `gap_set_list`'s entries past the block's end and the block's new entries (each grown at
-    /// its use).
-    tail: Vec<u16>,
-    runs: Vec<u16>,
 }
 
 impl Default for Scratch {
@@ -2839,8 +2852,6 @@ impl Default for Scratch {
             ex1: Arr::new(EX_ENTRIES),
             wflags: Box::new([0; 1024]),
             tmp: Box::new([0; 1024]),
-            tail: Vec::new(),
-            runs: Vec::new(),
         }
     }
 }
@@ -3404,7 +3415,7 @@ impl Decoder<'_> {
                 let list = &s.ex0.v[..count as usize];
                 // the list at once while the block is one, then bit by bit
                 let done = if valid {
-                    gap_set_list(gap, value, list, &mut s.tmp, &mut s.tail, &mut s.runs)
+                    gap_set_list(gap, value, list, &mut s.tmp)
                 } else {
                     0
                 };

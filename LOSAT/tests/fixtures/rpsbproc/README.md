@@ -311,8 +311,9 @@ bioconda's gave the same bytes in every case.
 ## Tied hits (line LIB, item S1, PD-LOSAT-NCBI-DEFECTS 1.54)
 
 The Owner's decision of 2026-11-20: `losat rpsbproc` sorts with Rust's standard stable sort. Hits of one query with
-equal E-value and bit score keep their input order, and a NaN E-value or bit score sorts after every number; NCBI's
-`std::sort` leaves them in an order of its own. The rows whose output this changes are of `use` `tied`:
+equal E-value and bit score keep their input order, where NCBI's `std::sort` leaves them in an order of its own. A NaN
+E-value or bit score sorts after every number of its key (Owner-delegated, 2026-11-20). The rows whose output this
+changes are of `use` `tied`:
 
 - `tied/<case>.{out,err,rc}`: LOSAT's bytes (written from LOSAT's output of 2026-11-20 and checked against NCBI's
   `oracle/` files, which stay): `tie1.std`, `tie1.std.f`, `tie1.full`, `tie1.full.f` and `x.tie1.doms.full` (two
@@ -323,4 +324,6 @@ equal E-value and bit score keep their input order, and a NaN E-value or bit sco
   `tied_rows_differ_from_ncbi_only_in_the_order_of_tied_hits` recomputes them from `oracle/` and `tied/`: standard
   error and exit status are NCBI's; the standard output differs only inside query blocks, in a `tie` block (runs of
   DOMAINS lines of one query, E-value and bit score, with the same hit types on both sides) or in a `nan` block (a
-  query with a NaN E-value or bit score), and the counts must equal the table's.
+  query with a NaN E-value or bit score), and the counts must equal the table's. Lines are counted as a diff counts
+  them: the lines of each block that a longest common subsequence of NCBI's and LOSAT's block leaves out, NCBI's
+  (`ncbi_lines`, removed) and LOSAT's (`losat_lines`, added), so that a changed line after a moved one counts too.

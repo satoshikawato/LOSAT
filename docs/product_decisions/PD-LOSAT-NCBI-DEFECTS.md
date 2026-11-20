@@ -889,13 +889,16 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
 Decided by the Owner on 2026-11-20 (line LIB `DECISIONS.md` 33; the Owner's words are in
 [`OWNER_DECISIONS.md`](../decisions/OWNER_DECISIONS.md)): `losat rpsbproc` sorts with Rust's
 standard sort. NCBI's order is deterministic for its binary, so rule 2 would otherwise reproduce
-it.
+it. The place of a NaN (below) is Owner-delegated (2026-11-20, standing instruction 2026-09-29,
+restated 2026-10-07).
 
-rpsbproc 0.5.1 sorts with `std::sort` in five places: the hits of a query, twice, by
-`TDomAlignOrderByEValue` (the E-value ascending, then the bit score descending,
+rpsbproc 0.5.1 sorts with `std::sort` in five places whose order the output reads: the hits of a
+query, twice, by `TDomAlignOrderByEValue` (the E-value ascending, then the bit score descending,
 `common/cdalignproc_base.hpp:62-70`), before it picks the representative, standard and specific hits
 (`common/cdalignproc_base.cpp:197-270`) and the structural domains (`:305-342`); and the rows of
 its CDD data by PSSM-ID, by accession and by cluster (`CPtrMap::Reset`, `common/ptrmap.hpp:167-179`).
+A sixth map, the clusters by PSSM-ID (`m_pssmid2fam.Reset`, `common/basedata.cpp:2585` and `:2688`),
+is sorted but never searched, so its order does not reach the output; LOSAT does not build it.
 The C++ standard does not keep the order of elements that compare equal in `std::sort`; NCBI's
 Linux builds leave them in the order that their C++ library's sort gives. LOSAT sorts with
 `slice::sort_by`, which is stable, and NCBI's comparisons made a total order:
@@ -904,8 +907,9 @@ Linux builds leave them in the order that their C++ library's sort gives. LOSAT 
   are equal) keep the order of the archive or XML. Data rows of one key keep the order of their
   file; no CDD v3.22 file has two rows of one key.
 - A hit whose E-value or bit score is NaN (printed `-nan`) sorts after every hit with a number in
-  that key; two NaNs are equal. NCBI's comparison orders a NaN against no number (no strict weak
-  ordering), so its place for such a hit depends on the steps of its library's sort. Of the six
+  that key (Owner-delegated, 2026-11-20): a NaN E-value after every E-value that is a number, a NaN
+  bit score last among the hits of one E-value; two NaNs are equal. NCBI's comparison orders a NaN
+  against no number (no strict weak ordering), so its place for such a hit depends on the steps of its library's sort. Of the six
   fixtures whose sorts hold NaN keys, the place after every number leaves 2 equal to NCBI and 46
   lines different in the other 4, the place before every number also 2, with 59 lines.
 

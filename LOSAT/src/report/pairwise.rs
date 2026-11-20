@@ -5686,6 +5686,100 @@ mod tests {
         );
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395 (quoted at
+    // `write_prolog`)
+    // ```c++
+    //     m_Outfile << NcbiEndl << NcbiEndl;
+    // ```
+    // Which programs' prologs flush after each of these two newlines (`write_prolog`'s
+    // `endl_flushes`, each program's flushes of dev; review note N3 of line RG T4a1): the prologs
+    // of blastx, rpstblastn, tblastn (also with `-in_pssm`), tblastx and the blastn tasks other
+    // than megablast do; those of blastp's driver (blastp, psiblast, rpsblast) and of megablast
+    // flush nowhere in the prolog.
+    #[test]
+    fn the_prologs_that_flush_after_their_two_newlines() {
+        /// Keeps what is written and the number of bytes written at each flush.
+        #[derive(Default)]
+        struct Flushes(Vec<u8>, Vec<usize>);
+        impl Write for Flushes {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.1.push(self.0.len());
+                Ok(())
+            }
+        }
+        type Prolog<'a> = Box<dyn Fn(&mut Flushes) -> io::Result<()> + 'a>;
+        let version = "2.17.0+";
+        let report = BlastpPairwiseReport {
+            version: version.into(),
+            database_name: "d".into(),
+            database_num_sequences: 1,
+            database_total_letters: 10,
+            matrix_name: Some("BLOSUM62".into()),
+            gap_open: 11,
+            gap_extend: 1,
+            word_threshold: 12.0,
+            window_size: 40,
+            gapped_karlin: Default::default(),
+            gumbel: None,
+            num_descriptions: 500,
+            num_alignments: 250,
+        };
+        let blastp = |program: &'static str| -> Prolog<'_> {
+            Box::new(move |out: &mut Flushes| {
+                write_blastp_pairwise_prolog(out, version, program, "d", 1, 10, None)
+            })
+        };
+        let blastn = |megablast: bool| -> Prolog<'_> {
+            Box::new(move |out: &mut Flushes| {
+                write_blastn_pairwise_prolog(out, version, megablast, "d", 1, 10, None)
+            })
+        };
+        let tblastn = |program: &'static str| -> Prolog<'_> {
+            Box::new(move |out: &mut Flushes| {
+                write_tblastn_pairwise_prolog(out, program, version, "d", 1, 10, None)
+            })
+        };
+        let blastx = |program: &'static str| -> Prolog<'_> {
+            let report = &report;
+            Box::new(move |out: &mut Flushes| write_blastx_prolog(out, program, report, None))
+        };
+        let prologs: [(&str, Prolog<'_>, bool); 10] = [
+            ("blastp", blastp("blastp"), false),
+            ("psiblast", blastp("psiblast"), false),
+            ("rpsblast", blastp("rpsblast"), false),
+            ("megablast", blastn(true), false),
+            ("blastn", blastn(false), true),
+            (
+                "tblastx",
+                Box::new(|out: &mut Flushes| {
+                    write_tblastx_pairwise_prolog(out, version, "d", 1, 10, None)
+                }),
+                true,
+            ),
+            ("tblastn", tblastn("TBLASTN"), true),
+            ("psitblastn", tblastn("PSITBLASTN"), true),
+            ("blastx", blastx("BLASTX"), true),
+            ("rpstblastn", blastx("RPSTBLASTN"), true),
+        ];
+        for (program, prolog, endl_flushes) in &prologs {
+            let mut out = Flushes::default();
+            prolog(&mut out).unwrap();
+            // The version line, then the two newlines.
+            let line = out.0.iter().position(|&byte| byte == b'\n').unwrap() + 1;
+            assert_eq!(&out.0[line..line + 2], b"\n\n", "{program}");
+            let flushes = if *endl_flushes {
+                vec![line + 1, line + 2]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(out.1, flushes, "{program}");
+        }
+    }
+
     /// `write_flatfile_wrapped_with` finds the break of a line without newlines or backspaces from the window's
     /// end; it equals the scan of every column (the form it takes for a text that may hold a
     /// backspace) on texts of every scored class, at every width.

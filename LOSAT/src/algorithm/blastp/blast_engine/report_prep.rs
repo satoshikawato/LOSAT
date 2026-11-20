@@ -1213,8 +1213,13 @@ pub(super) fn report_values(
     // subject (`PruneSeqalign`, quoted at `joined_cut`): a copy of one record that follows
     // another is kept with it; where it keeps another subject for others, the run is LOSAT's
     // refusal before any format is written.
+    // rpsblast's archive holds the merged results of its volumes as the search made them: no
+    // formatter cuts them before `WriteArchive` (the other formats' formatters cut them).
+    let prunes_lists = args.app.prunes_after_traceback()
+        && !(args.app == crate::algorithm::blastp::args::BlastpApp::Rpsblast
+            && matches!(requested_formats.first(), Some(BlastpReport::Archive)));
     let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
-        (app, Some(titles)) if app.prunes_after_traceback() => {
+        (_, Some(titles)) if prunes_lists => {
             Some(titles.joined_cut(hit_lists, args.max_target_seqs)?)
         }
         _ => None,
@@ -1383,7 +1388,7 @@ pub(super) fn report_values(
     }
     // Whether this call makes a PSSM: `-out_pssm`'s, or a round's for the next round.
     let pssm_made = args.psi_pssm.is_some() || reports.psi_round.is_some_and(|io| io.makes_next());
-    let psiblast_hits_found: Option<Vec<usize>> = args.app.prunes_after_traceback().then(|| {
+    let psiblast_hits_found: Option<Vec<usize>> = prunes_lists.then(|| {
         hit_lists
             .iter_mut()
             .enumerate()

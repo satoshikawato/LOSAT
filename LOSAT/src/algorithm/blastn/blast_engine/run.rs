@@ -8036,16 +8036,17 @@ pub fn run(
     // ```
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
-    // there too (`cli_output_formats`). `GetExportSearchStrategyStream` comes first: it creates
+    // there too (`output_formats_of`). `GetExportSearchStrategyStream` comes first: it creates
     // the search strategy file (`strategy::open_strategy_file`), which an error after it
-    // leaves empty.
+    // leaves empty, and with it a value that does not parse is left to the formatting handler
+    // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
         "BLASTN",
-        &args.outfmt,
     )?;
-    let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
+    let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+    let output_formats = output_formats_of(&choice, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
     let archive_requested = output_formats.contains(&BlastnOutputFormat::Archive);
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -8064,7 +8065,7 @@ pub fn run(
             anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 archive::option_inputs(&args, args.dust_filtering.as_deref()),
-                app::parse_formatting_string(&args.outfmt)?.number,
+                choice.number,
                 crate::report::archive::strategy::HitlistArgs {
                     max_target_seqs: args.max_target_seqs,
                     num_descriptions: args.num_descriptions,
@@ -8226,7 +8227,7 @@ pub fn run(
             .tabular_spec()
             .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
     });
-    let mut report = crate::cli::ReportStream::of_cli(out_file, tax_report);
+    let mut report = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
@@ -8324,7 +8325,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -8874,9 +8875,17 @@ fn cli_output_formats(
     outfmt: &str,
     out: Option<&std::path::Path>,
 ) -> Result<Vec<BlastnOutputFormat>> {
-    let choice = app::parse_formatting_string(outfmt)?;
-    app::report_format(&choice, Program::Blastn, out)?
-        .map(|format| BlastnOutputFormat::of(format, &choice))
+    output_formats_of(&app::parse_formatting_string(outfmt)?, out)
+}
+
+/// The report of the choice `choice` that `app::early_format_choice` read (`cli_output_formats`):
+/// none for one that NCBI itself rejects later, nor for one it left to the formatting handler.
+fn output_formats_of(
+    choice: &app::FormatChoice,
+    out: Option<&std::path::Path>,
+) -> Result<Vec<BlastnOutputFormat>> {
+    app::report_format(choice, Program::Blastn, out)?
+        .map(|format| BlastnOutputFormat::of(format, choice))
         .into_iter()
         .collect()
 }
@@ -9458,9 +9467,6 @@ fn search(
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file takes the file name as the base of its side files).
     outputs.xinclude_check(args.out.as_deref())?;
-    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
-    // (`strategy::check_report_stream`), after NCBI's own stops.
-    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
     // NCBI's x_CleanAndCompress reads past the end of some titles of punctuation (NCBI

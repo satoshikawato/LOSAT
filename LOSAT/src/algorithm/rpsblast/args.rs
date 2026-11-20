@@ -501,9 +501,10 @@ pub(crate) fn check_rps_outfmt(
     strategy: bool,
 ) -> Result<()> {
     use crate::blastinput::app::{Program, ReportFormat};
-    let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)? else {
+    let choice = crate::blastinput::app::early_format_choice(outfmt, strategy)?;
+    if choice.is_deferred() {
         return Ok(());
-    };
+    }
     // RPSBLAST searches with blastp's options, RPSTBLASTN with blastx's (neither writes SAM).
     let search = if program == "RPSTBLASTN" {
         Program::Blastx

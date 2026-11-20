@@ -498,13 +498,16 @@ fn run_inner(
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
     // behind the held document.
     let stream = match out_file {
-        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?),
-        None if tax_report => crate::cli::NcbiOstream::standard_output(),
+        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?, strategy.as_ref()),
+        None if tax_report => crate::cli::NcbiOstream::standard_output(strategy.as_ref()),
         out_file => {
-            let destination: Box<dyn Write> = match out_file {
-                None => Box::new(io::stdout().lock()),
-                Some(path) => Box::new(create(path)?),
-            };
+            let destination: Box<dyn Write> = crate::report::archive::strategy::hold_report(
+                strategy.as_ref(),
+                match out_file {
+                    None => Box::new(io::stdout().lock()),
+                    Some(path) => Box::new(create(path)?),
+                },
+            );
             crate::cli::NcbiOstream::buffered(match structured_xml {
                 true => Box::new(
                     held.insert(super::blast_xml::HeldOutput::new(
@@ -574,6 +577,8 @@ fn run_inner(
         args.query_loc.as_deref(),
         crate::blastinput::seq_range::RangeRole::Query,
     )?;
+    // A value that the early reading left to this handler (`FormatChoice::deferred`) fails here.
+    let choice = choice.at_formatting_handler(&args.outfmt)?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
@@ -892,9 +897,6 @@ fn run_inner(
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
     app::xinclude_check_for(&choice, args.out.as_deref())?;
-    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
-    // (`strategy::check_report_stream`), after NCBI's own stops.
-    crate::report::archive::strategy::check_report_stream(strategy.as_ref())?;
     // `BL2SEQ_LEGACY` makes NCBI search each `-subject` sequence on its own and write the
     // bl2seq report; LOSAT refuses it before the search, where an empty query has already ended
     // the run as NCBI ends it (`Query is Empty!`, exit status 0).

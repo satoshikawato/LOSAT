@@ -222,6 +222,34 @@ pub struct FormatChoice {
 }
 
 impl FormatChoice {
+    /// The choice of a `-outfmt` value that the early reading left to the formatting handler
+    /// (`early_format_choice`): no format number (-1 is none of NCBI's), no custom
+    /// specification. A run that holds it stops at NCBI's formatting handler with the error of
+    /// the value, where each program's handler reads the value again.
+    pub fn deferred() -> Self {
+        FormatChoice {
+            number: -1,
+            spec: String::new(),
+            delimiter: String::new(),
+        }
+    }
+
+    /// Whether the choice is `deferred`.
+    pub fn is_deferred(&self) -> bool {
+        self.number < 0
+    }
+
+    /// The choice at the program's formatting handler, the last of its option handlers: a
+    /// `deferred` choice reads the value `outfmt` again, with NCBI's error (the one owner of
+    /// where the value's error comes), any other is as read.
+    pub fn at_formatting_handler(&self, outfmt: &str) -> anyhow::Result<FormatChoice> {
+        if self.is_deferred() {
+            parse_formatting_string(outfmt)
+        } else {
+            Ok(self.clone())
+        }
+    }
+
     /// Whether a custom specification (fields or a delimiter) remains.
     pub fn custom(&self) -> bool {
         !self.spec.is_empty() || !self.delimiter.is_empty()
@@ -625,6 +653,9 @@ pub fn report_format(
     program: Program,
     out: Option<&Path>,
 ) -> anyhow::Result<Option<ReportFormat>> {
+    if choice.is_deferred() {
+        return Ok(None);
+    }
     let to_standard_output = out.is_none_or(|path| path.as_os_str() == "-");
     let name = program.name();
     let format = match ReportFormat::from_number(choice.number) {
@@ -744,25 +775,22 @@ pub fn ncbi_refuses_format(choice: &FormatChoice, program: Program, out: Option<
     formatting_handler_check(choice, program).is_err() || xinclude_check_for(choice, out).is_err()
 }
 
-/// An early reading of the `-outfmt` value `outfmt` (psiblast's, rpsblast's and rpstblastn's
-/// checks of the formats they write): `None` where the value does not parse and the run writes a
-/// search strategy file (`strategy`). NCBI then reads no `-outfmt` before its option handlers: the
-/// strategy file is created first and the early read is skipped (the `||` below), so the
-/// value's error comes after it, from the engine's reading, after `-out` is opened
-/// (`strategy::open_strategy_file`; line RG F/d36 review 2, probes ps.f99.essf, rps.f99.essf,
-/// rpst.f99.essf).
+/// The early reading of the `-outfmt` value `outfmt` that every program's `run` makes before its
+/// option handlers (NCBI's `ArchiveFormatRequested`), with NCBI's errors: the choice, or
+/// `FormatChoice::deferred` where the value does not parse and the run writes a search strategy
+/// file (`strategy`). NCBI then reads no `-outfmt` before its option handlers: the strategy file
+/// is created first and the early read is skipped (the `||` of that reference), so the value's error comes
+/// from the formatting handler, the last of the handlers, after the arguments' own errors in
+/// their order (`-subject` opened and `-subject_loc` read, `-query` opened, `-out` created,
+/// `-query_loc` read; line RG F/d36 review 2c B1). The program's own formatting handler reads the
+/// value again and raises it there; nothing before it uses a deferred choice (`report_format`
+/// reports no format for it).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-/// ```c++
-///     if (GetExportSearchStrategyStream(args) ||
-///            m_FormattingArgs->ArchiveFormatRequested(args)) {
-///         locality = CBlastOptions::eBoth;
-///     }
-/// ```
-pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<Option<FormatChoice>> {
+pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<FormatChoice> {
     match parse_formatting_string(outfmt) {
-        Ok(choice) => Ok(Some(choice)),
-        Err(_) if strategy => Ok(None),
+        Ok(choice) => Ok(choice),
+        Err(_) if strategy => Ok(FormatChoice::deferred()),
         Err(error) => Err(error),
     }
 }

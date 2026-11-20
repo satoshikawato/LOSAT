@@ -5558,14 +5558,15 @@ pub fn run(
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
     // there too. `GetExportSearchStrategyStream` comes first: it creates the search strategy
-    // file (`strategy::open_strategy_file`), which an error after it leaves empty.
+    // file (`strategy::open_strategy_file`), which an error after it leaves empty; with it a
+    // value that does not parse is left to the formatting handler
+    // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
         args.app.name(),
-        &args.outfmt,
     )?;
-    let choice = app::parse_formatting_string(&args.outfmt)?;
+    let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
     let format = app::report_format(&choice, app::Program::Blastp, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -5725,7 +5726,7 @@ pub fn run(
     } else {
         choice.normalized()
     };
-    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
+    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
@@ -5808,7 +5809,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -7478,9 +7479,6 @@ fn search(
     if let Some(choice) = xinclude {
         crate::blastinput::app::xinclude_check(choice)?;
     }
-    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
-    // (`strategy::check_report_stream`), after NCBI's own stops.
-    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     // `PrintProlog`: outfmt 20's formatter warns here when its field list asks for a name of the
     // taxonomy database that it cannot find (`tabular::write_tabular_prolog_warning`); its line
     // of the field names comes with the first report (or `write_pairwise_prologs`), after LOSAT's
@@ -7584,6 +7582,14 @@ fn search(
     // LOSAT's refusal of two queries of one scope with one id comes before any report.
     if let Some(refusal) = batches.query_refusal.take() {
         return Err(refusal);
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI writes its first
+    // request: once its first batch is read, before it is searched (`first_request_end`; this
+    // search writes the requests where its call ends, after the searches, which would hold the
+    // reports).
+    if batches.first_request_end().is_some() {
+        crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     }
     // LOSAT's limits come where NCBI starts the search, after its checks: a run that stops at its
     // first batch (`batches.starts` empty: a reader's error, NCBI's check of a PSSM, the object

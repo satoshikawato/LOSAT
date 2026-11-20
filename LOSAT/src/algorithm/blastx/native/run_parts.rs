@@ -92,14 +92,14 @@ impl RunSetup {
         // write is rejected there too. The custom tabular fields are read as NCBI reads them
         // (`ResolvedOptions::tabular`).
         // `GetExportSearchStrategyStream` comes first: it creates the search strategy file
-        // (`strategy::open_strategy_file`), which an error after it leaves empty.
+        // (`strategy::open_strategy_file`), which an error after it leaves empty; with it a value
+        // that does not parse is left to the formatting handler (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
             args.out.as_deref(),
             program.upper,
-            &args.outfmt,
         )?;
-        let choice = app::parse_formatting_string(&args.outfmt)?;
+        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
         let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).

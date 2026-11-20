@@ -671,9 +671,10 @@ impl PsiblastArgs {
     /// `-outfmt`.
     pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
         use crate::blastinput::app::{Program, ReportFormat};
-        let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)? else {
+        let choice = crate::blastinput::app::early_format_choice(outfmt, strategy)?;
+        if choice.is_deferred() {
             return Ok(());
-        };
+        }
         if crate::blastinput::app::ncbi_refuses_format(&choice, Program::Blastp, out) {
             return Ok(());
         }

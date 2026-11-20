@@ -14,6 +14,8 @@
 //! #  define NCBI_CONST_LONGDOUBLE(v)   v##L
 //! ```
 //! Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+//! (Boost's notice and the Boost Software License 1.0: `stats::spouge` and THIRD_PARTY_NOTICES,
+//! section 3.)
 //!
 //! The oracle (NCBI BLAST+ 2.17.0 for x86-64 Linux, built with gcc) evaluates every `long double`
 //! expression of `NStr::DoubleToString_Ecvt` and of `ErfImpl` on the x87 unit: a sign, a 15-bit

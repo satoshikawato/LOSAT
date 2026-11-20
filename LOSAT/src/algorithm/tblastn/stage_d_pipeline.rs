@@ -43,7 +43,7 @@ use crate::algorithm::blastp::protein_query_split::{
 use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
 use crate::core::composition_adjustment::adjust_scores::{
-    read_aa_composition, BlastCompositionWorkspace,
+    compo_matrix_data, read_aa_composition, BlastCompositionWorkspace,
 };
 use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, BlastCompoAdjustMode, BlastCompoQueryInfo, BlastCompoSequenceData,
@@ -1589,6 +1589,39 @@ fn run_local_search_with_redo<R: MatchRedo>(
             })
         })
         .collect();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3346-3357
+    // ```c
+    //         redo_align_params_tld[i] =
+    //             s_GetAlignParams(
+    //                     &gapping_params_context_tld[i],
+    //                     queryBlk,
+    //                     queryInfo,
+    //                     hitParams,
+    //                     extendParams
+    //             );
+    //         if (redo_align_params_tld[i] == NULL) {
+    //             status_code = -1;
+    //             goto function_cleanup;
+    //         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:657-660
+    // ```c
+    //     stdFreqRatios = _PSIMatrixFrequencyRatiosNew(matrixName);
+    //     if (stdFreqRatios == NULL) {
+    //         return -1;
+    //     }
+    // ```
+    // The redo's set-up reads the frequency ratios of the matrix (`s_GetAlignParams`, its
+    // `s_MatrixInfoInit`), which IDENTITY has none of (`_PSIMatrixFrequencyRatiosNew` returns NULL
+    // past its named matrices, matrix_freq_ratios.c:1734-1736): the batch's traceback fails before
+    // the redo reads a match, whatever the batch found (`Traceback failed`; no heap holds a match).
+    // Only `-use_sw_tback` gets here with IDENTITY, which NCBI searches in mode 0
+    // (`identity_cbs_reset`), where the X-drop path runs no redo.
+    if (compo_adjust_mode.is_enabled() || R::SMITH_WATERMAN)
+        && compo_matrix_data(scoring.matrix).is_none()
+    {
+        return Err(sw_batch_failed(false));
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
     // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
     // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
@@ -2138,7 +2171,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
             keep_item(context, &mut heaps, item);
         }
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (quoted at
     // `match_redo::sw_batch_failed`)
     // The status of the last match the Smith-Waterman redo reached fails the batch.
     if R::SMITH_WATERMAN && sw_last_failed {

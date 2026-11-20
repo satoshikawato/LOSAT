@@ -263,3 +263,39 @@ fn a_pssm_query_is_refused() {
         run.stderr
     );
 }
+
+// IDENTITY, which NCBI searches without composition-based statistics, has no frequency ratios for
+// the redo's set-up: every batch's traceback fails before the redo reads a match, a query without
+// hits too (`BLAST engine error: Traceback failed`, exit status 3; NCBI 2.17.0: rows
+// db.x4b.ident.*). With one query per batch the first batch fails: nothing is reported.
+#[test]
+fn identity_fails_every_batch_at_the_redo_set_up() {
+    let subject = input("db_search/tslice.fna");
+    for (query, env) in [
+        ("db_search/tslice_q.faa", &[][..]),
+        ("db_search/tslice_nohit.faa", &[][..]),
+        ("db_search/tslice_q.faa", &[("BATCH_SIZE", "1")][..]),
+    ] {
+        let query = input(query);
+        for threads in [1, 4] {
+            let run = tblastn(
+                &[
+                    "-query",
+                    query.to_str().unwrap(),
+                    "-subject",
+                    subject.to_str().unwrap(),
+                    "-matrix",
+                    "IDENTITY",
+                    "-use_sw_tback",
+                    "-outfmt",
+                    "6",
+                ],
+                threads,
+                env,
+            );
+            assert_eq!(run.code, Some(3), "n{threads} {env:?}: {}", run.stderr);
+            assert_eq!(run.stdout, "", "n{threads} {env:?}");
+            assert_eq!(run.stderr, TRACEBACK_FAILED, "n{threads} {env:?}");
+        }
+    }
+}

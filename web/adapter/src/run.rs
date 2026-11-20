@@ -860,6 +860,10 @@ struct Failed {
     /// An error of the adapter itself (the output ranges, the archive of outfmt 13 or 14), which
     /// no CLI run has: it ends the run, whichever search it comes from (`search_all`).
     fault: bool,
+    /// The writers of the argv's own outputs (`Output::requested`) of the search that failed, with what
+    /// they hold: the bytes that the CLI's run of the argv leaves in its output before its error, which
+    /// the run sends (`search_all`; line WQA's sweep, D15, 2026-11-20). None for a fault.
+    kept: Vec<StreamWriter>,
 }
 
 impl Failed {
@@ -882,6 +886,7 @@ impl Failed {
             cli_stderr,
             native,
             fault: false,
+            kept: Vec::new(),
         }
     }
 
@@ -1100,15 +1105,49 @@ fn search(
                         message: format!("the archive of outfmt {}: {error}", format.number),
                         native: None,
                         fault: true,
+                        kept: Vec::new(),
                     })
                 }
             }
         } else {
-            zip.into_inner()
+            // The side files written before the error and the master file as the run holds it (the CLI
+            // leaves its `-out` file empty when it fails before the master file is written), with the
+            // archive's central directory: a run that failed keeps them (line WQA's sweep, D15).
+            let mut zip = zip;
+            if let Err(error) = zip.add(master_name(format.number).as_bytes(), &master) {
+                return Err(Failed {
+                    cli_stderr: format!("{error}\n").into_bytes(),
+                    message: format!("the archive of outfmt {}: {error}", format.number),
+                    native: None,
+                    fault: true,
+                    kept: Vec::new(),
+                });
+            }
+            match zip.finish() {
+                Ok(stream) => stream,
+                Err(error) => {
+                    return Err(Failed {
+                        cli_stderr: format!("{error}\n").into_bytes(),
+                        message: format!("the archive of outfmt {}: {error}", format.number),
+                        native: None,
+                        fault: true,
+                        kept: Vec::new(),
+                    })
+                }
+            }
         };
     }
     if let Err(error) = outcome {
-        return Err(Failed::new(&error));
+        // The writers of the argv's own outputs keep what they hold: the CLI's run of the argv leaves it
+        // in its output before the error (`Failed::kept`).
+        let mut failed = Failed::new(&error);
+        failed.kept = formats
+            .iter()
+            .zip(writers)
+            .filter(|(format, _)| format.requested)
+            .map(|(_, writer)| writer)
+            .collect();
+        return Err(failed);
     }
     // The formats that failed alone: their writers are dropped with what they hold, and the
     // recorder forgets their events (`search_all` tells the host that each failed).
@@ -1137,6 +1176,7 @@ fn search(
             message,
             native: None,
             fault: true,
+            kept: Vec::new(),
         });
     }
     Ok(Searched {
@@ -1303,11 +1343,12 @@ fn give_blastn_counts(
     }
 }
 
-/// Runs the searches of the run and emits its streams. On failure the output streams stop, and
-/// the host discards what it received of them; the run still sends stream 3 (what the CLI writes
-/// to its standard error before the error that ends the run, without that error, which is the
-/// run's) and stream 8 (the file of `-logfile`), which the host keeps with the failed run
-/// (docs/web/abi_v2.md §5).
+/// Runs the searches of the run and emits its streams. On failure the output streams stop: the
+/// output of the argv's own `-outfmt` sends what the CLI's run of the argv leaves in its output
+/// before the error, and the other outputs are dropped (`keep_failed_outputs`; line WQA's sweep,
+/// D15, 2026-11-20); the run still sends stream 3 (what the CLI writes to its standard error before
+/// the error that ends the run, without that error, which is the run's) and stream 8 (the file of
+/// `-logfile`), which the host keeps with the failed run (docs/web/abi_v2.md §5).
 ///
 /// Without `-num_descriptions` and `-num_alignments` this is one search that writes every
 /// format. With them it is one search per distinct hit list size of the formats
@@ -1554,6 +1595,7 @@ fn search_all(
         }
         return Err(match result {
             Err(failed) => {
+                keep_failed_outputs(&groups, failed.kept, failed.fault);
                 *posted = failed.native;
                 failed.message
             }
@@ -1649,6 +1691,25 @@ fn search_all(
         writers.append(&mut other.writers);
     }
     Ok(Done { writers, records })
+}
+
+/// The outputs of a run that fails (line WQA's sweep, D15, 2026-11-20; docs/web/abi_v2.md §5): the
+/// output of the argv's own `-outfmt` (`Output::requested`) is what the CLI's run of the argv writes,
+/// and its file holds the bytes written before the error, so its writer (`Failed::kept`) sends what it
+/// holds, and the host keeps what it received. The other outputs, which the Web writes besides
+/// (outfmt 0, 6 and 7), are not the CLI's run of the argv, and a format of the search that failed
+/// stopped where that search did: each is signalled as dropped, with the error that ended the run as
+/// the place of its error (`emit::PLACE_RUN`), also where no search made it. An adapter fault
+/// (`Failed::fault`) is no CLI error: it keeps no output.
+fn keep_failed_outputs(groups: &[Vec<Output>], kept: Vec<StreamWriter>, fault: bool) {
+    for mut writer in kept {
+        writer.finish();
+    }
+    for output in groups.iter().flatten() {
+        if fault || !output.requested {
+            crate::emit::discard(output.stream, crate::emit::PLACE_RUN);
+        }
+    }
 }
 
 /// A writer to `sink` that keeps a copy of what it writes in `copy` (`search_all`: the warnings of
@@ -2532,6 +2593,83 @@ mod tests {
                 u32::from_le_bytes(signal[..4].try_into().unwrap())
             })
             .collect()
+    }
+
+    // Line WQA's sweep, D15 (2026-11-20): a run that fails sends the bytes that the CLI's run of the argv leaves in
+    // its output before the error (NCBI's `The average subject length is too short` comes after the outfmt 0 prolog:
+    // an empty file in the other formats), and drops every other output with the error that ended the run as the
+    // place of its error; stream 3 is the warnings before the error.
+    #[test]
+    fn a_failed_run_sends_the_output_of_its_argv_and_drops_the_others() {
+        let query = fasta(
+            b">q\nACGTACGTACGTACGTAGCTAGCTAGCTAGCATCGATCGATCGACTGACTAGCTAGCTAGCATGCATCGATCGATC\n",
+        );
+        let subject = fasta(b">s1\n>s2\n");
+        for (outfmt, kept) in [
+            (None, 0),
+            (Some("0"), 0),
+            (Some("6"), 6),
+            (Some("7"), 7),
+            (Some("6 qseqid"), crate::emit::STREAM_CUSTOM),
+            (Some("5"), crate::emit::STREAM_CUSTOM),
+        ] {
+            let mut words = vec!["blastn", "-query", "q", "-subject", "s"];
+            if let Some(outfmt) = outfmt {
+                words.extend(["-outfmt", outfmt]);
+            }
+            crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+            let error = run(&words, &query, &subject).unwrap_err();
+            assert!(
+                error.contains("The average subject length is too short"),
+                "{outfmt:?}: {error}"
+            );
+            let emitted = crate::emit::EMITTED.with(|emitted| emitted.borrow().clone());
+            let mut sent = std::collections::BTreeMap::<u32, Vec<u8>>::new();
+            let mut dropped = Vec::new();
+            for (stream, bytes) in &emitted {
+                if *stream == crate::emit::STREAM_DISCARD {
+                    let place = u32::from_le_bytes(bytes[4..].try_into().unwrap());
+                    assert_eq!(
+                        place,
+                        crate::emit::PLACE_RUN,
+                        "{outfmt:?}: the place of the error"
+                    );
+                    dropped.push(u32::from_le_bytes(bytes[..4].try_into().unwrap()));
+                } else {
+                    sent.entry(*stream).or_default().extend_from_slice(bytes);
+                }
+            }
+            dropped.sort_unstable();
+            // The program's formats besides the argv's own, which a custom -outfmt adds to.
+            let others: Vec<u32> = [0, 6, 7]
+                .into_iter()
+                .filter(|&stream| stream != kept)
+                .collect();
+            assert_eq!(dropped, others, "{outfmt:?}: the outputs dropped");
+            for stream in &dropped {
+                assert!(
+                    !sent.contains_key(stream),
+                    "{outfmt:?}: nothing of dropped stream {stream}"
+                );
+            }
+            // The outfmt 0 prolog is the file that the CLI's run of outfmt 0 leaves; the others leave none.
+            let output = sent.get(&kept).map(|bytes| text(bytes));
+            if kept == 0 {
+                let prolog = output.expect("the prolog of outfmt 0");
+                assert!(prolog.starts_with("BLASTN 2."), "{outfmt:?}: {prolog}");
+                assert!(
+                    prolog.contains("2 sequences; 0 total letters"),
+                    "{outfmt:?}: {prolog}"
+                );
+            } else {
+                assert_eq!(output, None, "{outfmt:?}: an empty output is no chunk");
+            }
+            assert!(
+                text(&sent[&crate::emit::STREAM_DIAGNOSTICS])
+                    .contains("Subject sequence contains no data"),
+                "{outfmt:?}: stream 3"
+            );
+        }
     }
 
     // The searches of a run: one per distinct hit list size of the formats 0, 6 and 7 (NCBI
@@ -5146,11 +5284,25 @@ mod tests {
         )
     }
 
-    /// A failed run sent nothing of its outputs and records (each fits in one chunk).
+    /// Whether the bytes are the CLI's prolog of a pairwise report (outfmt 0 to 4, 11, and the program's name and
+    /// version on its first line) and nothing after it but blank lines and the reference.
+    fn prolog_only(bytes: &[u8]) -> bool {
+        let text = String::from_utf8_lossy(bytes);
+        let first = text.lines().next().unwrap_or("");
+        first.contains("BLAST")
+            && first.contains(" 2.")
+            && !text.contains("Query=")
+            && !text.contains('\t')
+    }
+
+    /// A failed run sent no hits and no output with rows: what it keeps of its outputs is the CLI's file before the
+    /// error (outfmt 0's prolog, `a_failed_run_sends_the_output_of_its_argv_and_drops_the_others`), and the records
+    /// (each fits in one chunk) are none.
     fn assert_outputs_empty(streams: &std::collections::BTreeMap<u32, Vec<u8>>, label: &str) {
         for stream in [0, 6, 7, STREAM_CUSTOM, STREAM_HITS] {
+            let bytes = streams.get(&stream).map_or(&[][..], Vec::as_slice);
             assert!(
-                streams.get(&stream).is_none_or(Vec::is_empty),
+                bytes.is_empty() || ([0, STREAM_CUSTOM].contains(&stream) && prolog_only(bytes)),
                 "{label}: stream {stream}"
             );
         }

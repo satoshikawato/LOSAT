@@ -18,11 +18,13 @@ name: Python wheels
 # The source distribution (job `sdist`) is what `pip install pylosat` builds where no wheel fits: the
 # job builds a wheel from it as pip does and runs the same search.
 #
-# Publishing is the maintainer's act (job `publish`, RELEASE.md): a run started by hand from the
-# default branch with `tag` (the release's tag, which every job checks out) and `publish` uploads the
-# five wheels and the sdist of that run to PyPI, or to TestPyPI as a rehearsal. No token is stored:
-# PyPI trusts this workflow file in the environment `pypi` (Trusted Publishing, OpenID Connect), and
-# the environment's required reviewer approves the upload. Every other run uploads nothing.
+# Publishing is the maintainer's act (job `publish`, RELEASE.md): a run started by hand with `publish`
+# uploads the five wheels and the sdist of that run to PyPI, or to TestPyPI as a rehearsal. Every job
+# builds the commit the run was started on; a run that uploads to PyPI must be the source of the
+# release's tag `v<version>` (.github/scripts/release_tag_source.sh, first in job `sdist`: the tag is
+# checked, never checked out). No token is stored: PyPI trusts this workflow file in the environment
+# `pypi` (Trusted Publishing, OpenID Connect), and the environment's required reviewer approves the
+# upload. Every other run uploads nothing.
 #
 # When it runs (the macOS jobs are the scarce runners: see platform-checks.yml):
 #  - workflow_dispatch and push to main when the binding, the engine or the smoke's inputs change:
@@ -54,12 +56,8 @@ on:
     - cron: '7 21 * * 6'
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag or commit to build (empty: the branch this run is started from). To publish to PyPI: the release's tag, e.g. v0.2.0"
-        type: string
-        default: ''
       publish:
-        description: "Where to upload what this run builds (the maintainer's act)"
+        description: "Where to upload what this run builds (the maintainer's act; pypi: start the run on the release's tag or on main at it)"
         type: choice
         options: [nowhere, testpypi, pypi]
         default: nowhere
@@ -99,8 +97,6 @@ jobs:
           git config --global core.autocrlf false
           git config --global core.eol lf
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.tag || github.sha }}
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -183,8 +179,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.tag || github.sha }}
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -194,6 +188,20 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.14'
+
+      # First, so that a run that would upload something else than the release stops within a minute:
+      # PyPI takes the source of the tag v<version> only; on TestPyPI anything else is a notice.
+      - name: The release's tag
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'nowhere'
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --locked --no-deps --format-version 1 --manifest-path python/Cargo.toml \
+            | python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "pylosat"))')
+          uploads=false
+          if [ "$PUBLISH" = pypi ]; then uploads=true; fi
+          .github/scripts/release_tag_source.sh "$version" "$uploads"
 
       # The sdist holds python/ and the engine's crate (LOSAT/, the path dependency), with both lock
       # files. `twine check --strict` fails a description that PyPI would not render.
@@ -273,9 +281,6 @@ jobs:
 
       # PyPI never takes a file name twice, also after a deletion: a wrong upload cannot be replaced.
       - name: Check what will be uploaded
-        env:
-          TAG: ${{ inputs.tag }}
-          PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -309,9 +314,6 @@ jobs:
                   problems.append(f"{label}: expected one wheel, found {found}")
           if len(wheels) != len(platforms):
               problems.append(f"expected {len(platforms)} wheels, found {len(wheels)}")
-          tag = os.environ["TAG"]
-          if os.environ["PUBLISH"] == "pypi" and tag != f"v{version}":
-              problems.append(f"PyPI takes the release's tag only: tag {tag!r}, the files are of version {version}")
           if problems:
               sys.exit("\n".join(problems))
           print(f"pylosat {version}: the sdist and {len(wheels)} wheels")

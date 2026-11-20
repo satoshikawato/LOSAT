@@ -2,22 +2,20 @@ name: Publish crate
 
 # The maintainer's publication of the crate `losat` on crates.io (RELEASE.md, "Publish"). A version
 # on crates.io can be yanked but never deleted or replaced, so this is the last step of a release,
-# after the GitHub release and PyPI. Started by hand from the default branch with the release's tag:
-#  - `publish` off (the default): everything but the upload. The tag's crate is packaged, held to
-#    the size limit of crates.io, compared byte for byte with the `.crate` file of the GitHub
-#    release of that tag, and built by `cargo publish --dry-run`. A rehearsal may name any commit
-#    as `tag`: a ref that is not the version's tag, or has no GitHub release, is then a notice.
-#  - `publish` on: the same, then `cargo publish` with the token of the environment `crates-io`
-#    (its secret CARGO_REGISTRY_TOKEN), once the environment's required reviewer approves the job.
+# after the GitHub release and PyPI. Started by hand, on the release's tag or on main at it; the run
+# packages the commit it was started on (the tag is checked, never checked out):
+#  - `publish` off (the default): everything but the upload. The crate is packaged, held to the size
+#    limit of crates.io, compared byte for byte with the `.crate` file of the GitHub release
+#    `v<version>`, and built by `cargo publish --dry-run`. A rehearsal runs on any commit: one that
+#    is not the source of the tag `v<version>`, or has no GitHub release, is then a notice.
+#  - `publish` on: the same, with the tag and the release's crate required, then `cargo publish`
+#    with the token of the environment `crates-io` (its secret CARGO_REGISTRY_TOKEN), once the
+#    environment's required reviewer approves the job.
 # The first version of a crate can only be published with a token. After it, crates.io's Trusted
 # Publishing (no stored secret, as python-wheels.yml uses for PyPI) can be set up for the crate.
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: "The release's tag, e.g. v0.2.0"
-        type: string
-        required: true
       publish:
         description: "Upload to crates.io (the maintainer's act; a published version cannot be deleted)"
         type: boolean
@@ -36,7 +34,7 @@ env:
 
 jobs:
   check:
-    name: package and check ${{ inputs.tag }}
+    name: package and check
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
@@ -44,8 +42,6 @@ jobs:
       sha256: ${{ steps.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.tag }}
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -55,25 +51,18 @@ jobs:
         name: Package the crate
         working-directory: LOSAT
         env:
-          TAG: ${{ inputs.tag }}
           PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
           version=$(cargo metadata --locked --no-deps --format-version 1 \
             | python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "losat"))')
-          if [ "$TAG" != "v$version" ]; then
-            if [ "$PUBLISH" = true ]; then
-              echo "::error::the tag '$TAG' is not v$version, the version of LOSAT/Cargo.toml at that commit"
-              exit 1
-            fi
-            echo "::notice::rehearsal: '$TAG' is not the tag v$version"
-          fi
+          ../.github/scripts/release_tag_source.sh "$version" "$PUBLISH"
           cargo package --locked --no-verify
           crate=target/package/losat-$version.crate
           bytes=$(stat -c %s "$crate")
           sha256=$(sha256sum "$crate" | cut -d ' ' -f 1)
           {
-            echo "### losat $version ($TAG, $(git rev-parse HEAD))"
+            echo "### losat $version ($(git rev-parse HEAD))"
             echo
             echo "| file | bytes | of the 10 MiB limit | sha256 |"
             echo "|---|---|---|---|"
@@ -92,11 +81,11 @@ jobs:
         working-directory: LOSAT
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
           VERSION: ${{ steps.package.outputs.version }}
           PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
+          TAG="v$VERSION"
           if ! gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "losat-$VERSION.crate" --dir "$RUNNER_TEMP/release"; then
             if [ "$PUBLISH" = true ]; then
               echo "::error::the GitHub release $TAG has no losat-$VERSION.crate; publish the GitHub release first"
@@ -106,7 +95,7 @@ jobs:
             exit 0
           fi
           if ! cmp "$RUNNER_TEMP/release/losat-$VERSION.crate" "target/package/losat-$VERSION.crate"; then
-            echo "::error::the crate packaged from $TAG differs from losat-$VERSION.crate of the GitHub release $TAG"
+            echo "::error::the crate packaged from this commit differs from losat-$VERSION.crate of the GitHub release $TAG"
             exit 1
           fi
           echo "The packaged crate is the GitHub release's losat-$VERSION.crate, byte for byte." >> "$GITHUB_STEP_SUMMARY"
@@ -128,8 +117,6 @@ jobs:
       url: https://crates.io/crates/losat/${{ needs.check.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.tag }}
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:

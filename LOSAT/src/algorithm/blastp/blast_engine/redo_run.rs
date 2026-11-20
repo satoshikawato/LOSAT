@@ -1350,7 +1350,7 @@ fn sw_endless(batch_start: usize) -> anyhow::Error {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-313
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:305-313
 #[inline]
 fn fetch_excluded_reached(
     mark: &super::database::FetchExcludedMatch,

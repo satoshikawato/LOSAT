@@ -1060,7 +1060,7 @@ impl ListedSubjects {
 // sort into the redo's order); blastp and psiblast are gapped here (`-ungapped` is refused).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-313
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:305-313
 // The redo's loop reaches such a list in its stream: when the early termination test holds it
 // frees the list and goes on, and otherwise the excluded fetch sets the status back to 0
 // (blast_kappa.c:3560-3575). With `-use_sw_tback` the status of the batch is the last reached

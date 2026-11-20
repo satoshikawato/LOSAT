@@ -15,6 +15,7 @@ import {
   isUnavailable,
   RunCancelledError,
   runFilesOf,
+  runOutputFailedOf,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
@@ -446,8 +447,11 @@ export class Coordinator {
     const conffile = this.conffiles.get(runId);
     let staged = false;
     const startedAt = this.deps.now();
-    // The files that the run made besides its outputs, which a completed and a failed run keep.
+    // The files that the run made besides its outputs, which a completed and a failed run keep, and
+    // whether the engine ended the output of a failed run with `fail`, after which the data layer has
+    // the warnings that it wrote before its error (a completed run's are in its results).
     let runFiles: readonly RunFile[] | undefined;
+    let outputFailed = false;
     // Why the run was stopped (stopActive), if it was.
     let stop: Error | undefined;
     const stopped = new Promise<never>((_, reject) => {
@@ -480,6 +484,7 @@ export class Coordinator {
         (phase) => this.onPhase(runId, phase),
       ).catch((error: unknown) => {
         runFiles = runFilesOf(error);
+        outputFailed = runOutputFailedOf(error);
         throw error;
       });
       const runtime = await Promise.race([search, stopped]);
@@ -513,15 +518,22 @@ export class Coordinator {
         },
       });
     } catch (error) {
-      // Not waited for: a Data worker that does not answer must not keep the run from ending (line WQA's sweep, D2).
-      if (staged) void this.deps.data.discardRun(runId).catch(() => undefined);
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
+      // A failed run keeps the warnings that it wrote before its error (stream 3, docs/web/abi_v2.md §5;
+      // line WQA's sweep, D3, 2026-11-19), which the data layer reads as it discards the run. A stop (Cancel, the end
+      // of the Data worker) ends that wait, and the other discards are not waited for: a Data worker that does not
+      // answer must not keep the run from ending (line WQA's sweep, D2).
+      let diagnostics: string | undefined;
+      if (staged && outputFailed && !cancelled && stop === undefined) {
+        diagnostics = await Promise.race([this.deps.data.discardFailedRun(runId), stopped]).catch(() => undefined);
+      } else if (staged) void this.deps.data.discardRun(runId).catch(() => undefined);
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
         record: {
           endedAt: this.deps.now(),
           ...(cancelled ? {} : { error: failureText(error) }),
           ...(cancelled || runFiles === undefined ? {} : { runFiles }),
+          ...(cancelled || !diagnostics ? {} : { diagnostics }),
         },
       });
     } finally {

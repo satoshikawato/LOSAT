@@ -19,6 +19,17 @@ Query files (`tests/fasta/x4b2/`):
 - `big12.fna`: m_fam, m_mix and ten queries without a hit, 13,440 letters: one batch with BATCH_SIZE=30000.
 - `q240.fna`, `q120.fna`: the first 240 and 120 bases of m_fam (the `-db` rows of the cutoff score of 1, which NCBI
   redoes slowly: 1.4 to 3.2 seconds for q240 on ws, 0.1 for q120).
+- `hf_w.fna`, `hf_m.fna` (fix round 1, review 1's S2): `A` + tks_W (or tks_M) back-translated, so tks_W is in
+  frame +2 (context 1, which reads query 1's heap), qok1 in frame +1 (context 6, a query without a hit), and ten
+  queries without a hit: with `-max_target_seqs 1` qok1's match on sok1 fills query 1's heap first, and the heap test
+  of tks_W's window on sfail reads that full heap (indexed by the query, it would read query 0's empty heap).
+- `pre20_pad.fna`, `pre20_pad_wrc.fna`, `pre20_pad_crash.fna`, `pre20_pad_m.fna` (fix round 1, S3): pre20 and the
+  eleven queries without a hit (one batch of 1644 letters with BATCH_SIZE=1644), alone or followed by a second batch:
+  tks_W in frame -1 (context 3 of one query: past the array), pre20 again (`pre20b`), tks_W and five more queries
+  without a hit (`nohit12` to `nohit16`: tks_W's context 6 below the seven queries, the batch's first query keeps a
+  match and the last match fails), or tks_M (the redo without end against X4's endless subjects).
+- `empty_w.fna` (fix round 1, S3): a record without letters, then tks_W (with BATCH_SIZE=1 the first batch has no
+  valid context).
 
 Subject files: `ok_fail.faa` (sok1, then sfail: the failing match is the stream's last).
 
@@ -95,19 +106,31 @@ FA = os.path.join(TESTS, "fasta", "x4b2")
 slices = read_fasta(os.path.join(TESTS, "db_search", "bslice_q.fna"))
 w = ("tks_W_nt tks_W in frame +1", nt(TKS_W))
 pre20 = ("pre20_nt the first 20 letters of qok1 in frame +1", nt(PRE20))
-nohit = [(f"nohit{i:02d} CCCCGGGGAACC repeated", NOHIT) for i in range(1, 12)]
+nohit = [(f"nohit{i:02d} CCCCGGGGAACC repeated", NOHIT) for i in range(1, 17)]
+qok1 = ("qok1_nt qok1 in frame +1", nt(QOK1))
+w_rc = ("tks_W_rc tks_W in frame -1", rc(nt(TKS_W)))
+m = ("tks_M_nt tks_M in frame +1", nt(TKS_M))
 queries = {
     "w.fna": [w],
-    "w_rc.fna": [("tks_W_rc tks_W in frame -1", rc(nt(TKS_W)))],
-    "m.fna": [("tks_M_nt tks_M in frame +1", nt(TKS_M))],
-    "qok1_w12.fna": [("qok1_nt qok1 in frame +1", nt(QOK1)), w] + nohit[1:],
-    "pre20_w12.fna": [pre20, w] + nohit[1:],
-    "nohit_w12.fna": [nohit[0], w] + nohit[1:],
+    "w_rc.fna": [w_rc],
+    "m.fna": [m],
+    "qok1_w12.fna": [qok1, w] + nohit[1:11],
+    "pre20_w12.fna": [pre20, w] + nohit[1:11],
+    "nohit_w12.fna": [nohit[0], w] + nohit[1:11],
     "pre20_w.fna": [pre20, w],
-    "pre20_pad_w.fna": [pre20] + nohit + [w],
+    "pre20_pad_w.fna": [pre20] + nohit[:11] + [w],
+    "hf_w.fna": [("f2_tks_W A + tks_W in frame +2", "A" + nt(TKS_W)), qok1] + nohit[1:11],
+    "hf_m.fna": [("f2_tks_M A + tks_M in frame +2", "A" + nt(TKS_M)), qok1] + nohit[1:11],
+    "pre20_pad.fna": [pre20] + nohit[:11],
+    "pre20_pad_wrc.fna": [pre20] + nohit[:11] + [w_rc],
+    "pre20_pad_crash.fna": [pre20] + nohit[:11] + [("pre20b_nt the first 20 letters of qok1 in frame +1, again", nt(PRE20)), w]
+    + nohit[11:16],
+    "pre20_pad_m.fna": [pre20] + nohit[:11] + [m],
+    "empty_w.fna": [("empty a record without letters", ""), w],
     "q12.fna": [("m_fam_1k bases 1-1000 of m_fam", slices["m_fam"][:1000]),
-                ("m_mix_1k bases 1001-2000 of m_mix", slices["m_mix"][1000:2000])] + nohit[1:],
-    "big12.fna": [("m_fam MelaMJNV 26001-31000", slices["m_fam"]), ("m_mix MelaMJNV 56001-61600", slices["m_mix"])] + nohit[1:],
+                ("m_mix_1k bases 1001-2000 of m_mix", slices["m_mix"][1000:2000])] + nohit[1:11],
+    "big12.fna": [("m_fam MelaMJNV 26001-31000", slices["m_fam"]), ("m_mix MelaMJNV 56001-61600", slices["m_mix"])]
+    + nohit[1:11],
     "q240.fna": [("m_fam_240 bases 1-240 of m_fam", slices["m_fam"][:240])],
     "q120.fna": [("m_fam_120 bases 1-120 of m_fam", slices["m_fam"][:120])],
     "ok_fail.faa": [("sok1 BDT63546.1 of PajaWSV", SOK1),
@@ -118,6 +141,7 @@ for name, records in queries.items():
     with open(os.path.join(FA, name), "w") as f:
         f.write(fasta(records))
 assert sum(len(s) for _, s in queries["pre20_pad_w.fna"][:12]) == 1644
+assert sum(len(s) for _, s in queries["pre20_pad_crash.fna"][12:]) <= 1644
 if NCBI:
     base = [("dbj|AB300001.1| sok1 BDT63546.1 of PajaWSV", SOK1), ("dbj|AB300002.1| sfail tks_M with D first, twice", SFAIL)]
     dbs = {"fail": base, "excl": base + [("gnl|ti|9003 sx sfail's first half with 8 substitutions", weaker("D" + BODY))]}

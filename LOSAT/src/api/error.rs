@@ -89,17 +89,22 @@ impl Error {
 }
 
 /// The bytes of `error` in anyhow's alternate form (the error and its causes joined by `: `), with
-/// the bytes of each `cli::NativeError` of the chain, the text the command line writes: a name
-/// that is not UTF-8 keeps its bytes there (line LIB-B), where `{error:#}` would write U+FFFD.
+/// the bytes of each `cli::NativeError` and `NcbiException` of the chain, the text the command
+/// line writes: a name that is not UTF-8 keeps its bytes there (line LIB-B), where `{error:#}`
+/// would write U+FFFD.
 pub(crate) fn chain_bytes(error: &anyhow::Error) -> Vec<u8> {
     let mut bytes = Vec::new();
     for (at, cause) in error.chain().enumerate() {
         if at > 0 {
             bytes.extend_from_slice(b": ");
         }
-        match cause.downcast_ref::<crate::cli::NativeError>() {
-            Some(native) => bytes.extend_from_slice(&native.message),
-            None => bytes.extend_from_slice(cause.to_string().as_bytes()),
+        if let Some(native) = cause.downcast_ref::<crate::cli::NativeError>() {
+            bytes.extend_from_slice(&native.message);
+        } else if let Some(exception) = cause.downcast_ref::<crate::ncbi_exception::NcbiException>()
+        {
+            bytes.extend_from_slice(&exception.what());
+        } else {
+            bytes.extend_from_slice(cause.to_string().as_bytes());
         }
     }
     bytes

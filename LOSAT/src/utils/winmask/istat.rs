@@ -59,7 +59,7 @@ pub struct StatFile {
 /// ...
 /// ```
 pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
-    let name = path.to_string_lossy().into_owned();
+    let name = crate::utils::os_bytes::path_bytes(path).into_owned();
     let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
     discover(&mut file)
 }
@@ -530,7 +530,7 @@ impl UnitCounts {
     /// The `-t_*_pct` settings of the windowmasker application are not ported (blastn passes
     /// -1, `seq_masker.hpp:178-181`).
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
-        let name = path.to_string_lossy().into_owned();
+        let name = crate::utils::os_bytes::path_bytes(path).into_owned();
         let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
         Self::read(&mut file, params)
     }
@@ -862,7 +862,7 @@ impl UnitCounts {
     ///         vt[linenum] = (Uint2)atoi( line.c_str() );
     /// ```
     /// The numbers are glibc's `atoi` ([`ncbi_str::c_atoi`]) truncated to the field, and those of
-    /// the hash table parameters are read as libstdc++'s `>>` reads an `unsigned int`
+    /// the hash table parameters are read as C++'s `>>` reads an `unsigned int`
     /// ([`extract_uints`]). A value that `>>` does not reach (the line ends, or an earlier value
     /// failed) is left uninitialized by NCBI: a check that reads one is refused
     /// ([`WinMaskError::UnsetHashParameter`]). NCBI 2.17.0's errors for such lines change from
@@ -1934,59 +1934,72 @@ impl<R: Read> TextLines<R> {
     }
 }
 
-/// `istringstream( line ) >> v0 >> v1 >> ...` into `unsigned int`s, as libstdc++ reads them
-/// (`num_get::_M_extract_int` with the stream's default flags): white space, then a sign and the
-/// decimal digits up to the first other byte; no digit is 0 and a failure, a value beyond
-/// `UINT_MAX` is `UINT_MAX` and a failure, and a `-` gives the value's negation modulo 2^32.
-/// After a failure, and once the line has ended, the stream reads nothing more: the values and
-/// how many of them `>>` set (the first ones; a failed one is set), the others 0 here (NCBI
-/// leaves them uninitialized; see [`UnitCounts::read_oascii`]).
+/// Reads up to `N` unsigned integers from `line` as C++'s `std::istringstream` extracts them with
+/// `>>` into `unsigned int` (default flags: decimal, white space skipped), and returns them with
+/// the number of values that the stream stored.
+///
+/// A value that was not stored (the line ended before it, or an earlier value failed) is 0 in the
+/// returned array and is not counted: NCBI leaves such a variable as it was. A value that failed is
+/// stored and counted (0 when no number was found, `u32::MAX` when it was too large).
+///
+/// The rules are those of the C++ standard's `num_get` stages 1 to 3 for an unsigned integer
+/// (specifier `%u`) and `strtoull`, as the table `tests/fixtures/winmask_uints/oascii_hash_line.tsv`
+/// observed them (NCBI 2.17.0's C++ library, 3,038 lines, 4 fields each):
+///
+/// * Each `>>` first skips white space (space, tab, line feed, vertical tab, form feed, carriage
+///   return); if the text ends there nothing is stored and the stream has failed.
+/// * Stage 2 accumulates an optional `+` or `-` and then decimal digits, and stops at any other
+///   character (`0x10` is `0`; `1.5` is `1`; a sign followed by a space has no digits).
+/// * Stage 3 converts the field. No digit: 0, and the stream has failed. Otherwise the digits give
+///   a magnitude; one above `u32::MAX` stores `u32::MAX` and the stream has failed, whatever the
+///   sign (`-4294967296`, and `-18446744073709551615`, where `strtoull` alone would wrap in 64
+///   bits, fail alike). A magnitude that fits is stored as it is, or negated in 32 bits when the
+///   field has a `-` (`-1` is `u32::MAX`, `-4294967295` is 1, `-0` is 0), and the stream has not
+///   failed.
+/// * A stream that has failed, or that reached the end of the text while accumulating a field,
+///   stores nothing more.
 pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> ([u32; N], usize) {
+    let is_space = |byte: u8| matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
     let mut values = [0u32; N];
-    let mut set = 0;
-    let mut pos = 0;
-    for value in values.iter_mut() {
-        // The sentry: skip white space; at the end of the line it fails.
-        while pos < line.len() && ncbi_str::is_space(line[pos]) {
-            pos += 1;
+    let mut stored = 0;
+    let mut at = 0;
+    while stored < N {
+        while at < line.len() && is_space(line[at]) {
+            at += 1;
         }
-        if pos == line.len() {
+        if at == line.len() {
             break;
         }
-        set += 1;
-        let negative = line[pos] == b'-';
-        if negative || line[pos] == b'+' {
-            pos += 1;
+        let negative = line[at] == b'-';
+        if matches!(line[at], b'-' | b'+') {
+            at += 1;
         }
-        let digits_from = pos;
-        let mut result: u32 = 0;
-        let mut overflow = false;
-        while pos < line.len() && line[pos].is_ascii_digit() {
-            let digit = u32::from(line[pos] - b'0');
-            if result > u32::MAX / 10 {
-                overflow = true;
-            } else {
-                result *= 10;
-                overflow |= result > u32::MAX - digit;
-                result = result.wrapping_add(digit);
+        let first_digit = at;
+        let mut magnitude = 0u64;
+        let mut too_large = false;
+        while at < line.len() && line[at].is_ascii_digit() {
+            magnitude = magnitude * 10 + u64::from(line[at] - b'0');
+            if magnitude > u64::from(u32::MAX) {
+                // Past this the magnitude only has to stay above the limit.
+                too_large = true;
+                magnitude = u64::from(u32::MAX) + 1;
             }
-            pos += 1;
+            at += 1;
         }
-        if pos == digits_from {
-            break;
-        }
-        if overflow {
-            *value = u32::MAX;
-            break;
-        }
-        *value = if negative {
-            result.wrapping_neg()
+        let (value, failed) = if at == first_digit {
+            (0, true)
+        } else if too_large {
+            (u32::MAX, true)
+        } else if negative {
+            ((magnitude as u32).wrapping_neg(), false)
         } else {
-            result
+            (magnitude as u32, false)
         };
-        if pos == line.len() {
+        values[stored] = value;
+        stored += 1;
+        if failed || at == line.len() {
             break;
         }
     }
-    (values, set)
+    (values, stored)
 }

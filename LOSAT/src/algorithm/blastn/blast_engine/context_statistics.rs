@@ -364,17 +364,36 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                 1,
             )
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+        // A count of 0 (of a positive total) is the division by 0 where NCBI crashes, LOSAT's
+        // refusal (`common::database::check_setup_count`, D1a-5 of line RG) at this batch, after
+        // the reports of the batches before (NCBI's output before its crash in the tabular
+        // formats), as the error below; a run whose batches have no valid context does not reach
+        // it and is reported as NCBI's. Else
         // `stats::setup::setup_subject_length`: `(Uint4)(Int4)(total / num_seqs) == 0` (a
         // negative `NSEQ` passes; one of 2^31 fails).
-        if crate::stats::setup::setup_subject_length(total_length, num_seqs, None).is_none() {
-            let error = anyhow::Error::from(crate::cli::NativeError {
-                exit: 3,
-                message: format!(
-                    "BLAST engine error: {}\n",
-                    crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
-                )
-                .into(),
-            });
+        let setup_error = crate::algorithm::common::database::check_setup_count(
+            total_length,
+            num_seqs,
+            false,
+            "BLASTN",
+        )
+        .err()
+        .or_else(|| {
+            crate::stats::setup::setup_subject_length(total_length, num_seqs, None)
+                .is_none()
+                .then(|| {
+                    anyhow::Error::from(crate::cli::NativeError {
+                        exit: 3,
+                        message: format!(
+                            "BLAST engine error: {}\n",
+                            crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
+                        )
+                        .into(),
+                    })
+                })
+        });
+        if let Some(error) = setup_error {
             // A batch after the first: the batches before had no valid query (one with a
             // valid query would have raised the error), and NCBI has written their reports
             // (`run_in_pool`).

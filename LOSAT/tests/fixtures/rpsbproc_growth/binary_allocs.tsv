@@ -1,0 +1,32 @@
+# binary_allocs.tsv: allocations of NCBI rpsbproc 0.5.1 (bioconda/NCBI Linux x64 package, ~/losat-bench/tools/env_rpsbproc-0.5.1/bin/rpsbproc,
+# static libstdc++ of conda-forge gcc 13.4.0-16) on ws, 2026-11-20, for edited motifs of tests/fixtures/rpsbproc/data_with/sites + arch/mfirst.asn
+# (programs/runmotif.sh with the malloc shim programs/mallog.c; programs/runall_motifs.sh, programs/make_binary_allocs.py).
+# Columns: site (cat: motif of the catalytic site, 3 residues HKY of a query of 185; dim: the 24-position site, first motif site),
+# motif, baseline motif of the same shape, then the difference of the allocation counts per size in bytes (run minus baseline run;
+# the pattern vector (72*2^k bytes) and the motif text copy are removed first).
+cat	HKY	HKY	
+cat	Hx(13)K	Hx(1)K	8:-1 16:-1 64:-1 512:-1
+cat	Hx(14)K	Hx(1)K	8:-1 16:-1 31:+1 64:-1 512:-1
+cat	Hx(100)K	Hx(1)K	8:-1 16:-1 64:-1 102:+1 203:+1 512:-1
+cat	Hx(1237)K	Hx(1)K	8:-1 16:-1 64:-1 512:-1 1239:+1 2477:+1
+cat	Hx(4096)K	Hx(1)K	8:-1 16:-1 64:-1 512:-1 4098:+1 8195:+1
+cat	Hx(65535)K	Hx(1)K	8:-1 16:-1 64:-1 512:-1 65537:+1 131073:+1
+cat	Hx(3000000)K	Hx(1)K	8:-1 16:-1 64:-1 512:-1 3000002:+1 6000003:+1
+cat	HKYHKYHKYHKYHKYHKYHKY	HKY	8:-1 16:-1 43:+1 64:-1 512:-1
+cat	HKYHKYHK	HKY	8:-1 16:-1 31:+1 64:-1 512:-1
+cat	HKYHKYH	HKY	8:-1 16:-1 64:-1 512:-1
+cat	H-{<}(0,1000)-K	H-{<}(0,1)-K	16:-1 32:+1 64:+1 128:+1 256:+1 512:+1 1024:+1 2048:+1 4096:+1 8008:+1 8192:+1
+cat	H-{<}(0,100)-K	H-{<}(0,1)-K	16:-1 32:+1 64:+1 128:+1 256:+1 512:+1 808:+1 1024:+1
+cat	H-{<}(100)-K	H-{<}(1)-K	8:-1 16:-1 64:-1 102:+1 203:+1 512:-1
+cat	H-{<}(3,300)-K	H-{<}(1,2)-K	8:-1 16:-1 24:-1 32:-1 64:-1 512:-1
+cat	H-{<}(0,5000)-K	H-{<}(0,1)-K	16:-1 32:+1 64:+1 128:+1 256:+1 512:+1 1024:+1 2048:+1 4096:+1 8192:+1 16384:+1 32768:+1 40008:+1 65536:+1
+cat	H-{<}(0,70000)-K	H-{<}(0,1)-K	16:-1 32:+1 64:+1 128:+1 256:+1 512:+1 1024:+1 2048:+1 4096:+1 8192:+1 16384:+1 32768:+1 65536:+1 131072:+1 262144:+1 524288:+1 560008:+1 1048576:+1
+cat	<(0,1000)-H	<(0,1)-H	16:-1 32:+1 64:+1 128:+1 256:+1 512:+1 1024:+1 2048:+1 4096:+1 8008:+1 8192:+1
+cat	H-{<}(0,200)-{<}(0,300)-K	H-{<}(0,1)-{<}(0,1)-K	16:-2 32:+1 64:+1 128:+1 256:+1 512:+1 1024:+1 1608:+1 2048:+1 2408:+1 4096:+1
+cat	H-{<}(0,300)-{<}(0,200)-K	H-{<}(0,1)-{<}(0,1)-K	16:-2 32:+1 64:+1 128:+1 256:+1 512:+1 1024:+1 1608:+1 2048:+1 2408:+1 4096:+1
+dim	K	K	
+dim	KKKKKKKKKKKKKKKKKKKK	K	31:-1 41:+1
+dim	Hx(14)K	Hx(1)K	
+dim	Hx(100)K	Hx(1)K	8:-1 31:-1 64:-1 102:+1 203:+1 512:-1
+dim	x-{<}(0,500)	x-{<}(0,1)	16:-1 32:+1 64:+1 128:+1 256:+1 512:+1 1024:+1 2048:+1 4008:+1 4096:+1
+dim	x(3)-{<}(0,2000)-x(2)	x(3)-{<}(0,1)-x(2)	16:-1 64:+1 128:+1 256:+1 512:+1 1024:+1 2048:+1 4096:+1 8192:+1 16008:+1 16384:+1

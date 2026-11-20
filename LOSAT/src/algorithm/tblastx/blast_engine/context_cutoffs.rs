@@ -159,6 +159,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             1,
         )
     };
+    // A count of 0 (of a positive total) is LOSAT's refusal before (`search_query_batch`). Else
     // `stats::setup::setup_subject_length`: `(Uint4)(Int4)(total / num_seqs) == 0` (a negative
     // `NSEQ` passes; one of 2^31 fails).
     if crate::stats::setup::setup_subject_length(total_length, num_seqs as i32, None).is_none() {
@@ -396,7 +397,12 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             karlin: None,
             eff_searchsp: 0,
             aa_len: 0,
-            context0_search_space: 0,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:157-161
+            // (the request's search space is `-searchsp` when it was given)
+            // A query without frame +1 among its contexts (`-strand minus`, or fewer than three
+            // letters) keeps this value: `-searchsp`, else 0 (NCBI's context 0 then has no
+            // length, or is not even visited, blast_setup.c:770-772 with `first_context` 3).
+            context0_search_space: numbers.searchsp.unwrap_or(0),
             context0_aa_len: 0,
             seg_masks: frames
                 .iter()

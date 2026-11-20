@@ -1453,6 +1453,11 @@ fn check_ncbi_options(
 ) -> Result<(Option<SequenceRange>, ReportCounts)> {
     use crate::blastinput::app::{formatting_handler_check, options_error, Program};
     args.seg_spec()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1975-1991 (the
+    // query options handler reads the strand before the range)
+    // The command line's parser has checked the value, a caller of `run_local` has not: a value
+    // other than `both`, `plus` and `minus` is the parser's argument error.
+    crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
     // ```c++
     //     // set the sequence range
@@ -1771,7 +1776,8 @@ fn search_cli(
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
-            .with_parse_deflines(args.parse_deflines),
+            .with_parse_deflines(args.parse_deflines)
+            .with_strand(&args.strand),
     );
     query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
@@ -1837,6 +1843,9 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
+    // `run_local` has not (blastn's `run_local` does the same).
+    crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
@@ -1924,7 +1933,10 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The file of an unknown `-matrix`, first, as the command line's `run` looks it up.
+    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
+    // `run_local` has not (blastn's `run_local` does the same).
+    crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
+    // The file of an unknown `-matrix`, then, as the command line's `run` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
     // NCBI parses -outfmt before its option handlers run, with LOSAT's refusals;
     // `check_ncbi_options` and `search` check the formats again, after `-out` is opened.
@@ -5254,7 +5266,10 @@ fn search_query_batch<S: TbxScore>(
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:998-1082
     // NCBI uses average over ALL contexts including zero-length (frame restriction via strand)
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
-    let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
+    let avg_query_length = compute_avg_query_length_ncbi(
+        &query_nucl_lengths,
+        crate::algorithm::blastn::args::QueryStrand::from_option(&args.strand).searched(),
+    );
 
     let t_search_start = Instant::now();
     let scan_ns = AtomicU64::new(0);
@@ -5419,6 +5434,20 @@ fn search_query_batch<S: TbxScore>(
             x_timing: Vec::new(),
         });
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // A count of 0 (of a positive total) is the division by 0 where NCBI's setup of this first
+    // batch with a valid context crashes, before it reads a sequence: LOSAT's refusal
+    // (`common::database::check_setup_count`, D1a-5 of line RG), after the reports of the batches
+    // before, also where the sequences could not be read (NCBI 2.17.0: `NSEQ 0` over a volume
+    // without its `.nsq`, SIGFPE; review A of D1a-5, F1). A run whose batches have no valid context
+    // does not reach it and is reported as NCBI's.
+    crate::algorithm::common::database::check_setup_count(
+        db_length_nucl,
+        i32::try_from(db_num_seqs).unwrap_or(i32::MAX),
+        false,
+        "TBLASTX",
+    )
+    .map_err(ErrorAfterBatchReports)?;
     // `-db` whose sequences could not be read: this first batch with a valid context fails
     // (`run_in_pool` raises the kept read error).
     if matches!(subjects, Subjects::Unreadable) {

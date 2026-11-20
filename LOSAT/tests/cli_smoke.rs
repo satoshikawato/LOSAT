@@ -168,7 +168,8 @@ fn startup_trace_needs_the_diagnostics_feature() {
 // ```
 // NCBI's handlers read the subjects and open the query before the options are checked, so a
 // missing file is reported first; LOSAT's rejection of an option that NCBI runs comes where
-// NCBI checks the options.
+// NCBI checks the options. The option here is `-use_sw_tback` without composition-based
+// statistics, which BLASTP still refuses (with them it runs: line RG item X4).
 #[test]
 fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     let missing_query = temp_path("missing_query", "faa");
@@ -178,7 +179,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&missing_query)
         .arg("-subject")
         .arg(&missing_subject)
-        .arg("-use_sw_tback")
+        .args(["-use_sw_tback", "-comp_based_stats", "0"])
         .output()
         .expect("run unsupported blastp");
     assert!(!output.status.success(), "a missing subject should fail");
@@ -197,7 +198,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&query)
         .arg("-subject")
         .arg(&subject)
-        .arg("-use_sw_tback")
+        .args(["-use_sw_tback", "-comp_based_stats", "0"])
         .output()
         .expect("run unsupported blastp");
     let _ = std::fs::remove_file(&query);
@@ -206,7 +207,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains(
-            "-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's BLASTP"
+            "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's BLASTP yet"
         ),
         "unsupported error should name program, option, and reason: {stderr}"
     );

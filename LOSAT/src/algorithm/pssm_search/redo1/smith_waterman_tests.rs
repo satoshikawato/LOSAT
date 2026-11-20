@@ -9,6 +9,7 @@ use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
+use crate::core::composition_adjustment::smith_waterman::evalue_from_score;
 use crate::core::psi::KarlinBlk;
 use crate::stats::KarlinParams;
 use crate::utils::glibc_fma_libm::GlibcLibm;
@@ -125,7 +126,7 @@ fn several_hsps_give_several_alignments() {
     let info = info_of(&consensus);
     let subject = two_copies();
     let mut run = run_of(&consensus);
-    let mut sw = SwRedoScratch::new();
+    let mut sw = RpsSwScratch::new();
     let mut heap = BlastCompoHeap::new(500, 0.002);
     let n = consensus.len() as i32;
     let hsps = [
@@ -282,7 +283,7 @@ fn one_hsp_gives_one_alignment() {
     let alignments = redo_match(&info, consensus.len(), 20_000, 10.0)
         .redo_one_match_smith_waterman(
             &mut run,
-            &mut SwRedoScratch::new(),
+            &mut RpsSwScratch::new(),
             &mut BlastCompoHeap::new(500, 0.002),
             7,
             &[hsp((0, n), (10, 10 + n), 300)],
@@ -311,7 +312,7 @@ fn the_first_alignment_must_be_significant_and_wanted_by_the_heap() {
         redo_match(&info, consensus.len(), 20_000, expect)
             .redo_one_match_smith_waterman(
                 &mut run,
-                &mut SwRedoScratch::new(),
+                &mut RpsSwScratch::new(),
                 heap,
                 7,
                 &hsps,
@@ -351,7 +352,7 @@ fn alignments_of_score_zero_fail_or_never_end() {
     let subject = encode("A");
     let outcome = matching.redo_one_match_smith_waterman(
         &mut run_of(&consensus),
-        &mut SwRedoScratch::new(),
+        &mut RpsSwScratch::new(),
         &mut BlastCompoHeap::new(500, 0.002),
         0,
         &[hsp((0, 1), (0, 1), 1)],
@@ -362,7 +363,7 @@ fn alignments_of_score_zero_fail_or_never_end() {
     let hsps = [hsp((0, 1), (0, 1), 11), hsp((0, 1), (0, 1), 11)];
     let outcome = matching.redo_one_match_smith_waterman(
         &mut run_of(&consensus),
-        &mut SwRedoScratch::new(),
+        &mut RpsSwScratch::new(),
         &mut BlastCompoHeap::new(500, 0.002),
         0,
         &hsps,
@@ -372,7 +373,7 @@ fn alignments_of_score_zero_fail_or_never_end() {
     // With one HSP the loop stops after the first alignment.
     let outcome = matching.redo_one_match_smith_waterman(
         &mut run_of(&consensus),
-        &mut SwRedoScratch::new(),
+        &mut RpsSwScratch::new(),
         &mut BlastCompoHeap::new(500, 0.002),
         0,
         &hsps[..1],
@@ -394,7 +395,7 @@ fn a_significant_score_zero_is_decided_by_the_first_cell() {
         redo_match(&info, consensus.len(), search_space, 10.0)
             .redo_one_match_smith_waterman(
                 &mut run_of(&consensus),
-                &mut SwRedoScratch::new(),
+                &mut RpsSwScratch::new(),
                 &mut BlastCompoHeap::new(500, 0.002),
                 0,
                 &two,

@@ -152,8 +152,11 @@ pub struct UngappedHit {
 // `Int4` ends: the one-hit path (`blast_gapalign::get_ungapped_hsp_list_int4`, the chunk offsets
 // and merge of `blast_engine/run_impl.rs`, the first linking call of `subject_link.rs`) uses them
 // from the conversion of such an HSP until the HSPs of length 0 or less are dropped right after
-// that linking call, where NCBI's re-evaluation deletes them (a length of 0 or less scores 0,
-// below every cutoff: blast_hits.c:687-699, 449-453). Nothing after that sees such an HSP.
+// that linking call (without sum statistics, which link nothing, before the re-evaluation:
+// `subject_link::drop_unread_without_linking`), where NCBI's re-evaluation deletes them (a length
+// of 0 or less scores 0, below every cutoff: blast_hits.c:687-699, 449-453). Nothing after that
+// sees such an HSP; without sum statistics only the E-value of the first call and the reap by it
+// read one, and neither reads its ends.
 impl UngappedHit {
     /// NCBI's `query.end` (`Int4`).
     #[inline]

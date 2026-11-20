@@ -1449,8 +1449,10 @@ fn scan_chunk_one_hit<S: TbxScore>(
                         // other: its ends are at or before its starts, and below 0 near a
                         // frame's start. NCBI links it with the others and its
                         // re-evaluation deletes it; LOSAT keeps its `Int4` ends up to the
-                        // first linking call and drops it there (`chaining.rs`, the impl
-                        // of `UngappedHit`; `subject_link::link_subject_hits_int4`).
+                        // first linking call and drops it there, or without sum statistics
+                        // before the re-evaluation (`chaining.rs`, the impl of
+                        // `UngappedHit`; `subject_link::link_subject_hits_int4`,
+                        // `subject_link::drop_unread_without_linking`).
                         let hsp_q_absolute = ctx.frame_base + hit.q_start;
                         init_hsps.push(InitHSP {
                             q_start_absolute: hsp_q_absolute,

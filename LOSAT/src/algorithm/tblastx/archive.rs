@@ -87,11 +87,34 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // ```
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:321-323
+    // ```c++
+    //     if (args.Exist(kArgSumStats) && args[kArgSumStats]) {
+    //         opt.SetSumStatisticsMode(args[kArgSumStats].AsBoolean());
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2043-2052
+    // ```c++
+    // CBlastOptions::SetSumStatisticsMode(bool m)
+    // ...
+    //     if (m_Remote) {
+    //         m_Remote->SetValue(eBlastOpt_SumStatisticsMode, m);
+    //     }
+    // ```
+    // `SumStatistics` is recorded only when `-sum_stats` is given, with its value.
+    inputs.sum_stats = args.sum_stats;
     inputs.window_size = args.window_size;
     inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:957
+    // ```c++
+    //     opt.SetLongestIntronLength(args[kArgMaxIntronLength].AsInteger());
+    // ```
+    // The argument has a default, so the list always holds it; a value other than 0 stops the run
+    // before any archive (`check_ncbi_options`).
+    inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -409,9 +432,9 @@ mod tests {
     // probes; `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that each
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
-    // (`-sum_stats`, `-strand`, `-subject_besthit`, `-parse_deflines`; `-xdrop_ungap`, which NCBI
-    // does not record, is read since line RG X1): the list that NCBI would record is what the archive's model knows
-    // about them, pinned here.
+    // (`-strand`, `-subject_besthit`, `-parse_deflines`; `-xdrop_ungap`, which NCBI does not
+    // record, is read since line RG X1, and `-sum_stats` since line RG X3): the list that NCBI
+    // would record is what the archive's model knows about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def_sub", &[], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
         ("seg_no_sub", &["-seg", "no"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
@@ -506,16 +529,12 @@ mod tests {
     /// (they stop at the command line) are applied to the inputs by hand.
     fn inputs_of(extra: &[&str]) -> Option<OptionInputs> {
         let mut parsed: Vec<&str> = Vec::new();
-        let mut by_hand: Vec<(&str, &str)> = Vec::new();
+        let mut subject_besthit = false;
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                "-sum_stats" => {
-                    by_hand.push((extra[index], extra[index + 1]));
-                    index += 2;
-                }
                 "-subject_besthit" => {
-                    by_hand.push((extra[index], ""));
+                    subject_besthit = true;
                     index += 1;
                 }
                 // Not recorded (the strand is not an option of the request).
@@ -535,12 +554,7 @@ mod tests {
             return None;
         };
         let mut inputs = option_inputs(&args);
-        for (name, value) in by_hand {
-            match name {
-                "-sum_stats" => inputs.sum_stats = Some(value == "true"),
-                _ => inputs.subject_besthit = true,
-            }
-        }
+        inputs.subject_besthit = subject_besthit;
         Some(inputs)
     }
 

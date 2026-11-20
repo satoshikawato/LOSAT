@@ -9377,6 +9377,71 @@ fn context0_searched(
     }
 }
 
+/// What the blocks and statistics of a batch's first query are made of (`FirstContexts::first_context`).
+struct FirstContexts<'a> {
+    contexts: &'a [QueryContext],
+    query_valid: &'a [bool],
+    searchsp: Option<i64>,
+    exact_search_spaces: &'a [Option<i64>],
+    search_spaces: &'a [SearchSpace],
+    /// RPS-BLAST's last volume's search space per query (`context0_searched`); empty otherwise.
+    last_volume_spaces: &'a [i64],
+    /// rpsblast's gapped K per query (`rps_search::engine::batch_gapped_k`); `None` otherwise.
+    rps_gapped_k: Option<&'a [f64]>,
+    gapped_params: crate::stats::KarlinParams,
+    ungapped: bool,
+}
+
+impl FirstContexts<'_> {
+    /// The blocks and statistics of the batch whose first query is `first` (BLASTP has one
+    /// context per query): `-1` triples for a query without a valid context, and for the gapped
+    /// block of an ungapped search.
+    fn first_context(&self, first: usize) -> super::archive::FirstContext {
+        let context0 = context0_searched(
+            self.contexts,
+            self.query_valid,
+            self.searchsp,
+            self.exact_search_spaces,
+            self.search_spaces,
+            self.last_volume_spaces,
+            first,
+        );
+        if !self.query_valid[first] {
+            return super::archive::FirstContext {
+                karlin: None,
+                search_space: 0,
+                length_adjustment: 0,
+                context0_space: context0.space,
+                context0_length: context0.query_length,
+            };
+        }
+        // rpsblast's first query of a batch has its profile's K (`RPS_K_MULT` times the `.aux`
+        // value, `rps_search::engine::batch_gapped_k`), the others the table's.
+        let mut gapped = self.gapped_params;
+        if let Some(k) = self.rps_gapped_k {
+            gapped.k = k[first];
+        }
+        super::archive::FirstContext {
+            karlin: Some((
+                self.contexts[first].karlin_params,
+                (!self.ungapped).then_some(gapped),
+            )),
+            // The statistics block's space is volume 0's; the option is the last volume's where
+            // the volumes have their own spaces (`context0_searched`).
+            search_space: context0_search_space(
+                self.query_valid,
+                self.searchsp,
+                self.exact_search_spaces,
+                self.search_spaces,
+                first,
+            ),
+            length_adjustment: self.search_spaces[first].length_adjustment,
+            context0_space: context0.space,
+            context0_length: context0.query_length,
+        }
+    }
+}
+
 /// The batch whose search strategy request the run writes right after a call's batches are
 /// reported (`BlastpReports::strategy_next`): the batch that stops the run (every query without
 /// letters) after the searched batches, or the batch that fails with a header file NCBI cannot read
@@ -12188,53 +12253,18 @@ fn run_call(
             observer.query_stats(q_idx, stats);
         }
     }
-    // The blocks and statistics of a batch's first query (BLASTP has one context
-    // per query): `-1` triples for a query without a valid context, and for the
-    // gapped block of an ungapped search.
-    let first_context = |first: usize| -> super::archive::FirstContext {
-        let context0 = context0_searched(
-            &contexts,
-            &query_valid,
-            args.searchsp,
-            &exact_search_spaces,
-            &search_spaces,
-            &rps_last_volume_spaces,
-            first,
-        );
-        if !query_valid[first] {
-            return super::archive::FirstContext {
-                karlin: None,
-                search_space: 0,
-                length_adjustment: 0,
-                context0_space: context0.space,
-                context0_length: context0.query_length,
-            };
-        }
-        // rpsblast's first query of a batch has its profile's K (`RPS_K_MULT` times the `.aux`
-        // value, `rps_search::engine::batch_gapped_k`), the others the table's.
-        let mut gapped = gapped_params;
-        if let Some(k) = rps_gapped_k.as_ref() {
-            gapped.k = k[first];
-        }
-        super::archive::FirstContext {
-            karlin: Some((
-                contexts[first].karlin_params,
-                (!args.ungapped).then_some(gapped),
-            )),
-            // The statistics block's space is volume 0's; the option is the last volume's where
-            // the volumes have their own spaces (`context0_searched`).
-            search_space: context0_search_space(
-                &query_valid,
-                args.searchsp,
-                &exact_search_spaces,
-                &search_spaces,
-                first,
-            ),
-            length_adjustment: search_spaces[first].length_adjustment,
-            context0_space: context0.space,
-            context0_length: context0.query_length,
-        }
+    let first_contexts = FirstContexts {
+        contexts: &contexts,
+        query_valid: &query_valid,
+        searchsp: args.searchsp,
+        exact_search_spaces: &exact_search_spaces,
+        search_spaces: &search_spaces,
+        last_volume_spaces: &rps_last_volume_spaces,
+        rps_gapped_k: rps_gapped_k.as_deref(),
+        gapped_params,
+        ungapped: args.ungapped,
     };
+    let first_context = |first: usize| first_contexts.first_context(first);
     // The queries of the call's batches, as the archive and the search strategy take them.
     let batch_spans = || -> Vec<std::ops::Range<usize>> {
         query_batches

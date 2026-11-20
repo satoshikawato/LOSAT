@@ -15,7 +15,9 @@ fn temp_dir(tag: &str) -> PathBuf {
 }
 
 fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/gi_mask/db").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/seqdb/gi_mask/db")
+        .join(name)
 }
 
 fn be(bytes: &[u8], at: usize) -> u32 {

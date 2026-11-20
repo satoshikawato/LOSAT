@@ -855,7 +855,11 @@ fn init_search_request(
         // (`MaskAlgorithms::id_of`).
         let id = match id {
             Some(id) => id,
-            None => source.db.mask_algorithms()?.id_of(value).map_err(Stop::Ncbi)?,
+            None => source
+                .db
+                .mask_algorithms()?
+                .id_of(value)
+                .map_err(Stop::Ncbi)?,
         };
         if !is_mask_algo_id_valid(source, id, diag)? {
             return Err(Stop::Ncbi(

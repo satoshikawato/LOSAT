@@ -2010,12 +2010,7 @@ pub(crate) fn find_volume_paths(
     db_base: &str,
     seqtype: SeqType,
 ) -> Result<(Vec<String>, Vec<String>), SeqDbError> {
-    let tree = resolve_one_name(
-        db_base,
-        seqtype,
-        LocalCopy::No,
-        &SearchPath::current_dir()?,
-    )?;
+    let tree = resolve_one_name(db_base, seqtype, LocalCopy::No, &SearchPath::current_dir()?)?;
     let mut alias_files = std::collections::BTreeSet::new();
     collect_alias_files(&tree.root, &mut alias_files);
     Ok((tree.volumes, alias_files.into_iter().collect()))

@@ -324,13 +324,19 @@ fn read_fields(index: &MappedFile) -> Result<Fields, SeqDbError> {
         path: index.path().to_path_buf(),
         message,
     };
-    index.check_range(0, FIXED_FIELD_BYTES as i64, "the fixed fields of the GI-mask index")?;
+    index.check_range(
+        0,
+        FIXED_FIELD_BYTES as i64,
+        "the fixed fields of the GI-mask index",
+    )?;
     let mut header = [0u8; FIXED_FIELD_BYTES as usize];
     index.read_at(0, &mut header)?;
     let mut blob = Blob::new(&header, 0);
     let mut field = || blob.read_i32().map_err(format);
     if field()? != 1 {
-        return Err(format("Gi-mask file uses unknown format_version.".to_string()));
+        return Err(format(
+            "Gi-mask file uses unknown format_version.".to_string(),
+        ));
     }
     let num_vols = field()?;
     let gi_size = field()?;
@@ -863,10 +869,8 @@ impl GiMasks {
             }
         }
         let set = volume.defline_set(vol_oid)?;
-        Ok(set
-            .ids()
-            .find_map(|id| id.gi())
-            .map_or(u32::MAX, |gi| gi as u32))
+        let gi = set.ids().find_map(|id| id.gi());
+        Ok(gi.map_or(u32::MAX, |gi| gi as u32))
     }
 }
 

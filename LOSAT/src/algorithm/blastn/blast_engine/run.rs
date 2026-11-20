@@ -55,7 +55,7 @@ use super::super::extension::{
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, purge_hsps_with_common_endpoints,
     purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
-    subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
+    subject_best_hit, ReevalParams,
 };
 use super::super::hsp::{
     adjust_blastn_offsets, evalue_comp, get_prelim_hitlist_size, sort_hsplist_by_evalue,
@@ -4430,24 +4430,19 @@ fn merge_two_prelim_hits(hsp1: &mut PrelimHit, hsp2: &PrelimHit, allow_gap: bool
 }
 
 /// NCBI's preliminary subject-best-hit filter (`-subject_besthit`) over the combined HSP
-/// list of a subject, applied after each chunk is merged, before traceback.
+/// list of a subject, applied after each chunk is merged, before traceback: the list holds the
+/// HSPs of every query, each with the length of its own context.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:586-591
-/// ```c
-///         if((hit_params->options->hsp_filt_opt != NULL) &&
-///            (hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
-///            	Blast_HSPListSubjectBestHit(program_number,
-///            								hit_params->options->hsp_filt_opt->subject_besthit_opts,
-///            								query_info, combined_hsp_list);
-///         }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
 fn prelim_subject_best_hit(combined: &mut Vec<PrelimHit>, query_lengths: &[usize]) {
-    subject_best_hit_by(combined, |hit| BestHitKey {
-        context: hit.context_idx,
-        query_frame: hit.query_frame,
-        query_offset: i64::from(hit.prelim_qs),
-        query_end: i64::from(hit.prelim_qe),
-        query_length: query_lengths[hit.query_idx as usize] as i64,
+    crate::core::blast_hits::subject_besthit(combined, true, |hit| {
+        crate::core::blast_hits::BestHitExtent {
+            context: i64::from(hit.context_idx),
+            query_frame: hit.query_frame,
+            offset: i64::from(hit.prelim_qs),
+            end: i64::from(hit.prelim_qe),
+            query_length: query_lengths[hit.query_idx as usize] as i64,
+        }
     });
 }
 
@@ -9404,7 +9399,7 @@ fn megablast_index(
     // A megablast search with a template (`-template_type` and `-template_length`, which
     // require each other) looks for no index.
     let warning = if args.template_length.is_some() {
-        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".to_string()
+        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".as_bytes().to_vec()
     } else {
         if index_name.contains(',') {
             return Ok(MegablastIndex::VolumeRange);
@@ -9448,16 +9443,19 @@ fn megablast_index(
         // `DbIndexInit`'s `result` (blast_dbindex.cpp:1145-1168): the new-style loader's
         // `e.what()`, a line feed, the old-style loader's `e.what()`; `ERR_POST_EX` adds
         // " Database index will not be used." (setup_factory.cpp:455).
-        format!(
-            "Warning: (1.1) [blastn] {}\n{} Database index will not be used.\n",
-            new_style.what(),
-            old_style.what()
-        )
+        [
+            b"Warning: (1.1) [blastn] ".as_slice(),
+            &new_style.what(),
+            b"\n",
+            &old_style.what(),
+            b" Database index will not be used.\n",
+        ]
+        .concat()
     };
     // One diagnostic: the archive saves it as one message.
     match &args.archive {
-        Some(handle) => handle.write_warning(diagnostics, warning.as_bytes())?,
-        None => diagnostics.write_all(warning.as_bytes())?,
+        Some(handle) => handle.write_warning(diagnostics, &warning)?,
+        None => diagnostics.write_all(&warning)?,
     }
     Ok(MegablastIndex::NotAsked)
 }

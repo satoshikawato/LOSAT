@@ -1438,7 +1438,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 buf.clear();
                 if let Some(post) = post {
                     writer.flush()?;
-                    diagnostics.write_all(post.as_bytes())?;
+                    diagnostics.write_all(&post)?;
                     diagnostics.flush()?;
                 }
                 break;
@@ -1615,7 +1615,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             )?;
             if let Some(post) = caught {
                 writer.flush()?;
-                diagnostics.write_all(post.as_bytes())?;
+                diagnostics.write_all(&post)?;
                 diagnostics.flush()?;
             }
             // A text whose read no `Hit` placed comes after the query's report; one that a cut
@@ -1665,7 +1665,7 @@ pub(super) fn write_xml_epilog(
     };
     if let Some(post) = post {
         writer.flush()?;
-        diagnostics.write_all(post.as_bytes())?;
+        diagnostics.write_all(&post)?;
         diagnostics.flush()?;
     }
     write_with_posts(&buf, posts, writer, diagnostics)
@@ -1688,8 +1688,8 @@ fn write_with_posts(
 /// NCBI's post (`ERR_POST(Error << message)`) of a structured report's caught exception
 /// (`CaughtException`, `StructuredXml::caught_message`), as BLASTX writes it: `Error: [blastx] `,
 /// the message (which ends with the `what()` text's end of line) and the post's end of line.
-fn caught_post(message: &str) -> String {
-    format!("Error: [blastx] {message}\n")
+fn caught_post(message: &[u8]) -> Vec<u8> {
+    [b"Error: [blastx] ".as_slice(), message, b"\n"].concat()
 }
 
 #[cfg(test)]

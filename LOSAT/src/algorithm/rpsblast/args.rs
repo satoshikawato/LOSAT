@@ -395,6 +395,7 @@ impl RpsblastArgs {
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
             culling_limit: None,
+            subject_besthit: false,
             ungapped: false,
             // rpsblast's X-drops are its RPS engine's (`rps`).
             xdrop_ungap: None,

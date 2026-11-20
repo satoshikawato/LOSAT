@@ -962,12 +962,16 @@ mod tests {
     /// The message, the line and the position of an error (NCBI's `(m_Pos = <n>)`, which LOSAT
     /// writes as `(position <n>)`).
     fn failure(e: NcbiException) -> (String, u32, String) {
-        let what = e.what();
+        let what = String::from_utf8(e.what()).unwrap();
         let pos = what
             .rsplit_once(crate::wording::POSITION)
             .map(|(_, rest)| rest.trim_end_matches(")\n").to_string())
             .unwrap_or_default();
-        (e.get_msg().to_string(), e.site().line, pos)
+        (
+            String::from_utf8(e.get_msg().to_vec()).unwrap(),
+            e.site().line,
+            pos,
+        )
     }
 
     // NCBI's rpsbproc printed `Cannot convert string 'abc' to double (m_Pos = 0)` for a bit score

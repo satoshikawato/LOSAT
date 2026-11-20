@@ -87,6 +87,9 @@ pub(super) struct LocalStageDProfile<'a> {
     /// instead of the plain hit-list collector; the pipe after the traceback is run by the
     /// finish of the search (`tblastn_app.rs`).
     pub culling_limit: i32,
+    /// `-subject_besthit`: the preliminary stage filters each subject frame's list after each
+    /// merge of a chunk (`search_gapped`), the finish of the search each final hit list.
+    pub subject_besthit: bool,
     /// The `-max_intron_length` value (0: NCBI's default). With sum statistics it gives the
     /// largest subject gap of the linking, or turns the linking off
     /// (`core::link_hsps::translated_longest_intron`); without them nothing reads it.
@@ -1143,6 +1146,26 @@ impl std::fmt::Display for SetupEngineError {
 
 impl std::error::Error for SetupEngineError {}
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-301
+/// LOSAT's refusal of a batch's setup where NCBI's crashes (`common::database::check_setup_count`:
+/// the statistics' count of 0 without the Gumbel block). NCBI writes the reports of each batch
+/// before the next is searched, so its tabular output before the crash holds those of the batches
+/// before (NCBI 2.17.0, D1a-5 of line RG: `OLD_FSC=1 BATCH_SIZE=1` over `NSEQ 0`, two queries
+/// without letters to search then a valid one, the 152 bytes of their outfmt 7 reports without the
+/// last line; the crash cuts the buffered output of the other formats short):
+/// `tblastn_app::batch_failure` makes the refusal after them, as an engine error of the batch.
+#[derive(Debug)]
+pub(crate) struct SetupRefusal(pub(crate) anyhow::Error);
+
+impl std::fmt::Display for SetupRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for SetupRefusal {}
+
 /// Diagnostic (LOSAT_TIMING): adds the time from `start` to its drop to the common line's `search`
 /// (utils/xtiming.rs). No NCBI counterpart; it reads the clock only with LOSAT_TIMING.
 struct XSearchTimer(Option<std::time::Instant>);
@@ -1315,8 +1338,19 @@ fn run_local_search_with_pool(
     // search, which has none either, blast_setup.c:517-527) a set of subjects whose average is
     // below one letter, in nucleotides, fails the setup of a batch that NCBI searches (one with
     // a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
-    // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`).
+    // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`). A count of 0
+    // (of a positive total) is the division by 0 where NCBI crashes, LOSAT's refusal there
+    // (`common::database::check_setup_count`, D1a-5 of line RG), after the same reports
+    // (`SetupRefusal`); a run whose batches have no valid context does not reach it and is
+    // reported as NCBI's.
     if valid_contexts.iter().any(|&valid| valid) {
+        crate::algorithm::common::database::check_setup_count(
+            total_nt,
+            num_subjects,
+            gumbel.is_some(),
+            "TBLASTN",
+        )
+        .map_err(SetupRefusal)?;
         match min_subject_length {
             None => return Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into()),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760
@@ -2454,6 +2488,7 @@ fn preliminary_profile<'a>(
         .0,
         gapped_cutoff: &cutoffs.hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        subject_besthit: profile.subject_besthit,
     }
 }
 
@@ -4020,6 +4055,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4073,6 +4109,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4366,6 +4403,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4457,6 +4495,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4617,6 +4656,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4713,6 +4753,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 },
@@ -4900,6 +4941,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 };
@@ -5134,6 +5176,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 };
@@ -5351,6 +5394,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -5502,6 +5546,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -5675,6 +5720,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             };
@@ -5879,6 +5925,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 };
@@ -6046,6 +6093,7 @@ mod tests {
                         subject_set: Default::default(),
                         engine_positives: false,
                         culling_limit: 0,
+                        subject_besthit: false,
                         pssm: None,
                         fetch_excluded: None,
                     },
@@ -6360,6 +6408,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -6553,6 +6602,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 },
@@ -6671,6 +6721,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -6771,6 +6822,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -6888,6 +6940,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -7167,6 +7220,7 @@ mod tests {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
         };
@@ -7263,6 +7317,7 @@ mod tests {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
         };

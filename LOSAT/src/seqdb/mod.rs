@@ -239,7 +239,9 @@ impl std::fmt::Display for SeqDbError {
                 path.display(),
                 message
             ),
-            SeqDbError::Ncbi(exception) => f.write_str(exception.what().trim_end()),
+            SeqDbError::Ncbi(exception) => {
+                f.write_str(String::from_utf8_lossy(&exception.what()).trim_end())
+            }
         }
     }
 }
@@ -1941,7 +1943,7 @@ impl SeqDb {
     /// The total length and the number of sequences that the statistics of a search read
     /// (`BLAST_CalcEffLengths`, `BlastSetup_GetScoreBlock`): `DbStatistics::setup_total` and
     /// `setup_count`, NCBI's `Int8` and `Int4`. The number is 0 for an alias file's `NSEQ 0`,
-    /// which NCBI's average subject length divides by (`SeqDb::statistics_count_is_zero`), and
+    /// which NCBI's average subject length divides by (`common::database::setup_count_refused`), and
     /// negative for a negative `NSEQ` or one of 2^31 or more.
     pub fn statistics_numbers(&self) -> (i64, i32) {
         let statistics = self.statistics();
@@ -1985,25 +1987,6 @@ impl SeqDb {
     /// NCBI then reads no sequence and reports no hit (probes p4c_dp, p4c_dn of line RG D1a-2).
     pub fn first_oid_read_fails(&self) -> bool {
         self.statistics_length_is_empty() && self.num_oids() == 0
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-975
-    // ```c
-    //    if (sbp->gbp) {
-    //    ...
-    //    } else {
-    //        min_subject_length = (Int4) (total_length/num_seqs);
-    //    }
-    // ```
-    /// Whether the statistics read 0 sequences of a positive total length
-    /// ([`SeqDb::statistics_numbers`]: an alias file's `NSEQ 0` without `STATS_NSEQ`, its `LENGTH`
-    /// or `STATS_TOTLEN` over volumes without sequences, or a list that kept no sequence under a
-    /// `STATS_TOTLEN`). The programs without the Gumbel block
-    /// (BLASTN, TBLASTX, and the protein programs with `-ungapped`, `-searchsp` or `OLD_FSC`)
-    /// divide the total by it, and NCBI BLAST+ 2.17.0 crashes (SIGFPE).
-    pub fn statistics_count_is_zero(&self) -> bool {
-        let statistics = self.statistics();
-        statistics.setup_total > 0 && statistics.setup_count == 0
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:199-209

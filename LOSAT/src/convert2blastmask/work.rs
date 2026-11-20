@@ -107,7 +107,7 @@ pub(super) fn run(
     match run_masks(args, stdin, out, diag) {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
-            diag.cerr(format!("{}\n", exception.what()).as_bytes());
+            diag.cerr(&[exception.what().as_slice(), b"\n"].concat());
             1
         }
         Err(Failure::Std(what)) => {

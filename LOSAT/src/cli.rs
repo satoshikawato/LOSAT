@@ -634,10 +634,7 @@ where
             // USAGE errors and `-help` come first, as for any value. The parser reads the
             // value with U+FFFD in place of the bytes. The file names keep their bytes and
             // have their own check where the files are opened (`check_utf8_file_name`).
-            let value = if value.to_str().is_none()
-                && !matches!(name, "query" | "subject" | "out")
-                && is_ncbi_search_program(scope)
-            {
+            let value = if value.to_str().is_none() && refuses_non_utf8_value(scope, name) {
                 non_utf8_value.get_or_insert_with(|| (scope, name.to_string()));
                 OsString::from(value.to_string_lossy().into_owned())
             } else {
@@ -719,6 +716,15 @@ fn is_ncbi_search_program(scope: &clap::Command) -> bool {
             | "rpsblast"
             | "rpstblastn"
     )
+}
+
+/// Whether an option's value that is not UTF-8 is rejected after the parser
+/// ([`non_utf8_value_error`]): each option of makeblastdb, whose values are all UTF-8 strings,
+/// and each option of the NCBI search programs but the file names that keep their bytes
+/// (`check_utf8_file_name`).
+fn refuses_non_utf8_value(scope: &clap::Command, name: &str) -> bool {
+    scope.get_name() == "makeblastdb"
+        || (is_ncbi_search_program(scope) && !matches!(name, "query" | "subject" | "out"))
 }
 
 /// The explicit rejection of an option's value that is not UTF-8 (`try_parse_from`).
@@ -917,7 +923,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "negative_gilist",
     "negative_ipglist",
     "remote",
-    "subject_besthit",
 ];
 
 fn is_unported_blastp_arg(name: &str) -> bool {
@@ -1474,7 +1479,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "subject_besthit",
     "use_sw_tback",
 ];
 
@@ -1505,8 +1509,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "strand",
-    "subject_besthit",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {
@@ -1683,12 +1685,12 @@ impl NativeError {
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,
-                message: format!("BLAST Database error: {}\n", e.get_msg()).into(),
+                message: [b"BLAST Database error: ".as_slice(), e.get_msg(), b"\n"].concat(),
             };
         }
         NativeError {
             exit: 255,
-            message: format!("Error: {}\n", e.what()).into(),
+            message: [b"Error: ".as_slice(), &e.what(), b"\n"].concat(),
         }
     }
 
@@ -2421,7 +2423,7 @@ mod tests {
         assert_eq!(error.exit, 255);
         assert_eq!(
             error.message,
-            format!("Error: {}\n", other.what()).as_bytes()
+            [b"Error: ".as_slice(), &other.what(), b"\n"].concat()
         );
     }
 
@@ -2689,6 +2691,40 @@ mod tests {
                     "{message}"
                 );
             }
+        }
+    }
+
+    // makeblastdb keeps its values as UTF-8 strings: a value that is not UTF-8 (a file name of
+    // `-in`, `-out`, `-mask_data`, `-taxid_map`, `-logfile`, a `-title`) is LOSAT's explicit
+    // rejection, where the parser's own error named no option (line LIB-B, probe 2026-11-21).
+    #[test]
+    fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
+        for option in [
+            "-in",
+            "-out",
+            "-mask_data",
+            "-taxid_map",
+            "-logfile",
+            "-title",
+        ] {
+            let argv = vec![
+                OsString::from("losat"),
+                OsString::from("makeblastdb"),
+                OsString::from("-dbtype"),
+                OsString::from("nucl"),
+                // `-taxid_map` requires it: the parser's errors come before the rejection.
+                OsString::from("-parse_seqids"),
+                OsString::from(option),
+                OsString::from_vec(b"n\xe9.x".to_vec()),
+            ];
+            let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+            let message = render_message(&error);
+            assert_eq!(error.kind(), ErrorKind::InvalidUtf8, "{option}: {message}");
+            assert!(
+                message.contains(&format!("the value of {option} is not UTF-8"))
+                    && message.contains("not supported by LOSAT's MAKEBLASTDB"),
+                "{message}"
+            );
         }
     }
 

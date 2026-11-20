@@ -87,7 +87,7 @@ impl std::fmt::Display for SerialError {
                 f,
                 "a character 0x{byte:02x} outside the visible ASCII range in an ASN.1 VisibleString is not supported by LOSAT"
             ),
-            SerialError::Utf8(error) => f.write_str(error.exception().get_msg()),
+            SerialError::Utf8(error) => f.write_str(&String::from_utf8_lossy(error.exception().get_msg())),
             SerialError::XmlUnsupported(what) => {
                 write!(f, "an XML {what} is not supported by LOSAT")
             }

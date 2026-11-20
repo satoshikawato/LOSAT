@@ -4,9 +4,12 @@
 //! `CSeqTableInfo`), the attach of the entry's Bioseq-set and Bioseq ids (`entry::Tse::attach`),
 //! then the index of every annotation (phase I, `CSeq_annot_Info::x_InitAnnotKeys`), with NCBI's messages, its
 //! exceptions, and the failed diagnostic stream after its "Failed to parse location of" message
-//! (`ncbi_exception::main_diag_failbit`). What NCBI does not do the same way on every run (a
-//! message with a memory address, a crash, BitMagic's decoding, a signed overflow, the order of
-//! memory addresses) is LOSAT's refusal, each naming its condition (`Refusal`).
+//! (`ncbi_exception::main_diag_failbit`), and BitMagic's decoding of a Seq-table's bit vectors
+//! (`bitmagic`). What NCBI does not do the same way on every run or every build (a message with a
+//! memory address, a crash, BitMagic data that NCBI reads past, decodes with undefined behaviour
+//! or from memory it did not write, or answers differently in its scalar and SIMD builds, a signed
+//! overflow, the order of memory addresses) is LOSAT's refusal, each naming its condition
+//! (`Refusal`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (tblastn_app.cpp:222-226)
 //! ```c++
@@ -24,6 +27,7 @@
 //! ```
 
 mod align;
+mod bitmagic;
 mod entry;
 mod range;
 mod table;
@@ -79,7 +83,9 @@ pub(crate) enum Refusal {
     NullPointer,
     /// A Dense-seg whose division by `numseg` is by zero (SIGFPE).
     DivideByZero,
-    /// A bit-bvector or bit-set-bvector that the index reads (BitMagic).
+    /// A bit-bvector or bit-set-bvector that the index reads whose BitMagic data NCBI decodes past
+    /// its checks, or that NCBI's builds of BitMagic decode differently or answer differently for
+    /// a row of it (`bitmagic::Fail::Refuse`).
     BitVector,
     /// A Packed-seg read past its `present`, `starts`, `ids` or `lens`.
     PackedOutOfBounds,
@@ -110,7 +116,7 @@ impl Refusal {
             Refusal::EmptyRegion => "a PSSM query whose annot has an empty location (NCBI's object manager posts 'Empty region in' with a memory address)",
             Refusal::NullPointer => "a PSSM query whose annot has a Seq-table row without a Seq-id or a location (NCBI's object manager stops with a NULL pointer report of memory addresses)",
             Refusal::DivideByZero => "a PSSM query whose annot has a Dense-seg of no segments with starts or strands (NCBI's object manager divides by zero and crashes)",
-            Refusal::BitVector => "a PSSM query whose annot has a Seq-table bit-bvector or bit-set-bvector that NCBI's object manager reads (BitMagic data decoded without checks)",
+            Refusal::BitVector => "a PSSM query whose annot has a Seq-table bit-bvector or bit-set-bvector with malformed BitMagic data that NCBI's object manager reads past, decodes with undefined behaviour (an XOR block, a shift of 32 bits or more, a write past BitMagic's blocks or buffers) or from memory it did not write, or that holds a GAP block that is not one which NCBI's builds of BitMagic (scalar, SSE2, SSE4.2) decode differently or answer differently for a row of the index",
             Refusal::PackedOutOfBounds => "a PSSM query whose annot has a Packed-seg with fewer present, starts, ids or lens than its dim and numseg (NCBI's object manager reads past them)",
             Refusal::DeltaOverflow => "a PSSM query whose annot has a Seq-table int-delta column whose sums leave their integer type (a signed overflow in NCBI's object manager)",
             Refusal::ScaledOverflow => "a PSSM query whose annot has a Seq-table int-scaled column whose values leave Int8 (a signed overflow in NCBI's object manager)",

@@ -1187,6 +1187,10 @@ class WorkflowTests(unittest.TestCase):
             checkouts = len(re.findall(r"uses: actions/checkout@", workflow))
             self.assertGreater(checkouts, 0, name)
             self.assertEqual(workflow.count(message), checkouts, f"{name}: one check per checkout")
+        # The publishing workflows check the release's tag in the same way: one script, never a checkout ref.
+        for name in ("publish-crate.yml", "python-wheels.yml"):
+            workflow = (workflows / name).read_text(encoding="utf-8")
+            self.assertIn(".github/scripts/release_tag_source.sh", workflow, name)
 
 
 if __name__ == "__main__":

@@ -2199,7 +2199,8 @@ pub(crate) struct LogFileName {
 }
 
 /// The free space under which NCBI's log file gets no message (`Reopen`, quoted above).
-pub(crate) const LOW_DISK_SPACE: u64 = 1024 * 20;
+#[cfg(not(windows))]
+const LOW_DISK_SPACE: u64 = 1024 * 20;
 
 /// NCBI's reading of the `-logfile` name `name` on Unix, in the working directory `cwd` (`None`
 /// where it cannot be read: `CDir::GetCwd` gives ""): the one reading of these names for the

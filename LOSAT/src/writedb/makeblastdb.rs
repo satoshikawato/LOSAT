@@ -17,9 +17,7 @@ use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
-use crate::blastinput::ncbi_environment::{
-    diag_target, ApplicationSettings, DiagStream, DiagTarget,
-};
+use crate::blastinput::ncbi_environment::{diag_target, ApplicationSettings, DiagStream};
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
@@ -1803,6 +1801,7 @@ fn finish(result: Result<(), MakedbError>, end_messages: &[String], err: &mut dy
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blastinput::ncbi_environment::DiagTarget;
 
     // makedb-v5 DECISIONS 12: `[BLAST] MAX_SEQID_LENGTH` is refused with `-parse_seqids`
     // (build_db.cpp:739-747, quoted at `check_registry_settings`), the library's argument

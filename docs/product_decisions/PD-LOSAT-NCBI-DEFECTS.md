@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.51
+- Version: 1.52
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -180,6 +180,12 @@
   of fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3, and
   names X-short-bat open in 1.46; line RG item X-short-tbx, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.50, line DBID item pfoff-2)
+  1.52 2026-11-18 (makeblastdb `-mask_data`, line NP item M4a-1c: the explicit rejection of a mask
+  file's string whose length passes the end of the file and is 1 GiB to 2^47 bytes, which NCBI's
+  reader reserves before it reads and which succeeds or fails by the host's memory, and of an
+  element of a mask's list stated as `NULL` that makeblastdb dereferences, whose report holds the
+  run's memory addresses, rule 3; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.51, line RG item X-short-tbx)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1491,6 +1497,32 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
   before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
   prints what the last loaded row set.
+- makeblastdb `-mask_data` (version 1.52, 2026-11-18, line NP item M4a-1c, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07): a string of a binary mask file whose
+  length passes the end of the file and is 1 GiB to 2^47 bytes. NCBI's reader reserves the
+  length before it reads the bytes (`CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`):
+  from 2^47 bytes, which no x86-64 host can allocate, it throws `std::bad_alloc` ("BLAST ran out
+  of memory", exit status 4, which LOSAT writes), past the largest `std::string` (2^63 - 1 bytes)
+  `std::length_error` ("Error: basic_string::_M_create", exit status 255, which LOSAT writes), and
+  below 1 GiB its reservation succeeds and the read ends at the end of the file (NCBI's
+  end-of-file report, which LOSAT writes); between them the reservation succeeds or fails by the
+  host's memory and overcommit, the bound of line PS's DECISIONS 40 that `losat rpsbproc` uses.
+  LOSAT refuses it (exit 1, "losat makeblastdb: mask data that LOSAT does not read: a string whose
+  length ... passes the end of the file ..."), before the build. Fixtures
+  `LOSAT/tests/seqdb/mask_parse/b_length_*.asnb` (`make_mask_parse_fixtures.py`).
+  An element of a mask's list of `CRef`s (`masks`, a `mix`, an `equiv`, a `packed-int`) stated as
+  `NULL` (`05 00` in binary), which NCBI's reader takes and leaves as an empty `CRef`
+  (`CObjectIStream::ReadPointer`, `serial/objistr.cpp:1133-1213`), is explicitly rejected under
+  rule 3 where makeblastdb dereferences it: the `GetId` of each mask in `x_ProcessMaskData`
+  (`**iter`) and the walk of `CSeq_loc::CheckId` (`**ii`, `(*li)->CheckId`,
+  `objects/seqloc/Seq_loc.cpp:3541-3620`) stop with a `CCoreException` whose report prints a stack
+  trace with the run's library addresses and the path of the installed binary. LOSAT refuses it
+  there (exit 1, "losat makeblastdb: mask data that LOSAT does not read: an element of ... stated
+  as NULL ..."): after the masks before it, after any error of NCBI's reader in the rest of its
+  object, and only where the walk reaches it (after two Seq-ids or a `feat` the walk stops first,
+  and LOSAT writes NCBI's "Cannot get masked range Seq-id"). Unit tests in
+  `LOSAT/src/writedb/mask_info/tests.rs`; the fixtures `h_pointer_*` and `b_pointer_*` of
+  `make_mask_parse_fixtures.py` hold the cases NCBI completes or fails on without that report.
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations

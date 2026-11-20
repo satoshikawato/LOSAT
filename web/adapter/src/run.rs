@@ -2184,12 +2184,12 @@ mod tests {
             assert!(inputs_together(&words), "{program}");
             assert!(start_json(&words)
                 .unwrap()
-                .ends_with(",\"register_inputs\":true}"));
+                .ends_with(",\"register_inputs\":true,\"database\":false}"));
             let dry = [&words[..], &["-dryrun"]].concat();
             assert!(!inputs_together(&dry), "{program}");
             assert!(start_json(&dry)
                 .unwrap()
-                .ends_with(",\"register_inputs\":false}"));
+                .ends_with(",\"register_inputs\":false,\"database\":false}"));
             assert!(!inputs_together(&words[..5]), "{program}");
             assert!(!inputs_together(&[&words[..], &["-nosuchoption"]].concat()));
         }

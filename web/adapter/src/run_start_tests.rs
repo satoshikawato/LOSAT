@@ -359,7 +359,7 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
 fn the_start_json_tells_the_files_and_the_dry_run() {
     assert_eq!(
         start_json(&["blastn", "-outfmt", "6"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false}"#
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"database":false}"#
     );
     assert_eq!(
         start_json(&[
@@ -372,12 +372,12 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "-dryrun"
         ])
         .unwrap(),
-        r#"{"conffile":"c.ini","log_file":"x.log","dry_run":true,"register_inputs":false}"#
+        r#"{"conffile":"c.ini","log_file":"x.log","dry_run":true,"register_inputs":false,"database":false}"#
     );
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false}"#
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"database":false}"#
     );
     let version = start_json(&["blastn", "-version"]).unwrap_err();
     assert_eq!(version, parse(&["blastn", "-version"]).unwrap_err());

@@ -129,6 +129,17 @@
   line-height: 1.45;
 }
 
+/* The page always has its vertical scroll bar, so that its width never depends on whether it scrolls. Where scroll bars
+   take space (Windows, Linux), the Dot Plot's square plot follows the page's width and makes the page taller as it
+   grows: in a window a few pixels taller than the page, the bar went away, the wider plot brought it back, and the plot
+   changed its size, with "ResizeObserver loop completed with undelivered notifications.", every frame (line WQA's
+   sweep 2, S2-2, review M1, 2026-11-20). Overlay scroll bars (phones, macOS) take no space. `scrollbar-gutter: stable`
+   keeps the same place, but Chromium keeps it also where it hides scroll bars, as in the tests, which would then see
+   every window 15 px narrower than it is. */
+html {
+  overflow-y: scroll;
+}
+
 body {
   margin: 0;
   padding: 0 16px 32px;

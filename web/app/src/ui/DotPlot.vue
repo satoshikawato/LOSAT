@@ -710,10 +710,12 @@ function placePopup(): void {
 
 // --- life cycle ----------------------------------------------------------------------------------
 
-// The observer reads the stage's width from its ruler, an empty line as wide as the stage, whose size follows the page
-// and never the plot. It observed the stage itself, which is as tall as the plot: the width it set changed the square
-// plot's height, and so the stage's, in the same frame, and every change of the window's width ended with "ResizeObserver
-// loop completed with undelivered notifications." (line WQA's sweep 2, S2-2, 2026-11-20).
+// The observer reads the stage's width from its ruler, an empty line as wide as the stage, whose height the plot never
+// changes. It observed the stage itself, which is as tall as the plot: the width it set changed the square plot's
+// height, and so the stage's, in the same frame, and every change of the window's width ended with "ResizeObserver loop
+// completed with undelivered notifications." (line WQA's sweep 2, S2-2, 2026-11-20). The ruler's width is the page's,
+// and the plot's height decides whether the page scrolls: where scroll bars take space, the page's width followed the
+// plot until the page always kept its scroll bar (styles.css, html; S2-2 review M1).
 let observer: ResizeObserver | undefined;
 onMounted(() => {
   observer = new ResizeObserver((entries) => {

@@ -21,6 +21,7 @@ import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
 import { TMP_DIRECTORY } from '../../src/infra/data/session';
 import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
+import { E2E_ORIGIN } from './support/origin';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
@@ -1762,6 +1763,66 @@ test('the dot plot follows changes of the window width without a ResizeObserver 
   const side = (width: number) => sides.get(width)!.split('x').map(Number);
   expect(side(320)[0]).toBeLessThan(side(1280)[0]!);
   for (const [w, h] of [side(320), side(1280)]) expect(w).toBe(h);
+});
+
+// Where scroll bars take space (Windows and Linux; Playwright's Chromium hides them unless it starts without
+// --hide-scrollbars), the page's width depended on whether it scrolled, and the square plot's height decided that: in a
+// window a few pixels taller than the page, the scroll bar went away, the wider plot made the page scroll again, and the
+// bar, the plot (563 and 578 px at 700 px) and "ResizeObserver loop completed with undelivered notifications." came back
+// every frame (line WQA's sweep 2, S2-2, review M1, 2026-11-20). The page now always keeps the scroll bar (styles.css).
+test('the dot plot keeps one size in a window a few pixels taller than the page, where scroll bars take space', async ({
+  playwright,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', "the scroll bars of Playwright's Firefox and WebKit take no space");
+  // A browser of its own: the launch options are the worker's, and one test cannot change them.
+  const browser = await playwright.chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
+  try {
+    const page = await browser.newPage({ baseURL: E2E_ORIGIN, viewport: { width: 700, height: 600 } });
+    const uncaught: string[] = [];
+    page.on('pageerror', (error) => uncaught.push(String(error)));
+    await openSearch(page);
+    await program(page, 'blastn');
+    await paste(page, 'query', `>q\n${S1}\n`);
+    await paste(page, 'subject', `>s\n${S1}\n`);
+    await run(page, 1);
+    await openRun(page, 1);
+    await show(page, 'dotplot');
+    const canvas = page.getByTestId('dotplot-canvas');
+    await expect(canvas).toHaveAttribute('data-segments', /^[1-9]/);
+    await page.evaluate(() => {
+      const errors: string[] = [];
+      (window as unknown as { __windowErrors: string[] }).__windowErrors = errors;
+      window.addEventListener('error', (event) => errors.push(event.message));
+    });
+    const frame = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    const takeErrors = () =>
+      page.evaluate(() => (window as unknown as { __windowErrors: string[] }).__windowErrors.splice(0).length);
+    const unsteady: string[] = [];
+    for (const width of [700, 500, 1000]) {
+      await page.setViewportSize({ width, height: 600 });
+      await frame();
+      await frame();
+      await takeErrors();
+      // The page scrolls here, and its scroll bar takes space: else this test could not see the loop.
+      expect(await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth)).toBeGreaterThan(0);
+      const tall = await page.evaluate(() => document.documentElement.scrollHeight);
+      for (const height of [tall + 3, tall + 8]) {
+        await page.setViewportSize({ width, height });
+        const sizes = new Set<string>();
+        for (let i = 0; i < 12; i++) {
+          await frame();
+          sizes.add((await canvas.getAttribute('data-plot'))!);
+        }
+        const errors = await takeErrors();
+        if (sizes.size !== 1 || errors !== 0) unsteady.push(`${width}x${height}: plot ${[...sizes].join(', ')}; ${errors} errors`);
+      }
+    }
+    expect(unsteady).toEqual([]);
+    expect(uncaught).toEqual([]);
+  } finally {
+    await browser.close();
+  }
 });
 
 test('the E value filter compares the values that the lists show: an E value written 0.0 passes "E value ≤ 0"', async ({ page }) => {

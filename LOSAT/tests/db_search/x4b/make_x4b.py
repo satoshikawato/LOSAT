@@ -13,7 +13,7 @@ make tks_W's Smith-Waterman redo fail (`-use_sw_tback`, PD-LOSAT-NCBI-DEFECTS 1.
   after the one on sfail_rc in both of NCBI's stream orders (a worse best e-value with composition-based statistics,
   a higher OID without them). `neg.txt` lists only an id that no database holds: a negative seqid list with ids
   keeps sx_rc and removes its line, and NCBI's fetch with `check_oid_exclusion` excludes it at the redo
-  (`seqsrc_seqdb.cpp:306-313`), after its early termination test; NCBI then sets the batch's status back to 0
+  (`seqsrc_seqdb.cpp:305-313`), after its early termination test; NCBI then sets the batch's status back to 0
   (`blast_kappa.c:3560-3575`), which clears the failure of the match before (rows `db.x4b.excl.*`,
   `db.x4b.sp.db.excl.*`).
 - `polycg`: `tests/fasta/x4b/polycg.fna` (repeats of CCCCGGGGAA, no parsed Seq-ids), on which a PSSM finds no hit

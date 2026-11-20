@@ -227,8 +227,9 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
     would_insert: &mut dyn FnMut(usize, f64, i32) -> Result<bool>,
     scratch: &mut SwMatchScratch,
 ) -> Result<BlastRedoOneMatchResult> {
-    // BLASTX's translated query windows (item X4b-2) and a PSSM's rows (psiblast, tblastn
-    // `-in_pssm`) do not reach this redo: their options refuse `-use_sw_tback`.
+    // BLASTX's translated query windows (item X4b-2) and a PSSM's rows do not reach this redo:
+    // psiblast and blastx refuse `-use_sw_tback`, tblastn `-in_pssm` refuses it at its first match
+    // (`tblastn::match_redo::sw_pssm_refusal`).
     if params.query_is_translated || params.position_based {
         bail!(
             "the Smith-Waterman redo of translated query or position-based windows is not ported"

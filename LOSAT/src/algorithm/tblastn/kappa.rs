@@ -524,10 +524,14 @@ pub(super) const TBLASTN_REDO_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlig
     redo_one_alignment: tblastn_redo_one_alignment_callback,
 };
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:770-803
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:795-800
 // ```c
-// new_align = BlastCompo_AlignmentNew((int)(hsp->score * localScalingFactor),
-//     eDontAdjustMatrix, ..., hsp);
+//         new_align =
+//             BlastCompo_AlignmentNew((int) (hsp->score * localScalingFactor),
+//                                     eDontAdjustMatrix,
+//                                     hsp->query.offset, hsp->query.end, hsp->context,
+//                                     hsp->subject.offset, hsp->subject.end,
+//                                     hsp->subject.frame, hsp);
 // ```
 /// The incoming alignments of a match (`s_ResultHspToDistinctAlign`): its preliminary HSPs in
 /// order, each score times the redo's scale (`localScalingFactor`, `score_divisor`), each naming

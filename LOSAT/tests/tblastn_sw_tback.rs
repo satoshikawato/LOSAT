@@ -236,32 +236,64 @@ fn the_default_mode_with_a_database_reads_the_cutoff_of_1() {
     }
 }
 
-// A PSSM query stays refused (NCBI 2.17.0 aborts with `-db` and fails its traceback with
-// `-subject`; `in_pssm::check_limits`).
+// A PSSM query's Smith-Waterman redo is refused at its first match, after the prolog (NCBI 2.17.0
+// fails its traceback, stops with an exception or crashes there, by the input;
+// `match_redo::sw_pssm_refusal`); a search without hits ends as NCBI's (exit 0, rows
+// db.x4b.pssm.*).
 #[test]
-fn a_pssm_query_is_refused() {
-    let (pssm, subject) = (
-        input("fixtures/db_search/db.ps.asn.rnd.6.asn"),
-        input("db_search/tslice.fna"),
-    );
-    let run = tblastn(
-        &[
-            "-in_pssm",
-            pssm.to_str().unwrap(),
-            "-subject",
-            subject.to_str().unwrap(),
-            "-use_sw_tback",
-        ],
-        1,
-        &[],
-    );
-    assert_eq!(run.code, Some(1), "{}", run.stderr);
-    assert_eq!(run.stdout, "");
-    assert!(
-        run.stderr.contains("-use_sw_tback with -in_pssm"),
-        "{}",
-        run.stderr
-    );
+fn a_pssm_query_is_refused_at_its_first_match() {
+    let pssm = input("fixtures/db_search/db.ps.asn.rnd.6.asn");
+    for (subject, outfmt) in [("db_search/tslice.fna", "6"), ("db_search/tslice.fna", "0")] {
+        let subject = input(subject);
+        let run = tblastn(
+            &[
+                "-in_pssm",
+                pssm.to_str().unwrap(),
+                "-subject",
+                subject.to_str().unwrap(),
+                "-use_sw_tback",
+                "-outfmt",
+                outfmt,
+            ],
+            1,
+            &[],
+        );
+        assert_eq!(run.code, Some(1), "{}", run.stderr);
+        assert!(
+            run.stderr
+                .contains("-use_sw_tback with -in_pssm on a search with hits"),
+            "{}",
+            run.stderr
+        );
+        if outfmt == "6" {
+            assert_eq!(run.stdout, "");
+        } else {
+            assert!(
+                run.stdout.starts_with("PSITBLASTN 2.17.0+"),
+                "{}",
+                run.stdout
+            );
+            assert!(!run.stdout.contains("Query="), "{}", run.stdout);
+        }
+    }
+    let none = input("fasta/x4b/polycg.fna");
+    for threads in [1, 4] {
+        let run = tblastn(
+            &[
+                "-in_pssm",
+                pssm.to_str().unwrap(),
+                "-subject",
+                none.to_str().unwrap(),
+                "-use_sw_tback",
+                "-outfmt",
+                "6",
+            ],
+            threads,
+            &[],
+        );
+        assert_eq!(run.code, Some(0), "{}", run.stderr);
+        assert_eq!(run.stdout, "");
+    }
 }
 
 // IDENTITY, which NCBI searches without composition-based statistics, has no frequency ratios for

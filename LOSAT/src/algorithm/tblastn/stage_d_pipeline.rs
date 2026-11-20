@@ -15,7 +15,9 @@ use super::kappa::{
     postredo_engine_positives, reap_contained_postredo_hsps, ConvertedKappaHsp,
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
-use super::match_redo::{match_outcome, sw_batch_failed, MatchRedo, SmithWatermanRedo, XDropRedo};
+use super::match_redo::{
+    match_outcome, sw_batch_failed, sw_pssm_refusal, MatchRedo, SmithWatermanRedo, XDropRedo,
+};
 use super::search_gapped::{
     full_translation_traceback_with_matrix_and_events_with_mask_mode_owned, GappedHsp,
     PreliminaryProfile, TargetTranslation, TracebackOwnedHsp,
@@ -1688,6 +1690,15 @@ fn run_local_search_with_redo<R: MatchRedo>(
     let excluded_at_fetch =
         FetchMarks::of(profile.fetch_excluded, &preliminary_lists, list_ordinal)
             .map_err(fetch_refusal)?;
+    // A PSSM query's Smith-Waterman redo (`-in_pssm`, composition-based statistics 0) is refused at
+    // its first match, the first list that the fetch keeps (the heaps are empty there, so early
+    // termination lets it go on): `match_redo::sw_pssm_refusal`.
+    if R::SMITH_WATERMAN
+        && profile.pssm.is_some()
+        && (0..preliminary_lists.len()).any(|index| !excluded_at_fetch.excluded(index))
+    {
+        return Err(sw_pssm_refusal());
+    }
     // With a `-db` stream, the subjects of the lists that the redo fetches, each read
     // when first aligned, held until their last match is done (LOSAT_X_TBNSTAGEDROP; with it off
     // until the redo ends).

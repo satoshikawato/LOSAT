@@ -200,8 +200,10 @@
   1.54 2026-11-20 (TBLASTN `-use_sw_tback`, line RG item X4b-1: the explicit rejections of 1.53,
   a Smith-Waterman redo that NCBI repeats without end and a failed batch whose first query holds
   a redone match, on which NCBI's clean-up crashes, extended from BLASTP to TBLASTN, rule 3,
-  within the class of 1.30, after the reports of the query batches before; Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.53, line RG item X4)
+  within the class of 1.30, after the reports of the query batches before; a subject excluded
+  at the redo's fetch clears the batch's status as in NCBI; `-in_pssm -use_sw_tback` refused at
+  the first match the redo reaches instead of before the search; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.53, line RG item X4)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1558,13 +1560,18 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   instruction 2026-09-29, restated 2026-10-07, within the class of 1.30 and the rules of 1.53; P2,
   P3: the same match body and round loop as BLASTP's,
   `core::composition_adjustment::smith_waterman_match`): TBLASTN's redo of a match holds the
-  windows of all its frames (`s_WindowsFromTranslatedAligns`, sorted by frame), in one call
+  windows of all its frames (`s_WindowsFromTranslatedAligns`), sorted by subject position
+  (`s_SubjectCompareWindows`: the subject range's begin, end and frame, then the query range's;
+  windows of different frames interleave), in one call
   (`Blast_RedoOneMatchSmithWaterman`), with composition-based statistics 0 to 3. A window of two or
   more preliminary HSPs in which a score of 0 is significant (in e-value mode, `-sum_stats false`
   or a `-max_intron_length` of 1 to 4, when the query's effective search space times K is below
-  `-evalue`; with sum statistics only where the cutoff score is 0 or below, which a Spouge cutoff
-  of 0 gives, a tiny `-dbsize`) makes NCBI's round loop reach the score of 0: where the query's
-  first letter scores the window's first subject letter (after SEG) above 0 NCBI never ends, and
+  `-evalue`; with sum statistics only where the cutoff score is 0 or below, which no probe has
+  reached: with `-dbsize 1` NCBI's redo of the same matches ends with rows, rows `db.x4b.cut0.*`)
+  makes NCBI's round loop reach the score of 0: where the query's first letter scores the
+  window's first subject letter (after SEG) above 0, by the scores of the matrix that the
+  composition-based statistics give (tks_M's subjects never end with 2 and fail with 0 and 1, rows
+  `db.x4b.rej.endless.6` and `db.x4b.end.c*`), NCBI never ends, and
   LOSAT refuses (exit 1, "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI
   BLAST+ 2.17.0 ... is not supported by LOSAT's TBLASTN"; probes `tbn.fail.*`, `tbn.endless.*` of
   line RG X4b's survey, NCBI still running at 120 s); otherwise the match's redo fails and frees the
@@ -1573,8 +1580,24 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   match after the batch's first query kept a redone match crashes NCBI's clean-up as in 1.53, which
   LOSAT refuses (exit 1, "... with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by
   LOSAT's TBLASTN"). Both refusals come after the reports of the query batches before, as in 1.53.
-  Fixture rows `db.x4b.fail.*` and `db.x4b.rej.*`; `LOSAT/tests/tblastn_sw_tback.rs`; crafted
-  inputs `LOSAT/tests/fasta/x4b` (X4's proteins back-translated). With `-db` and sum statistics
+  A match whose subject NCBI's fetch excludes (`check_oid_exclusion`: a subject that a
+  `-negative_seqidlist` keeps without a line, `seqsrc_seqdb.cpp:306-313`) and that passes the
+  early termination test sets the batch's status back to 0 (`blast_kappa.c:3560-3575`), so a
+  failure before it neither fails the batch nor crashes its clean-up: LOSAT keeps such a list in
+  the redo's stream as a marker that clears the status (`FetchMarks`,
+  `SwBatchStatus::excluded_at_fetch`; rows `db.x4b.excl.*`). The status is per thread in NCBI
+  (with `-num_threads 8` the same search ends in `Traceback failed`); LOSAT gives the outcome of
+  `-num_threads 1` at every thread count.
+  With `-in_pssm`, NCBI's Smith-Waterman redo of a PSSM fails its traceback (exit 3), throws
+  (`Mapping resulted in an empty alignment`, exit 255) or crashes (with `-db`: SIGABRT `free():
+  invalid pointer`, SIGSEGV), depending on the input; LOSAT, which does not port that redo,
+  refuses at the first match it reaches, after the prolog (exit 1, "-use_sw_tback with -in_pssm
+  on a search with hits, ... is not supported by LOSAT's TBLASTN"), where it refused the option
+  before the search, and a search without hits ends as NCBI's (exit 0; rows `db.x4b.pssm.*`,
+  `db.tbn.inpssm.rej.swtback`).
+  Fixture rows `db.x4b.fail.*`, `db.x4b.dbfail.*` and `db.x4b.rej.*`;
+  `LOSAT/tests/tblastn_sw_tback.rs`; crafted inputs `LOSAT/tests/fasta/x4b` (X4's proteins
+  back-translated) and the databases `LOSAT/tests/db_search/x4b` (`make_x4b.py`). With `-db` and sum statistics
   (the default) the cutoff score is NCBI's floor of 1 (`BLAST_Cutoffs` from `new_cutoff = 1`,
   SeqDB's shortest length 10): no score of 0 is significant there, and the redo makes every local
   alignment down to that score, slow but finite: LOSAT gives NCBI's output (rows `db.x4b.cut.*`).

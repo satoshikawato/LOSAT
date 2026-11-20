@@ -387,7 +387,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 | Option or value | What happens |
 | :--- | :--- |
 | `-ungapped` | Refused. |
-| `-use_sw_tback` | Refused. |
+| `-use_sw_tback` | Refused when the search finds an alignment, after the report's header. NCBI fails its traceback (`BLAST engine error: Traceback failed`), throws an exception or crashes there, depending on the input. A search that finds nothing runs, as in NCBI. |
 | `-outfmt 11` | Refused. NCBI searches with it. |
 | `-mt_mode 1` with more than one thread and `-db` | Refused. |
 | A PSSM query that `-seg` masks completely | Refused. |

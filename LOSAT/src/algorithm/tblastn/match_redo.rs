@@ -285,6 +285,32 @@ pub(super) fn sw_batch_failed(first_query_holds_match: bool) -> anyhow::Error {
     ErrorAfterBatchReports(sw_batch_failed_error("tblastn", first_query_holds_match)).into()
 }
 
+/// LOSAT's refusal of a PSSM query's search (`-in_pssm`, the one query batch) whose
+/// Smith-Waterman redo reaches a match (a preliminary hit list that the fetch keeps), after the
+/// prolog (`ErrorAfterBatchReports`): NCBI's redo of a PSSM query (`positionBased`, the PSSM's rows
+/// as its matrix) makes alignments whose scores pass 2^30 and frame 0 (survey probe
+/// `gdb3.tbn_inpssm_s`), then fails the traceback (`Traceback failed`, exit 3), stops with a C++
+/// exception of the Seq-align mapping (exit 255) or crashes (`free(): invalid pointer`, exit 134,
+/// or SIGSEGV with `-db`), by the input (NCBI BLAST+ 2.17.0, probes `pssm.*` of X4b-1 fix round 1;
+/// rule 3). A search without such a match ends as NCBI's (exit 0). Not ported: the
+/// Smith-Waterman redo of a PSSM (`smith_waterman_match` takes a square matrix).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3359-3360 (the
+/// Smith-Waterman redo of a PSSM query reads the PSSM's rows; `-use_sw_tback` sets the mode
+/// after `SetPSITblastnDefaults`, blast_args.cpp:885)
+/// ```c
+///         if (positionBased) {
+///             matrix_tld[i] = sbp_tld[i]->psi_matrix->pssm->data;
+/// ```
+#[cold]
+#[inline(never)]
+pub(super) fn sw_pssm_refusal() -> anyhow::Error {
+    ErrorAfterBatchReports(anyhow::anyhow!(
+        "-use_sw_tback with -in_pssm on a search with hits, with which NCBI BLAST+ 2.17.0's tblastn fails its traceback, stops with an exception or crashes, is not supported by LOSAT's TBLASTN"
+    ))
+    .into()
+}
+
 /// LOSAT's refusal of a batch with a match whose Smith-Waterman redo does not end in NCBI (a
 /// significant score of 0 in a window of two or more preliminary HSPs whose first query letter
 /// scores the window's first subject letter above 0; PD-LOSAT-NCBI-DEFECTS 1.54, rule 3), after

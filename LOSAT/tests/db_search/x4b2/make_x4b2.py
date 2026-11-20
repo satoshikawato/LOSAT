@@ -19,17 +19,21 @@ Query files (`tests/fasta/x4b2/`):
 - `big12.fna`: m_fam, m_mix and ten queries without a hit, 13,440 letters: one batch with BATCH_SIZE=30000.
 - `q240.fna`, `q120.fna`: the first 240 and 120 bases of m_fam (the `-db` rows of the cutoff score of 1, which NCBI
   redoes slowly: 1.4 to 3.2 seconds for q240 on ws, 0.1 for q120).
-- `hf_w.fna`, `hf_m.fna` (fix round 1, review 1's S2): `A` + tks_W (or tks_M) back-translated, so tks_W is in
-  frame +2 (context 1, which reads query 1's heap), qok1 in frame +1 (context 6, a query without a hit), and ten
-  queries without a hit: with `-max_target_seqs 1` qok1's match on sok1 fills query 1's heap first, and the heap test
-  of tks_W's window on sfail reads that full heap (indexed by the query, it would read query 0's empty heap).
+- `hf_w.fna` (fix round 1, review 1's S2): `A` + tks_W back-translated, so tks_W is in frame +2 (context 1, which
+  reads query 1's heap), qok1 in frame +1 and ten queries without a hit: with `-max_target_seqs 1` qok1's match on sok1
+  fills query 1's heap first, but tks_W's window on sfail has an e-value below the heap's 0.002, which a heap takes
+  whatever it holds.
+- `cut12.fna` (fix round 1, S2): `A` + tks_M's letters 22-33 back-translated (frame +2, context 1), qok1 and ten
+  queries without a hit: with `-searchsp 10000000000` the window's e-value is above 0.002, and with
+  `-max_target_seqs 1` query 1's full heap turns it away (indexed by the query, it would read query 0's empty heap).
 - `pre20_pad.fna`, `pre20_pad_wrc.fna`, `pre20_pad_crash.fna`, `pre20_pad_m.fna` (fix round 1, S3): pre20 and the
   eleven queries without a hit (one batch of 1644 letters with BATCH_SIZE=1644), alone or followed by a second batch:
   tks_W in frame -1 (context 3 of one query: past the array), pre20 again (`pre20b`), tks_W and five more queries
   without a hit (`nohit12` to `nohit16`: tks_W's context 6 below the seven queries, the batch's first query keeps a
   match and the last match fails), or tks_M (the redo without end against X4's endless subjects).
-- `empty_w.fna` (fix round 1, S3): a record without letters, then tks_W (with BATCH_SIZE=1 the first batch has no
-  valid context).
+- `empty_w.fna`, `ac_w.fna` (fix round 1, S3): a record without letters (it adds no letter, so tks_W joins its
+  batch) or a two-base query (AC: with BATCH_SIZE=1 a first batch without a valid context, which NCBI reports without a
+  search), then tks_W.
 
 Subject files: `ok_fail.faa` (sok1, then sfail: the failing match is the stream's last).
 
@@ -120,13 +124,14 @@ queries = {
     "pre20_w.fna": [pre20, w],
     "pre20_pad_w.fna": [pre20] + nohit[:11] + [w],
     "hf_w.fna": [("f2_tks_W A + tks_W in frame +2", "A" + nt(TKS_W)), qok1] + nohit[1:11],
-    "hf_m.fna": [("f2_tks_M A + tks_M in frame +2", "A" + nt(TKS_M)), qok1] + nohit[1:11],
+    "cut12.fna": [("f2_cut12 A + tks_M letters 22-33 in frame +2", "A" + nt(BODY[20:32])), qok1] + nohit[1:11],
     "pre20_pad.fna": [pre20] + nohit[:11],
     "pre20_pad_wrc.fna": [pre20] + nohit[:11] + [w_rc],
     "pre20_pad_crash.fna": [pre20] + nohit[:11] + [("pre20b_nt the first 20 letters of qok1 in frame +1, again", nt(PRE20)), w]
     + nohit[11:16],
     "pre20_pad_m.fna": [pre20] + nohit[:11] + [m],
     "empty_w.fna": [("empty a record without letters", ""), w],
+    "ac_w.fna": [("ac two bases", "AC"), w],
     "q12.fna": [("m_fam_1k bases 1-1000 of m_fam", slices["m_fam"][:1000]),
                 ("m_mix_1k bases 1001-2000 of m_mix", slices["m_mix"][1000:2000])] + nohit[1:11],
     "big12.fna": [("m_fam MelaMJNV 26001-31000", slices["m_fam"]), ("m_mix MelaMJNV 56001-61600", slices["m_mix"])]

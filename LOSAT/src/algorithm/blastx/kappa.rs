@@ -799,8 +799,9 @@ pub(crate) fn sw_heap_past(context: usize, queries: usize) -> anyhow::Error {
 /// make, and crashes (SIGSEGV) at every query batch NCBI searches, with hits or without, with
 /// `-subject` and with `-db` (line RG X4b's survey, a debugger's trace; probes `u.*` of item X4b-2
 /// on ws, 2026-11-21). PD-LOSAT-NCBI-DEFECTS 1.60, rule 3. The caller refuses at the traceback of
-/// the first query batch that is searched, after the reports of the batches before it (batches
-/// without a valid context, which NCBI does not search).
+/// the first query batch that is searched, after the reports of the batches before it: batches
+/// without a valid context (a two-base query alone), which NCBI reports with a warning and does
+/// not search (rows `db.x4b2.rej.ungapped.ac.b1.*`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3092-3095

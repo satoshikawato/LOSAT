@@ -1757,43 +1757,47 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   NCBI redoes each frame of a match on its own, with the Karlin block of the frame's query context
   and one array of heaps of redone matches per batch, one heap per query
   (`blast_kappa.c:3601-3622`), with composition-based statistics 0 to 3 (0: scale 1 and the
-  unadjusted matrix). The endless redo and the failed batch behave as in 1.59: LOSAT refuses a
-  match whose redo NCBI never ends (exit 1, "a match whose Smith-Waterman redo (-use_sw_tback) does
-  not end in NCBI BLAST+ 2.17.0 ... is not supported by LOSAT's BLASTX"; tks_M back-translated
-  against X4's endless subjects, rows `db.x4b2.rej.endless.*`; with `-dbsize 1` and sum statistics
-  the redo's cutoff score is 0, and on the first 240 bases of `bslice_q.fna`'s m_fam NCBI aborts in
+  unadjusted matrix). The endless redo and the failed batch behave as in 1.59: LOSAT refuses a match
+  whose redo NCBI never ends (exit 1, "a match whose Smith-Waterman redo (-use_sw_tback) does not
+  end in NCBI BLAST+ 2.17.0 ... is not supported by LOSAT's BLASTX"; tks_M back-translated against
+  X4's endless subjects, rows `db.x4b2.rej.endless.*`; with `-dbsize 1` and sum statistics the
+  redo's cutoff score is 0, and on the first 240 bases of `bslice_q.fna`'s m_fam NCBI aborts in
   malloc's heap check in one run and still runs at 60 s in others), copies `Traceback failed` (exit
   3) where the batch's last redone match fails (`blast_kappa.c:3775-3779`; rows `db.x4b2.fail.*`,
   `db.x4b2.dbsize1.*`) and refuses the batch where its first query holds a redone match, on whose
   clean-up NCBI crashes (`blast_kappa.c:3795-3802`; exit 1, "... with which NCBI BLAST+ 2.17.0's
   blastx crashes, is not supported by LOSAT's BLASTX"; rows `db.x4b2.rej.crash.*`). A subject that
-  NCBI's fetch excludes clears the batch's status as in 1.59 (rows `db.x4b2.excl.*`). New in
-  BLASTX: in e-value mode (`-sum_stats false`, or a `-max_intron_length` of 1 to 4, with which
-  NCBI turns sum statistics off in a gapped search, `blast_parameters.c:793-805`) NCBI tests a window against the heap that its query
-  context indexes in the batch's array of heaps (`redo_alignment.c:1465-1474`), and a BLASTX query
-  has six contexts: the context of frame f of the batch's query q is 6 x q + f, so the test reads
-  another query's heap while the context is below the batch's query count, which LOSAT reproduces
-  (rule 2; rows `db.x4b2.ev.*`), and past the array at or above it, into NCBI's other allocations,
-  where NCBI crashes (SIGSEGV; at every thread count above 1), fails the batch (a single query with
-  a match in frame -1 exits 3 with `Traceback failed`) or goes on with what lies there. This is the
-  common case in e-value mode, not a rare one: with one query in a batch (a query of 10,002 letters
-  or more, or `BATCH_SIZE=1`) any hit outside frame +1 reaches it, and with N queries only frames of
-  the first queries whose number 6 x q + f is below N stay inside the array. LOSAT refuses such a batch at that test, after the reports of the batches before (exit
+  NCBI's fetch excludes clears the batch's status as in 1.59 (rows `db.x4b2.excl.*`). New in BLASTX:
+  in e-value mode (`-sum_stats false`, or a `-max_intron_length` of 1 to 4, with which NCBI turns
+  sum statistics off in a gapped search, `blast_parameters.c:793-805`) NCBI tests a window against
+  the heap that its query context indexes in the batch's array of heaps
+  (`redo_alignment.c:1465-1474`), and a BLASTX query has six contexts: the context of frame f of the
+  batch's query q is 6 x q + f, so the test reads another query's heap while the context is below
+  the batch's query count, which LOSAT reproduces (rule 2; rows `db.x4b2.ev.*` and `db.x4b2.ctx.*`,
+  where a full heap of another query turns a window away), and past the array at or above it, into
+  NCBI's other allocations, where NCBI crashes (SIGSEGV; at every thread count above 1), fails the
+  batch (a single query with a match in frame -1 exits 3 with `Traceback failed`) or goes on with
+  what lies there. This is the common case in e-value mode, not a rare one: with one query in a
+  batch (a query of 10,002 letters or more, or `BATCH_SIZE=1`) any hit outside frame +1 reaches it,
+  and with N queries only frames of the first queries whose number 6 x q + f is below N stay inside
+  the array. LOSAT refuses such a batch at that test, after the reports of the batches before (exit
   1, "a query batch whose Smith-Waterman redo (-use_sw_tback) in e-value mode reaches a match in
   frame F of the batch's query Q, for which NCBI BLAST+ 2.17.0's blastx reads past its list of the
-  batch's N queries (it crashes, fails or goes on with what lies there), is not supported by
-  LOSAT's BLASTX"; rows `db.x4b2.rej.past.*`). Also new: `-ungapped -comp_based_stats 0
-  -use_sw_tback` (the only composition mode that lets `-ungapped` reach a search) makes NCBI's
-  traceback run the redo's set-up, which reads the gapped Karlin blocks that an ungapped search
-  does not make (`blast_traceback.c:1486-1498`, `blast_kappa.c:3092-3095`, `2073-2074`), and NCBI
-  crashes (SIGSEGV) at every query batch it searches, with hits or without, with `-subject` and
-  `-db`; LOSAT refuses at the traceback of the first batch it searches (exit 1, "-use_sw_tback
-  with -ungapped, on which NCBI BLAST+ 2.17.0's blastx crashes at every query batch it searches,
-  is not supported by LOSAT's BLASTX"; rows `db.x4b2.rej.ungapped.*`). With `-use_sw_tback` LOSAT
-  searches a query batch of NCBI's reader as one unit (the batch's status, its first query's heap
-  and the contexts that index the heaps are per batch), and gives the outcome of `-num_threads 1`
-  at every thread count. Fixture rows `db.x4b2.*`; `LOSAT/tests/blastx_sw_tback.rs`; inputs
-  `LOSAT/tests/fasta/x4b2` and the databases `LOSAT/tests/db_search/x4b2` (`make_x4b2.py`).
+  batch's N queries (it crashes, fails or goes on with what lies there), is not supported by LOSAT's
+  BLASTX"; rows `db.x4b2.rej.past.*`, also after an earlier batch's report). Also new: `-ungapped
+  -comp_based_stats 0 -use_sw_tback` (the only composition mode that lets `-ungapped` reach a
+  search) makes NCBI's traceback run the redo's set-up, which reads the gapped Karlin blocks that an
+  ungapped search does not make (`blast_traceback.c:1486-1498`, `blast_kappa.c:3092-3095`,
+  `2073-2074`), and NCBI crashes (SIGSEGV) at every query batch it searches, with hits or without,
+  with `-subject` and `-db`; LOSAT refuses at the traceback of the first batch it searches, after
+  the reports of the batches without a valid context before it, which NCBI reports with a warning
+  and does not search (rows `db.x4b2.rej.ungapped.ac.b1.*`) (exit 1, "-use_sw_tback with -ungapped,
+  on which NCBI BLAST+ 2.17.0's blastx crashes at every query batch it searches, is not supported by
+  LOSAT's BLASTX"; rows `db.x4b2.rej.ungapped.*`). With `-use_sw_tback` LOSAT searches a query batch
+  of NCBI's reader as one unit (the batch's status, its first query's heap and the contexts that
+  index the heaps are per batch), and gives the outcome of `-num_threads 1` at every thread count.
+  Fixture rows `db.x4b2.*`; `LOSAT/tests/blastx_sw_tback.rs`; inputs `LOSAT/tests/fasta/x4b2` and
+  the databases `LOSAT/tests/db_search/x4b2` (`make_x4b2.py`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

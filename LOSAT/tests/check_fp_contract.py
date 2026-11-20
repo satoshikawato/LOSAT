@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """Check LOSAT's floating-point contract (docs/agents/diagnostics.md, "Floating-point contract").
 
-NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-```c
-            result *= expl(-z * z) / z;
-```
+Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143 (ErfC's long-double product)
 LOSAT's fused multiply-adds (`f64::mul_add`) are in two places: `stats/spouge.rs`, the exact
 rounding error of a product inside the double-double emulation of that long-double line's `expl`,
 and `utils/glibc_fma_libm.rs`, the fused operations of glibc's x86-64 FMA `exp`, `log` and `pow`,

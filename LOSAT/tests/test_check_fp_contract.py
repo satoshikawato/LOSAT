@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """Focused tests for the floating-point contract checker.
 
-NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-```c
-            result *= expl(-z * z) / z;
-```
+Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143 (ErfC's long-double product)
 LOSAT emulates that long-double line with one fused multiply-add; the tests freeze the
 checker that keeps it the only one. They do not reproduce or alter NCBI arithmetic.
 """

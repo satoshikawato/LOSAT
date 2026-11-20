@@ -1,0 +1,69 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/outfmt0/x3_s20.fna).
+           1 sequences; 20,000 total letters
+
+
+
+Query= LC738868.1 MAG: Marsupenaeus japonicus endogenous nimavirus
+Ginoza2017 DNA, complete genome
+
+Length=20000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+LC738869.1 MAG: Penaeus monodon endogenous nimavirus Mikawa2016 D...  408     5e-116
+
+
+
+For reading frame +3 of query sequence:
+
+Query_1    13269  ERKRRYKYMSINVILGHLKRFLEWACAEANYPLCEMTKREHAFYSKLCRRKGDVENMNRK  13448
+Subject_1  930    .LVKK..HL..S.....V...VD...S..D.VISPRVR...EL.T.......GR..FD..  1109
+
+Query_1    13449  VAEYVPTIGEMGPLIRCSKHRVIVDGLIERPRETLAEYSIDLIHAALAWPLIIRAGARTG  13628
+Subject_1  1110   IE..L..LRDI....HSV...Y.IN..L...S..IENE.......TI...C.LKS.V...  1289
+
+Query_1    13629  VVRNLLVSEVLEAVDTSDGVIVKVKKHKTSSLYGPYQIGLPAREHNMLVNFIRHRNWESD  13808
+Subject_1  1290   .LM.MC.N...G.TKYQE.F.IR.RN....EH........NEE.YAIIF....N.T.T..  1469
+
+Query_1    13809  YVFSTSRGNPFSLANIQRFMRKLFQRYGLPHLRIASVRKFLTTQAHSAGDDRIQEATASL  13988
+Subject_1  1470   .....RG.KK...S.......V..NI...RDM..TTI.....SHI.KE.N.NMI......  1649
+
+Query_1    13989  LKHSMKTAKRDYKAMQRDRDALDTANRLSRILQDQL  14096
+Subject_1  1650   ....I...R.......H.....K...N.AHM.K...  1757
+
+For reading frame -2 of query sequence:
+
+Query_1    16015  DKLPNCSSLKELTMTTNPRGKTALKRTLKMFQNFSHLTTLTLIPFRRYASFHWVIGPVVQ  15836
+Subject_1  14001  .N.WK..N....SL..A.HAIIDE.SAAS..N........L.V.SGGKV......DH.IR  14180
+
+Query_1    15835  YCRKLKEFHLVYHGGSLEKSGWGIEDLVQCPELVLLWLFDYS  15710
+Subject_1  14181  S.PF.....VA.D.RK.KDN.G...K....QN..S.C.Y.F.  14306
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 43970161
+
+
+  Database: User specified sequence set (Input: tests/fasta/outfmt0/x3_s20.fna).
+    Posted date:  Unknown
+  Number of letters in database: 20,000
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

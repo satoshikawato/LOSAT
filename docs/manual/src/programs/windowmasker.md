@@ -22,6 +22,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 - `-infmt fasta` (the default) reads FASTA. `-infmt blastdb` reads every sequence of a nucleotide database named by `-in`, in every volume. `-infmt seqids` stops with NCBI's error, as NCBI's does.
 - `-parse_seqids` parses the ids of the FASTA definition lines, so the output names sequences by their ids. Use it when the masks are for a database built with `makeblastdb -parse_seqids`.
 - `-ids FILE` masks only the sequences that match one of the ids in `FILE` (one per line); `-exclude_ids FILE` masks all others. As in NCBI's, an id matches the first word of a sequence's title, whole or by its `|`-separated parts. The other sequences are left out of the output.
+- `-text_match F` (with `-infmt blastdb` only) reads each id of the `-ids` or `-exclude_ids` file as a Seq-id, such as `gb|AB000001.1|` or `AB000001.1`, and matches it against the Seq-ids of each database sequence, as NCBI's does: case does not matter, and the versions must agree (`AB000001` does not match `AB000001.1`). In a database made without `-parse_seqids`, the second sequence is `gnl|BL_ORD_ID|1`, the third `gnl|BL_ORD_ID|2`, and so on; `gnl|BL_ORD_ID|0` matches no sequence, as in NCBI's. An id that is not a Seq-id, such as a bare word, is written to the standard error as an error and skipped.
 
 ## Common options
 
@@ -63,8 +64,7 @@ None that change the output of a normal run. When the reader of the output close
 
 - `-mk_counts` and `-convert`: LOSAT does not make or convert counts files yet.
 - Counts files on which NCBI's result is undefined, such as an `ascii` file with units of more than 16 letters.
-- `-text_match F` with `-infmt blastdb` and `-ids` or `-exclude_ids`: LOSAT does not match ids as Seq-ids yet.
-- An ids file with an empty id (a line that starts with a space or a tab, `>`, `|` or `>|`).
+- An ids file matched as text (without `-text_match F`) with an empty id (a line that starts with a space or a tab, `>`, `|` or `>|`).
 
 See [What LOSAT refuses](../refusals.md#windowmasker).
 

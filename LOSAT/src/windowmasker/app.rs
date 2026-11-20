@@ -11,7 +11,7 @@ use crate::ncbi_app::files::{open_input_file, Cin};
 use crate::ncbi_app::Diag;
 use crate::utils::winmask::{MaskerParams, PctSettings};
 
-use super::ids::{fill_id_list, EmptyId, IdLists};
+use super::ids::{fill_id_list, EmptyId, IdLists, IdSet, SeqIdSet, TextMatchIds};
 use super::work::{
     self, config_exception, report, unsupported, Failure, Options, CONFIG, INCONSISTENT,
 };
@@ -122,18 +122,17 @@ fn masking_run(
     let source = work::reader(options, input)?;
     let mut output = args.output_file("out", out).map_err(Failure::Arg)?;
     let writer = work::writer(options.outfmt);
-    let lists = id_lists(args, options.infmt)?;
+    let lists = id_lists(args, options.infmt, diag)?;
     work::run(options, source, writer, &lists, &mut output, diag)
 }
 
-/// The id lists of `-ids` and `-exclude_ids` (`CIdSet_TextMatch`), or the configuration's
-/// exception.
+/// The id lists of `-ids` and `-exclude_ids` (`CIdSet_TextMatch`, or `CIdSet_SeqId` with
+/// `-text_match false`), or the configuration's exception.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:405-445
-/// `-text_match false` with `-infmt blastdb` matches the lists as Seq-ids (`CIdSet_SeqId`),
-/// which LOSAT does not do yet: refused. An id of no words is NCBI's crash (`ids::EmptyId`):
-/// refused.
-fn id_lists(args: &Args, infmt: &str) -> Result<IdLists, Failure> {
+/// An id of no words in a list matched as text is NCBI's crash (`ids::EmptyId`): refused. The
+/// ids that `CSeq_id` cannot read are posted as they are read (`SeqIdSet::insert`).
+fn id_lists(args: &Args, infmt: &str, diag: &mut Diag) -> Result<IdLists, Failure> {
     let ids = args.value("ids").unwrap_or_default();
     let exclude_ids = args.value("exclude_ids").unwrap_or_default();
     if !ids.is_empty() && !exclude_ids.is_empty() {
@@ -147,29 +146,34 @@ fn id_lists(args: &Args, infmt: &str) -> Result<IdLists, Failure> {
     let text_match = args
         .boolean("text_match")
         .expect("-text_match has a default");
-    let list = |name: &str, line: u32| -> Result<Option<_>, Failure> {
+    let mut list = |name: &str, line: u32| -> Result<Option<IdSet>, Failure> {
         if name.is_empty() {
             return Ok(None);
         }
-        if !text_match {
-            if infmt != "blastdb" {
-                return Err(Failure::Ncbi(config_exception(
-                    line,
-                    INCONSISTENT,
-                    CONFIG,
-                    "-text_match false can be used only with infmt blastdb",
-                )));
-            }
-            return Err(Failure::Refused(unsupported(
-                "-text_match false (ids matched as Seq-ids)",
+        if text_match {
+            let mut set = TextMatchIds::default();
+            fill_id_list(name, |id| set.insert(id)).map_err(|EmptyId { id }| {
+                Failure::Refused(unsupported(&format!(
+                    "an id list with an empty id ('{}': NCBI BLAST+ indexes its id sets at -1 and crashes)",
+                    String::from_utf8_lossy(&id)
+                )))
+            })?;
+            return Ok(Some(IdSet::Text(set)));
+        }
+        if infmt != "blastdb" {
+            return Err(Failure::Ncbi(config_exception(
+                line,
+                INCONSISTENT,
+                CONFIG,
+                "-text_match false can be used only with infmt blastdb",
             )));
         }
-        fill_id_list(name).map(Some).map_err(|EmptyId { id }| {
-            Failure::Refused(unsupported(&format!(
-                "an id list with an empty id ('{}': NCBI BLAST+ indexes its id sets at -1 and crashes)",
-                String::from_utf8_lossy(&id)
-            )))
-        })
+        let mut set = SeqIdSet::default();
+        let Ok(()) = fill_id_list(name, |id| {
+            set.insert(id, diag);
+            Ok::<(), std::convert::Infallible>(())
+        });
+        Ok(Some(IdSet::SeqId(set)))
     };
     Ok(IdLists {
         ids: list(ids, 424)?,

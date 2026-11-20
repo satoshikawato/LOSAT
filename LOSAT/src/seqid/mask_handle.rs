@@ -639,7 +639,7 @@ fn push_opt_i32(key: &mut Vec<u8>, value: Option<i32>) {
 /// info). The one model of the tree: `makeblastdb`'s mask ranges (`writedb::mask_data::range_set`)
 /// and the object manager's index and attach of a PSSM query (`algorithm::pssm_search::annot_index`)
 /// keep their handles in it and drop each one when the last thing holding it goes.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct GiimTree {
     lists: HashMap<i32, Vec<(usize, GiimportId)>>,
     made: usize,

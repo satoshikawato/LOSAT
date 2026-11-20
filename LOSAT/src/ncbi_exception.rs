@@ -332,6 +332,11 @@ impl NcbiException {
             .into_owned()
     }
 
+    /// NCBI's text of [`NcbiException::what`], which LOSAT's maps (`crate::wording::losat_bytes`).
+    pub(crate) fn ncbi_what(&self) -> String {
+        self.ncbi_what_in(NCBI_BUILD_ROOT)
+    }
+
     /// NCBI's text of [`NcbiException::what_in`], which LOSAT's maps.
     fn ncbi_what_in(&self, root: &str) -> String {
         let mut os = String::from("NCBI C++ Exception:\n");

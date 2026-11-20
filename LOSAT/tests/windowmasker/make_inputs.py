@@ -74,6 +74,21 @@ def main():
     write("ids_cr.txt", "rec1\rrec4\n".encode(), "wb")
     write("ids_none.txt", "nosuchid\n")
     write("ids_db.txt", "AB000001.1\nrec1\nNC_000099.1\n")
+    # Id lists of -text_match F (CIdSet_SeqId: each id read as a Seq-id; the first six are those of
+    # probe s1 of line NP M5, 2026-11-21): bare words, versions, case, forms, ordinal ids, ids that
+    # CSeq_id cannot read (empty, a byte of 0x80 or more, too many parts, ...), a CRLF list.
+    write("ids_unver.txt", "AB000001\nlcl|rec1\nrec1\nNC_000099\n")
+    write("ids_ord.txt", "gnl|BL_ORD_ID|0\ngnl|BL_ORD_ID|3\n")
+    write("ids_case.txt", "ab000001.1\nnc_000099.1\nREC1\nlcl|REC2\n")
+    write("ids_forms.txt", "AB000001.2\nref|NC_000099.1|\ngb|AB000001.1|\nsp|P12345|ABC_HUMAN\nP12345\n"
+          "BK000001.1\ntpg|BK000001.1|\n")
+    write("ids_bad.txt", "gb|\nx y\n|||\nrec1\n")
+    write("ids_lcl.txt", "lcl|rec2\nrec2\nrec4\nlcl|rec4.\n")
+    write("ids_sp.txt", "P12345\n")
+    write("ids_tpa.txt", "BK000001.1\n")
+    write("ids_seqid_err.txt", b" x\n>\n> y\ngb||\ngb|A|B|C|D\ngi|abc\ngi|0\ncaf\xe9\nAB000001.1.2\n"
+          b"ref|NC_000099.x|\npdb|\npat|US\ngnl|\ngnl|db\ntr|\nlcl|\n", "wb")
+    write("ids_seqid_crlf.txt", b"AB000001.1\r\nrec1\r\nlcl|rec2\r\n", "wb")
     # Counts files: garbage, empty, and the ascii counts of mg1655_u9 without their ##pct lines.
     write("garbage.counts", "hello\n")
     write("empty.counts", "")

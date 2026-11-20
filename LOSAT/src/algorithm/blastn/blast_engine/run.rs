@@ -13524,21 +13524,28 @@ fn search_query_batch<const UNGAPPED: bool>(
     // one again.
     X_SORT.x_clear_idle();
     // The traceback pass over the subjects (`SubjectPasses::traceback_pass`).
-    let hit_lists = passes
-        .traceback_pass::<UNGAPPED>(prelim_lists)
-        .map_err(|error| {
-            database_search_error(
-                error,
-                first_batch,
-                reborrow_outputs(&mut outputs),
-                megablast,
-                &shown,
-            )
-        })?;
-
+    let traced = passes.traceback_pass::<UNGAPPED>(prelim_lists);
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // ```
+    // No NCBI counterpart: NCBI writes nothing to its standard error while it searches a batch.
+    // The bar moves only in the traceback pass; its end clears it
+    // (`subject_env::batch_progress_bar`) whether the pass ends or fails, before anything else is
+    // written (the batch's report, or the prologs of a database error), so nothing of it stays on
+    // the terminal.
     if let Some(bar) = progress_bar.as_ref() {
-        bar.finish();
+        bar.finish_using_style();
     }
+    let hit_lists = traced.map_err(|error| {
+        database_search_error(
+            error,
+            first_batch,
+            reborrow_outputs(&mut outputs),
+            megablast,
+            &shown,
+        )
+    })?;
     subject_space_overflow.check()?;
     let mut batch = batch_result(hit_lists, Vec::new());
     if let Some(timing) = timing.as_ref() {

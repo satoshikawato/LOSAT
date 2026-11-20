@@ -57,7 +57,7 @@ A WASI module sees only what its host gives it.
 - **Files.** The host must open the directories the module reads and writes (a preopened directory). The release tests give the module `/`, so absolute and relative file names work as they do natively.
 - **Working directory.** Pass the directory you start in as the environment variable `PWD`. Relative file names, and the `New DB name:` that `makeblastdb` prints, start from `PWD`. Without `PWD` they start from `/`.
 - **Time zone.** Pass `TZ`, or give the module the zone files (`/etc/localtime` and `/usr/share/zoneinfo`). `makeblastdb` then writes local times. Without them it writes UTC.
-- **Temporary files.** A WASI command has no temporary directory. A search program normally decompresses a `.gz`, `.bz2` or `.zst` input into a temporary file first; on WASI it stops with an error instead. Decompress the file yourself, or pipe it to `-query -`.
+- **Temporary files.** A search program decompresses a `.gz`, `.bz2` or `.zst` input into a temporary file beside the input. A WASI command has no temporary directory to fall back on, so if the input's folder refuses the file, it stops with an error. Give the module a writable folder for the input, or pipe the data to `-query -`.
 - **Memory.** A module can grow past 2 GiB. A host must then pass pointers and lengths to WASI calls as unsigned 32-bit numbers. Node's `node:wasi` refuses the signed values that the plain WebAssembly interface gives for 2 GiB and above, so the repository's Node.js runner (below) converts them.
 
 ### Run with Node.js

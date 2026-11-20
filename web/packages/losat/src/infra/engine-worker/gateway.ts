@@ -19,6 +19,7 @@ import {
   RunCancelledError,
   UnavailableError,
   withRunFiles,
+  withRunOutputFailed,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
@@ -490,7 +491,8 @@ function workerInput(program: string, input: EngineInput): WorkerInput {
 
 /**
  * Rebuilds an error of the worker with its name and message (as web/app/src/infra/data-worker/rpc.ts),
- * and the files of a failed run (`runFilesOf`).
+ * the files of a failed run (`runFilesOf`), and whether it ended the run's output with `fail`
+ * (`runOutputFailedOf`).
  */
 function toError(error: WorkerError): Error {
   if (error.name === 'InputMismatchError' && error.role !== undefined && error.detail !== undefined) {
@@ -498,5 +500,6 @@ function toError(error: WorkerError): Error {
   }
   const rebuilt = new Error(error.message);
   rebuilt.name = error.name;
-  return error.runFiles === undefined ? rebuilt : withRunFiles(rebuilt, error.runFiles);
+  const failed = error.outputFailed === true ? withRunOutputFailed(rebuilt) : rebuilt;
+  return error.runFiles === undefined ? failed : withRunFiles(failed, error.runFiles);
 }

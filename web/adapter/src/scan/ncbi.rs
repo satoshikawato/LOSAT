@@ -1227,21 +1227,11 @@ impl Records {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:774-779
-    // ```c++
-    // void CFastaReader::ParseDataLine(
-    //     const TStr& s, ILineErrorListener * pMessageListener)
-    // {
-    //     if( NStr::StartsWith(s, ">?") ) {
-    //         ParseGapLine(s, pMessageListener);
-    //         return;
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1386-1389
-    // ```c++
-    //     if ( !TestFlag(fParseGaps)  &&  m_TotalGapLength > 0 ) {
-    //         // Encountered >? lines; substitute runs of Ns or Xs as appropriate.
-    //         string    new_data;
-    //         char      gap_char(inst.IsAa() ? 'X' : 'N');
-    // ```
+    // `ParseDataLine` hands a line that starts with `>?` to the parser of gap lines before any
+    // check of data; without `fParseGaps` (BLAST's reader) the record's gaps are then stored as
+    // runs of `X` in protein and `N` in nucleotide data (line WQA's D13 round 3, L2: the
+    // reference lines replace the quoted source, license rule 1 of 2026-11-20).
     /// The end of a gap line: its letters, as the reader's parser of gap lines counts them
     /// (`gap_line_letters`), are a run of `N` (kind 1) or `X` (kind 2) in the record. A gap line
     /// gets no `CheckDataLine` and stores no residue in `m_SeqData`, so the next data line is

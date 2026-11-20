@@ -141,7 +141,9 @@ describe("the reader of the engine's archive of a run's files", () => {
 // --- the ABI binding -------------------------------------------------------------------------------
 
 /** Exports of a fake engine for `start`, `validate` and the file calls, which log what they are given. */
-function fakeExports(options: { start?: string | 'fail'; validate?: string; trapValidate?: boolean; failEnd?: boolean } = {}) {
+function fakeExports(
+  options: { start?: string | 'fail'; validate?: string; validation?: string; trapValidate?: boolean; failEnd?: boolean } = {},
+) {
   const memory = new WebAssembly.Memory({ initial: 4 });
   const log: string[] = [];
   let next = 4096;
@@ -183,6 +185,8 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; trap
         respond('{"data_loaders":true}');
         return 0;
       }
+      // The *validation* that the engine sends before an option check refuses the argv (line WQA's D13 round 3, L1).
+      if (options.validation !== undefined) respond(options.validation);
       error = options.validate;
       return -1;
     },
@@ -363,6 +367,20 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
       message: 'BLAST query/options error: bad',
     });
     expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false } });
+  });
+
+  // line WQA's D13 round 3, L1, 2026-11-20: the engine sends the data loaders of the argv's registry before its option
+  // checks; a refused argv gives them with its message, which the host reads after them.
+  it("gives the data loaders of a refused argv's registry with its message", async () => {
+    const refused = fakeExports({ validate: 'Unexpected extra argument: -x', validation: '{"data_loaders":false}' });
+    const engine = reactorControl(async () => refused.abi, async () => refused.abi);
+    expect(await engine.validate(['blastp', '-x'])).toEqual({ ok: false, message: 'Unexpected extra argument: -x', dataLoaders: false });
+    // An argv whose start failed before the registry has none.
+    const failed = fakeExports({ validate: 'BLAST query/options error: bad' });
+    expect(await reactorControl(async () => failed.abi, async () => failed.abi).validate(['blastp'])).toEqual({
+      ok: false,
+      message: 'BLAST query/options error: bad',
+    });
   });
 
   it('keeps the file away from every call of the shared instance, also from calls that wait with it for one opening of that instance', async () => {

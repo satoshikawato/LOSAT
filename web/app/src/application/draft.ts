@@ -1529,7 +1529,9 @@ export class SearchDraft {
         registry = this.registryFile(program, start);
         const result = await this.deps.engine.validate(argv, registry);
         validation = result.ok ? { state: 'ok' } : { state: 'invalid', message: result.message };
-        if (result.ok) dataLoaders = result.dataLoaders;
+        // Also from a refused argv whose registry the engine read (line WQA's D13 round 3, L1): the setting does not depend
+        // on the option that it refuses.
+        if (result.dataLoaders !== undefined) dataLoaders = result.dataLoaders;
       }
     } catch (error) {
       // The chosen file changed or went after it was chosen: the browser no longer reads it.

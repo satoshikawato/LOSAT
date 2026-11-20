@@ -279,9 +279,11 @@ export class ReactorAbi {
    */
   validate(argv: readonly string[]): ValidationResult {
     const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
-    if (status < 0) return { ok: false, message: this.lastError() };
-    const json = this.response() as { data_loaders: boolean };
-    return { ok: true, dataLoaders: json.data_loaders };
+    // The *validation* comes before the option checks, so a refused argv may have it too (line WQA's D13 round 3, L1):
+    // it is read before the error, whose call drops the responses.
+    const known = status < 0 && this.responses.length === 0 ? undefined : (this.response() as { data_loaders: boolean }).data_loaders;
+    if (status < 0) return { ok: false, message: this.lastError(), ...(known === undefined ? {} : { dataLoaders: known }) };
+    return { ok: true, dataLoaders: known! };
   }
 
   /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders on or off (ABI v2 §4, version 5). */

@@ -140,18 +140,26 @@ pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) 
 
 /// Checks the argv as the CLI does before it reads its inputs (`run::validate`) and emits the
 /// *validation* JSON on stream 2: whether the run reads its inputs with NCBI's data loaders on
-/// (`{"data_loaders":true}`; docs/web/abi_v2.md §9).
+/// (`{"data_loaders":true}`; docs/web/abi_v2.md §9). It is emitted once the start has read the
+/// argv's registry, before the option checks: a refused argv has it too, unless its start or
+/// LOSAT's settings failed (line WQA's D13 round 3, L1, 2026-11-20).
 ///
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
 #[no_mangle]
 pub unsafe extern "C" fn losat_web2_validate(argv_ptr: *const u8, argv_len: usize) -> i32 {
     guarded(|| {
-        let data_loaders = run::validate(&words(text(argv_ptr, argv_len, "argv")?))?;
-        emit(
-            STREAM_RESPONSE,
-            format!("{{\"data_loaders\":{data_loaders}}}").as_bytes(),
-        );
+        // The *validation* goes out once the start knows the setting, before the option checks, so
+        // that a host has it also when they refuse the argv (line WQA's D13 round 3, L1).
+        run::validate_with(
+            &words(text(argv_ptr, argv_len, "argv")?),
+            &mut |data_loaders| {
+                emit(
+                    STREAM_RESPONSE,
+                    format!("{{\"data_loaders\":{data_loaders}}}").as_bytes(),
+                );
+            },
+        )?;
         Ok(0)
     })
 }

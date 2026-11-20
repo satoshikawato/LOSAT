@@ -478,6 +478,34 @@ describe('SearchDraft inputs', () => {
     expect(checks.at(-1)).toBe('tblastx|query|true');
   });
 
+  // line WQA's D13 round 3, L1, 2026-11-20: the engine gives the data loaders of the registry of -conffile also when it
+  // refuses another option of the argv, and the draft reads the inputs with them: the card does not ask for
+  // DATA_LOADERS=none that the chosen file already sets while the argv is invalid.
+  it('reads the sources with the data loaders of the registry while another option is refused', async () => {
+    const { draft, data } = setup({
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
+      validate: (argv, registry) => {
+        const dataLoaders = !(argv.includes('-conffile') && registry !== undefined);
+        return argv.includes('-unknown_option') ? { ok: false, message: 'Unexpected extra argument: -unknown_option', dataLoaders } : { ok: true, dataLoaders };
+      },
+    });
+    const readers: string[] = [];
+    const indexSource = data.indexSource.bind(data);
+    data.indexSource = async (sourceId, reader) => {
+      readers.push(`${reader.program}|${reader.dataLoaders}`);
+      if (reader.dataLoaders) throw new Error('the first line of the query ("2HHB") is not a defline and may be a sequence identifier');
+      return indexSource(sourceId, reader);
+    };
+    draft.setPaste('query', '2HHB\nMKLV\n');
+    draft.setExtra('-conffile nol.ini -unknown_option');
+    draft.setConffile(file('nol.ini', '[BLAST]\nDATA_LOADERS=none\n'));
+    await draft.idle();
+    expect(draft.state.get().validation.state).toBe('invalid');
+    expect(draft.state.get().dataLoaders).toBe(false);
+    expect(sourceOf(draft, 'query').status).toBe('ready');
+    expect(readers.at(-1)).toBe('blastn|false');
+  });
+
   // An index that is running when the reader changes ends with the old reader's records or refusal; the input is read
   // again with the reader in force, whatever the order (line WQA's D13 round 2, M1, 2026-11-20; the review's probe).
   describe('an index that is running when its reader changes reads the input again with the reader in force', () => {

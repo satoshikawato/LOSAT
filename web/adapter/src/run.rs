@@ -436,6 +436,14 @@ pub fn data_loaders(words: &[&str]) -> Result<bool, String> {
 /// Returns whether the run reads its inputs with NCBI's data loaders on (`data_loaders`), which
 /// the host gives `register` and `scan_begin` (line WQA's D16, 2026-11-20).
 pub fn validate(words: &[&str]) -> Result<bool, String> {
+    validate_with(words, &mut |_| ())
+}
+
+/// `validate`, which also gives `known` the data loaders of the argv's registry as soon as the
+/// start has read it and LOSAT takes its settings, before the checks of the arguments and the
+/// options: the setting does not depend on them, so it is known while another option is refused
+/// (line WQA's D13 round 3, L1, 2026-11-20). Not called when the start or the settings fail.
+pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool, String> {
     use losat::web_adapter::{parse_optional_range, RangeRole};
     let started = start(
         words,
@@ -443,6 +451,9 @@ pub fn validate(words: &[&str]) -> Result<bool, String> {
         &mut std::io::sink(),
     )
     .map_err(|(message, _)| message)?;
+    if let Ok(settings) = started.settings() {
+        known(settings.data_loaders);
+    }
     let Some((program, command, requested)) = started_command(words, &started)? else {
         return Ok(started.settings()?.data_loaders);
     };

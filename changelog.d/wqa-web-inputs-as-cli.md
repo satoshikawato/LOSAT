@@ -20,3 +20,6 @@
   browser reads `DATA_LOADERS` from the file of `-conffile`, not from `.ncbirc`, and gives its
   remedies ("Put '>' before the first line", the sentence on Fetch) also when the engine's check
   refuses the input after `-conffile` is taken away.
+- LOSAT Web: while another option of "Additional options" is refused, the inputs are read with
+  `DATA_LOADERS` of the file of `-conffile`, where the card asked for `DATA_LOADERS=none` that the
+  file already set.

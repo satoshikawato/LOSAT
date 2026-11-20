@@ -187,7 +187,10 @@ class DbSearchFixtureTests(unittest.TestCase):
             # A copy row's expectation is the cut of its whole NCBI output (`ncbi-copies:`).
             if db_fixtures.copies_cell(r) is not None:
                 self.assertEqual(db_fixtures.copy_row_problems(r), [], r["row_id"])
-                self.assertEqual((r["rc"], r["stderr_sha256"]), ("0", ""), r["row_id"])
+                self.assertEqual(r["rc"], "0", r["row_id"])
+                # Its stderr, where NCBI writes one, is a warning of the arguments that names no copy.
+                err = db_fixtures.FROZEN / f"{r['row_id']}.err"
+                self.assertFalse(err.exists() and db_fixtures.COPY_PREFIX.encode() in err.read_bytes(), r["row_id"])
             # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
             near = db_fixtures.near_row_id(r)
             # A row frozen from NCBI under valgrind (`ncbi-valgrind`) has frozen files of its own run.

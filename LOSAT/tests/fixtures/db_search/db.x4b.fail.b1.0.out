@@ -1,0 +1,46 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/x4b/ok1_fail_rc.fna).
+           2 sequences; 852 total letters
+
+
+
+Query= qpre20
+
+Length=20
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sok1_nt sok1 in frame +1                                              40.4    7e-10
+
+
+> sok1_nt sok1 in frame +1
+Length=372
+
+ Score = 40.4 bits (93),  Expect = 7e-10, Method: Compositional matrix adjust.
+ Identities = 19/20 (95%), Positives = 19/20 (95%), Gaps = 0/20 (0%)
+ Frame = +1
+
+Query  1   WATAPAALPFGKANAAACGN  20
+            ATAPAALPFGKANAAACGN
+Sbjct  1   MATAPAALPFGKANAAACGN  60
+
+
+
+Lambda      K        H
+   0.317    0.125    0.437 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000

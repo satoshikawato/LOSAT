@@ -594,6 +594,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           threshold,
           windowSize,
           xdropUngap,
+          { flag: '-strand', label: 'Query strand', kind: 'choice' },
           sumStats,
         ],
       },

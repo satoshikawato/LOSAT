@@ -41,6 +41,7 @@ use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::BlastCompositionWorkspace;
 use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
+use crate::report::diag_log::Posts;
 use crate::report::row_letters::RowSide;
 use crate::report::{
     write_blastp_pairwise_report, BlastpPairwiseReport, OutputConfig, OutputFormat, PairwiseConfig,
@@ -7971,6 +7972,7 @@ fn search(
         let ReportOutputs {
             formats,
             diagnostics,
+            later_warnings,
             hits,
             observer,
         } = &mut *outputs;
@@ -8182,6 +8184,7 @@ fn search(
                             })
                             .collect(),
                         diagnostics: &mut **diagnostics,
+                        later_warnings: later_warnings.as_deref_mut(),
                         hits: x_want_records.then_some(
                             &mut x_collect as &mut crate::api::local_blast::HitsSink<'_>,
                         ),
@@ -12413,7 +12416,7 @@ fn run_call(
         pssm_made,
         pssm_reads: &pssm_reads,
     };
-    let mut query_warning_lines = report_prep::query_warning_lines(&prep);
+    let (mut query_warning_lines, kept) = report_prep::query_warning_lines(&prep);
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
@@ -12684,6 +12687,8 @@ fn run_call(
             *after = posts;
         }
     }
+    // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+    let query_posts = Posts::with_later(query_posts, kept.as_deref().unwrap_or_default());
     let mut warning_lines: Option<&[crate::report::diag_log::Posts]> = Some(&query_posts);
     // Every structured format of the call is XML2 or JSON: none writes the report that a
     // `-subject` document holds back (`blast_xml::write_blastp_xml`).
@@ -12795,7 +12800,9 @@ fn run_call(
         // The first format's writer also writes the texts of the subjects that the reports
         // read one by one (`ReportedPrefetch::subject_reads`).
         let first_lines = warning_lines.take();
+        let own = format.later_warnings(kept.is_some(), &mut outputs.later_warnings, format_index);
         let mut warnings = (first_lines.is_some()
+            || own.is_some()
             || crate::report::query_warnings::report_posts(format.report_format())
             || matches!(
                 outfmt,
@@ -12807,7 +12814,8 @@ fn run_call(
                 first_lines.unwrap_or(&[]),
                 args.archive.as_ref(),
                 &mut *outputs.diagnostics,
-            );
+            )
+            .with_later(&query_posts, own);
             match first_lines {
                 Some(_) => warnings.with_subject_reads(prefetched.subject_reads.queries()),
                 None => warnings,

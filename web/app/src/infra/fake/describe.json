@@ -2333,6 +2333,17 @@
     ]
    },
    {
+    "flag": "-strand",
+    "help": "",
+    "takes_value": true,
+    "default": "both",
+    "choices": [
+     "both",
+     "plus",
+     "minus"
+    ]
+   },
+   {
     "flag": "-xdrop_ungap",
     "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
     "takes_value": true

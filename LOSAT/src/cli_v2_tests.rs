@@ -1614,8 +1614,8 @@ fn show_gis_is_a_flag_of_every_search_program() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("tblastn", &["-db_soft_mask", "11"][..]),
-        ("tblastx", &["-db_soft_mask", "11"]),
+        ("tblastn", &["-gilist", "ids.gil"][..]),
+        ("tblastx", &["-gilist", "ids.gil"]),
         ("blastp", &["-gilist", "ids.gil"]),
     ] {
         let error = crate::cli::render_message(&parse(program, words).unwrap_err());
@@ -1631,12 +1631,12 @@ fn unported_ncbi_options_are_rejected_explicitly() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356 (quoted at
 // `blastinput::db_mask::DbMaskArgs`)
-// BLASTN's (series NP, M4a-2), BLASTP's and BLASTX's (series NP, M4b) `-db_soft_mask` and
-// `-db_hard_mask`: strings, each excluding the other, `-subject` and `-subject_loc` (conflicts of
-// LOSAT's parser, where NCBI prints its usage; probes o04, o05, o06 of the M4a-2 survey); neither
-// is a refusal of the run (`RUN_REFUSALS`, series NP, M4a-2b).
+// BLASTN's (series NP, M4a-2), BLASTP's, BLASTX's (series NP, M4b), TBLASTN's and TBLASTX's (M4b
+// PR 2) `-db_soft_mask` and `-db_hard_mask`: strings, each excluding the other, `-subject` and
+// `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage; probes o04, o05, o06
+// of the M4a-2 survey); neither is a refusal of the run (`RUN_REFUSALS`, series NP, M4a-2b).
 #[test]
-fn blastn_blastp_and_blastx_take_the_database_masks() {
+fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
     let masks = |program: &str, words: &[&str]| {
         let mut argv = vec!["losat", program, "-query", "q.fa"];
         argv.extend(words);
@@ -1644,10 +1644,12 @@ fn blastn_blastp_and_blastx_take_the_database_masks() {
             Commands::Blastn(args) => args.db_mask,
             Commands::Blastp(args) => args.db_mask,
             Commands::Blastx(args) => args.db_mask,
+            Commands::Tblastn(args) => args.db_mask,
+            Commands::Tblastx(args) => args.db_mask,
             _ => panic!("{program}"),
         })
     };
-    for program in ["blastn", "blastp", "blastx"] {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
         let found = masks(program, &["-db", "d", "-db_soft_mask", "+11"]).unwrap();
         assert_eq!(found.db_soft_mask.as_deref(), Some("+11"), "{program}");
         assert_eq!(found.db_hard_mask, None, "{program}");

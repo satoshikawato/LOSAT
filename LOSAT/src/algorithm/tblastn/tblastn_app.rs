@@ -659,6 +659,7 @@ fn open_search_database(
                 name,
                 settings,
                 list,
+                args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
@@ -903,6 +904,8 @@ fn search_cli(
         return Ok(());
     }
     let batch_size = before_prolog(subjects, x_subject_stores, outputs.diagnostics)?;
+    let mut resolved = resolved;
+    resolve_db_mask(&args, &mut resolved, database.as_ref(), outputs.diagnostics)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:267-270
     // ```c
     // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
@@ -1004,6 +1007,8 @@ fn search_pssm_query(
         "tblastn",
         outputs.diagnostics,
     )?;
+    let mut resolved = resolved;
+    resolve_db_mask(args, &mut resolved, database, outputs.diagnostics)?;
     xinclude_checks(outputs, args.out.as_deref())?;
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.pssm_query(&records[0]);
@@ -1079,6 +1084,30 @@ fn before_prolog(
         diagnostics,
     )?;
     Ok(batch_size)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (quoted at
+// `blastinput::db_mask::DbMaskOption::resolve`)
+/// The formatter's resolution of the database masking (`-db_soft_mask`, `-db_hard_mask`; series
+/// NP, M4b PR 2) into `resolved.db_mask`, where NCBI makes its formatter: after `Query is Empty!`
+/// and the formatter's set-up of the subjects, before the XInclude checks. Its warning (one
+/// message of the archive) or its database error, and the program options of the archive and of
+/// the search strategy. Nothing without a database or without the options.
+fn resolve_db_mask(
+    args: &TblastnArgs,
+    resolved: &mut ResolvedTblastnArgs,
+    database: Option<&TblastnDatabase>,
+    diagnostics: &mut dyn Write,
+) -> Result<()> {
+    if let (Some(database), Some(option)) = (database, args.db_mask.option()) {
+        resolved.db_mask = database.resolve_mask_option(
+            &option,
+            args.archive.as_ref(),
+            args.strategy.as_ref(),
+            diagnostics,
+        )?;
+    }
+    Ok(())
 }
 
 // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
@@ -1288,6 +1317,8 @@ fn search_database(
         return Ok(());
     }
     let batch_size = before_prolog(&[], None, outputs.diagnostics)?;
+    let mut resolved = resolved;
+    resolve_db_mask(&args, &mut resolved, Some(&database), outputs.diagnostics)?;
     xinclude_checks(outputs, args.out.as_deref())?;
     search(
         &args,
@@ -1533,6 +1564,11 @@ fn search(
     } else {
         0
     };
+    // LOSAT's refusals of the masked search (`-db_hard_mask`; series NP, M4b PR 2) come where NCBI
+    // starts the search, after its checks.
+    if let (Some(database), Some(mask)) = (database, resolved.db_mask.as_ref()) {
+        database.check_mask_limits(mask, usize::try_from(resolved.word_size)?)?;
+    }
     app::check_search_environment("TBLASTN", database.is_none())?;
     let subjects = subject_records;
     // The search reads the residues of the subject records in place (NCBI's subjects stay in the
@@ -1575,7 +1611,8 @@ fn search(
     if let Some(database) = database.filter(|_| subject_set.old_fsc) {
         database.check_statistics_count()?;
     }
-    let pairwise_database = database.map(TblastnDatabase::pairwise_database);
+    let pairwise_database =
+        database.map(|database| database.pairwise_database_masked(resolved.db_mask.as_ref()));
     let subject_path = match database {
         Some(_) => None,
         None => Some(
@@ -1825,7 +1862,7 @@ fn search(
                 } else if let Some(failure) = pssm_failure {
                     Err(failure.error("TBLASTN"))
                 } else {
-                    database.x_stream(resolved.num_threads).map(|stream| {
+                    database.x_stream(resolved.num_threads, resolved.db_mask.as_ref()).map(|stream| {
                         x_stream = Some(stream);
                         Vec::new()
                     })

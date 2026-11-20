@@ -74,6 +74,9 @@ pub struct TblastnArgs {
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
+    /// `-db_soft_mask` and `-db_hard_mask` (`blastinput::db_mask`; series NP, M4b PR 2).
+    #[command(flatten)]
+    pub db_mask: crate::blastinput::db_mask::DbMaskArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -439,6 +442,9 @@ pub struct ResolvedTblastnArgs {
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     /// `-in_pssm`: the query's PSSM (PSI-TBLASTN, `in_pssm.rs`).
     pub pssm: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
+    /// The database masking as the formatter resolved it (`tblastn_app::resolve_db_mask`; series
+    /// NP, M4b PR 2); `None` before, and for a search without it.
+    pub db_mask: Option<crate::blastinput::db_mask::ResolvedMask>,
 }
 
 impl TblastnArgs {
@@ -850,6 +856,7 @@ impl TblastnArgs {
             num_threads: self.num_threads,
             query_range,
             pssm,
+            db_mask: None,
         })
     }
 }
@@ -1461,7 +1468,7 @@ mod tests {
             assert!(parse(extra).is_err(), "{extra:?}");
         }
         for extra in [
-            &["-db_soft_mask", "1"][..],
+            &["-gilist", "ids.gil"][..],
             &["-remote"],
             &["-use_sw_tback"],
         ] {

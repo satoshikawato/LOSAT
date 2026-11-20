@@ -60,7 +60,6 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-export_search_strategy` with a file name that is not UTF-8 | Refused. |
 | `-export_search_strategy` with `-dbsize` and a list that keeps no sequence of the database | Refused. |
 | `-export_search_strategy` in the library API and pylosat | Refused. The command line writes the file. |
-| `-db_soft_mask`, `-db_hard_mask` with `tblastn` or `tblastx` | Refused. `blastn`, `blastp` and `blastx` run them. |
 | `-parse_deflines` with two subjects of one id | Refused. NCBI cannot report it correctly. |
 | `-parse_deflines` with two queries of one id in one query batch | Refused. |
 | `-parse_deflines` with a query and a subject of one id that are not the same record | Refused. |
@@ -269,6 +268,8 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) or more | Refused. NCBI's `tblastn` crashes on some inputs with it. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback | Refused. NCBI crashes. |
+| `-db_hard_mask` on a database with a sequence that leaves a reading frame without letters after one of its masks (a masked tail or a masked start, for example) | Refused. See Rare inputs. |
+| `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. |
 | `-in_pssm` | See the next section. |
 
 <details>
@@ -282,6 +283,7 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 - With `-in_pssm` and a PSSM whose `-` column scores above NCBI's minimum, a one-hit alignment whose gapped start lies past the end of NCBI's translation of the subject (after its last frame). NCBI's gapped alignment reads the byte after its end, which it never sets, or past it.
 - A one-hit alignment whose gapped start lies after the end of its frame's translation and that reaches NCBI's traceback. NCBI reads a byte its translation does not set there.
 - The report of a one-hit alignment whose traceback starts on the end marker. NCBI places its column past the subject's end, and LOSAT does not reproduce that result yet. Such alignments that NCBI drops before its reports give NCBI's output.
+- `-db_hard_mask` is refused on a database that has a searched sequence (of at least the word size times 3 plus 2 bases) with a mask after which one of its six reading frames has no letter. NCBI maps the masks to each frame by dividing positions by 3, so this is a mask that runs to the sequence's end (frames +1 to +3), one that starts at its first bases (frames -1 to -3), or one that ends one or two bases before an end. NCBI then scans the masked letters of that frame past the unmasked ones and gives alignments that differ from those of a near input.
 
 </details>
 
@@ -293,6 +295,8 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | `-query_gencode 32`, `-db_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
 | An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension passes into the next frame of the query | Refused. See Rare inputs. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation | Refused. NCBI crashes. |
+| `-db_hard_mask` on a database with a sequence that leaves a reading frame without letters after one of its masks | Refused. NCBI writes some alignments many times. See Rare inputs. |
+| `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. |
 | `-outfmt 1` to `4` with `-parse_deflines` | See "All five search programs" above. |
 
 <details>
@@ -305,6 +309,7 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 - In the cases checked, NCBI keeps such an alignment in the frame where it started, with query coordinates outside that frame. It writes coordinates past the query or leaves the alignment out of every report.
 - LOSAT writes the results of the query batches before and then stops with the error.
 - An extension that passes into the next frame without scoring higher there gives NCBI's output.
+- `-db_hard_mask` is refused for the sequences described under `tblastn`. In `tblastx` NCBI also writes the same alignment once for each word it finds in the masked letters of that frame, all ending where the mask starts.
 
 </details>
 

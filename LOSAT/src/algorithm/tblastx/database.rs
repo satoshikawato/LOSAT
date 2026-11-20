@@ -79,21 +79,24 @@ impl TblastxDatabase {
     /// holds as such (`SubjectSetNumbers::total`) on every target.
     #[cfg(test)]
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, &mut std::io::sink())
+        Self::open_restricted(name, settings, None, None, &mut std::io::sink())
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
-    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
+    /// `-db_hard_mask`; series NP, M4b PR 2) (`shared::restrict_database`, whose warnings go to
+    /// `diagnostics`).
     pub(crate) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
+        mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed =
-            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
         // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
@@ -240,6 +243,56 @@ impl TblastxDatabase {
         shared::pairwise_database(&self.db)
     }
 
+    /// `pairwise_database` of a search masked with `mask` (`None`: not masked): each name's
+    /// algorithm, which the `Masked using:` lines show (`shared::pairwise_database_masked`).
+    pub(crate) fn pairwise_database_masked(
+        &self,
+        mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
+    ) -> PairwiseDatabase {
+        shared::pairwise_database_masked(&self.db, mask.map(|mask| mask.shown.as_slice()))
+    }
+
+    /// The formatter's step of the database masking `option` (`shared::resolve_database_masking`;
+    /// series NP, M4b PR 2): its warning goes to `diagnostics` (as one message of the archive
+    /// `archive`), and the program options to `archive` and `strategy`.
+    pub(crate) fn resolve_mask_option(
+        &self,
+        option: &crate::blastinput::db_mask::DbMaskOption,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Option<crate::blastinput::db_mask::ResolvedMask>> {
+        shared::resolve_database_masking(
+            &self.db,
+            &self.name,
+            option,
+            PROGRAM,
+            archive,
+            strategy,
+            &mut |text| match archive {
+                Some(handle) => handle.write_warning(diagnostics, text),
+                None => diagnostics.write_all(text),
+            },
+        )
+    }
+
+    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`)
+    /// whose words have `word_size` letters (the shortest subject searched has `word_size * 3 + 2`
+    /// bases).
+    pub(crate) fn check_mask_limits(
+        &self,
+        mask: &crate::blastinput::db_mask::ResolvedMask,
+        word_size: usize,
+    ) -> Result<()> {
+        mask.check_losat_limits(
+            &self.db,
+            PROGRAM,
+            crate::blastinput::db_mask::HardScan::Translated {
+                min_length: word_size * 3 + 2,
+            },
+        )
+    }
+
     /// The Blast-def-line taxid of each reported sequence by rank (`reported`: the ordinal id of
     /// each rank and the sequences with parsed Seq-ids; every rank is reported, a rank is made
     /// from a hit) and what the taxonomy database says about it, for the XML2 and JSON formats
@@ -299,8 +352,13 @@ impl TblastxDatabase {
     /// of its sequences would be read, with the same errors, and its sequences read where each
     /// query batch searches them (`subjects::Subjects::Stream`) and reports them
     /// (`read_reported`).
-    pub(crate) fn x_stream(&self, threads: usize) -> Result<XDbStream<'_>> {
-        XDbStream::new(&self.db, threads, PROGRAM)
+    pub(crate) fn x_stream(
+        &self,
+        threads: usize,
+        mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
+    ) -> Result<XDbStream<'_>> {
+        Ok(XDbStream::new(&self.db, threads, PROGRAM)?
+            .with_mask(crate::algorithm::common::db_mask_search::SearchMask::of(mask)))
     }
 }
 

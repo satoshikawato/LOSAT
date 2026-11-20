@@ -5,7 +5,9 @@ No NCBI counterpart: a reading aid for LOSAT's comments, not ported behavior.
 
 LOSAT's comments cite NCBI's C/C++ source by path and lines in the pinned tree
 (`NCBI reference (598d8ae6): c++/<path>:<a>-<b>`) and do not copy it (AGENTS.md rule 4). This
-prints the cited lines from a checkout of that tree (`$NCBI_SRC`, or `--ncbi-src`):
+prints the cited lines from a checkout of that tree (`$NCBI_SRC`, or `--ncbi-src`); citations of
+RpsbProc (`RpsbProc/<path>:<a>-<b>`, version 0.5.1) are read from the directory that holds its
+`RpsbProc/` (`$RPSBPROC_SRC`, or `--rpsbproc-src`):
 
   scripts/ncbi_ref.py LOSAT/src/algorithm/blastn/hsp.rs:120   the citations nearest above line 120
   scripts/ncbi_ref.py LOSAT/src/algorithm/blastn/hsp.rs       every citation of the file
@@ -26,9 +28,9 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 PINNED = "598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4"
-# A path of NCBI's tree with its lines: `c++/<path>:12-20,31`.
+# A path of NCBI's tree (or of RpsbProc) with its lines: `c++/<path>:12-20,31`.
 CITE_RE = re.compile(
-    r"(?<![\w.+/-])(?P<path>c\+\+/[\w.+/-]*[\w+])"
+    r"(?<![\w.+/-])(?P<path>(?:c\+\+|RpsbProc)/[\w.+/-]*[\w+])"
     r"(?::(?P<ranges>\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*))?"
 )
 COMMENT_RE = re.compile(r"^\s*(?://|#)")
@@ -95,10 +97,10 @@ def show(ncbi: Path, path: str, ranges: list[tuple[int, int]], context: int, out
     return ok
 
 
-def resolve_ncbi(option: str | None) -> Path:
+def resolve_ncbi(option: str | None) -> Path | None:
     value = option or os.environ.get("NCBI_SRC")
     if not value:
-        sys.exit("ncbi_ref.py: set $NCBI_SRC (or --ncbi-src) to a checkout of NCBI's tree at " + PINNED)
+        return None
     root = Path(value)
     head = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True
@@ -109,7 +111,7 @@ def resolve_ncbi(option: str | None) -> Path:
 
 
 def targets(arg: str) -> Iterable[str]:
-    if arg.startswith("c++/"):
+    if arg.startswith(("c++/", "RpsbProc/")):
         yield arg
         return
     file, _, line = arg.rpartition(":")
@@ -126,14 +128,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("target", help="<file>[:<line>] of LOSAT, or c++/<path>:<lines>")
     parser.add_argument("--ncbi-src", help="checkout of NCBI's tree (default: $NCBI_SRC)")
+    parser.add_argument(
+        "--rpsbproc-src", help="directory that holds RpsbProc/ (default: $RPSBPROC_SRC)"
+    )
     parser.add_argument("--context", type=int, default=0, help="lines around each range")
     args = parser.parse_args(argv)
     ncbi = resolve_ncbi(args.ncbi_src)
+    rpsbproc_value = args.rpsbproc_src or os.environ.get("RPSBPROC_SRC")
+    rpsbproc = Path(rpsbproc_value) if rpsbproc_value else None
     ok, any_cited = True, False
     for text in targets(args.target):
         for path, ranges in citations(text):
             any_cited = True
-            ok = show(ncbi, path, ranges, args.context) and ok
+            if path.startswith("RpsbProc/"):
+                root, need = rpsbproc, "$RPSBPROC_SRC (or --rpsbproc-src) to the directory that holds RpsbProc/"
+            else:
+                root, need = ncbi, f"$NCBI_SRC (or --ncbi-src) to a checkout of NCBI's tree at {PINNED}"
+            if root is None:
+                print(f"ncbi_ref.py: {path}: set {need}", file=sys.stderr)
+                ok = False
+                continue
+            ok = show(root, path, ranges, args.context) and ok
     if not any_cited:
         print(f"ncbi_ref.py: no citation of NCBI's tree at {args.target}", file=sys.stderr)
         return 1

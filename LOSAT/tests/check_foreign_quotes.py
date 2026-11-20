@@ -417,6 +417,25 @@ def pin_problem(text: str) -> str | None:
     return None
 
 
+# A comment after code on its line (`let x = 6; // NCBI reference ...`): read for PIN and REF.
+TRAILING_COMMENT_RE = re.compile(r"[\w;,{}()\[\]]\s+//[/!]?\s(?P<text>.*)$")
+
+
+def citation_findings(
+    rel: str, number: int, text: str, table: dict[str, int], dirs: frozenset[str]
+) -> list[Finding]:
+    """PIN and REF of one comment's text."""
+    findings: list[Finding] = []
+    problem = pin_problem(text)
+    if problem is not None:
+        findings.append(Finding(rel, number, "PIN", problem, text))
+    for match in TREE_PATH_RE.finditer(text):
+        problem = ref_problem(match.group("path"), match.group("ranges"), table, dirs)
+        if problem is not None:
+            findings.append(Finding(rel, number, "REF", problem, match.group(0)))
+    return findings
+
+
 def check_text(
     rel: str,
     lines: Sequence[str],
@@ -439,6 +458,11 @@ def check_text(
         dirs = directories(table)
     for number, text in enumerate(comment_texts(style, lines), start=1):
         if text is None:
+            trailing = TRAILING_COMMENT_RE.search(lines[number - 1]) if style == "slash" else None
+            if trailing is not None and table is not None:
+                findings.extend(
+                    citation_findings(rel, number, trailing.group("text"), table, dirs or frozenset())
+                )
             in_fence = False  # a fence ends with its comment run
             run_label, run_citations = None, []
             continue
@@ -490,13 +514,7 @@ def check_text(
             if source is not None:
                 findings.append(Finding(rel, number, "LABEL", source, text))
         if source_file and table is not None:
-            problem = pin_problem(text)
-            if problem is not None:
-                findings.append(Finding(rel, number, "PIN", problem, text))
-            for match in TREE_PATH_RE.finditer(text):
-                problem = ref_problem(match.group("path"), match.group("ranges"), table, dirs or frozenset())
-                if problem is not None:
-                    findings.append(Finding(rel, number, "REF", problem, match.group(0)))
+            findings.extend(citation_findings(rel, number, text, table, dirs or frozenset()))
         if citation:
             last_citation = (number, text)
     return findings
@@ -565,7 +583,10 @@ def fix_lines(
                 while end < len(lines) and texts[end] is not None and not FENCE_RE.match(texts[end] or ""):
                     end += 1
                 closed = end < len(lines) and texts[end] is not None
-                drop.update(range(index, end + 1 if closed else end))
+                if closed or style != "text":
+                    # A fence in a comment ends with the comment; in a Markdown file an
+                    # unclosed one is left to the writer.
+                    drop.update(range(index, end + 1 if closed else end))
             else:
                 drop.add(index)
         elif finding.kind == "PIN":
@@ -583,6 +604,17 @@ def fix_lines(
                 )
             lines[index] = line
     drop = {index for index in drop if texts[index] is not None}
+    if style == "python":
+        # A docstring's quotes stay: a fence that shares their line loses only its backticks.
+        for index in [i for i in drop if '"""' in lines[i] or "'''" in lines[i]]:
+            drop.discard(index)
+            lines[index] = lines[index].replace("```", "", 1)
+
+    def blank(line: str) -> bool:
+        if style in ("text", "python"):
+            return not line.strip() or BLANK_COMMENT_RE.match(line) is not None
+        return BLANK_COMMENT_RE.match(line) is not None
+
     out: list[str] = []
     index = 0
     while index < len(lines):
@@ -595,9 +627,12 @@ def fix_lines(
             end += 1
         before = out[-1] if out else None
         after = lines[end] if end < len(lines) else None
-        blank_before = before is not None and BLANK_COMMENT_RE.match(before) is not None
-        blank_after = after is not None and BLANK_COMMENT_RE.match(after) is not None
-        comment_after = after is not None and re.match(r"^\s*(?://|#)", after) is not None
+        blank_before = before is not None and blank(before)
+        blank_after = after is not None and blank(after)
+        # In Markdown and docstrings a blank line is a paragraph break: only a doubled one goes.
+        comment_after = style in ("text", "python") or (
+            after is not None and re.match(r"^\s*(?://|#)", after) is not None
+        )
         if blank_before and blank_after:
             end += 1
         elif blank_before and not comment_after:
@@ -606,14 +641,97 @@ def fix_lines(
     return out
 
 
-def fix(root: Path) -> int:
-    """Rewrite the files with findings (`fix_lines`); the number of files changed."""
+def rust_code(text: str) -> str:
+    """The tokens of Rust source without its comments, one space between them where there was
+    space: what a change of comments only leaves the same."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if text.startswith("/*", i):
+            depth = 0
+            while i < n:
+                if text.startswith("/*", i):
+                    depth, i = depth + 1, i + 2
+                elif text.startswith("*/", i):
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+                if depth == 0:
+                    break
+            out.append(" ")
+            continue
+        raw = re.match(r'b?r(#*)"', text[i : i + 260])
+        if raw and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+            close = '"' + raw.group(1)
+            j = text.find(close, i + raw.end())
+            j = n if j < 0 else j + len(close)
+            out.append(text[i:j])
+            i = j
+            continue
+        if text[i] == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i : j + 1])
+            i = j + 1
+            continue
+        char = re.match(r"'(?:\\.[^']*|[^'\\])'", text[i : i + 16])
+        if char:
+            out.append(char.group(0))
+            i += char.end()
+            continue
+        out.append(" " if text[i].isspace() else text[i])
+        i += 1
+    return " ".join("".join(out).split())
+
+
+def python_code(text: str) -> str | None:
+    """The AST of Python source without docstrings, or None when it does not parse."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if (
+            isinstance(body, list)
+            and body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            body[0] = ast.Pass()
+    return ast.dump(tree)
+
+
+def same_code(suffix: str, old: str, new: str) -> bool:
+    """A fix of a Rust or Python file left its code as it was (strings included)."""
+    if suffix == ".rs":
+        return rust_code(old) == rust_code(new)
+    if suffix == ".py":
+        return python_code(old) == python_code(new)
+    return True
+
+
+def fix(root: Path) -> tuple[int, list[str]]:
+    """Rewrite the files with findings (`fix_lines`): the number of files changed, and the files
+    left as they were because the fix would have changed their code (a comment marker inside a
+    string), which the writer fixes by hand. Line endings are kept."""
     table = load_table()
     dirs = directories(table)
     names = base_names(table)
     changed = 0
+    refused: list[str] = []
     for path in source_files(root):
-        text = path.read_text(encoding="utf-8")
+        try:
+            with path.open(encoding="utf-8", newline="") as handle:
+                text = handle.read()
+        except UnicodeDecodeError:
+            continue
         style = COMMENT_STYLES[path.suffix]
         lines = text.split("\n")
         rel = path.relative_to(root).as_posix()
@@ -623,10 +741,15 @@ def fix(root: Path) -> int:
         if not findings:
             continue
         new = "\n".join(fix_lines(list(lines), style, findings, names))
-        if new != text:
-            path.write_text(new, encoding="utf-8")
-            changed += 1
-    return changed
+        if new == text:
+            continue
+        if not same_code(path.suffix, text, new):
+            refused.append(rel)
+            continue
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(new)
+        changed += 1
+    return changed, refused
 
 
 def write_table(ncbi_src: Path, rpsbproc_src: Path, out: Path = TABLE_PATH) -> int:
@@ -700,7 +823,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     root = args.root.resolve()
     if args.fix:
-        print(f"fixed {fix(root)} files")
+        changed, refused = fix(root)
+        print(f"fixed {changed} files")
+        for rel in refused:
+            print(f"{rel}: not fixed, the fix would change code; fix it by hand")
     findings = find(root)
     for f in findings:
         print(f"{f.kind}\t{f.path}:{f.line}\t{f.source}\t{ADVICE[f.kind]}\t{f.text}")

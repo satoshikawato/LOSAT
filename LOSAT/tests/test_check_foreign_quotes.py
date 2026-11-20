@@ -304,6 +304,47 @@ class FixTest(unittest.TestCase):
             " `Blast_HSPListSortByScore`\nfn f() {}\n",
         )
 
+    def test_a_comment_after_code_is_pinned_and_checked(self) -> None:
+        text = "    pub x: i32, // NCBI reference: blast_hits.c:2 (blastn: 50)\n"
+        self.assertEqual([f.kind for f in checker.check_text("x", [text], "slash", TABLE)], ["PIN"])
+        fixed = checker.fix_lines([text], "slash", checker.check_text("x", [text], "slash", TABLE), checker.base_names(TABLE))
+        self.assertEqual(
+            fixed, ["    pub x: i32, // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 (blastn: 50)\n"]
+        )
+        late = "    pub x: i32, // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:6000\n"
+        self.assertEqual([f.kind for f in checker.check_text("x", [late], "slash", TABLE)], ["REF"])
+        self.assertEqual(checker.check_text("x", ['let u = "http://a"; // ok\n'], "slash", TABLE), [])
+
+    def test_fix_keeps_a_docstrings_quotes(self) -> None:
+        text = (
+            'def f():\n    """Doc.\n'
+            "    NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:10-20\n"
+            '    ```c\n    int x;\n    """\n    return 1\n'
+        )
+        fixed = self.fixed(text, "python")
+        self.assertIn('    """\n    return 1', fixed)
+        self.assertNotIn("int x;", fixed)
+        self.assertEqual(checker.python_code(fixed), checker.python_code(text))
+
+    def test_fix_leaves_an_unclosed_markdown_fence(self) -> None:
+        text = "NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\n```c\nx;\n\nMore prose.\n"
+        self.assertEqual(self.fixed(text, "text"), text)
+
+    def test_fix_keeps_code_strings_and_line_endings(self) -> None:
+        quote = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\r\n// ```c\r\n// x;\r\n// ```\r\n"
+        in_string = 'let s = r#"\n// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\n// ```c\n// x;\n// ```\n"#;\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.rs").write_bytes((quote + "fn f() {}\r\n").encode())
+            (root / "b.rs").write_bytes(in_string.encode())
+            changed, refused = checker.fix(root)
+            self.assertEqual((changed, refused), (1, ["b.rs"]))
+            self.assertEqual(
+                (root / "a.rs").read_bytes(),
+                b"// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\r\nfn f() {}\r\n",
+            )
+            self.assertEqual((root / "b.rs").read_bytes(), in_string.encode())
+
     def test_fix_drops_a_blank_line_left_before_code(self) -> None:
         text = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\n//\n// ```c\n// x;\n// ```\nfn f() {}\n"
         self.assertEqual(

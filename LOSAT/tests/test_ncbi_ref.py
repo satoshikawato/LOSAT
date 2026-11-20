@@ -71,6 +71,17 @@ class NcbiRefTest(unittest.TestCase):
         code, out = self.run_main("c++/src/a.c:3", "--context", "1")
         self.assertEqual(out, "== c++/src/a.c:3\n     2. two\n     3  three\n     4. four\n")
 
+    def test_rpsbproc_citations_read_their_own_tree(self) -> None:
+        rpsb = Path(self.tmp.name) / "rpsb"
+        (rpsb / "RpsbProc/src").mkdir(parents=True)
+        (rpsb / "RpsbProc/src/main.cpp").write_text("m1\nm2\n", encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = ncbi_ref.main(["RpsbProc/src/main.cpp:2", "--rpsbproc-src", str(rpsb)])
+        self.assertEqual((code, out.getvalue()), (0, "== RpsbProc/src/main.cpp:2\n     2  m2\n"))
+        code, _ = self.run_main("RpsbProc/src/main.cpp:2")
+        self.assertEqual(code, 1)
+
     def test_lines_outside_the_file_fail(self) -> None:
         code, out = self.run_main("c++/src/a.c:5-6")
         self.assertEqual(code, 1)

@@ -61,7 +61,7 @@ pub struct TaskConfig {
     pub min_raw_gapped_score: Option<i32>,
     /// The off-diagonal range of the second hit (`-off_diagonal_range`, else 0).
     pub scan_range: usize,
-    pub min_diag_separation: i32, // NCBI reference: blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
+    pub min_diag_separation: i32, // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
     /// The two-hit window (`-window_size`, else the task's: 40 for dc-megablast, 0 (one hit)
     /// otherwise).
     pub window_size: usize,

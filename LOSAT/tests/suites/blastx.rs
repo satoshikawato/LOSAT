@@ -28,6 +28,8 @@ mod blastx_range;
 mod blastx_scan_byte;
 #[path = "../blastx_subject_flow.rs"]
 mod blastx_subject_flow;
+#[path = "../blastx_sw_tback.rs"]
+mod blastx_sw_tback;
 #[path = "../blastx_ungap_sent.rs"]
 mod blastx_ungap_sent;
 #[path = "../blastx_unit_cap.rs"]

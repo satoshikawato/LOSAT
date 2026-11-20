@@ -13301,6 +13301,7 @@ mod tests {
                     diagnostics: &mut diagnostics,
                     hits: None,
                     observer: None,
+                    later_warnings: None,
                 };
                 write_reports_without_queries(
                     &resolved,

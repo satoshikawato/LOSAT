@@ -1,0 +1,108 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: edge masks 1
+Masked using: 'dust', options: 'edge adjacent'
+           5 sequences; 7,360 total letters
+
+
+
+<b>Query=</b> q5
+
+Length=1000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s5 test subject s5                                                    <a href=#BL_ORD_ID:4>1736</a>    0.0  
+
+
+><a name=BL_ORD_ID:4></a> s5 test subject s5
+Length=1200
+
+ Score = 1736 bits (940),  Expect = 0.0
+ Identities = 980/1000 (98%), Gaps = 0/1000 (0%)
+ Strand=Plus/Plus
+
+Query  1     TAACAAGGGTCACTATGGGACCCGGACTTCCAGGCTCTTACGGCACCAGGATCCATCACGAAAGGGAAAGAGATTGTCGCGCGAACGTCACAGCTGCAG  99
+             ||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  101   taacaagggtcactaggggacccggacttccaggctcttacggcaccaggatccatcacgaaagggaaagagattgtcgcgcgaacgtcacagctgcag  199
+
+Query  100   GTGCTCGAATCTAAACTATCTCAGCCAGGGGCTACAGTATGGGATGCGCATGCGTTTAGCTCGAGCGCGGAGCTCATAGAAGCAAGATTTACATCACGA  198
+             ||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  200   <font color="#000000">gtgctcgaatctaaactatctcacccaggggctacagtatgggatgcgcatgcgtttagctcgagcgcggagctcatagaagcaagatttacatcacga</font>  298
+
+Query  199   AATAAGAACCGGTAGTTCAACCGGCATGTGAGTGCCGGGGGAAACGCAGCCAGTGTGGTGGCTCGATAGCACAAAGTGTCTCGCGAGGTGGGGTAAACC  297
+             |||||||||||||||||||||||||| |||||||||||| ||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  299   <font color="#000000">aa</font>TAAGAACCGGTAGTTCAACCGGCACGTGAGTGCCGGGTGAAACGCAGCCTGTGTGGTGGCTCGATAGCACAAAGTGTCTCGCGAGGTGGGGTAAACC  397
+
+Query  298   TTTAGGGACTACGGCGGTACCCTATGCCATACTATGCCCAAAAACGATTGGGACAATACACCTATGTCTGTAATTCACCCAAAGCCCACGAGAGTATAA  396
+             |||||||||||||||||||||| |||||||||||||||| |||||||||||||||||||| |||||||||||||||||||||||| |||||||||||||
+Sbjct  398   TTTAGGGACTACGGCGGTACCCCATGCCATACTATGCCCCAAAACGATTGGGACAATACAACTATGTCTGTAATTCACCCAAAGCGCACGAGAGTATAA  496
+
+Query  397   GGCAGACCTTCTGCGCGCAAAGGCGCTAGCTTTTGCCGAATGGTTGTCTGGTTTTGGGCTCTGTACGAGTTCGTGGTATATTTAGGCTCTTTGCATACT  495
+             ||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  497   GGCAGACCTTCTGCGCGAAAAGGCGCTAGCTTTTGCCGAATGGTTGTCTGGTTTTGGGCTCTGTACGAGTTCGTGGTATATTTAGGCTCTTTGCATACT  595
+
+Query  496   TGCATGCTGTTTAACACTTGCGAGCCCGTTCCTTATCTAGACCACGAATATATCTACTTAGATTGTCACTGTTGGGATGGTCATTCGATCCTCTTGGAT  594
+             |||||||||| |||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||| 
+Sbjct  596   TGCATGCTGTGTAACACTTGCGAGCCCGTTCCTTATCTAGACCACGAATGTATCTACTTAGATTGTCACTGTTGGGATGGTCATTCGATCCTCTTGGAA  694
+
+Query  595   TTGGAGCTTCCCAGTCTTAAAATACCTTAGTATAAGCTGGGAGTGCGACCATCGTGCCCAGTCAGGGCTAATTGATGCAGAGGTCGGGGACCGGTACCT  693
+             ||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||
+Sbjct  695   TTGGAGCTTCCCAGTCTTAAAATGCCTTAGTATAAGCTGGGAGTGCGACCATCGTGCCCATTCAGGGCTAATTGATGCAGAGGTCGGGGACCGGTACCT  793
+
+Query  694   TCGCGTTACGGGCCACCCTTTGATGATCGCAGGGGTGCTCGCCGATTCATACGTTGCCTTTGCAAGCCAGCATAGTAATTATAACTAGACACGCGCTTG  792
+             |||||||||||||||||||||||||||||||||||||||| ||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  794   TCGCGTTACGGGCCACCCTTTGATGATCGCAGGGGTGCTCACCGATTCATACATTGCCTTTGCAAGCCAGCATAGTAATTATAACTAGACACGCGCTTG  892
+
+Query  793   GTAATGCGGATGCCCATTAACCTTGGGTCGTACAAAATCACAAACTCGCGAACCCTCGAGCCTCCAGTTGGGCCTGCCTTGTGTTAGCCCAGGGCCTGG  891
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||| |||||||||
+Sbjct  893   GTAATGCGGATGCCCATTAACCTTGGGTCGTACAAAATCACAAACTCGCGAACCCTCGACCCTCCAGTTGGGCCTGCCTTGTGTTAGCCGAGGGCCTGG  991
+
+Query  892   TATTGTGTCGTTTCGCTGTTGAGGGACGTTTGGCTCTTCGTATTAAATACTTAATTGACGAAGACGTGACAGCAGCTGCCACTCCGATGTAGGCGACGA  990
+             |||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||
+Sbjct  992   TATTGTGTCGTTTCGCTGTTGAGGGACGTTTGGCTCTTCGTATTAAATACTTAATTTACGAAGACGTGACAGCAGCTGCCACTCCGATGTAGGCGACGA  1090
+
+Query  991   TTACTTACGA  1000
+             ||||||||||
+Sbjct  1091  TTACTTACGA  1100
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 7175725
+
+
+  Database: edge masks 1
+  Masked using: 'dust', options: 'edge adjacent'
+    Posted date:  Nov 14, 2026  6:15 AM
+  Number of letters in database: 7,360
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

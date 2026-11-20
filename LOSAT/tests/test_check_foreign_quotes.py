@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the check of quoted foreign source (`check_foreign_quotes.py`).
+"""Tests for the check of source text and pinned citations in comments (`check_foreign_quotes.py`).
 
 No NCBI counterpart: the checker reads LOSAT's own comments.
 """
@@ -28,6 +28,15 @@ def findings(text: str, style: str = "slash") -> list[tuple[str, int, str]]:
     return [(f.kind, f.line, f.source) for f in checker.check_text("x", lines, style)]
 
 
+TABLE = {"c++/src/algo/blast/core/blast_hits.c": 5000, "RpsbProc/src/rpsbproc_main.cpp": 2000}
+
+
+def pinned(text: str, style: str = "slash") -> list[tuple[str, int, str]]:
+    """The findings with the PIN and REF checks, against `TABLE`."""
+    lines = text.splitlines()
+    return [(f.kind, f.line, f.source) for f in checker.check_text("x", lines, style, TABLE)]
+
+
 NCBI_QUOTE = """\
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
 // ```c
@@ -35,11 +44,37 @@ NCBI_QUOTE = """\
 // ```
 fn f() {}
 """
+NCBI_CITATION = """\
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
+// The HSPs are sorted by score (`ScoreCompareHSPs`).
+fn f() {}
+"""
 
 
 class CheckTextTest(unittest.TestCase):
-    def test_ncbi_quote_passes(self) -> None:
-        self.assertEqual(findings(NCBI_QUOTE), [])
+    def test_ncbi_quote_fails(self) -> None:
+        self.assertEqual(findings(NCBI_QUOTE), [("QUOTE", 2, "source text")])
+        self.assertEqual(findings(NCBI_CITATION), [])
+
+    def test_a_source_language_fence_fails_without_a_citation(self) -> None:
+        for language in ("c", "c++", "cpp", "asn", "cmake"):
+            text = f"/// The search:\n///\n/// ```{language}\n/// x = 1;\n/// ```\nfn f() {{}}\n"
+            self.assertEqual(findings(text), [("QUOTE", 3, "source text")], language)
+
+    def test_a_text_fence_under_a_citation_fails(self) -> None:
+        text = (
+            "// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-36\n"
+            "// ```text\n// Seq-id ::= CHOICE {\n// ```\n"
+        )
+        self.assertEqual(findings(text), [("QUOTE", 2, "source text")])
+
+    def test_examples_and_output_without_a_citation_pass(self) -> None:
+        text = (
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381\n"
+            "//\n// Format:\n// ```text\n// Score = 10 bits\n// ```\n"
+            "/// Example (blast_hits.c):\n/// ```rust\n/// let x = 1;\n/// ```\nfn f() {}\n"
+        )
+        self.assertEqual(findings(text), [])
 
     def test_quote_after_another_projects_label_fails(self) -> None:
         text = (
@@ -104,14 +139,14 @@ class CheckTextTest(unittest.TestCase):
         text = (
             "// libstdc++ (GCC 13): bits/list.tcc:614-662\n" + NCBI_QUOTE.replace("fn f() {}\n", "")
         )
-        self.assertEqual(findings(text), [])
+        self.assertEqual(findings(text), [("QUOTE", 3, "source text")])
         prose = (
             "/// libstdc++'s insertion sort moves the second one (glibc's qsort, GCC, LLVM).\n"
             "/// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:170-184\n"
             "/// ```c\n///     Blast_Message2TSearchMessages(blast_msg.Get(), query_info, msgs);\n"
             "/// ```\n"
         )
-        self.assertEqual(findings(prose), [])
+        self.assertEqual(findings(prose), [("QUOTE", 3, "source text")])
 
     def test_a_fence_without_a_citation_is_not_checked(self) -> None:
         text = "/// Example:\n/// ```text\n/// losat blastn -query q.fa\n/// ```\nfn f() {}\n"
@@ -138,7 +173,7 @@ class CheckTextTest(unittest.TestCase):
         diff = "+// glibc's qsort is a stable merge sort, as slice::sort_by is\n+    v.sort_by(cmp);\n"
         self.assertEqual(findings(diff, "text"), [])
 
-    def test_prose_and_ncbis_code_lines_are_not_quotes(self) -> None:
+    def test_prose_passes_and_ncbis_code_lines_are_quotes(self) -> None:
         prose = (
             "// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:395,3969\n"
             "// \"uncommitted\" (no put area) until the first output;\n"
@@ -148,7 +183,50 @@ class CheckTextTest(unittest.TestCase):
             "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379\n"
             "// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*), cmp);\n"
         )
-        self.assertEqual(findings(ncbi), [])
+        self.assertEqual(findings(ncbi), [("QUOTE", 2, "source text")])
+
+    def test_unpinned_ncbi_labels_and_checkout_paths_fail(self) -> None:
+        self.assertEqual(pinned(NCBI_CITATION), [])
+        for label in ("NCBI reference: ", "NCBI reference (2.17.0): ", "Reference: ncbi-blast/"):
+            text = f"// {label}c++/src/algo/blast/core/blast_hits.c:1379\n"
+            self.assertEqual([k for k, _, _ in pinned(text)], ["PIN"], label)
+        local = "// see /mnt/c/Users/x/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1\n"
+        self.assertEqual([k for k, _, _ in pinned(local)], ["PIN"])
+        rpsbproc = "// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1-9\n"
+        unit = "// NCBI unit test (598d8ae6): c++/src/algo/blast/core/blast_hits.c:10-20 Case\n"
+        prose = "//! see that module's NCBI reference), and its reader\n"
+        self.assertEqual(pinned(rpsbproc + unit + prose), [])
+        self.assertEqual(pinned("NCBI reference: c++/x.c\n", "text"), [])
+
+    def test_cited_paths_and_lines_must_be_in_the_pinned_trees(self) -> None:
+        ok = (
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1-5000, 7\n"
+            "// (c++/src/algo/blast/core/ and c++/src/algo/<dir>/<file>)\n"
+        )
+        self.assertEqual(pinned(ok), [])
+        bad = (
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:4990-5001\n"
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hitz.c:1\n"
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:20-10\n"
+            "// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/main.cpp:1\n"
+        )
+        self.assertEqual(
+            pinned(bad),
+            [
+                ("REF", 1, "lines 4990-5001 outside the file's 5000"),
+                ("REF", 2, "no such file"),
+                ("REF", 3, "lines 20-10 outside the file's 5000"),
+                ("REF", 4, "no such file"),
+            ],
+        )
+
+    def test_the_table_reads_directories_and_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.tsv"
+            path.write_text("# comment\nc++/src/a/\nb.c\t12\nc++/include/\nd.h\t3\n", encoding="utf-8")
+            table = checker.load_table(path)
+        self.assertEqual(table, {"c++/src/a/b.c": 12, "c++/include/d.h": 3})
+        self.assertIn("c++/src/", checker.directories(table))
 
     def test_python_docstrings_and_hash_comments_are_read(self) -> None:
         docstring = (
@@ -163,6 +241,10 @@ class CheckTextTest(unittest.TestCase):
         toml = "# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395\n# ```c\n# x\n# ```\n"
         self.assertEqual(findings(toml, "hash"), [("LABEL", 1, "LMDB"), ("QUOTE", 2, "LMDB")])
         self.assertEqual(findings("#!/bin/sh\n# ```\n# glibc 2.39: libio/a.c:1\n", "hash"), [])
+
+    def test_python_strings_that_are_not_statements_are_not_comments(self) -> None:
+        text = 'X = """\\\n// ```c\nint x;\n"""\nY = "# ```c"\n\n\ndef f():\n    """Doc.\n\n    ```c\n    x;\n    ```\n    """\n'
+        self.assertEqual(findings(text, "python"), [("QUOTE", 11, "source text")])
 
     def test_markdown_reads_only_the_paragraph_above_a_fence(self) -> None:
         text = (
@@ -189,13 +271,19 @@ class MainTest(unittest.TestCase):
             return code, out.getvalue()
 
     def test_clean_tree_passes(self) -> None:
-        code, out = self.run_main({"LOSAT/src/a.rs": NCBI_QUOTE})
+        code, out = self.run_main({"LOSAT/src/a.rs": NCBI_CITATION})
         self.assertEqual(code, 0)
         self.assertIn("findings=0", out)
 
+    def test_the_checked_in_table_holds_the_pinned_trees(self) -> None:
+        table = checker.load_table()
+        self.assertGreater(len(table), 6000)
+        self.assertEqual(table["c++/src/algo/blast/core/blast_hits.c"], 3891)
+        self.assertIn("RpsbProc/src/rpsbproc_main.cpp", table)
+
     def test_foreign_quote_fails_with_its_place(self) -> None:
         bad = "// SQLite 3.51.1: src/btree.c:404-411\n// ```c\n// x\n// ```\n"
-        code, out = self.run_main({"LOSAT/src/a.rs": NCBI_QUOTE, "LOSAT/src/b.rs": bad})
+        code, out = self.run_main({"LOSAT/src/a.rs": NCBI_CITATION, "LOSAT/src/b.rs": bad})
         self.assertEqual(code, 1)
         self.assertIn("QUOTE\tLOSAT/src/b.rs:2\tSQLite", out)
         self.assertIn("findings=1", out)

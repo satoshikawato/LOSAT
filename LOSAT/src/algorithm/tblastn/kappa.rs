@@ -794,6 +794,7 @@ mod tests {
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
                 eff_searchsp_override: None,
+                ungapped: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: (subject_nt.len() / 3) as i32,
@@ -826,6 +827,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            gapped: true,
         };
         let stage_c_hsps =
             preliminary_hsps_of_letters(&[&search_query], &subject_nt, 1, profile).unwrap();
@@ -1063,6 +1065,7 @@ mod tests {
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
                 eff_searchsp_override: None,
+                ungapped: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: 120,
@@ -1106,6 +1109,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            gapped: true,
         };
         let stage_c_hsps =
             preliminary_hsps_of_letters(&[&search_query], &subject_nt, 32, profile).unwrap();
@@ -1460,6 +1464,7 @@ mod tests {
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
                 eff_searchsp_override: None,
+                ungapped: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: 2_125,
@@ -1501,6 +1506,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            gapped: true,
         };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:614-625;
         // ncbi-blast/c++/src/algo/blast/core/blast_engine.c:484-525
@@ -2245,6 +2251,7 @@ mod tests {
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
                 eff_searchsp_override: None,
+                ungapped: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: 120,
@@ -2274,6 +2281,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            gapped: true,
         };
         let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
         for (oid, (_, subject)) in subjects.iter().enumerate() {

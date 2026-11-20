@@ -373,6 +373,78 @@ pub(super) fn link_preliminary_hsps_on(
     Ok(x_link_list(hsps))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1779-1782
+// ```c
+//     if (link_hsp_params->longest_intron <= 0) {
+//         s_BlastEvenGapLinkHSPs(program_number, hsp_list, query_info,
+//                               subject_length, sbp, link_hsp_params,
+//                               gapped_calculation);
+// ```
+/// The linking of an ungapped search with a `longest_intron` of 0 (`-max_intron_length` 4 or
+/// less): `s_BlastEvenGapLinkHSPs` (`core::link_hsps::even_gap_link_hsps`) of the HSPs of `input`
+/// on their subject frames, with the ungapped Karlin blocks `kbp` (`sbp->kbp`), the contexts'
+/// lengths and the subject's length in nucleotides (`EvenGapLinkParams::subject_translated`), then
+/// sorted by score with the best e-value (link_hsps.c:1801-1810).
+pub(super) fn link_even_gap_translated(
+    input: &[(usize, GappedHsp)],
+    query_lengths: &[i32],
+    lengths: &[LocalContextLength],
+    subject_nt_length: i32,
+    kbp: &[KarlinParams],
+    params: &crate::core::link_hsps::EvenGapLinkParams,
+) -> Result<LinkedHspList> {
+    use crate::core::link_hsps::{even_gap_link_hsps, LinkContext, LinkHsp};
+    // NCBI c++/src/algo/blast/core/link_hsps.c:1774-1777: an empty list returns at once (as
+    // `link_preliminary_hsps_on`).
+    if input.is_empty() {
+        return Ok(LinkedHspList {
+            hsps: Vec::new(),
+            best_evalue: 0.0,
+        });
+    }
+    let contexts: Vec<LinkContext> = (0..query_lengths.len())
+        .map(|context| {
+            Ok(LinkContext {
+                lambda: kbp[context].lambda,
+                log_k: kbp[context].k.glibc_ln(),
+                query_length: query_lengths[context],
+                length_adjustment: i32::try_from(lengths[context].length_adjustment)?,
+                eff_searchsp: lengths[context].eff_searchsp,
+            })
+        })
+        .collect::<Result<_>>()?;
+    let hsps: Vec<LinkHsp> = input
+        .iter()
+        .map(|&(context, hsp)| LinkHsp {
+            context,
+            subject_frame: hsp.frame,
+            query_offset: hsp.q_start,
+            query_end: hsp.q_end,
+            subject_offset: hsp.s_start,
+            subject_end: hsp.s_end,
+            score: hsp.score,
+        })
+        .collect();
+    let mut linked = Vec::with_capacity(input.len());
+    even_gap_link_hsps(
+        &hsps,
+        &|context| contexts[context],
+        subject_nt_length,
+        params,
+        &mut |l| {
+            let (context, hsp) = input[l.index];
+            linked.push(LinkedHsp {
+                context,
+                hsp,
+                num: l.num,
+                evalue: l.evalue,
+                source_index: l.index,
+            })
+        },
+    );
+    Ok(x_link_list(linked))
+}
+
 /// The HSPs of `input` linked (`s_BlastUnevenGapLinkHSPs`), with their sum e-values and chain
 /// sizes, in the order of `input` (`source_index` = the position in `input`).
 fn x_link_values(
@@ -768,6 +840,7 @@ mod tests {
                     scale_factor: 1.0,
                     gumbel: Some(&gumbel),
                     eff_searchsp_override: None,
+                    ungapped: None,
                 },
                 LocalParameterCall::Initial {
                     min_subject_length: (subject_nt_length / 3) as i32,
@@ -920,6 +993,7 @@ mod tests {
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
                 eff_searchsp_override: None,
+                ungapped: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: 2_125,
@@ -1204,6 +1278,7 @@ mod tests {
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
                 eff_searchsp_override: None,
+                ungapped: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: 120,
@@ -1238,6 +1313,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            gapped: true,
         };
         let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
         for (oid, subject) in subjects.iter().enumerate() {

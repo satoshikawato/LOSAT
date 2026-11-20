@@ -140,6 +140,7 @@ impl TblastnDatabase {
             engine_db_length: statistics.engine_db_length,
             min_length: statistics.min_length,
             request_count: statistics.request_count,
+            average: statistics.average,
         }
     }
 

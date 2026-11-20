@@ -2176,6 +2176,7 @@ mod tests {
                     culling_limit: 0,
                     pssm: None,
                     fetch_excluded: None,
+                    query_cov_hsp_perc: 0.0,
                 },
                 if mode == 2 {
                     BlastCompoAdjustMode::CompositionMatrixAdjust

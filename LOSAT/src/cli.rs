@@ -1508,12 +1508,10 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "gilist",
     "html",
     "import_search_strategy",
-    "max_intron_length",
     "negative_gilist",
     "remote",
     "strand",
     "subject_besthit",
-    "sum_stats",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {

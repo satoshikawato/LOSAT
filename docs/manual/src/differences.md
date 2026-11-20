@@ -12,6 +12,7 @@ The differences you are most likely to meet in everyday use:
 - [A `-query`, `-subject` or `makeblastdb -in` file named `.gz`, `.bz2` or `.zst` is read through its decompressor](#compressed--query--subject-and--in).
 - [On macOS, the last digit of a full-precision E value can differ by 1](#last-digit-of-a-full-precision-value-on-macos).
 - [SAM output (`-outfmt 17`) records LOSAT's command line](#sam-output-the-cl-tag).
+- [`rpsbproc` keeps hits that tie in E-value and bit score in their input order](#rpsbproc-hits-that-tie); NCBI's order of them can differ.
 
 The other items are rare cases in which NCBI BLAST+ crashes, reads outside its memory, or overflows an integer.
 
@@ -92,6 +93,12 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 
 - **What you see.** LOSAT prints positions and orders PSSM ids without overflow (NCBI's binary prints `-2147483648` for a base at 2^31). A motif check that would read NCBI's list of motif positions past its end counts as failed, and the site is dropped.
 - **When.** Only with data that reaches these limits. No CDD release has a PSSM id of 2^31.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
+### `rpsbproc`: hits that tie
+
+- **What you see.** Hits of one query with equal E-value and bit score keep their order in the archive or XML. NCBI's `rpsbproc` orders them with its C++ library's unstable sort, so the order of such hits can differ, and so can which of two tied hits is `Specific`: `-m std` then prints the other hit's line, and `-m full` swaps their hit types. A hit whose E-value or bit score is not a number (`-nan`) comes after every hit with a number; NCBI's place for it varies, and in such a query the representative and `Specific` hits, and their sites and motifs, can differ too.
+- **When.** In the DOMAINS lines of `-m std` and `-m full`. In 74 reports of E. coli K-12 proteins and genome pieces against CDD v3.22, 18 differed, by 1 to 6 lines each; in 7 of them one query's `Specific` hit changed. None of them has a `-nan` value.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### A taxonomy record past NCBI's mapping of `taxdb.btd`

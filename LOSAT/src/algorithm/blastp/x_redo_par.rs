@@ -3658,35 +3658,28 @@ mod tests {
     fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
         let fixture = redo_fixture();
         let count = fixture.lists.len();
-        // Heaps that keep two lists: empty, one list, and full above the cutoff (worst E 0.5).
-        let mut heaps = heaps_of(count, 2);
-        for (q_idx, heap) in heaps.iter_mut().enumerate() {
-            for (kept, &(evalue, score)) in
-                [(1e-30, 300), (0.5, 60)].iter().enumerate().take(q_idx % 3)
-            {
-                let oid = 1000 + kept as u32;
-                heap.insert(list(oid, evalue, false), evalue, score, oid);
-            }
-        }
-        let all = stream(&fixture.lists);
-        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
-        let windows: Vec<XWindow> = (0..8)
-            .map(|index| {
-                let start = all[rng.below(all.len())];
-                let caps = vec![usize::MAX; count];
-                let mut window = x_window::<true>(
-                    &fixture.lists,
-                    &heaps,
-                    &fixture.batches,
-                    &vec![None; count],
-                    &caps,
-                    start,
-                    2 + rng.below(10),
-                );
-                for ended in &mut window.ended {
-                    *ended = index % 2 == 1 && rng.below(4) == 0;
+        // Two sets of heaps that keep two lists. The first: by query, empty, one list, and full
+        // above the cutoff (worst E 0.5). The second: full within the cutoff (worst E 1e-25), but
+        // for each batch's first query, which stays empty so that no batch ends early: there every
+        // test of an E-value above the cutoff is FALSE for certain.
+        let heap_sets: Vec<Vec<BlastCompoHeap>> = [false, true]
+            .into_iter()
+            .map(|within| {
+                let mut heaps = heaps_of(count, 2);
+                for (q_idx, heap) in heaps.iter_mut().enumerate() {
+                    let kept: &[(f64, i32)] = if !within {
+                        &[(1e-30, 300), (0.5, 60)][..q_idx % 3]
+                    } else if fixture.batches[q_idx].start == q_idx {
+                        &[]
+                    } else {
+                        &[(1e-30, 300), (1e-25, 250)]
+                    };
+                    for (index, &(evalue, score)) in kept.iter().enumerate() {
+                        let oid = 1000 + index as u32;
+                        heap.insert(list(oid, evalue, false), evalue, score, oid);
+                    }
                 }
-                window
+                heaps
             })
             .collect();
         let build = |q_idx: usize| -> Result<BlastRedoAlignParams> {
@@ -3696,117 +3689,142 @@ mod tests {
             })
         };
         let (mut compared, mut with_list, mut deferred_tests, mut certain_false) = (0, 0, 0, 0);
-        for threads in [1, 2, 3, 7] {
-            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-                let search = XRedoParSearch {
-                    pool,
-                    threads,
-                    contexts: &fixture.contexts,
-                    query_nomask: query_raw,
-                    search_spaces: &fixture.search_spaces,
-                    subjects: crate::algorithm::blastp::x_redo_subjects::XRedoSubjects::Encoded(
-                        &fixture.subjects,
-                    ),
-                    query_batches: &fixture.batches,
-                    matrix: ScoringMatrix::Blosum62,
-                    gapped_params: &fixture.gapped_params,
-                    gapped_gumbel: Some(&fixture.gapped_gumbel),
-                    evalue: 10.0,
-                    build_redo_align_params: &build,
-                    timing: false,
-                    engine_positives: false,
-                    sw_errors: TEST_SW_ERRORS,
-                };
-                for window in &windows {
-                    for lpt in [false, true] {
-                        let shared = Arc::new(XSharedSubjectRanges::new());
-                        let (computed, _) = x_compute_window::<_, true>(
-                            &search,
-                            &fixture.lists,
-                            &heaps,
-                            window,
-                            &shared,
-                            lpt,
-                        );
-                        assert_eq!(computed.len(), window.matches.len());
-                        for (index, computed) in computed.iter().enumerate() {
-                            let matched = window.matches[index];
-                            let at = (threads, lpt, matched);
-                            let Some(computed) = computed else {
-                                assert!(window.ended[index], "{at:?}");
-                                continue;
-                            };
-                            // The one-thread call with fresh scratch, its test answered by the
-                            // heap at the window's start.
-                            let q_idx = matched.q_idx;
-                            let local_match = x_local_match(&fixture.lists, matched);
-                            let hits: Vec<BlastpPreliminaryHsp> = local_match
-                                .hsps
-                                .iter()
-                                .map(preliminary_hit_from_local_match_hsp)
-                                .collect();
-                            let mut scratch = XScratch::new(
-                                BlastpKappaSubjectRangeCache::new(None),
-                                ScoringMatrix::Blosum62,
+        for heaps in &heap_sets {
+            let all = stream(&fixture.lists);
+            let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+            let windows: Vec<XWindow> = (0..8)
+                .map(|index| {
+                    let start = all[rng.below(all.len())];
+                    let caps = vec![usize::MAX; count];
+                    let mut window = x_window::<true>(
+                        &fixture.lists,
+                        heaps,
+                        &fixture.batches,
+                        &vec![None; count],
+                        &caps,
+                        start,
+                        2 + rng.below(10),
+                    );
+                    for ended in &mut window.ended {
+                        *ended = index % 2 == 1 && rng.below(4) == 0;
+                    }
+                    window
+                })
+                .collect();
+            for threads in [1, 2, 3, 7] {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    let search = XRedoParSearch {
+                        pool,
+                        threads,
+                        contexts: &fixture.contexts,
+                        query_nomask: query_raw,
+                        search_spaces: &fixture.search_spaces,
+                        subjects: crate::algorithm::blastp::x_redo_subjects::XRedoSubjects::Encoded(
+                            &fixture.subjects,
+                        ),
+                        query_batches: &fixture.batches,
+                        matrix: ScoringMatrix::Blosum62,
+                        gapped_params: &fixture.gapped_params,
+                        gapped_gumbel: Some(&fixture.gapped_gumbel),
+                        evalue: 10.0,
+                        build_redo_align_params: &build,
+                        timing: false,
+                        engine_positives: false,
+                        sw_errors: TEST_SW_ERRORS,
+                    };
+                    for window in &windows {
+                        for lpt in [false, true] {
+                            let shared = Arc::new(XSharedSubjectRanges::new());
+                            let (computed, _) = x_compute_window::<_, true>(
+                                &search,
+                                &fixture.lists,
+                                heaps,
+                                window,
+                                &shared,
+                                lpt,
                             );
-                            let mut sw_scratch = SwMatchScratch::new();
-                            let subject = search.subjects.read(local_match.oid).expect("a subject");
-                            let mut asked = None;
-                            let reference = postprocess_preliminary_hits_smith_waterman(
-                                &hits,
-                                &x_query_workspace(&search, q_idx),
-                                &mut scratch.composition_workspace,
-                                query_raw(&fixture.contexts[q_idx]),
-                                subject.residues(),
-                                ScoringMatrix::Blosum62,
-                                &fixture.gapped_params,
-                                Some(&fixture.gapped_gumbel),
-                                &build(q_idx).expect("parameters"),
-                                10.0,
-                                &mut scratch.gap_scratch,
-                                &mut scratch.range_cache,
-                                false,
-                                &mut sw_scratch,
-                                &mut |evalue, score| {
-                                    asked = Some((evalue, score));
-                                    heaps[q_idx].clone().would_insert(
-                                        evalue,
-                                        score,
-                                        local_match.oid,
-                                    )
-                                },
-                            );
-                            with_list += usize::from(
-                                reference
-                                    .as_ref()
-                                    .is_ok_and(|result| result.hsp_list.is_some()),
-                            );
-                            let reference = reference.map_err(|error| format!("{error:#}"));
-                            assert_eq!(
-                                x_result_difference(&computed.result, &reference),
-                                None,
-                                "{at:?}"
-                            );
-                            let before =
-                                index - window.matches.partition_point(|other| other.q_idx < q_idx);
-                            let heap = &heaps[q_idx];
-                            let expected = asked.filter(|&(evalue, score)| {
-                                evalue > heap.ecutoff
-                                    && heap.n + before >= heap.heap_threshold
-                                    && heap.would_insert_view(evalue, score, local_match.oid)
-                            });
-                            assert_eq!(computed.deferred, expected, "{at:?}");
-                            deferred_tests += usize::from(expected.is_some());
-                            certain_false += usize::from(asked.is_some_and(|(evalue, score)| {
-                                !heap.would_insert_view(evalue, score, local_match.oid)
-                            }));
-                            compared += 1;
+                            assert_eq!(computed.len(), window.matches.len());
+                            for (index, computed) in computed.iter().enumerate() {
+                                let matched = window.matches[index];
+                                let at = (threads, lpt, matched);
+                                let Some(computed) = computed else {
+                                    assert!(window.ended[index], "{at:?}");
+                                    continue;
+                                };
+                                // The one-thread call with fresh scratch, its test answered by the
+                                // heap at the window's start.
+                                let q_idx = matched.q_idx;
+                                let local_match = x_local_match(&fixture.lists, matched);
+                                let hits: Vec<BlastpPreliminaryHsp> = local_match
+                                    .hsps
+                                    .iter()
+                                    .map(preliminary_hit_from_local_match_hsp)
+                                    .collect();
+                                let mut scratch = XScratch::new(
+                                    BlastpKappaSubjectRangeCache::new(None),
+                                    ScoringMatrix::Blosum62,
+                                );
+                                let mut sw_scratch = SwMatchScratch::new();
+                                let subject =
+                                    search.subjects.read(local_match.oid).expect("a subject");
+                                let mut asked = None;
+                                let reference = postprocess_preliminary_hits_smith_waterman(
+                                    &hits,
+                                    &x_query_workspace(&search, q_idx),
+                                    &mut scratch.composition_workspace,
+                                    query_raw(&fixture.contexts[q_idx]),
+                                    subject.residues(),
+                                    ScoringMatrix::Blosum62,
+                                    &fixture.gapped_params,
+                                    Some(&fixture.gapped_gumbel),
+                                    &build(q_idx).expect("parameters"),
+                                    10.0,
+                                    &mut scratch.gap_scratch,
+                                    &mut scratch.range_cache,
+                                    false,
+                                    &mut sw_scratch,
+                                    &mut |evalue, score| {
+                                        asked = Some((evalue, score));
+                                        heaps[q_idx].clone().would_insert(
+                                            evalue,
+                                            score,
+                                            local_match.oid,
+                                        )
+                                    },
+                                );
+                                with_list += usize::from(
+                                    reference
+                                        .as_ref()
+                                        .is_ok_and(|result| result.hsp_list.is_some()),
+                                );
+                                let reference = reference.map_err(|error| format!("{error:#}"));
+                                assert_eq!(
+                                    x_result_difference(&computed.result, &reference),
+                                    None,
+                                    "{at:?}"
+                                );
+                                let before = index
+                                    - window.matches.partition_point(|other| other.q_idx < q_idx);
+                                let heap = &heaps[q_idx];
+                                let expected = asked.filter(|&(evalue, score)| {
+                                    evalue > heap.ecutoff
+                                        && heap.n + before >= heap.heap_threshold
+                                        && heap.would_insert_view(evalue, score, local_match.oid)
+                                });
+                                assert_eq!(computed.deferred, expected, "{at:?}");
+                                deferred_tests += usize::from(expected.is_some());
+                                certain_false +=
+                                    usize::from(asked.is_some_and(|(evalue, score)| {
+                                        !heap.would_insert_view(evalue, score, local_match.oid)
+                                    }));
+                                compared += 1;
+                            }
                         }
                     }
-                }
-                Ok(())
-            })
-            .expect("a pool");
+                    Ok(())
+                })
+                .expect("a pool");
+            }
         }
         assert!(
             compared > 150 && with_list > 30 && deferred_tests > 10 && certain_false > 10,

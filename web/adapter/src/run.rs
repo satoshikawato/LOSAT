@@ -1675,11 +1675,12 @@ impl std::io::Write for Kept<'_> {
 /// other search writes only the lines of its warnings that stream 3 does not hold yet: the reader's
 /// and the queries' warnings, which every search of the run writes (up to the place where its
 /// formats end), come with the argv's search, and so does a formatting handler's line that both
-/// searches write (`Examining 5 or more matches`). Each format after the first of its search
-/// then adds, in the search's order, its formatting handler's lines, what its run writes with its
+/// searches write (`Examining 5 or more matches`). Each format after the argv's own one then
+/// adds (in the other search, its first format too), in the search's order, its formatting handler's lines, what its run writes with its
 /// queries' reports where the argv's format is a structured one (`Searched::later`: the queries'
 /// warnings; BLASTX: every line of its reports' standard error), and its refusal where it failed
-/// alone, each where stream 3 does not hold it; the error of a search that failed follows that
+/// alone (every format of the other search fails alone), each where stream 3 does not hold it;
+/// the error of a search that failed follows that
 /// search's warnings. An error or a refusal comes once as a whole text (streams 6 and 7 of a
 /// search stop at the same row). What is added goes where the sink writes it (`CallerSink::add`,
 /// `CallerSink::error`).

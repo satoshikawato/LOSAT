@@ -131,12 +131,22 @@ git push origin release/v0.1.0
 git push origin v0.1.0
 ```
 
-If publishing to crates.io:
+From v0.2.0 the release is also published on PyPI (`pylosat`, the Python package, under LOSAT's
+version number) and on crates.io (`losat`). Both uploads are the maintainer's act, started by hand
+from the default branch with the release's tag, after the GitHub release exists, in this order:
 
-```bash
-cd LOSAT
-cargo publish
-```
+1. PyPI: workflow `Python wheels` (`.github/workflows/python-wheels.yml`) with `tag` = the release's
+   tag and `publish` = `pypi` (`testpypi` rehearses the same upload on TestPyPI from any commit). It
+   builds the five wheels and the sdist at the tag, runs the frozen search through each, and uploads
+   them from the environment `pypi` by Trusted Publishing: no token is stored. PyPI never takes a
+   file name twice, so a wrong upload cannot be replaced, only yanked.
+2. crates.io, last: workflow `Publish crate` (`.github/workflows/publish-crate.yml`) with `tag` = the
+   release's tag. With `publish` off it packages the crate, holds it to the 10 MiB limit, compares it
+   byte for byte with the GitHub release's `losat-<version>.crate` and runs `cargo publish
+   --dry-run`; with `publish` on it then uploads with the token of the environment `crates-io`. A
+   version on crates.io can be yanked but never deleted.
+
+Both environments have the maintainer as required reviewer; the upload job waits for that approval.
 
 
 Threading remediation builds use separate `serial-command`, `threaded-command`,

@@ -323,19 +323,20 @@ impl DbFilterArgs {
         &self,
         taxids: &[i32],
     ) -> Option<crate::report::archive::options::Param> {
+        use crate::report::archive::fields;
         use crate::report::archive::options::{Param, ParamValue};
         let negative = match (self.seqid_list(), self.list()) {
             (Some((_, negative)), _) | (None, Some((_, _, negative))) => negative,
             (None, None) => return None,
         };
-        Some(Param {
-            name: if negative {
-                "NegativeTaxidList"
+        Some(Param::new(
+            if negative {
+                fields::NEGATIVE_TAXID_LIST
             } else {
-                "TaxidList"
+                fields::TAXID_LIST
             },
-            value: ParamValue::IntegerList(taxids.to_vec()),
-        })
+            ParamValue::IntegerList(taxids.to_vec()),
+        ))
     }
 
     /// The list of the command line, read (and a taxid list expanded) as NCBI reads it, with
@@ -578,13 +579,13 @@ mod tests {
         let param = filter(true, false)
             .archive_parameter(&[9606, 10090])
             .unwrap();
-        assert_eq!(param.name, "TaxidList");
+        assert_eq!(param.name(), "TaxidList");
         assert_eq!(param.value, ParamValue::IntegerList(vec![9606, 10090]));
         // A missing taxonomy file: the list object of NCBI has no id.
         let param = filter(true, false).archive_parameter(&[]).unwrap();
         assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
         let param = filter(false, true).archive_parameter(&[]).unwrap();
-        assert_eq!(param.name, "NegativeTaxidList");
+        assert_eq!(param.name(), "NegativeTaxidList");
         assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
         assert!(DbFilterArgs::default().archive_parameter(&[]).is_none());
     }

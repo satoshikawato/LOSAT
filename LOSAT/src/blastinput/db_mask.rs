@@ -21,6 +21,7 @@ use anyhow::Result;
 
 use crate::cli::NativeError;
 use crate::core::subject_split::HardSplitState;
+use crate::report::archive::fields;
 use crate::report::archive::options::{Param, ParamValue};
 use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
 
@@ -436,14 +437,14 @@ impl DbMaskOption {
         match (resolved, &self.algorithm) {
             (Some(mask), _) => mask.archive_params(),
             (None, FilteringAlgorithm::Name(name)) if !name.is_empty() => vec![
-                Param {
-                    name: "DbFilteringAlgorithmKey",
-                    value: ParamValue::Str(name.clone()),
-                },
-                Param {
-                    name: "SubjectMaskingType",
-                    value: ParamValue::Integer(self.kind as i32),
-                },
+                Param::new(
+                    fields::DB_FILTERING_ALGORITHM_KEY,
+                    ParamValue::Str(name.clone()),
+                ),
+                Param::new(
+                    fields::SUBJECT_MASKING_TYPE,
+                    ParamValue::Integer(self.kind as i32),
+                ),
             ],
             (None, _) => Vec::new(),
         }
@@ -502,21 +503,21 @@ impl ResolvedMask {
     /// An empty name is no key (`algo_key != kEmptyStr`): the id it was translated to is written.
     pub fn archive_params(&self) -> Vec<Param> {
         let algorithm = match self.key.as_deref() {
-            Some(key) if !key.is_empty() => Param {
-                name: "DbFilteringAlgorithmKey",
-                value: ParamValue::Str(key.to_string()),
-            },
-            _ => Param {
-                name: "DbFilteringAlgorithmId",
-                value: ParamValue::Integer(self.id),
-            },
+            Some(key) if !key.is_empty() => Param::new(
+                fields::DB_FILTERING_ALGORITHM_KEY,
+                ParamValue::Str(key.to_string()),
+            ),
+            _ => Param::new(
+                fields::DB_FILTERING_ALGORITHM_ID,
+                ParamValue::Integer(self.id),
+            ),
         };
         vec![
             algorithm,
-            Param {
-                name: "SubjectMaskingType",
-                value: ParamValue::Integer(self.kind as i32),
-            },
+            Param::new(
+                fields::SUBJECT_MASKING_TYPE,
+                ParamValue::Integer(self.kind as i32),
+            ),
         ]
     }
 }

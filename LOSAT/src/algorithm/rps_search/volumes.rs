@@ -136,6 +136,7 @@ pub(crate) fn search_sets(
     searchsp: Option<i64>,
     dbsize: Option<i64>,
 ) -> Vec<crate::report::archive::options::Param> {
+    use crate::report::archive::fields;
     use crate::report::archive::options::{Param, ParamValue};
     let volumes = RpsVolumeSet::of(db);
     let mut sets = Vec::new();
@@ -144,24 +145,21 @@ pub(crate) fn search_sets(
         // that `SetDbLength(Int8)` takes as NCBI's `Int8`: `DbStatistics::engine_db_length`
         // (positive here: `untraced_total_length` refuses 0 and the negative totals of an alias
         // `LENGTH` of 2^63 or more).
-        sets.push(Param {
-            name: "DbLength",
-            value: ParamValue::BigInteger(db.statistics().engine_db_length),
-        });
+        sets.push(Param::new(
+            fields::DB_LENGTH,
+            ParamValue::BigInteger(db.statistics().engine_db_length),
+        ));
     }
     if let Some((matrix, gap_open, gap_extend)) = costs {
-        sets.push(Param {
-            name: "MatrixName",
-            value: ParamValue::Str(matrix),
-        });
-        sets.push(Param {
-            name: "GapOpeningCost",
-            value: ParamValue::Integer(gap_open),
-        });
-        sets.push(Param {
-            name: "GapExtensionCost",
-            value: ParamValue::Integer(gap_extend),
-        });
+        sets.push(Param::new(fields::MATRIX_NAME, ParamValue::Str(matrix)));
+        sets.push(Param::new(
+            fields::GAP_OPENING_COST,
+            ParamValue::Integer(gap_open),
+        ));
+        sets.push(Param::new(
+            fields::GAP_EXTENSION_COST,
+            ParamValue::Integer(gap_extend),
+        ));
     }
     sets
 }

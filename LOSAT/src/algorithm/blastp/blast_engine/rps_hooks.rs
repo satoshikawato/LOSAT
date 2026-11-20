@@ -167,12 +167,10 @@ pub(super) fn note_strategy_sets(
     args: &ResolvedBlastpArgs,
     database: &database::BlastpDatabase,
 ) -> Result<()> {
+    use crate::report::archive::fields;
     use crate::report::archive::options::{Param, ParamValue};
     let before_batches = (rps.requested_cbs != 0 && !args.comp_based_stats.is_enabled())
-        .then_some(Param {
-            name: "CompositionBasedStats",
-            value: ParamValue::Integer(0),
-        })
+        .then(|| Param::new(fields::COMPOSITION_BASED_STATS, ParamValue::Integer(0)))
         .into_iter()
         .collect();
     // The volumes' matrix and gap costs as the first volume's files read them (the search sets the

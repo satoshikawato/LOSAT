@@ -308,7 +308,7 @@ fn the_archive_writes_the_key_of_a_name_or_the_id() {
     let params = |mask: &ResolvedMask| {
         mask.archive_params()
             .into_iter()
-            .map(|param| (param.name, param.value))
+            .map(|param| (param.name(), param.value))
             .collect::<Vec<_>>()
     };
     assert_eq!(
@@ -577,7 +577,7 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
 #[test]
 fn the_strategy_keeps_a_name_the_database_does_not_know() {
     let names = |params: Vec<Param>| -> Vec<&'static str> {
-        params.iter().map(|param| param.name).collect()
+        params.iter().map(|param| param.name()).collect()
     };
     assert_eq!(
         names(soft("dust").strategy_params(None)),

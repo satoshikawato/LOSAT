@@ -496,7 +496,7 @@ mod tests {
                     ParamValue::Str(value) => format!("string:{value}"),
                     ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
-                format!("{}={value}", param.name)
+                format!("{}={value}", param.name())
             })
             .collect::<Vec<_>>()
             .join(" ")

@@ -990,10 +990,10 @@ mod tests {
             handle.options().clone(),
         );
         assert!(export.options().same(handle.options()));
-        let list = crate::report::archive::options::Param {
-            name: "TaxidList",
-            value: crate::report::archive::options::ParamValue::IntegerList(vec![9606]),
-        };
+        let list = crate::report::archive::options::Param::new(
+            crate::report::archive::fields::TAXID_LIST,
+            crate::report::archive::options::ParamValue::IntegerList(vec![9606]),
+        );
         handle
             .options()
             .set_database_filter(

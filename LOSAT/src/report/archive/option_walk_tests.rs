@@ -57,7 +57,7 @@ fn render(inputs: &OptionInputs, database: Option<&str>) -> Vec<String> {
     let mut listed: Vec<String> = request
         .algorithm
         .iter()
-        .map(|param| format!("{}={:?}", param.name, param.value))
+        .map(|param| format!("{}={:?}", param.name(), param.value))
         .collect();
     if let Some(step) = request.step_number {
         listed.push(format!("Web_StepNumber=Integer({step})"));

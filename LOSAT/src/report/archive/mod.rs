@@ -23,6 +23,7 @@
 //! holds for its other formats.
 //!
 //! - `options`: the request's `algorithm-options` (the fold of NCBI's `Set*` calls);
+//! - `fields`: the Blast4 parameters' names and value types, which the writer and the reader share;
 //! - `bioseq`: the Bioseq of a query or subject record;
 //! - `masks`: the `Blast4-mask` lists (results and the `LCaseMask` options);
 //! - `writer`: the document.
@@ -34,6 +35,7 @@
 //! - `requests`: the request inputs of a batch from its records.
 
 pub mod bioseq;
+pub mod fields;
 pub mod masks;
 pub mod options;
 pub mod requests;
@@ -511,11 +513,11 @@ impl OptionsHandle {
         let mut sets = options::ParamList::default();
         if let Some(search) = self.0.search.get() {
             for param in &search.before_batches {
-                sets.set(param.name, param.value.clone());
+                sets.set(param.field(), param.value.clone());
             }
         }
         for param in carry.0.params() {
-            sets.set(param.name, param.value.clone());
+            sets.set(param.field(), param.value.clone());
         }
         sets.into_params()
     }
@@ -537,7 +539,7 @@ impl OptionsHandle {
     pub fn pass(&self, carry: &mut HandleCarry, searched: Option<SearchedContext0>) {
         if let Some(search) = self.0.search.get() {
             for param in &search.each_batch {
-                carry.0.set(param.name, param.value.clone());
+                carry.0.set(param.field(), param.value.clone());
             }
         }
         if let Some(context0) = searched {
@@ -547,7 +549,7 @@ impl OptionsHandle {
                 .get()
                 .map_or(RequestLength::Search, |filter| filter.request_length);
             carry.0.set(
-                "EffectiveSearchSpace",
+                fields::EFFECTIVE_SEARCH_SPACE,
                 options::ParamValue::BigInteger(length.space(context0)),
             );
         }
@@ -1245,7 +1247,7 @@ mod tests {
     /// The `EffectiveSearchSpace` option among a request's sets.
     pub(super) fn search_space(sets: &[options::Param]) -> Option<i64> {
         sets.iter()
-            .find(|param| param.name == "EffectiveSearchSpace")
+            .find(|param| param.name() == "EffectiveSearchSpace")
             .map(|param| match param.value {
                 options::ParamValue::BigInteger(space) => space,
                 ref other => panic!("EffectiveSearchSpace {other:?}"),
@@ -1261,19 +1263,13 @@ mod tests {
         let handle = OptionsHandle::default();
         handle
             .set_search_sets(
-                vec![Param {
-                    name: "CompositionBasedStats",
-                    value: ParamValue::Integer(0),
-                }],
+                vec![Param::new(
+                    fields::COMPOSITION_BASED_STATS,
+                    ParamValue::Integer(0),
+                )],
                 vec![
-                    Param {
-                        name: "DbLength",
-                        value: ParamValue::BigInteger(560),
-                    },
-                    Param {
-                        name: "MatrixName",
-                        value: ParamValue::Str("BLOSUM62".to_string()),
-                    },
+                    Param::new(fields::DB_LENGTH, ParamValue::BigInteger(560)),
+                    Param::new(fields::MATRIX_NAME, ParamValue::Str("BLOSUM62".to_string())),
                 ],
             )
             .unwrap();
@@ -1283,7 +1279,7 @@ mod tests {
             handle
                 .request_sets(carry)
                 .iter()
-                .map(|param| param.name)
+                .map(|param| param.name())
                 .collect()
         };
         assert_eq!(names(&carry), ["CompositionBasedStats"]);

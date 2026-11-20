@@ -183,7 +183,19 @@ impl Drop for Registered {
 // and round 2 read the last ones as NCBI does. Round 3 (`fix-logfile-dir/r3`): `//run.log` has no
 // directory (stream 3), a user's command line makes no file in a directory of root's (`/run.log`,
 // `/etc/run.log`, `/var/log/run.log`, `/dev/run.log`) and opens none of its devices
-// (`/dev/kmsg`), but a new terminal's master (`/dev/ptmx`), whose messages are lost.
+// (`/dev/kmsg`), but a new terminal's master (`/dev/ptmx`), whose messages are lost. Round 4
+// (`fix-logfile-dir/r4`): a user makes files only in the working directory, a home and the
+// directories where every user does (`/var/lock` is `/run/lock`), every other directory is root's
+// (`/data/run.log`), and the system refuses a component of more than 255 bytes.
+/// A name of 256 bytes, one more than a component may have.
+const LONG_NAME: &str = concat!(
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+);
+const _: () = assert!(LONG_NAME.len() == 256);
+
 #[test]
 fn the_logfile_is_a_file_of_the_run() {
     for (program, _, _) in SEARCHES {
@@ -250,6 +262,9 @@ fn the_logfile_is_a_file_of_the_run() {
             "/tmp/abs/run.log/",
             " run.log",
             "run.log ",
+            "/var/lock/run.log",
+            "/var/crash/run.log",
+            "/home/me/run.log",
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", name]);
@@ -303,6 +318,10 @@ fn the_logfile_is_a_file_of_the_run() {
             ("/var/log/run.log", false),
             ("/dev/run.log", false),
             ("/dev/kmsg", false),
+            ("/data/run.log", false),
+            ("/run/user/1000/run.log", false),
+            ("/bin/../tmp/run.log", false),
+            (LONG_NAME, false),
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", value]);

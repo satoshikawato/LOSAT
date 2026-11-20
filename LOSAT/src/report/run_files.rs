@@ -34,18 +34,20 @@ impl RunFiles {
     // file, or `cerr` when its directory does not exist or it cannot be opened (a directory).
     /// The target of the `-logfile` value `name` (`None` without one). On `Disk` the file
     /// system's (`diag_target`). For a `Receiver`: NCBI's special names as there
-    /// (`special_log_target`), and any other name as the command line on Linux reads it in a
-    /// working directory of its own where the name's directories exist (`log_name`), as LOSAT Web
-    /// reads a `-conffile` name as a path of the command line's working directory (line WQA's
-    /// sweep, D11, 2026-11-20; it refused a name with a directory before): `cerr` for a directory,
-    /// which NCBI cannot open as a file, and for a name that a user's command line cannot open
-    /// (`//run.log`, `/etc/run.log`, `/dev/kmsg`); the file that is the standard error
-    /// (`DiagTarget::StderrFile`) for `/dev/stderr`; no output for another spelling of `/dev/null`,
-    /// for a device whose writes are lost (`/dev/ptmx`) and for a name in a file system that
-    /// reports no free space (`/dev/fd/2`); and for any other
-    /// name a file in memory under the whole name, which `deliver_log` hands over (`logs/run.log`,
-    /// `logs/`, `/tmp/run.log`, and `/dev/stdout`, whose bytes the command line writes into its
-    /// standard output among the report's, where their place depends on the report's buffering).
+    /// (`special_log_target`), and any other name as the command line of a user on Linux reads it
+    /// in a working directory of the user's own (`log_name`), as LOSAT Web reads a `-conffile`
+    /// name as a path of the command line's working directory (line WQA's sweep, D11, 2026-11-20;
+    /// it refused a name with a directory before): `cerr` for a directory, which NCBI cannot open
+    /// as a file, and for a name that a user's command line cannot open (`//run.log`,
+    /// `/etc/run.log`, `/data/run.log`, `/dev/kmsg`, a component of 256 bytes); the file that is
+    /// the standard error (`DiagTarget::StderrFile`) for `/dev/stderr`; no output for another
+    /// spelling of `/dev/null`, for a device whose writes are lost (`/dev/ptmx`) and for a name in
+    /// a file system that reports no free space (`/dev/fd/2`); and for any other name, one in the
+    /// working directory, in the user's home or in a directory where every user makes files, a
+    /// file in memory under the whole name, which `deliver_log` hands over (`logs/run.log`,
+    /// `logs/`, `/tmp/run.log`, `/var/lock/run.log`, and `/dev/stdout`, whose bytes the command
+    /// line writes into its standard output among the report's, where their place depends on the
+    /// report's buffering).
     pub fn log_target(&self, name: Option<&OsStr>) -> DiagTarget {
         match self {
             RunFiles::Disk => diag_target(name),
@@ -93,55 +95,101 @@ enum LogName {
     File,
 }
 
-/// The directories of LOSAT Web's Linux (`log_name`) besides the working directory, its
-/// ancestors and the name's own: those of the Filesystem Hierarchy Standard at the root and the
-/// directories of the file systems that report no free space (`NO_FREE_SPACE`), each with its
-/// ancestors.
-const DIRECTORIES: [&[u8]; 23] = [
-    b"/bin",
-    b"/boot",
-    b"/dev/fd",
-    b"/dev/mqueue",
-    b"/dev/pts",
-    b"/dev/shm",
-    b"/etc",
-    b"/home",
-    b"/lib",
-    b"/lib64",
-    b"/media",
-    b"/mnt",
-    b"/opt",
-    b"/proc/self/fd",
-    b"/proc/thread-self/fd",
-    b"/root",
-    b"/run",
-    b"/sbin",
-    b"/srv",
-    b"/sys",
-    b"/tmp",
-    b"/usr",
-    b"/var",
-];
+/// The working directory's tree on LOSAT Web's Linux (`log_name`): the working directory is a
+/// chain of `"\0"` components in it (`/\0/\0/...`), deeper than a name's `..` reach, so that no
+/// name climbs out of it, as a user's command line runs in a directory of the user's own
+/// (`~/work`). A command line's words have no NUL byte, so no name gives another path in it.
+const WORKING_TREE: &[u8] = b"/\0";
 
-/// The directories of LOSAT Web's Linux that are root's (mode 0755 and under it), where a user
-/// makes no file and writes none of the system's: `/` itself, `/dev` and those of `DIRECTORIES`
-/// at the root that are not file systems of their own, with every directory in them, except
-/// `SHARED_DIRECTORIES` and a user's home (`/home/<user>`).
-const SYSTEM_DIRECTORIES: [&[u8]; 16] = [
-    b"/bin", b"/boot", b"/dev", b"/etc", b"/home", b"/lib", b"/lib64", b"/media", b"/mnt", b"/opt",
-    b"/root", b"/run", b"/sbin", b"/srv", b"/usr", b"/var",
-];
-
-/// The directories of LOSAT Web's Linux where every user makes files (mode 1777): `/tmp`,
-/// `/var/tmp`, `/dev/shm` and `/run/lock` (line WQA's D11 round 3, 2026-11-20: NCBI BLAST+ 2.17.0
-/// and LOSAT's command line write their log there as a user); `/dev/mqueue` too, whose names are
-/// message queues (`opens`).
+/// The directories of LOSAT Web's Linux where every user makes files (mode 1777, `/var/crash`
+/// 3777): `/tmp` and `/var/tmp` of the Filesystem Hierarchy Standard, `/dev/shm`, Ubuntu's
+/// `/run/lock` (also `/var/lock`, `LINKS`) and Ubuntu's `/var/crash` (line WQA's D11 rounds 3 and
+/// 4, 2026-11-20: NCBI BLAST+ 2.17.0 and LOSAT's command line write their log there as a user on
+/// Ubuntu 24.04). `/dev/mqueue` (1777 too) holds message queues only (`opens`).
 const SHARED_DIRECTORIES: [&[u8]; 5] = [
     b"/tmp",
     b"/var/tmp",
     b"/dev/shm",
-    b"/dev/mqueue",
     b"/run/lock",
+    b"/var/crash",
+];
+
+/// Whether the user of LOSAT Web's Linux makes entries in `directory`, a path without links: in
+/// the working directory's tree (`WORKING_TREE`), in a user's home (`/home/<user>`, which LOSAT
+/// Web takes as the user's own, not knowing the user's name) and in the directories where every
+/// user makes files (`SHARED_DIRECTORIES`), each with the directories that the user makes in it.
+/// Every other directory is root's, as only root makes entries in `/` (line WQA's D11 round 4,
+/// 2026-11-20, Owner-delegated: one rule of owners in place of lists of root's directories):
+/// `/`, `/data`, `/home`, `/etc`, `/var/log`, `/run/user/<uid>` (a user's under systemd only).
+fn user_makes(directory: &[u8]) -> bool {
+    within(directory, WORKING_TREE)
+        || directory
+            .strip_prefix(b"/home/")
+            .is_some_and(|user| !user.is_empty())
+        || SHARED_DIRECTORIES
+            .iter()
+            .any(|shared| within(directory, shared))
+}
+
+/// The directories of root's on LOSAT Web's Linux, an Ubuntu of merged `/usr` (`is_directory`),
+/// each with its ancestors: those that the Filesystem Hierarchy Standard 3.0 requires at the
+/// root, in `/usr` and in `/var` (`/bin`, `/lib`, `/lib64` and `/sbin` being links, `LINKS`), the
+/// shared ones (`SHARED_DIRECTORIES`), `/dev/mqueue`, and those of procfs, sysfs and the devices
+/// that `opens` reads. A directory of root's that it does not list is not there (`/data`, which
+/// only root makes).
+const DIRECTORIES: [&[u8]; 32] = [
+    b"/boot",
+    b"/dev/mqueue",
+    b"/dev/net",
+    b"/dev/pts",
+    b"/dev/shm",
+    b"/etc/opt",
+    b"/home",
+    b"/media",
+    b"/mnt",
+    b"/opt",
+    b"/proc/self/attr",
+    b"/proc/self/fd",
+    b"/proc/thread-self/attr",
+    b"/root",
+    b"/run/lock",
+    b"/srv",
+    b"/sys",
+    b"/tmp",
+    b"/usr/bin",
+    b"/usr/lib",
+    b"/usr/lib64",
+    b"/usr/local",
+    b"/usr/sbin",
+    b"/usr/share",
+    b"/var/cache",
+    b"/var/crash",
+    b"/var/lib",
+    b"/var/local",
+    b"/var/log",
+    b"/var/opt",
+    b"/var/spool",
+    b"/var/tmp",
+];
+
+/// The links of LOSAT Web's Linux and their targets (`log_name`), besides `/proc/self/cwd` and
+/// `/proc/thread-self/cwd`, the working directory: merged `/usr`'s, the Filesystem Hierarchy
+/// Standard's `/var/lock` and `/var/run`, the standard streams' (`/dev/fd`, `/dev/stdin`,
+/// `/dev/stdout`, `/dev/stderr`) and procfs's (a thread's descriptors are the process's).
+const LINKS: [(&[u8], &[u8]); 13] = [
+    (b"/bin", b"/usr/bin"),
+    (b"/lib", b"/usr/lib"),
+    (b"/lib64", b"/usr/lib64"),
+    (b"/sbin", b"/usr/sbin"),
+    (b"/var/lock", b"/run/lock"),
+    (b"/var/run", b"/run"),
+    (b"/dev/fd", b"/proc/self/fd"),
+    (b"/dev/stdin", b"/proc/self/fd/0"),
+    (b"/dev/stdout", b"/proc/self/fd/1"),
+    (b"/dev/stderr", b"/proc/self/fd/2"),
+    (b"/proc/thread-self/fd", b"/proc/self/fd"),
+    (b"/proc/self/root", b"/"),
+    (b"/proc/thread-self/root", b"/"),
 ];
 
 /// The file systems of Linux that report no free space (`statfs`'s `f_bavail` is 0): procfs,
@@ -208,21 +256,43 @@ const THREAD_FILES: [&[u8]; 15] = [
     b"uid_map",
 ];
 
+/// Linux's limits of the paths given to the system (Linux 6.8: include/uapi/linux/limits.h:12-13,
+/// `NAME_MAX` and `PATH_MAX`): a component of at most 255 bytes, a path of fewer than 4096 (with
+/// its closing NUL). The system refuses a longer one (`ENAMETOOLONG`), which NCBI then cannot open.
+const NAME_MAX: usize = 255;
+const PATH_MAX: usize = 4096;
+
+/// Whether the system takes `path`, a path given to it as it is (`NAME_MAX`, `PATH_MAX`).
+fn fits(path: &[u8]) -> bool {
+    path.len() < PATH_MAX
+        && path
+            .split(|byte| *byte == b'/')
+            .all(|part| part.len() <= NAME_MAX)
+}
+
 /// Whether `path` is `directory` or a directory in it, component by component.
 fn within(path: &[u8], directory: &[u8]) -> bool {
     path.strip_prefix(directory)
         .is_some_and(|rest| rest.is_empty() || rest[0] == b'/' || directory.ends_with(b"/"))
 }
 
-/// Whether a user's system opens `path` for writing, a path without links whose directories exist:
-/// a file that a name may make or write, also a device (No NCBI counterpart). In procfs, only the
-/// standard streams and the files of `PROCESS_FILES` and `THREAD_FILES` (a name that procfs does
-/// not have is not made there); sysfs and devpts open none of a user's names; an mqueue file is a
-/// name in `/dev/mqueue`. In a directory of root's (`SYSTEM_DIRECTORIES`, the root), only the
-/// devices of `LOST_DEVICES`: a new name there is not made, and another device or a file of the
-/// system's (`/dev/kmsg`, `/dev/console`, `/dev/tty` in a run without a terminal, `/etc/passwd`)
-/// is not open to a user; a name in a user's directory is (`/tmp/run.log`, `/home/me/run.log`,
-/// `/data/run.log`, whose directory the name gives).
+/// Whether `directory`, a path without links, is a directory of LOSAT Web's Linux: one of root's
+/// (`DIRECTORIES`) or an ancestor of one, or one where the user makes entries (`user_makes`),
+/// which the model takes as made where a name gives it (`logs/run.log`, `/tmp/a/run.log`; the
+/// working directory and its ancestors in the working directory's tree). Not a directory of
+/// root's that it does not list, nor a file (`/dev/null/x`, `/dev/stdout/../stderr`).
+fn is_directory(directory: &[u8]) -> bool {
+    DIRECTORIES.iter().any(|known| within(known, directory)) || user_makes(directory)
+}
+
+/// Whether a user's system opens `path` for writing, a path without links in a directory that
+/// exists: a file that a name may make or write, also a device (No NCBI counterpart). In procfs,
+/// only the standard streams and the files of `PROCESS_FILES` and `THREAD_FILES` (a name that
+/// procfs does not have is not made there); sysfs and devpts open none of a user's names; an
+/// mqueue file is a name in `/dev/mqueue`; the devices of `LOST_DEVICES` are open to every user.
+/// Any other name opens where the user makes entries (`user_makes`): a new name in a directory of
+/// root's is not made, and another device or a file of the system's (`/dev/kmsg`, `/dev/console`,
+/// `/dev/tty` in a run without a terminal, `/etc/passwd`) is not open to a user.
 fn opens(path: &[u8]) -> bool {
     if let Some(file) = path.strip_prefix(b"/proc/self/") {
         return matches!(file, b"fd/0" | b"fd/1" | b"fd/2") || PROCESS_FILES.contains(&file);
@@ -239,73 +309,48 @@ fn opens(path: &[u8]) -> bool {
     {
         return false;
     }
-    if LOST_DEVICES.contains(&path) {
-        return true;
-    }
-    let directory = &path[..path.iter().rposition(|byte| *byte == b'/').unwrap_or(0)];
-    let home = directory
-        .strip_prefix(b"/home/")
-        .is_some_and(|user| !user.is_empty());
-    let shared = SHARED_DIRECTORIES
-        .iter()
-        .any(|shared| within(directory, shared));
-    home || shared
-        || !(directory.is_empty()
-            || SYSTEM_DIRECTORIES
-                .iter()
-                .any(|system| within(directory, system)))
-}
-
-/// Whether `path`, a path without links, is a file of LOSAT Web's Linux, which is no directory
-/// (`/dev/null/x` and `/dev/stdout/../stderr` name no file): an entry of `/proc/self/fd`, a file
-/// of `PROCESS_FILES` or `THREAD_FILES`, a device of `LOST_DEVICES` or `/dev/tty`.
-fn known_file(path: &[u8]) -> bool {
-    path.strip_prefix(b"/proc/self/fd/")
-        .is_some_and(|fd| !fd.is_empty())
-        || path
-            .strip_prefix(b"/proc/self/")
-            .is_some_and(|file| PROCESS_FILES.contains(&file))
-        || path
-            .strip_prefix(b"/proc/thread-self/")
-            .is_some_and(|file| THREAD_FILES.contains(&file))
-        || LOST_DEVICES.contains(&path)
-        || path == b"/dev/tty"
+    LOST_DEVICES.contains(&path)
+        || user_makes(&path[..path.iter().rposition(|byte| *byte == b'/').unwrap_or(0)])
 }
 
 /// What the `-logfile` name `name` gives on the command line on Linux (No NCBI counterpart: LOSAT
-/// Web has no file system; line WQA's sweep, D11, 2026-11-20 and its rounds 2 and 3). The name is
+/// Web has no file system; line WQA's sweep, D11, 2026-11-20 and its rounds 2 to 4). The name is
 /// read as NCBI reads it on Unix (`ncbi_environment::log_file_name`, the command line's reading
-/// too) in a working directory of its own, where the directories that the name gives exist (those
-/// that NCBI checks and those of the file it opens) on a file system with free space: `logs/run.log`,
-/// ` run.log` (`run.log`), `logs/` (the file `logs`) and `/tmp/run.log` are files. A directory of
-/// '/'s only (`//run.log`) is none, as `CDirEntry::Reset` leaves it empty. The system then follows
-/// the links of Linux in the path that NCBI opens and in the directory whose free space it reads:
-/// `/dev/fd` (`/proc/self/fd`), `/dev/stdin`, `/dev/stdout` and `/dev/stderr` (`/proc/self/fd/0`
-/// to `2`), `/proc/self/cwd` (the working directory) and `/proc/self/root` (`/`), also of
-/// `/proc/thread-self`. The opened path is a directory, which NCBI cannot open (`cerr`), where it
-/// is the working directory or one of its ancestors, a directory that the name gives, one of
-/// `DIRECTORIES` or an ancestor of any of them (`.`, `logs/.`, `a/b/..`, `/tmp/`,
-/// `/proc/self/cwd`); NCBI cannot open a path that the system does not open to a user either
-/// (`opens`: `/dev/fd/3`, `/proc/self/status`, `/sys/...`, `/dev/pts/0`, `/dev/tty`,
-/// `/run.log`, `/etc/run.log`, `/var/log/run.log`, `/dev/run.log`, `/dev/kmsg`), nor one whose
-/// directory is a file (`known_file`: `/dev/null/x`). A file opened in a file system that reports
-/// no free space (`NO_FREE_SPACE`) gets no message, as NCBI checks the space before it writes
-/// (`/dev/fd/2`, `/proc/self/fd/1`, `/proc/self/comm`, `/dev/mqueue/q`, `/dev/fd/../stderr`,
-/// whose directory is `/proc/self`). Otherwise `/dev/stderr` is the standard error, also written
-/// otherwise (`//dev/stderr`); the standard input is the null device (`/dev/stdin`), as for a
-/// command line run without one; the devices whose writes are lost (`LOST_DEVICES`: `/dev/ptmx`)
-/// give no message; `/dev/stdout` is a file of that name, whose bytes the command line writes into
-/// its standard output among the report's, and `/proc/self/cwd/run.log` the file `run.log` of the
-/// working directory, under the name as typed. The model's command line is a user's (not root),
-/// with no terminal, its standard output and error being pipes, as a shell's `|` gives.
+/// too) in a working directory of the user's own (`WORKING_TREE`) on a file system with free
+/// space: `logs/run.log`, ` run.log` (`run.log`), `logs/` (the file `logs`) and `/tmp/run.log`
+/// are files. A directory of '/'s only (`//run.log`) is none, as `CDirEntry::Reset` leaves it
+/// empty. The system then follows the links of Linux (`LINKS`; `/proc/self/cwd` is the working
+/// directory) in the directory that NCBI checks, in the path that it opens and in the directory
+/// whose free space it reads, and refuses a component of more than 255 bytes and a path of 4096
+/// or more (`fits`: `aaa...`, a directory `x/../x/../...` of 4096 bytes). The directory that NCBI
+/// checks (the name's as written, with each directory in it) must be a directory of the system
+/// (`is_directory`): one of root's that the Filesystem Hierarchy Standard requires, or one where
+/// the user makes entries, which the user made (`logs`, `/tmp/a`, `/home/me/logs`); not `/data`,
+/// `/bin/..` (`/usr`, then `/usr/tmp` is none), `/var/lock/..` (`/run`, then `/run/tmp`) or a file
+/// (`/dev/null/x`). The opened path is a directory, which NCBI cannot open (`cerr`), where it is
+/// the working directory or one of its ancestors, a directory that the name gives, one of root's
+/// or an ancestor of any of them (`.`, `logs/.`, `a/b/..`, `/tmp/`, `/proc/self/cwd`); NCBI
+/// cannot open a path that the system does not open to a user either (`opens`: `/dev/fd/3`,
+/// `/proc/self/status`, `/sys/...`, `/dev/pts/0`, `/dev/tty`, a name in a directory of root's:
+/// `/run.log`, `/etc/run.log`, `/var/log/run.log`, `/dev/run.log`, `/dev/kmsg`). A file opened in
+/// a file system that reports no free space (`NO_FREE_SPACE`) gets no message, as NCBI checks
+/// the space before it writes (`/dev/fd/2`, `/proc/self/fd/1`, `/proc/self/comm`,
+/// `/dev/mqueue/q`, `/dev/fd/../stderr`, whose directory is `/proc/self`). Otherwise
+/// `/dev/stderr` is the standard error, also written otherwise (`//dev/stderr`); the standard
+/// input is the null device (`/dev/stdin`), as for a command line run without one; the devices
+/// whose writes are lost (`LOST_DEVICES`: `/dev/ptmx`) give no message; `/dev/stdout` is a file
+/// of that name, whose bytes the command line writes into its standard output among the
+/// report's, `/proc/self/cwd/run.log` the file `run.log` of the working directory, and
+/// `/var/lock/run.log` a file in `/run/lock`, each under the name as typed. The model's command
+/// line is a user's (not root), with no terminal, its standard output and error being pipes, as a
+/// shell's `|` gives.
 fn log_name(name: &[u8]) -> LogName {
-    // A working directory deeper than the name's ".." reach, of components no name has (a
-    // command line's words have no NUL byte): its ancestors are never the root's directories.
+    // A working directory deeper than the name's ".." reach (`WORKING_TREE`).
     let climbs = crate::ncbi_str::truncate_spaces(name)
         .split(|byte| *byte == b'/')
         .filter(|part| *part == b"..")
         .count();
-    let cwd = b"/\0".repeat(climbs + 1);
+    let cwd = WORKING_TREE.repeat(climbs + 1);
     let file = crate::blastinput::ncbi_environment::log_file_name(
         crate::blastinput::ncbi_environment::PathRules::Unix,
         name,
@@ -313,15 +358,13 @@ fn log_name(name: &[u8]) -> LogName {
     )
     .expect("NCBI's Unix reading reads every name");
     let link = |path: &[u8]| -> Option<Vec<u8>> {
-        Some(match path {
-            b"/dev/fd" | b"/proc/thread-self/fd" => b"/proc/self/fd".to_vec(),
-            b"/dev/stdin" => b"/proc/self/fd/0".to_vec(),
-            b"/dev/stdout" => b"/proc/self/fd/1".to_vec(),
-            b"/dev/stderr" => b"/proc/self/fd/2".to_vec(),
-            b"/proc/self/cwd" | b"/proc/thread-self/cwd" => cwd.clone(),
-            b"/proc/self/root" | b"/proc/thread-self/root" => b"/".to_vec(),
-            _ => return None,
-        })
+        match path {
+            b"/proc/self/cwd" | b"/proc/thread-self/cwd" => Some(cwd.clone()),
+            _ => LINKS
+                .iter()
+                .find(|(link, _)| *link == path)
+                .map(|(_, target)| target.to_vec()),
+        }
     };
     let resolve = |path: &[u8]| {
         crate::blastinput::ncbi_environment::normalize_path(path, Some(&link))
@@ -329,7 +372,7 @@ fn log_name(name: &[u8]) -> LogName {
     };
     let mut directories: Vec<Vec<u8>> = Vec::new();
     if let Some(directory) = &file.directory {
-        if directory.is_empty() {
+        if directory.is_empty() || !fits(directory) {
             return LogName::Unopened;
         }
         let given = if directory.first() == Some(&b'/') {
@@ -337,22 +380,29 @@ fn log_name(name: &[u8]) -> LogName {
         } else {
             [cwd.as_slice(), b"/", directory].concat()
         };
-        directories.extend(
-            given
-                .iter()
-                .enumerate()
-                .filter(|(_, byte)| **byte == b'/')
-                .map(|(at, _)| resolve(&given[..=at])),
-        );
-        directories.push(resolve(&given));
+        for end in given
+            .iter()
+            .enumerate()
+            .filter(|(_, byte)| **byte == b'/')
+            .map(|(at, _)| at + 1)
+            .chain([given.len()])
+        {
+            let checked = resolve(&given[..end]);
+            if !is_directory(&checked) {
+                return LogName::Unopened;
+            }
+            directories.push(checked);
+        }
     }
     directories.push(cwd.clone());
-    directories.extend(DIRECTORIES.iter().map(|directory| directory.to_vec()));
     let path = resolve(&file.path);
     if file.path.is_empty()
+        || !fits(&file.path)
         || directories
             .iter()
-            .any(|directory| within(directory, &path) || known_file(directory))
+            .map(Vec::as_slice)
+            .chain(DIRECTORIES)
+            .any(|directory| within(directory, &path))
         || !opens(&path)
     {
         return LogName::Unopened;
@@ -393,12 +443,25 @@ mod tests {
     /// `//run.log` has no directory, a user's command line opens no new name in a directory of
     /// root's (`/etc/run.log`, `/dev/run.log`) and none of its devices but those whose writes are
     /// lost (`/dev/ptmx`), and makes files in `/tmp`, `/var/tmp`, `/dev/shm`, `/run/lock`, its
-    /// home and its own directories).
+    /// home and its own directories; its round 4: the directories of root's are all but the
+    /// user's (`/data`), the links of `/var/lock`, `/var/run` and merged `/usr` are followed, a
+    /// directory of root's that is not there is none (`/bin/../tmp`), and the system refuses a
+    /// component of 256 bytes and a path of 4096; NCBI BLAST+ 2.17.0 and LOSAT's command line on
+    /// Ubuntu 24.04 as a user, `fix-logfile-dir/r4/cli1.jsonl` and review 2's `cli-names.jsonl`).
     #[test]
     fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         let kept = Arc::new(Kept::default());
         let files = RunFiles::Receiver(kept.clone());
         let target = |name: Option<&str>| files.log_target(name.map(OsStr::new));
+        // Linux's limits: a component of 255 bytes, a path of 4095 bytes given to the system.
+        let component_255 = "a".repeat(255);
+        let long_component = "a".repeat(256);
+        let long_file = format!("logs/{}", "b".repeat(256));
+        let long_climbed = format!("{}/../run.log", "a".repeat(256));
+        let directory_4094 = format!("{}run.log", "x/../".repeat(819));
+        let directory_4099 = format!("{}run.log", "x/../".repeat(820));
+        let directory_4095 = format!("x{}/run.log", "/.".repeat(2047));
+        let directory_4096 = format!("xx{}/run.log", "/.".repeat(2047));
         assert!(matches!(target(None), DiagTarget::Stderr));
         assert!(matches!(target(Some("-")), DiagTarget::Stderr));
         assert!(matches!(target(Some("")), DiagTarget::Discard));
@@ -454,6 +517,28 @@ mod tests {
             "/dev/console",
             "/dev/ptmx/x",
             "/proc/self/root/etc/run.log",
+            // Round 4: one rule of owners (only root makes entries in `/`), the links of Linux,
+            // the directories of root's that are there, and the system's limits of a path.
+            "/data/run.log",
+            "/data/logs/run.log",
+            "/lost+found/run.log",
+            "/snap/run.log",
+            "/opt/run.log",
+            "/run/user/1000/run.log",
+            "/var/run/user/1000/run.log",
+            "/run/shm/run.log",
+            "/dev/mqueue/a/run.log",
+            "/bin/../tmp/run.log",
+            "/var/lock/../tmp/run.log",
+            "/dev/fd/../../tmp/run.log",
+            "/data/../tmp/run.log",
+            "/var/lock",
+            "/bin",
+            long_component.as_str(),
+            long_file.as_str(),
+            long_climbed.as_str(),
+            directory_4096.as_str(),
+            directory_4099.as_str(),
         ] {
             assert!(matches!(target(Some(name)), DiagTarget::Stderr), "{name}");
         }
@@ -524,7 +609,17 @@ mod tests {
             "/var/tmp/run.log",
             "/dev/shm/run.log",
             "/run/lock/run.log",
-            "/data/run.log",
+            // Round 4.
+            "/var/lock/run.log",
+            "/var/run/lock/run.log",
+            "/var/crash/run.log",
+            "/var/run/../tmp/run.log",
+            "/usr/../tmp/run.log",
+            "/tmp/a/../run.log",
+            "/dev/shm/a/run.log",
+            component_255.as_str(),
+            directory_4094.as_str(),
+            directory_4095.as_str(),
         ];
         for name in names {
             let log = target(Some(name));

@@ -7,7 +7,10 @@
   apart from the outputs, where the command line writes its lines into its standard output among the
   report's. `-logfile logs/` gives the file `logs`, and `/dev/fd/2` sends the messages nowhere, as on the
   command line. A name where a user's command line cannot make or open a file (`/etc/run.log`, `/run.log`,
-  `/dev/run.log`, `/dev/kmsg`) sends the messages to the run's Warnings, and `/dev/ptmx` nowhere, as there.
+  `/data/run.log`, `/dev/run.log`, `/dev/kmsg`, a name of more than 255 bytes) sends the messages to the run's
+  Warnings, and `/dev/ptmx` nowhere, as there; a user makes files in the working directory, in a home
+  (`/home/<user>/...`) and where every user does (`/tmp`, `/var/tmp`, `/dev/shm`, `/run/lock`, also as
+  `/var/lock`, `/var/crash`).
 - `-logfile` names are read as NCBI BLAST+ 2.17.0 reads them, in every program and on Windows by its
   Windows rules (`\` and `/` both end a directory there): a name that ends in `/`
   makes the file without it where no such directory exists (`-logfile logs/` writes to `logs`, where the

@@ -809,7 +809,14 @@ const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>
   // Round 3: a directory of '/'s only is none (`CDirEntry::Reset` empties `//`), a user makes no file in a directory of
   // root's and opens none of its devices but those whose writes are lost (a new terminal's master).
   "//run.log", "/run.log", "/etc/run.log", "/var/log/run.log", "/home/run.log", "/dev/run.log", "/dev/kmsg", "/dev/console",
-  "/dev/ptmx"];
+  "/dev/ptmx",
+  // Round 4: one rule of owners (a user makes files in the working directory, a home and the directories where every user
+  // does; every other directory is root's, where only root makes one), the links of Linux (`/var/lock` is `/run/lock`,
+  // `/bin` is `/usr/bin`), and the system's limits of a path (a component of 255 bytes). `<id>` is a name of this run's
+  // own, for the files that the CLI makes outside the run's directory.
+  "/var/lock/<id>.log", "/var/run/../tmp/<id>.log", "/data/run.log", "/lost+found/run.log", "/snap/run.log",
+  "/bin/../tmp/<id>.log", "/var/lock/../tmp/<id>.log", "/dev/fd/../../tmp/<id>.log", "a".repeat(256),
+  `logs/${"b".repeat(256)}`];
 
 // The CLI's run with its standard output and error on pipes, as a shell's `|` or a terminal gives them: node's child
 // processes get sockets, which `/dev/stdout` and `/dev/stderr` cannot open (ENXIO), so that NCBI and the CLI send the
@@ -858,11 +865,14 @@ async function checkLogfileNames(reactor, native, scratch, engine, waitForWorker
       }
       for (const template of LOG_NAMES) {
         const directory = fs.mkdtempSync(path.join(scratch, "logfile."));
-        const name = template.replace("<dir>", directory);
+        const name = template.replace("<dir>", directory).replace("<id>", `losat-v-abi-${process.pid}-${engine}-${rows}`);
+        // The file that the CLI makes outside the run's directory: the path that NCBI opens, the name read lexically.
+        const outside = template.includes("<id>") ? path.posix.normalize(name) : undefined;
         const label = `${engine} ${program}${ncbirc ? " .ncbirc 0xEF" : ""} -logfile ${JSON.stringify(name)}`;
         // The directories that the name gives: the one that NCBI checks (the name's, without its trailing '/'s) and that
         // of the file it opens (the name without the spaces at its ends).
-        if (!device(name)) {
+        // Not outside it: a user makes no directory of root's (`/data`), which the CLI then does not find.
+        if (!device(name) && (!name.trim().startsWith("/") || name.startsWith(directory))) {
           for (const given of [name.replace(/\/+$/, ""), name.trim().replace(/\/+$/, "")]) {
             const slash = given.lastIndexOf("/");
             if (slash > 0) fs.mkdirSync(path.resolve(directory, given.slice(0, slash)), { recursive: true });
@@ -881,6 +891,7 @@ async function checkLogfileNames(reactor, native, scratch, engine, waitForWorker
           fs.rmSync(out);
           // The file that the run made (NCBI's name for it: `logs` for `logs/`, `run.log` for ` run.log`).
           const madeFiles = filesIn(directory).filter((file) => !before.has(file));
+          if (outside !== undefined && fs.existsSync(outside)) madeFiles.push(outside);
           assert.ok(madeFiles.length <= 1, `${label}: native outfmt ${format} made ${madeFiles}`);
           const made = madeFiles.length === 1 ? fs.readFileSync(madeFiles[0]) : undefined;
           // The next format's run appends to the file: each run starts without it.

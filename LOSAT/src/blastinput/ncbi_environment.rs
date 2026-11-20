@@ -388,7 +388,7 @@ impl ProcessFacts<'static> {
             // Rust's `home_dir` on Unix reads `HOME` and, when it is not set, the `pw_dir` of
             // `getpwuid_r(getuid())`; it is asked only when `HOME` is not set (`ncbi_home`).
             home_by_uid: &|| std::env::home_dir().map(PathBuf::into_os_string),
-            program_dirs: &program_directories,
+            program_dirs: &this_program_directories,
             files: &FileSystem,
         }
     }
@@ -548,10 +548,13 @@ fn ncbi_home(
 /// `GetModuleFileName` (Rust's `current_exe`), the resolved name lexically normalized (no link
 /// is read outside Unix, ncbifile.cpp:928-946), which names the same directory as the full
 /// name that the loader gives, so LOSAT adds that one directory. A target that is neither
-/// (WASI) has no program path: no directory.
-fn program_directories(arguments_set: bool) -> Result<Vec<PathBuf>, String> {
+/// (WASI) has no program path: no directory. `cwd` is the working directory as NCBI reads it
+/// (`ncbi_cwd`, `None` for one of 4095 bytes or more), in which `FindProgramExecutablePath` makes
+/// a relative name absolute on Unix (`unix_program_name`).
+fn program_directories(arguments_set: bool, cwd: Option<&OsStr>) -> Result<Vec<PathBuf>, String> {
     #[cfg(windows)]
     {
+        let _ = cwd;
         if !arguments_set {
             return Ok(Vec::new());
         }
@@ -568,13 +571,11 @@ fn program_directories(arguments_set: bool) -> Result<Vec<PathBuf>, String> {
         let name = match (&argv0, arguments_set) {
             (Some(argv0), true) => {
                 let path_env = std::env::var_os("PATH").unwrap_or_default();
-                // `CDir::GetCwd`, "" for a working directory of 4095 bytes or more.
-                let cwd = ncbi_cwd().unwrap_or_default();
                 let is_file = |name: &[u8]| Path::new(OsStr::from_bytes(name)).is_file();
                 unix_program_name(
                     Some(argv0.as_bytes()),
                     path_env.as_bytes(),
-                    cwd.as_bytes(),
+                    cwd.map(OsStr::as_bytes).unwrap_or_default(),
                     &is_file,
                 )
             }
@@ -609,9 +610,15 @@ fn program_directories(arguments_set: bool) -> Result<Vec<PathBuf>, String> {
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = arguments_set;
+        let _ = (arguments_set, cwd);
         Ok(Vec::new())
     }
+}
+
+/// The program's directories (`program_directories`) in this process's working directory as NCBI
+/// reads it (`ncbi_cwd`: "" for one of 4095 bytes or more).
+fn this_program_directories(arguments_set: bool) -> Result<Vec<PathBuf>, String> {
+    program_directories(arguments_set, ncbi_cwd().as_deref())
 }
 
 /// The directories of the program's `name` and of its `resolved` name, in order, the second
@@ -1008,19 +1015,14 @@ impl PathRules {
     /// (`is_absolute`), in the working directory `cwd` (`CDir::GetCwd`, empty where it cannot be
     /// read): `cwd` and `path`, the spaces at their ends cut, joined by a separator and
     /// normalized; on Windows a path from a separator follows the first 3 bytes of `cwd` (its
-    /// disk, `C:\`) as it is. `None` where NCBI throws (`CFileException`): on Windows a path with
-    /// a disk's ':' (`C:run.log`), also where the cut of `cwd` would split a character.
+    /// disk, `C:\`) as it is (a cut that `log_file_name` checks on Windows). `None` where NCBI
+    /// throws (`CFileException`): on Windows a path with a disk's ':' (`C:run.log`).
     fn absolute_path(self, path: &[u8], cwd: &[u8]) -> Option<Vec<u8>> {
         if self == Self::Windows {
             if path.contains(&b':') || Self::is_network_path(path) {
                 return None;
             }
             if matches!(path.first(), Some(b'/' | b'\\')) {
-                // The byte after the cut must start a character (UTF-8 and WTF-8 continuation
-                // bytes are 0x80-0xBF): NCBI's string would not be UTF-8 otherwise.
-                if cwd.get(3).is_some_and(|byte| (0x80..0xc0).contains(byte)) {
-                    return None;
-                }
                 return Some([cwd.get(..3).unwrap_or(cwd), path].concat());
             }
         }
@@ -2544,7 +2546,7 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
     match (special_log_target(name), name) {
         (Some(target), _) => target,
         (None, None) => DiagTarget::Stderr,
-        (None, Some(name)) => open_log_file(name),
+        (None, Some(name)) => open_log_file(name, ncbi_cwd().as_deref()),
     }
 }
 
@@ -2642,8 +2644,13 @@ const LOW_DISK_SPACE: u64 = 1024 * 20;
 /// `CreateAbsolutePath` throws (Windows: `C:run.log`), which ends NCBI's program in its C++
 /// runtime (`AppMain`, quoted above): how it ends is the runtime's, not ported (the license rule
 /// of 2026-11-20, rule 2), so the command line keeps the messages on `cerr` (unverified: no
-/// Windows run). The checks of `directory`, of the opened `path` and of the free space at
-/// `space` are the caller's.
+/// Windows run). On Windows NCBI opens the path as UTF-16, which its UTF-8 string becomes
+/// (`_T_XCSTRING`, quoted at `decodes`): where one of NCBI's cuts of bytes splits a character (the
+/// first 3 bytes of the working directory, the 2047 of the name, the 2 of a part with a ':' in
+/// `NormalizePath`), the conversion throws, which leaves `AppMain` as `CreateAbsolutePath`'s
+/// exception does: `None` too (unverified: no Windows run). On Unix NCBI opens the bytes as they
+/// are, a split character too. The checks of `directory`, of the opened `path` and of the free
+/// space at `space` are the caller's.
 pub(crate) fn log_file_name(
     rules: PathRules,
     name: &[u8],
@@ -2656,11 +2663,104 @@ pub(crate) fn log_file_name(
     };
     log_name.truncate(2047);
     let directory = rules.dir(name);
+    let path = rules.os_path(&log_name);
+    if rules == PathRules::Windows && !decodes(&path) {
+        return None;
+    }
     Some(LogFileName {
         directory: (!directory.is_empty()).then(|| rules.reset(&directory).to_vec()),
-        path: rules.os_path(&log_name),
+        path,
         space: rules.dir(&log_name),
     })
+}
+
+// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:154-162 (NCBI's Unicode build, which
+// opens the log by `NcbiSys_open(_T_XCSTRING(CFile::ConvertToOSPath(fname)), ...)`,
+// c++/src/corelib/ncbidiag.cpp:6514-6515), 5666-5674, 5686-5689
+// ```c++
+// #  if defined(_DEBUG)
+// #    define _T_XSTRING(x) \
+//     ncbi::CUtf8::AsBasicString<ncbi::TXChar>(x, NULL, ncbi::CUtf8::eValidate)
+// #  else
+// #    define _T_XSTRING(x) \
+//     ncbi::CUtf8::AsBasicString<ncbi::TXChar>(x, NULL, ncbi::CUtf8::eNoValidate)
+// #  endif
+// #  define _T_STDSTRING(x)     ncbi::CUtf8::AsUTF8(x)
+// #  define _T_XCSTRING(x)      _T_XSTRING(x).c_str()
+// ...
+// CUtf8::x_Decode(TIterator& src)
+// {
+//     SIZE_TYPE more=0;
+//     TUnicodeSymbol sym = DecodeFirst(*src,more);
+//     while (more--) {
+//         sym = DecodeNext(sym, *(++src));
+//     }
+//     return sym;
+// }
+// ...
+//     CTempString::const_iterator src = str.begin();
+//     CTempString::const_iterator to  = str.end();
+//     for (; src != to; ++src) {
+//         TUnicodeSymbol ch = Decode(src);
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7174-7206
+// ```c++
+// TUnicodeSymbol CUtf8::DecodeFirst(char ch, SIZE_TYPE& more)
+// {
+//     TUnicodeSymbol chRes = 0;
+//     more = 0;
+//     if ((ch & 0x80) == 0) {
+//         chRes = ch;
+//     } else if ((ch & 0xE0) == 0xC0) {
+//         chRes = (ch & 0x1F);
+//         more = 1;
+//     } else if ((ch & 0xF0) == 0xE0) {
+//         chRes = (ch & 0x0F);
+//         more = 2;
+//     } else if ((ch & 0xF8) == 0xF0) {
+//         chRes = (ch & 0x07);
+//         more = 3;
+//     } else {
+//         NCBI_THROW2(CStringException, eBadArgs,
+//             "Source string is not in UTF8 format", 0);
+//     }
+//     return chRes;
+// }
+//
+//
+// TUnicodeSymbol CUtf8::DecodeNext(TUnicodeSymbol chU, char ch)
+// {
+//     if ((ch & 0xC0) == 0x80) {
+//         return (chU << 6) | (ch & 0x3F);
+//     } else {
+//         NCBI_THROW2(CStringException, eBadArgs,
+//             "Source string is not in UTF8 format", 0);
+//     }
+//     return 0;
+// }
+// ```
+/// Whether NCBI's `CUtf8` decodes every character of `bytes` (its release build, which does not
+/// validate first): each starts with a byte of `0xxxxxxx`, `110xxxxx`, `1110xxxx` or `11110xxx`
+/// and has as many bytes of `10xxxxxx` after it as that byte says. A string cut inside a character
+/// does not: the byte after its end is the closing NUL (`std::string`'s), which `DecodeNext`
+/// refuses. The encoded bytes of a name that Windows gives (WTF-8) decode, an unpaired surrogate's
+/// 3 bytes too.
+fn decodes(bytes: &[u8]) -> bool {
+    let mut rest = bytes;
+    while let Some((&first, tail)) = rest.split_first() {
+        let more = match first {
+            0x00..=0x7f => 0,
+            0xc0..=0xdf => 1,
+            0xe0..=0xef => 2,
+            0xf0..=0xf7 => 3,
+            _ => return false,
+        };
+        if tail.len() < more || !tail[..more].iter().all(|byte| byte & 0xc0 == 0x80) {
+            return false;
+        }
+        rest = &tail[more..];
+    }
+    true
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3708-3716 (`NcbiSys_getcwd` is
@@ -2696,24 +2796,43 @@ fn getcwd_reads(cwd: OsString) -> Option<OsString> {
     (length < 4095).then_some(cwd)
 }
 
-/// The path of the bytes `path` that `log_file_name` gives.
+/// The path of the bytes `path` that `log_file_name` gives: any bytes on Unix and WASI.
+#[cfg(not(windows))]
 fn log_path(path: &[u8]) -> &Path {
-    // SAFETY: each path that `log_file_name` gives is made of the bytes of the name and of the
-    // working directory, both of the platform's encoding, joined and cut at ASCII bytes
-    // (separators, ':', spaces) and at a cut of the working directory that starts a character
-    // (`PathRules::absolute_path`), all boundaries of it.
+    #[cfg(unix)]
+    use std::os::unix::ffi::OsStrExt;
+    #[cfg(target_os = "wasi")]
+    use std::os::wasi::ffi::OsStrExt;
+    #[cfg(any(unix, target_os = "wasi"))]
+    let path = OsStr::from_bytes(path);
+    // A target without a file system, where every open fails.
+    #[cfg(not(any(unix, target_os = "wasi")))]
+    let path = std::str::from_utf8(path).unwrap_or_default();
+    Path::new(path)
+}
+
+/// The path of the bytes `path` that `log_file_name` gives on Windows.
+#[cfg(windows)]
+fn log_path(path: &[u8]) -> &Path {
+    // SAFETY: each path that `log_file_name` gives is made of the encoded bytes of the name and
+    // of the working directory (WTF-8), joined at separators and cut at ASCII bytes (separators,
+    // ':', spaces), which are boundaries of it, and at NCBI's cuts of bytes (3 of the working
+    // directory, 2047 of the name, 2 of a part with a ':'); a path where these split a character
+    // is `None` there (`decodes`), and a part that ends at a cut ends `path` or comes before a
+    // separator, so no two surrogates come together.
     Path::new(unsafe { OsStr::from_encoded_bytes_unchecked(path) })
 }
 
-/// The target of the `-logfile` name `name` (not a special one) on the file system: the file that
-/// NCBI opens (`log_file_name`), `cerr` where its directory is not one or it cannot be opened, and
-/// no message where its file system has less than 20 KiB free (the file is made all the same).
-fn open_log_file(name: &OsStr) -> DiagTarget {
-    let cwd = ncbi_cwd();
+/// The target of the `-logfile` name `name` (not a special one) on the file system, in the working
+/// directory `cwd` as NCBI reads it (`ncbi_cwd`, `None` for one of 4095 bytes or more): the file
+/// that NCBI opens (`log_file_name`), `cerr` where its directory is not one or it cannot be
+/// opened, and no message where its file system has less than 20 KiB free (the file is made all
+/// the same).
+fn open_log_file(name: &OsStr, cwd: Option<&OsStr>) -> DiagTarget {
     let Some(file) = log_file_name(
         PathRules::HOST,
         name.as_encoded_bytes(),
-        cwd.as_ref().map(|cwd| cwd.as_encoded_bytes()),
+        cwd.map(OsStr::as_encoded_bytes),
     ) else {
         return DiagTarget::Stderr;
     };
@@ -2729,10 +2848,7 @@ fn open_log_file(name: &OsStr) -> DiagTarget {
         .append(true)
         .open(log_path(&file.path))
     {
-        Ok(_)
-            if free_disk_space(&file.space, cwd.as_deref())
-                .is_some_and(|free| free < LOW_DISK_SPACE) =>
-        {
+        Ok(_) if free_disk_space(&file.space, cwd).is_some_and(|free| free < LOW_DISK_SPACE) => {
             DiagTarget::Discard
         }
         Ok(opened) => DiagTarget::File(opened),
@@ -4262,6 +4378,22 @@ mod tests {
         let rooted = |name: &[u8]| name == b"x" || name == b"/x";
         assert_eq!(unix_program_name(Some(b"x"), b"", b"", &rooted), b"/x");
         assert_eq!(unix_program_name(Some(b"x"), b"", b"", &none), b"x");
+        // A working directory of 4095 bytes or more is read as none (`getcwd_reads`), which is
+        // what `program_directories` takes (line WQA's D11 round 4, 2026-11-20).
+        let deep = |length: usize| {
+            getcwd_reads(OsString::from(format!("/{}", "d".repeat(length - 1))))
+                .map(|cwd| cwd.as_encoded_bytes().to_vec())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            unix_program_name(Some(b"x"), b"", &deep(4095), &rooted),
+            b"/x"
+        );
+        let in_deep = |name: &[u8]| name == b"x" || name.ends_with(b"d/x");
+        assert_eq!(
+            unix_program_name(Some(b"x"), b"", &deep(4094), &in_deep),
+            [deep(4094).as_slice(), b"/x"].concat()
+        );
         // The directories: the name's, then the resolved name's when it is another one (the
         // last of '/', '\\' and ':' ends a directory on every platform).
         let dirs = |name: &str, resolved: Option<&str>| {
@@ -5052,6 +5184,13 @@ mod tests {
         let (_, path, space) = read(&long, cwd);
         assert_eq!(path, [b"/w/".as_slice(), &long[..2044]].concat());
         assert_eq!(space, b"/w/");
+        // On Unix the cut may split a character, whose first bytes NCBI opens (round 4).
+        let japanese = "日".repeat(700);
+        let (_, path, _) = read(japanese.as_bytes(), cwd);
+        assert_eq!(
+            path,
+            [b"/w/".as_slice(), &japanese.as_bytes()[..2044]].concat()
+        );
     }
 
     /// NCBI's reading of a `-logfile` name on Windows (by NCBI's source: line WQA's D11 round 3,
@@ -5109,6 +5248,19 @@ mod tests {
         ] {
             assert_eq!(read(name, cwd), read_as, "{name:?}");
         }
+        // A cut of NCBI's that splits a character leaves a string that NCBI's conversion to
+        // UTF-16 does not read (round 4, L1): the 2047 bytes of the name, the 2 of a part with a
+        // ':' (a 3-byte character); where the cuts end characters, the path is read.
+        let japanese = "日".repeat(700);
+        assert_eq!(read(&japanese, cwd), None);
+        let whole = format!("ab{japanese}");
+        let (_, path, _) = read(&whole, cwd).unwrap();
+        assert_eq!(path, format!("C:\\w\\ab{}", "日".repeat(680)).into_bytes());
+        assert_eq!(read("C:\\日:x\\..\\run.log", cwd), None);
+        assert_eq!(
+            read("C:\\é:x\\..\\run.log", cwd),
+            paths(Some("C:\\é:x\\.."), "C:\\é\\..\\run.log", "C:\\é:x\\..\\")
+        );
         // Without a working directory a name from one separator stays as it is.
         assert_eq!(
             read("\\run.log", None),
@@ -5218,6 +5370,20 @@ mod tests {
         }
         assert!(matches!(target("own-link"), DiagTarget::File(_)));
         drop(own);
+        // A relative name is opened in the working directory that `open_log_file` is given, the
+        // one that NCBI reads (`ncbi_cwd`; round 4, L3: not this process's own here).
+        assert!(matches!(
+            open_log_file(OsStr::new("relative.log"), Some(dir.as_os_str())),
+            DiagTarget::File(_)
+        ));
+        assert!(dir.join("relative.log").is_file());
+        assert!(matches!(
+            open_log_file(
+                OsStr::new("relative.log"),
+                Some(dir.join("missing").as_os_str())
+            ),
+            DiagTarget::Stderr
+        ));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

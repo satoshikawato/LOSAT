@@ -556,6 +556,130 @@ fn an_unreadable_conffile_and_a_last_word_without_value() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// NCBI BLAST+ 2.17.0 tblastx `-evalue 0 -logfile /dev/full` writes its error to the file, whose
+/// writes fail, and exits with 1, writing nothing (line WQA's D11 round 2, 2026-11-20). LOSAT's
+/// standard error is then that file, and its last write of the error fails: dropped, as NCBI's post
+/// drops it, not a panic, which would abort (`cli::exit_on_native_error`; review 2 L3a, round 4).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_log_that_cannot_be_written_ends_the_run_as_ncbis() {
+    let dir = scratch("full");
+    let (_, search) = SEARCHES[3];
+    let mut words = vec!["tblastx"];
+    words.extend(search);
+    words.extend(["-evalue", "0", "-logfile", "/dev/full"]);
+    let run = run_in(&dir, &words, &[]);
+    assert_eq!(
+        (run.status.code(), text(&run.stdout), text(&run.stderr)),
+        (Some(1), String::new(), String::new()),
+        "{run:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// NCBI BLAST+ 2.17.0 cannot read a working directory of 4095 bytes or more (`CDir::GetCwd`'s
+/// `getcwd` into 4095 bytes), so a relative `-logfile` name stays relative and its file is made
+/// there; in one of 4094 bytes it makes the name absolute and keeps 2047 bytes of it, which name a
+/// file in an ancestor (line WQA's D11 round 3, probe 6, 2026-11-20). The command line opens the
+/// log in the working directory as NCBI reads it (`ncbi_environment::ncbi_cwd`; review 2 L3b,
+/// round 4).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_deep_working_directory_keeps_a_log_name_relative() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = scratch("deep");
+    let warning = "Warning: [tblastx] Examining 5 or more matches is recommended\n";
+    let (_, search) = SEARCHES[3];
+    let inputs: Vec<String> = search
+        .iter()
+        .map(|word| match word.strip_prefix("arch_") {
+            Some(_) => dir.join(word).display().to_string(),
+            None => word.to_string(),
+        })
+        .collect();
+    for (length, part) in [(4094, "a"), (4095, "b")] {
+        let base = dir.join(part);
+        let deep = deep_directory(&base, length);
+        let mut words = vec!["tblastx"];
+        words.extend(inputs.iter().map(String::as_str));
+        words.extend([
+            "-outfmt",
+            "6",
+            "-max_target_seqs",
+            "1",
+            "-logfile",
+            "run.log",
+        ]);
+        let run = run_in(&deep, &words, &[]);
+        assert_eq!(
+            (run.status.code(), text(&run.stderr)),
+            (Some(0), String::new()),
+            "{length}"
+        );
+        let in_deep = read_under(&base, &deep, "run.log");
+        let cut = Path::new(std::ffi::OsStr::from_bytes(
+            &deep.as_os_str().as_bytes()[..2047],
+        ));
+        let at_cut = fs::read_to_string(cut).ok();
+        if length == 4095 {
+            assert_eq!(
+                (in_deep, at_cut),
+                (Some(warning.to_string()), None),
+                "{length}"
+            );
+        } else {
+            assert_eq!(
+                (in_deep, at_cut),
+                (None, Some(warning.to_string())),
+                "{length}"
+            );
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// A directory under `base` whose path has `length` bytes, of components of at most 101 bytes,
+/// made; its byte 2047 is inside a component that goes on after it, so that the first 2047 bytes
+/// name a file that can be made in an ancestor.
+#[cfg(target_os = "linux")]
+fn deep_directory(base: &Path, length: usize) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    let start = base.as_os_str().as_bytes();
+    assert!(start.len() < 1900, "{}", base.display());
+    for first in 60..100 {
+        let mut path = start.to_vec();
+        let mut size = first;
+        while length - path.len() > size + 2 {
+            path.push(b'/');
+            path.extend(std::iter::repeat_n(b'd', size));
+            size = 100;
+        }
+        let rest = length - path.len();
+        path.push(b'/');
+        path.extend(std::iter::repeat_n(b'e', rest - 1));
+        if path[2046] != b'/' && path[2047] != b'/' && path[2048] != b'/' {
+            let deep = PathBuf::from(std::ffi::OsStr::from_bytes(&path));
+            fs::create_dir_all(&deep).unwrap();
+            return deep;
+        }
+    }
+    unreachable!("a layout for {length} bytes")
+}
+
+/// The text of the file `name` in `deep`, a directory under `base` whose path may be too long for
+/// the system to take whole, read relative to `base`; `None` where there is none.
+#[cfg(target_os = "linux")]
+fn read_under(base: &Path, deep: &Path, name: &str) -> Option<String> {
+    use rustix::fs::{Mode, OFlags};
+    let directory =
+        rustix::fs::open(base, OFlags::RDONLY | OFlags::DIRECTORY, Mode::empty()).unwrap();
+    let relative = deep.strip_prefix(base).unwrap().join(name);
+    let file = rustix::fs::openat(&directory, &relative, OFlags::RDONLY, Mode::empty()).ok()?;
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut fs::File::from(file), &mut text).unwrap();
+    Some(text)
+}
+
 /// No NCBI counterpart: LOSAT's own refusal (here of `BL2SEQ_LEGACY`, which NCBI reads and LOSAT
 /// does not) stays on the terminal when tblastx sends the messages of its run to the `-logfile`
 /// file (line RG DECISIONS 32).

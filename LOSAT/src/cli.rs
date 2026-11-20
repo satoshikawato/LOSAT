@@ -2585,9 +2585,19 @@ pub(crate) fn create_out_file(
 // }
 // ```
 /// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
-/// that the run already wrote (`post_native_error`) is not written again.
+/// that the run already wrote (`post_native_error`) is not written again. An error of a report's
+/// writer that carries an exception of NCBI's (`NcbiException::into_io_error`: the `-html` links'
+/// registry, `report::formatter_registry::InitConfig`, which NCBI's formatter reads while it
+/// writes) is that exception's report (`NativeError::of_writer`), whichever program wrote it.
 pub fn exit_on_native_error(error: &anyhow::Error) {
-    if let Some(e) = error.downcast_ref::<NativeError>() {
+    let of_writer = error
+        .downcast_ref::<std::io::Error>()
+        .and_then(crate::ncbi_exception::NcbiException::of_io_error)
+        .map(NativeError::exception);
+    if let Some(e) = of_writer
+        .as_ref()
+        .or_else(|| error.downcast_ref::<NativeError>())
+    {
         if !posted(&e.message) {
             eprint!("{}", catch_all_text(&e.message));
         }

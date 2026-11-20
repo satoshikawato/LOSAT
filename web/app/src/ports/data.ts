@@ -110,6 +110,14 @@ export interface RunStore {
   commitRun(runId: string): Promise<ResultSetRef>;
   /** Drops a staged run. Committed and unknown runs are left alone. */
   discardRun(runId: string): Promise<void>;
+  /**
+   * Drops a staged run that the engine failed after it began to write (its rejection says so:
+   * `runOutputFailedOf`), once its `fail` arrived (losat/ports run-output.ts), and resolves to what
+   * the run wrote to stream 3 before its error (its warnings, UTF-8, as `readDiagnostics` reads a
+   * committed run's; docs/web/abi_v2.md §5). Resolves to '' where its output arrived incomplete or
+   * could not be stored, and for a run that is not staged.
+   */
+  discardFailedRun(runId: string): Promise<string>;
   readOutput(runId: string, output: RunOutput): Promise<Uint8Array>;
   /** Bytes [start, end) of one output of a committed run (an HSP's row or section). */
   readOutputRange(runId: string, output: RunOutput, start: number, end: number): Promise<Uint8Array>;

@@ -33,6 +33,7 @@ mod frames;
 mod nucleotide;
 mod offline;
 mod prosite;
+pub(crate) use prosite::{HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
 mod query;
 mod segset;
 mod sites;

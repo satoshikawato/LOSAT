@@ -160,6 +160,8 @@ export interface WorkerError {
   readonly stopped?: boolean;
   /** The files that the failed run made besides its outputs (stream 8; `runFilesOf`). */
   readonly runFiles?: readonly RunFile[];
+  /** The failed run ended its output with `fail` (`runOutputFailedOf`). */
+  readonly outputFailed?: true;
 }
 
 export type EngineEvent =

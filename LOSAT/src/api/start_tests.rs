@@ -796,6 +796,56 @@ fn a_callers_start_reads_its_files_and_hands_over_the_log() {
     );
 }
 
+// What a caller's run adds to the command line's messages for its arguments (`CallerSink::add`,
+// LOSAT Web's other formats) goes to its diagnostics, but where the run's messages go nowhere
+// (TBLASTX's `-logfile ""` and `-logfile /dev/null`), and never to the file of `-logfile` (line
+// WQA's sweep, D3 review r3, 2026-11-19); the sink says where it went.
+#[test]
+fn what_a_callers_run_adds_goes_where_the_run_s_messages_can_go() {
+    use crate::blastinput::ncbi_environment::{ApplicationStart, TextPlace};
+    use crate::report::run_files::RunFiles;
+    let kept = std::sync::Arc::new(Kept::default());
+    let files = Files(Vec::new());
+    for (program, logfile, shown) in [
+        ("tblastx", None, true),
+        ("tblastx", Some("run.log"), true),
+        ("tblastx", Some("-"), true),
+        ("tblastx", Some(""), false),
+        ("tblastx", Some("/dev/null"), false),
+        ("blastn", Some(""), true),
+        ("blastn", Some("/dev/null"), true),
+        ("blastp", Some("run.log"), true),
+    ] {
+        let words: Vec<&str> = logfile.map_or(Vec::new(), |name| vec!["-logfile", name]);
+        let mut stderr = Vec::new();
+        let mut started = begin_with(
+            ApplicationStart::with_files(program, &words, &[], &files),
+            &words,
+            &RunFiles::Receiver(kept.clone()),
+            &mut stderr,
+        )
+        .unwrap();
+        let mut diagnostics = Vec::new();
+        let place = started.sink(&mut diagnostics).add(b"Warning: w\n");
+        let expected: &[u8] = if shown { b"Warning: w\n" } else { b"" };
+        assert_eq!(diagnostics, expected, "{program} {logfile:?}");
+        let expected = if shown {
+            TextPlace::StandardError
+        } else {
+            TextPlace::Nowhere
+        };
+        assert_eq!(place, expected, "{program} {logfile:?}");
+        started.finish().unwrap();
+    }
+    // The files of `-logfile` hold nothing of it.
+    assert!(kept
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|(_, bytes)| bytes.is_empty()));
+}
+
 // Line WQA's sweep, D7 (2026-11-20): the place that a caller's start gives for its run's messages
 // (`CallerStart::messages_place`) is where the messages written to its sink end up, for each kind
 // of `-logfile` target (none, `-`, a file, `""` and `/dev/null`) in a program whose run's messages
@@ -855,13 +905,15 @@ fn a_callers_start_says_where_its_run_s_messages_go() {
 }
 
 // Line WQA's sweep, D7 (2026-11-20): the error of an output that a caller's run could not write
-// goes where the command line's run of that output alone writes it, and the place that the sink
-// gives back is where the text is. NCBI's message goes where the run's messages go: in TBLASTX
-// `-logfile run.log` writes it to the file, `""` and `/dev/null` nowhere, `-` to the standard error
-// (NCBI BLAST+ 2.17.0 and LOSAT's command line, `tblastx -outfmt 6 -num_alignments 0`). LOSAT's
-// own refusal goes to the standard error whatever `-logfile` is (`cli::main_entry`; LOSAT's
-// `tblastx -outfmt 6` of a subject title that NCBI cannot decode writes it there and none to the
-// file, for each of these `-logfile`).
+// goes where the command line's run writes it, and the place that the sink gives back is where the
+// text is. NCBI's message goes where what the run adds goes (`CallerSink::add`): to the standard
+// error, also for TBLASTX's `-logfile run.log`, whose file holds what the CLI's file holds for the
+// argv, which is not that output's (the CLI's `tblastx -num_alignments 0 -logfile run.log` leaves it
+// empty; line WQA's sweep, D3 review r2, 2026-11-19), and nowhere for `""` and `/dev/null`, where
+// the CLI's run of that output writes it nowhere (NCBI BLAST+ 2.17.0 and LOSAT's command line,
+// `tblastx -outfmt 6 -num_alignments 0`). LOSAT's own refusal goes to the standard error whatever
+// `-logfile` is (`cli::main_entry`; LOSAT's `tblastx -outfmt 6` of a subject title that NCBI cannot
+// decode writes it there and none to the file, for each of these `-logfile`).
 #[test]
 fn a_callers_sink_writes_an_output_s_error_where_the_command_line_does() {
     use crate::blastinput::ncbi_environment::{ApplicationStart, TextPlace};
@@ -909,9 +961,9 @@ fn a_callers_sink_writes_an_output_s_error_where_the_command_line_does() {
                     },
                     "{label}: {place:?}"
                 );
-                let expected = match source {
-                    ErrorSource::Ncbi => messages,
-                    ErrorSource::Losat => TextPlace::StandardError,
+                let expected = match (source, messages) {
+                    (ErrorSource::Ncbi, TextPlace::Nowhere) => TextPlace::Nowhere,
+                    _ => TextPlace::StandardError,
                 };
                 assert_eq!(place, expected, "{label}");
             }

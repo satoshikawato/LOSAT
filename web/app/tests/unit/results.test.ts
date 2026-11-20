@@ -689,6 +689,19 @@ describe('ResultsBrowser', () => {
     expect(logged.results.state.get().message).toBe(
       'Run 1 failed: BLAST engine error: The average subject length is too short. A failed run keeps no results. It keeps the file of its -logfile, run.log.',
     );
+    // A failed run keeps the warnings written before its error (line WQA's sweep, D3, 2026-11-19); white space alone is none.
+    const warned = setup({
+      status: 'failed',
+      error: 'BLAST engine error: The average subject length is too short',
+      record: { diagnostics: 'Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n' },
+    });
+    await warned.results.open('r1');
+    expect(warned.results.state.get().message).toBe(
+      'Run 1 failed: BLAST engine error: The average subject length is too short. A failed run keeps no results. It keeps the warnings written before the error.',
+    );
+    const blank = setup({ status: 'failed', error: 'boom', record: { diagnostics: '\n' } });
+    await blank.results.open('r1');
+    expect(blank.results.state.get().message).toBe('Run 1 failed: boom. A failed run keeps no results.');
 
     const running = setup({ status: 'running' });
     await running.results.open('r1');

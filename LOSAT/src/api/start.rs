@@ -342,7 +342,8 @@ impl Write for RunSink<'_> {
 /// writes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorSource {
-    /// NCBI's message (a `NativeError`'s), which NCBI writes where the run's messages go.
+    /// NCBI's message (a `NativeError`'s), which NCBI writes where the run's messages go
+    /// (`CallerSink::add`).
     Ncbi,
     /// LOSAT's own refusal (`Error: ` and the error, as `main` writes it), which NCBI has no
     /// message for.
@@ -351,24 +352,40 @@ pub enum ErrorSource {
 
 /// The writer of the messages that a caller's run writes for `cerr` (`CallerStart::sink`): they go
 /// where the run's messages go (`RunLog::sink`: the file of `-logfile` in TBLASTX, else the caller's
-/// diagnostics), as they come. It also writes the error of an output that the run could not write,
-/// and says where it went (`CallerSink::error`).
+/// diagnostics), as they come. It also writes what the caller's run adds to the command line's
+/// messages for its arguments (`CallerSink::add`), among them the error of an output that the run
+/// could not write (`CallerSink::error`), and says where each went.
 pub struct CallerSink<'a>(RunSink<'a>);
 
 impl CallerSink<'_> {
-    /// Writes `text`, the error of an output that the run could not write, where the command line's
-    /// run of that output alone writes it, and gives back where that is: NCBI's message
-    /// (`ErrorSource::Ncbi`) where the run's messages go (the file of `-logfile` or nowhere in
-    /// TBLASTX, `RunLog::sink`), LOSAT's own refusal (`ErrorSource::Losat`) to the caller's
+    /// Writes `text`, what the caller's run adds to the command line's messages for its arguments
+    /// (LOSAT Web writes outfmt 0, 6 and 7 besides the argv's `-outfmt`, and gives what the command
+    /// line writes for those formats), and gives back where that is: the caller's diagnostics, the
+    /// standard error, also where the run's messages go to the file of `-logfile`, which keeps what
+    /// the command line's file holds for the arguments (line WQA's sweep, D3 review r2,
+    /// 2026-11-19: the file had the other formats' lines); nowhere where the run's messages go
+    /// nowhere (`-logfile ""` and `-logfile /dev/null` in TBLASTX, `DiagTarget::Discard`), as the
+    /// command line's run of any format writes them nowhere there (D3 review r3, 2026-11-19).
+    pub fn add(&mut self, text: &[u8]) -> TextPlace {
+        match self.0.place() {
+            TextPlace::Nowhere => TextPlace::Nowhere,
+            TextPlace::StandardError | TextPlace::LogFile => {
+                let _ = self.0.diagnostics.write_all(text);
+                TextPlace::StandardError
+            }
+        }
+    }
+
+    /// Writes `text`, the error of an output that the run could not write (one that the command
+    /// line's run of the arguments does not write: that run's own error ends the caller's run), and
+    /// gives back where that is: NCBI's message (`ErrorSource::Ncbi`) where the run's other added
+    /// messages go (`CallerSink::add`), LOSAT's own refusal (`ErrorSource::Losat`) to the caller's
     /// diagnostics, the standard error, which the command line writes it to whatever `-logfile` is
     /// (`cli::main_entry`). The place is the writer's own, so it stays where the text is (line
     /// WQA's sweep, D7, 2026-11-20).
     pub fn error(&mut self, text: &[u8], source: ErrorSource) -> TextPlace {
         match source {
-            ErrorSource::Ncbi => {
-                let _ = self.0.write_all(text);
-                self.0.place()
-            }
+            ErrorSource::Ncbi => self.add(text),
             ErrorSource::Losat => {
                 let _ = self.0.diagnostics.write_all(text);
                 TextPlace::StandardError

@@ -7,8 +7,12 @@ follows NCBI's `GetUniqSeqCoverage`, which builds `CRangeCollection<TSeqPos>` ob
 `R.GetToOpen() <= Pos`). A query gap at the first or last subject letter of a part gives a query
 range whose `TSeqPos` arithmetic wrapped, and the collection is then not in the order of
 `GetToOpen()`. For such a collection the position `lower_bound` returns depends on which
-elements it compares and in which order, so `lower_bound_by` in `tabular.rs` asks about the same
-elements in the same order as `std::lower_bound` did here.
+elements it compares and in which order, so `lower_bound_by` (`LOSAT/src/utils/lower_bound.rs`)
+asks about the same elements in the same order as `std::lower_bound` did here. The same search
+stands for NCBI's other calls of `lower_bound` whose elements nothing checks for order: the units
+of a binary windowmasker file (`CSeqMaskerUsetArray::get_info`, `LOSAT/src/utils/winmask/istat.rs`)
+and the `indexes` of a Seq-table's sparse index (`CSeqTable_sparse_index::GetIndexAt`,
+`LOSAT/src/algorithm/pssm_search/annot_index/table.rs`).
 
 The order was observed, not taken from any library's source: `observe_lower_bound.cpp` passes
 `std::lower_bound` a comparator that records every call it receives (the index of the element and
@@ -18,7 +22,8 @@ source, no preprocessed output, no disassembly or debugger trace of the library.
 ## Files
 
 - `observe_lower_bound.cpp`: the observation program (modes `tree`, `data`, `one`; see its header).
-- `probe_trees.txt`: the fixture of the unit test `lower_bound_asks_in_the_observed_order`. One
+- `probe_trees.txt`: the fixture of the unit test `lower_bound_asks_in_the_observed_order`
+  (`LOSAT/src/utils/lower_bound_tests.rs`). One
   line per window: `tree <n> <start> <total> <preorder tree>`, the window being the `n` elements
   from index `start` of a vector of `total` elements. The tree lists every sequence of answers
   the comparator can give: `p<index>` is a call with the element at `index` (followed by the tree

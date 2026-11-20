@@ -15,7 +15,7 @@
 //! is the business of the fixture rows `db.x4b.*`; these tests pin LOSAT's decisions and their
 //! independence of `-num_threads`.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
 //! ```c
 //!     for (i = 0; i < actual_num_threads; ++i) {
 //!         if (status_code_tld[i] != 0) {
@@ -23,7 +23,7 @@
 //!         }
 //!     }
 //! ```
-//! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-253
 //! ```c++
 //!     if (status) {
 //!         NCBI_THROW(CBlastException, eCoreBlastError, "Traceback failed");

@@ -823,7 +823,7 @@ pub(crate) struct SwXdropTraceback {
 /// An alignment of the round loop, in the window's coordinates (`queryStart`, the updated
 /// `queryEnd`, `matchStart`, the updated `matchEnd` of `s_NewAlignmentUsingXdrop`), with the X-drop
 /// score and edit script; the caller adds the window's offsets, its frame and matrix rule
-/// (`BlastCompo_AlignmentNew`, blast_kappa.c:1856-1873).
+/// (`BlastCompo_AlignmentNew`, blast_kappa.c:1858-1876).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SwAlignment {
     pub(crate) score: i32,
@@ -994,7 +994,7 @@ pub(crate) enum SwWindowRedo {
 ///     if (size <= 0)
 ///        return NULL;
 /// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1856-1873
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1858-1876
 /// ```c
 ///     if (editScript != NULL) {
 ///         ...

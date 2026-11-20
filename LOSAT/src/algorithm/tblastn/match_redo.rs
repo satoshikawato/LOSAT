@@ -185,12 +185,13 @@ impl MatchRedo for SmithWatermanRedo {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1456-1474
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1456-1473
     // ```c
-    //             if (params->do_link_hsps) {
-    //                 alignment_is_significant = aSwScore >= params->cutoff_s;
-    //             } else {
-    //                 double newSwEvalue; /* evalue as computed by Smith-Waterman */
+    //                 if (do_link_hsps) {
+    //                     alignment_is_significant = aSwScore >= params->cutoff_s;
+    //                 } else {
+    //                     double newSwEvalue;     /* evalue as computed by the
+    //                                              * Smith-Waterman algorithm */
     // ...
     //                     if (alignments[query_index] == NULL) {
     // ...
@@ -303,7 +304,7 @@ pub(super) fn match_outcome<R: MatchRedo, T>(
 /// 1` result at every thread count: with `-db` and more threads NCBI interrupts the batch at the
 /// first failure.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
 /// ```c
 ///     for (i = 0; i < actual_num_threads; ++i) {
 ///         if (status_code_tld[i] != 0) {

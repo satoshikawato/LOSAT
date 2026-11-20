@@ -147,7 +147,7 @@ pub(super) fn check_limits(
             "-mt_mode 1 with -num_threads above 1, -db and -in_pssm, with which NCBI BLAST+ 2.17.0's tblastn aborts, is not supported by LOSAT's TBLASTN"
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3360-3361 (the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3359-3360 (the
     // Smith-Waterman redo of a PSSM query reads the PSSM's rows; `-use_sw_tback` sets the mode
     // after `SetPSITblastnDefaults`, blast_args.cpp:885)
     // ```c

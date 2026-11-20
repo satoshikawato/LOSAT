@@ -15,7 +15,7 @@
 //!     Boolean smithWaterman =
 //!         (Boolean) (extendParams->options->eTbackExt == eSmithWatermanTbck);
 //! ```
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3621
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3622
 //! ```c
 //!                     if (smithWaterman) {
 //!                         *pStatusCode =
@@ -203,7 +203,7 @@ impl std::error::Error for SwRedoEndless {}
 /// the window's first alignment is near identical, as for the X-drop redo's first range
 /// (`subject_maybe_biased` starts true there and this redo does not read its answer).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3360-3363 (`matrix`, which
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3359-3362 (`matrix`, which
 /// `Blast_AdjustScores` overwrites, is the thread's score block's matrix)
 /// ```c
 ///         if (positionBased) {
@@ -326,7 +326,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
             );
         };
         let matrix_adjust_rule = match unadjusted {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1336
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1332
             // ```c
             //     EMatrixAdjustRule matrix_adjust_rule = eDontAdjustMatrix;
             // ```
@@ -335,15 +335,18 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
                 EMatrixAdjustRule::DontAdjustMatrix
             }
             _ => {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-937
+                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:923-936
                 // ```c
-                //     if (is_translated) {
-                //         int start, end;
-                //         start = align->matchStart - range->begin;
-                //         end   = align->matchEnd   - range->begin;
-                //         Blast_GetCompositionRange(&left, &right, data, length,
-                //                                   start, end);
+                //     if (query_is_translated || subject_is_translated) {
+                //         int start;
+                //         int end;
+                //         start = ((query_is_translated) ?
+                //                  align->queryStart : align->matchStart) - range->begin;
+                //         end   = ((query_is_translated) ?
+                //                  align->queryEnd   : align->matchEnd  ) - range->begin;
+                //         Blast_GetCompositionRange(&left, &right, data, length, start, end);
                 //     } else {
+                //         /* Use the whole subject to compute the composition */
                 //         left = 0;
                 //         right = length;
                 //     }
@@ -426,7 +429,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
                 cutoff_e,
             }
         };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1466-1474
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1465-1474
         // ```c
         //                     if (alignments[query_index] == NULL) {
         //                         /* this is the most significant alignment; if
@@ -553,7 +556,7 @@ pub(crate) fn unadjusted_square_matrix(
 /// refusal of the batch where NCBI's clean-up crashes (PD-LOSAT-NCBI-DEFECTS 1.53, rule 3; exit 1).
 /// The caller puts it after the reports of the batches before.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
 /// ```c
 ///     for (i = 0; i < actual_num_threads; ++i) {
 ///         if (status_code_tld[i] != 0) {
@@ -561,7 +564,7 @@ pub(crate) fn unadjusted_square_matrix(
 ///         }
 ///     }
 /// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-253
 /// ```c++
 ///     if (status) {
 ///         NCBI_THROW(CBlastException, eCoreBlastError, "Traceback failed");

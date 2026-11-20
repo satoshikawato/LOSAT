@@ -11368,7 +11368,7 @@ fn run_call(
     // Each query's context of the E-value adjustment with a composition P-value: the next
     // query's of its batch, or its own (`kappa::evalue_adjust_contexts`). With unified P-values a
     // batch whose adjustment NCBI makes with a search space of 0 is refused there.
-    let evalue_adjust_contexts = kappa::evalue_adjust_contexts(
+    let evalue_adjust_contexts = super::kappa::evalue_adjust_contexts(
         &contexts,
         &search_spaces,
         &kappa_query_batches,

@@ -1,0 +1,32 @@
+Possible duplication of sequences:
+subject: gnl|BL_ORD_ID:1 and query: gnl|BL_ORD_ID:0
+at intervals
+subject: 8003 --- 38003
+query  : 10000 --- 40000
+
+Possible duplication of sequences:
+subject: gnl|BL_ORD_ID:0 and query: gnl|BL_ORD_ID:0
+at intervals
+subject: 0 --- 40000
+query  : 0 --- 40000
+
+Possible duplication of sequences:
+subject: gnl|BL_ORD_ID:1 and query: gnl|BL_ORD_ID:0
+at intervals
+subject: 8003 --- 38003
+query  : 10000 --- 40000
+
+Possible duplication of sequences:
+subject: gnl|BL_ORD_ID:1 and query: gnl|BL_ORD_ID:1
+at intervals
+subject: 9003 --- 39003
+query  : 9003 --- 39003
+
+Possible duplication of sequences:
+subject: gnl|BL_ORD_ID:1 and query: gnl|BL_ORD_ID:0
+at intervals
+subject: 4006 --- 34006
+query  : 6003 --- 36003
+
+pass 1
+pass 2

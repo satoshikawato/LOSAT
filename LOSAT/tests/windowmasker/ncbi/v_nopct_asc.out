@@ -1,0 +1,53 @@
+##windowmasker-statistics-format-version:ascii 1.1.0
+##windowmasker-statistics-algorithm-version:1.0.0
+##parameters:unit=4 t_low=500 t_high=500
+##note:dm2L 60k
+4
+0 500
+1 500
+2 500
+3 500
+4 500
+7 500
+8 500
+9 500
+b 500
+c 500
+d 500
+e 500
+f 500
+10 500
+13 500
+20 500
+22 500
+24 500
+30 500
+31 500
+33 500
+34 500
+38 500
+3c 500
+3d 500
+3e 500
+40 500
+41 500
+44 500
+4c 500
+50 500
+80 500
+90 500
+b0 500
+c0 500
+c4 500
+cc 500
+d0 500
+e0 500
+e4 500
+f0 500
+
+
+>t_low 500
+>t_extend 500
+>t_threshold 500
+>t_high 500
+

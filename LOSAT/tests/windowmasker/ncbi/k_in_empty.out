@@ -1,0 +1,1018 @@
+##windowmasker-statistics-format-version:ascii 1.1.0
+##windowmasker-statistics-algorithm-version:1.0.0
+##parameters:unit=5 t_low=1 t_high=0
+##pct: 0 0
+##pct: 1 -nan
+##pct: 2 -nan
+##pct: 3 -nan
+##pct: 4 -nan
+##pct: 5 -nan
+##pct: 6 -nan
+##pct: 7 -nan
+##pct: 8 -nan
+##pct: 9 -nan
+##pct: 10 -nan
+##pct: 11 -nan
+##pct: 12 -nan
+##pct: 13 -nan
+##pct: 14 -nan
+##pct: 15 -nan
+##pct: 16 -nan
+##pct: 17 -nan
+##pct: 18 -nan
+##pct: 19 -nan
+##pct: 20 -nan
+##pct: 21 -nan
+##pct: 22 -nan
+##pct: 23 -nan
+##pct: 24 -nan
+##pct: 25 -nan
+##pct: 26 -nan
+##pct: 27 -nan
+##pct: 28 -nan
+##pct: 29 -nan
+##pct: 30 -nan
+##pct: 31 -nan
+##pct: 32 -nan
+##pct: 33 -nan
+##pct: 34 -nan
+##pct: 35 -nan
+##pct: 36 -nan
+##pct: 37 -nan
+##pct: 38 -nan
+##pct: 39 -nan
+##pct: 40 -nan
+##pct: 41 -nan
+##pct: 42 -nan
+##pct: 43 -nan
+##pct: 44 -nan
+##pct: 45 -nan
+##pct: 46 -nan
+##pct: 47 -nan
+##pct: 48 -nan
+##pct: 49 -nan
+##pct: 50 -nan
+##pct: 51 -nan
+##pct: 52 -nan
+##pct: 53 -nan
+##pct: 54 -nan
+##pct: 55 -nan
+##pct: 56 -nan
+##pct: 57 -nan
+##pct: 58 -nan
+##pct: 59 -nan
+##pct: 60 -nan
+##pct: 61 -nan
+##pct: 62 -nan
+##pct: 63 -nan
+##pct: 64 -nan
+##pct: 65 -nan
+##pct: 66 -nan
+##pct: 67 -nan
+##pct: 68 -nan
+##pct: 69 -nan
+##pct: 70 -nan
+##pct: 71 -nan
+##pct: 72 -nan
+##pct: 73 -nan
+##pct: 74 -nan
+##pct: 75 -nan
+##pct: 76 -nan
+##pct: 77 -nan
+##pct: 78 -nan
+##pct: 79 -nan
+##pct: 80 -nan
+##pct: 81 -nan
+##pct: 82 -nan
+##pct: 83 -nan
+##pct: 84 -nan
+##pct: 85 -nan
+##pct: 86 -nan
+##pct: 87 -nan
+##pct: 88 -nan
+##pct: 89 -nan
+##pct: 90 -nan
+##pct: 91 -nan
+##pct: 92 -nan
+##pct: 93 -nan
+##pct: 94 -nan
+##pct: 95 -nan
+##pct: 96 -nan
+##pct: 97 -nan
+##pct: 98 -nan
+##pct: 99 -nan
+##pct: 100 -nan
+##pct: 101 -nan
+##pct: 102 -nan
+##pct: 103 -nan
+##pct: 104 -nan
+##pct: 105 -nan
+##pct: 106 -nan
+##pct: 107 -nan
+##pct: 108 -nan
+##pct: 109 -nan
+##pct: 110 -nan
+##pct: 111 -nan
+##pct: 112 -nan
+##pct: 113 -nan
+##pct: 114 -nan
+##pct: 115 -nan
+##pct: 116 -nan
+##pct: 117 -nan
+##pct: 118 -nan
+##pct: 119 -nan
+##pct: 120 -nan
+##pct: 121 -nan
+##pct: 122 -nan
+##pct: 123 -nan
+##pct: 124 -nan
+##pct: 125 -nan
+##pct: 126 -nan
+##pct: 127 -nan
+##pct: 128 -nan
+##pct: 129 -nan
+##pct: 130 -nan
+##pct: 131 -nan
+##pct: 132 -nan
+##pct: 133 -nan
+##pct: 134 -nan
+##pct: 135 -nan
+##pct: 136 -nan
+##pct: 137 -nan
+##pct: 138 -nan
+##pct: 139 -nan
+##pct: 140 -nan
+##pct: 141 -nan
+##pct: 142 -nan
+##pct: 143 -nan
+##pct: 144 -nan
+##pct: 145 -nan
+##pct: 146 -nan
+##pct: 147 -nan
+##pct: 148 -nan
+##pct: 149 -nan
+##pct: 150 -nan
+##pct: 151 -nan
+##pct: 152 -nan
+##pct: 153 -nan
+##pct: 154 -nan
+##pct: 155 -nan
+##pct: 156 -nan
+##pct: 157 -nan
+##pct: 158 -nan
+##pct: 159 -nan
+##pct: 160 -nan
+##pct: 161 -nan
+##pct: 162 -nan
+##pct: 163 -nan
+##pct: 164 -nan
+##pct: 165 -nan
+##pct: 166 -nan
+##pct: 167 -nan
+##pct: 168 -nan
+##pct: 169 -nan
+##pct: 170 -nan
+##pct: 171 -nan
+##pct: 172 -nan
+##pct: 173 -nan
+##pct: 174 -nan
+##pct: 175 -nan
+##pct: 176 -nan
+##pct: 177 -nan
+##pct: 178 -nan
+##pct: 179 -nan
+##pct: 180 -nan
+##pct: 181 -nan
+##pct: 182 -nan
+##pct: 183 -nan
+##pct: 184 -nan
+##pct: 185 -nan
+##pct: 186 -nan
+##pct: 187 -nan
+##pct: 188 -nan
+##pct: 189 -nan
+##pct: 190 -nan
+##pct: 191 -nan
+##pct: 192 -nan
+##pct: 193 -nan
+##pct: 194 -nan
+##pct: 195 -nan
+##pct: 196 -nan
+##pct: 197 -nan
+##pct: 198 -nan
+##pct: 199 -nan
+##pct: 200 -nan
+##pct: 201 -nan
+##pct: 202 -nan
+##pct: 203 -nan
+##pct: 204 -nan
+##pct: 205 -nan
+##pct: 206 -nan
+##pct: 207 -nan
+##pct: 208 -nan
+##pct: 209 -nan
+##pct: 210 -nan
+##pct: 211 -nan
+##pct: 212 -nan
+##pct: 213 -nan
+##pct: 214 -nan
+##pct: 215 -nan
+##pct: 216 -nan
+##pct: 217 -nan
+##pct: 218 -nan
+##pct: 219 -nan
+##pct: 220 -nan
+##pct: 221 -nan
+##pct: 222 -nan
+##pct: 223 -nan
+##pct: 224 -nan
+##pct: 225 -nan
+##pct: 226 -nan
+##pct: 227 -nan
+##pct: 228 -nan
+##pct: 229 -nan
+##pct: 230 -nan
+##pct: 231 -nan
+##pct: 232 -nan
+##pct: 233 -nan
+##pct: 234 -nan
+##pct: 235 -nan
+##pct: 236 -nan
+##pct: 237 -nan
+##pct: 238 -nan
+##pct: 239 -nan
+##pct: 240 -nan
+##pct: 241 -nan
+##pct: 242 -nan
+##pct: 243 -nan
+##pct: 244 -nan
+##pct: 245 -nan
+##pct: 246 -nan
+##pct: 247 -nan
+##pct: 248 -nan
+##pct: 249 -nan
+##pct: 250 -nan
+##pct: 251 -nan
+##pct: 252 -nan
+##pct: 253 -nan
+##pct: 254 -nan
+##pct: 255 -nan
+##pct: 256 -nan
+##pct: 257 -nan
+##pct: 258 -nan
+##pct: 259 -nan
+##pct: 260 -nan
+##pct: 261 -nan
+##pct: 262 -nan
+##pct: 263 -nan
+##pct: 264 -nan
+##pct: 265 -nan
+##pct: 266 -nan
+##pct: 267 -nan
+##pct: 268 -nan
+##pct: 269 -nan
+##pct: 270 -nan
+##pct: 271 -nan
+##pct: 272 -nan
+##pct: 273 -nan
+##pct: 274 -nan
+##pct: 275 -nan
+##pct: 276 -nan
+##pct: 277 -nan
+##pct: 278 -nan
+##pct: 279 -nan
+##pct: 280 -nan
+##pct: 281 -nan
+##pct: 282 -nan
+##pct: 283 -nan
+##pct: 284 -nan
+##pct: 285 -nan
+##pct: 286 -nan
+##pct: 287 -nan
+##pct: 288 -nan
+##pct: 289 -nan
+##pct: 290 -nan
+##pct: 291 -nan
+##pct: 292 -nan
+##pct: 293 -nan
+##pct: 294 -nan
+##pct: 295 -nan
+##pct: 296 -nan
+##pct: 297 -nan
+##pct: 298 -nan
+##pct: 299 -nan
+##pct: 300 -nan
+##pct: 301 -nan
+##pct: 302 -nan
+##pct: 303 -nan
+##pct: 304 -nan
+##pct: 305 -nan
+##pct: 306 -nan
+##pct: 307 -nan
+##pct: 308 -nan
+##pct: 309 -nan
+##pct: 310 -nan
+##pct: 311 -nan
+##pct: 312 -nan
+##pct: 313 -nan
+##pct: 314 -nan
+##pct: 315 -nan
+##pct: 316 -nan
+##pct: 317 -nan
+##pct: 318 -nan
+##pct: 319 -nan
+##pct: 320 -nan
+##pct: 321 -nan
+##pct: 322 -nan
+##pct: 323 -nan
+##pct: 324 -nan
+##pct: 325 -nan
+##pct: 326 -nan
+##pct: 327 -nan
+##pct: 328 -nan
+##pct: 329 -nan
+##pct: 330 -nan
+##pct: 331 -nan
+##pct: 332 -nan
+##pct: 333 -nan
+##pct: 334 -nan
+##pct: 335 -nan
+##pct: 336 -nan
+##pct: 337 -nan
+##pct: 338 -nan
+##pct: 339 -nan
+##pct: 340 -nan
+##pct: 341 -nan
+##pct: 342 -nan
+##pct: 343 -nan
+##pct: 344 -nan
+##pct: 345 -nan
+##pct: 346 -nan
+##pct: 347 -nan
+##pct: 348 -nan
+##pct: 349 -nan
+##pct: 350 -nan
+##pct: 351 -nan
+##pct: 352 -nan
+##pct: 353 -nan
+##pct: 354 -nan
+##pct: 355 -nan
+##pct: 356 -nan
+##pct: 357 -nan
+##pct: 358 -nan
+##pct: 359 -nan
+##pct: 360 -nan
+##pct: 361 -nan
+##pct: 362 -nan
+##pct: 363 -nan
+##pct: 364 -nan
+##pct: 365 -nan
+##pct: 366 -nan
+##pct: 367 -nan
+##pct: 368 -nan
+##pct: 369 -nan
+##pct: 370 -nan
+##pct: 371 -nan
+##pct: 372 -nan
+##pct: 373 -nan
+##pct: 374 -nan
+##pct: 375 -nan
+##pct: 376 -nan
+##pct: 377 -nan
+##pct: 378 -nan
+##pct: 379 -nan
+##pct: 380 -nan
+##pct: 381 -nan
+##pct: 382 -nan
+##pct: 383 -nan
+##pct: 384 -nan
+##pct: 385 -nan
+##pct: 386 -nan
+##pct: 387 -nan
+##pct: 388 -nan
+##pct: 389 -nan
+##pct: 390 -nan
+##pct: 391 -nan
+##pct: 392 -nan
+##pct: 393 -nan
+##pct: 394 -nan
+##pct: 395 -nan
+##pct: 396 -nan
+##pct: 397 -nan
+##pct: 398 -nan
+##pct: 399 -nan
+##pct: 400 -nan
+##pct: 401 -nan
+##pct: 402 -nan
+##pct: 403 -nan
+##pct: 404 -nan
+##pct: 405 -nan
+##pct: 406 -nan
+##pct: 407 -nan
+##pct: 408 -nan
+##pct: 409 -nan
+##pct: 410 -nan
+##pct: 411 -nan
+##pct: 412 -nan
+##pct: 413 -nan
+##pct: 414 -nan
+##pct: 415 -nan
+##pct: 416 -nan
+##pct: 417 -nan
+##pct: 418 -nan
+##pct: 419 -nan
+##pct: 420 -nan
+##pct: 421 -nan
+##pct: 422 -nan
+##pct: 423 -nan
+##pct: 424 -nan
+##pct: 425 -nan
+##pct: 426 -nan
+##pct: 427 -nan
+##pct: 428 -nan
+##pct: 429 -nan
+##pct: 430 -nan
+##pct: 431 -nan
+##pct: 432 -nan
+##pct: 433 -nan
+##pct: 434 -nan
+##pct: 435 -nan
+##pct: 436 -nan
+##pct: 437 -nan
+##pct: 438 -nan
+##pct: 439 -nan
+##pct: 440 -nan
+##pct: 441 -nan
+##pct: 442 -nan
+##pct: 443 -nan
+##pct: 444 -nan
+##pct: 445 -nan
+##pct: 446 -nan
+##pct: 447 -nan
+##pct: 448 -nan
+##pct: 449 -nan
+##pct: 450 -nan
+##pct: 451 -nan
+##pct: 452 -nan
+##pct: 453 -nan
+##pct: 454 -nan
+##pct: 455 -nan
+##pct: 456 -nan
+##pct: 457 -nan
+##pct: 458 -nan
+##pct: 459 -nan
+##pct: 460 -nan
+##pct: 461 -nan
+##pct: 462 -nan
+##pct: 463 -nan
+##pct: 464 -nan
+##pct: 465 -nan
+##pct: 466 -nan
+##pct: 467 -nan
+##pct: 468 -nan
+##pct: 469 -nan
+##pct: 470 -nan
+##pct: 471 -nan
+##pct: 472 -nan
+##pct: 473 -nan
+##pct: 474 -nan
+##pct: 475 -nan
+##pct: 476 -nan
+##pct: 477 -nan
+##pct: 478 -nan
+##pct: 479 -nan
+##pct: 480 -nan
+##pct: 481 -nan
+##pct: 482 -nan
+##pct: 483 -nan
+##pct: 484 -nan
+##pct: 485 -nan
+##pct: 486 -nan
+##pct: 487 -nan
+##pct: 488 -nan
+##pct: 489 -nan
+##pct: 490 -nan
+##pct: 491 -nan
+##pct: 492 -nan
+##pct: 493 -nan
+##pct: 494 -nan
+##pct: 495 -nan
+##pct: 496 -nan
+##pct: 497 -nan
+##pct: 498 -nan
+##pct: 499 -nan
+##pct: 500 -nan
+5
+
+# 0 ecodes
+# 1	0	-nan
+# 2	0	-nan
+# 3	0	-nan
+# 4	0	-nan
+# 5	0	-nan
+# 6	0	-nan
+# 7	0	-nan
+# 8	0	-nan
+# 9	0	-nan
+# 10	0	-nan
+# 11	0	-nan
+# 12	0	-nan
+# 13	0	-nan
+# 14	0	-nan
+# 15	0	-nan
+# 16	0	-nan
+# 17	0	-nan
+# 18	0	-nan
+# 19	0	-nan
+# 20	0	-nan
+# 21	0	-nan
+# 22	0	-nan
+# 23	0	-nan
+# 24	0	-nan
+# 25	0	-nan
+# 26	0	-nan
+# 27	0	-nan
+# 28	0	-nan
+# 29	0	-nan
+# 30	0	-nan
+# 31	0	-nan
+# 32	0	-nan
+# 33	0	-nan
+# 34	0	-nan
+# 35	0	-nan
+# 36	0	-nan
+# 37	0	-nan
+# 38	0	-nan
+# 39	0	-nan
+# 40	0	-nan
+# 41	0	-nan
+# 42	0	-nan
+# 43	0	-nan
+# 44	0	-nan
+# 45	0	-nan
+# 46	0	-nan
+# 47	0	-nan
+# 48	0	-nan
+# 49	0	-nan
+# 50	0	-nan
+# 51	0	-nan
+# 52	0	-nan
+# 53	0	-nan
+# 54	0	-nan
+# 55	0	-nan
+# 56	0	-nan
+# 57	0	-nan
+# 58	0	-nan
+# 59	0	-nan
+# 60	0	-nan
+# 61	0	-nan
+# 62	0	-nan
+# 63	0	-nan
+# 64	0	-nan
+# 65	0	-nan
+# 66	0	-nan
+# 67	0	-nan
+# 68	0	-nan
+# 69	0	-nan
+# 70	0	-nan
+# 71	0	-nan
+# 72	0	-nan
+# 73	0	-nan
+# 74	0	-nan
+# 75	0	-nan
+# 76	0	-nan
+# 77	0	-nan
+# 78	0	-nan
+# 79	0	-nan
+# 80	0	-nan
+# 81	0	-nan
+# 82	0	-nan
+# 83	0	-nan
+# 84	0	-nan
+# 85	0	-nan
+# 86	0	-nan
+# 87	0	-nan
+# 88	0	-nan
+# 89	0	-nan
+# 90	0	-nan
+# 91	0	-nan
+# 92	0	-nan
+# 93	0	-nan
+# 94	0	-nan
+# 95	0	-nan
+# 96	0	-nan
+# 97	0	-nan
+# 98	0	-nan
+# 99	0	-nan
+# 100	0	-nan
+# 101	0	-nan
+# 102	0	-nan
+# 103	0	-nan
+# 104	0	-nan
+# 105	0	-nan
+# 106	0	-nan
+# 107	0	-nan
+# 108	0	-nan
+# 109	0	-nan
+# 110	0	-nan
+# 111	0	-nan
+# 112	0	-nan
+# 113	0	-nan
+# 114	0	-nan
+# 115	0	-nan
+# 116	0	-nan
+# 117	0	-nan
+# 118	0	-nan
+# 119	0	-nan
+# 120	0	-nan
+# 121	0	-nan
+# 122	0	-nan
+# 123	0	-nan
+# 124	0	-nan
+# 125	0	-nan
+# 126	0	-nan
+# 127	0	-nan
+# 128	0	-nan
+# 129	0	-nan
+# 130	0	-nan
+# 131	0	-nan
+# 132	0	-nan
+# 133	0	-nan
+# 134	0	-nan
+# 135	0	-nan
+# 136	0	-nan
+# 137	0	-nan
+# 138	0	-nan
+# 139	0	-nan
+# 140	0	-nan
+# 141	0	-nan
+# 142	0	-nan
+# 143	0	-nan
+# 144	0	-nan
+# 145	0	-nan
+# 146	0	-nan
+# 147	0	-nan
+# 148	0	-nan
+# 149	0	-nan
+# 150	0	-nan
+# 151	0	-nan
+# 152	0	-nan
+# 153	0	-nan
+# 154	0	-nan
+# 155	0	-nan
+# 156	0	-nan
+# 157	0	-nan
+# 158	0	-nan
+# 159	0	-nan
+# 160	0	-nan
+# 161	0	-nan
+# 162	0	-nan
+# 163	0	-nan
+# 164	0	-nan
+# 165	0	-nan
+# 166	0	-nan
+# 167	0	-nan
+# 168	0	-nan
+# 169	0	-nan
+# 170	0	-nan
+# 171	0	-nan
+# 172	0	-nan
+# 173	0	-nan
+# 174	0	-nan
+# 175	0	-nan
+# 176	0	-nan
+# 177	0	-nan
+# 178	0	-nan
+# 179	0	-nan
+# 180	0	-nan
+# 181	0	-nan
+# 182	0	-nan
+# 183	0	-nan
+# 184	0	-nan
+# 185	0	-nan
+# 186	0	-nan
+# 187	0	-nan
+# 188	0	-nan
+# 189	0	-nan
+# 190	0	-nan
+# 191	0	-nan
+# 192	0	-nan
+# 193	0	-nan
+# 194	0	-nan
+# 195	0	-nan
+# 196	0	-nan
+# 197	0	-nan
+# 198	0	-nan
+# 199	0	-nan
+# 200	0	-nan
+# 201	0	-nan
+# 202	0	-nan
+# 203	0	-nan
+# 204	0	-nan
+# 205	0	-nan
+# 206	0	-nan
+# 207	0	-nan
+# 208	0	-nan
+# 209	0	-nan
+# 210	0	-nan
+# 211	0	-nan
+# 212	0	-nan
+# 213	0	-nan
+# 214	0	-nan
+# 215	0	-nan
+# 216	0	-nan
+# 217	0	-nan
+# 218	0	-nan
+# 219	0	-nan
+# 220	0	-nan
+# 221	0	-nan
+# 222	0	-nan
+# 223	0	-nan
+# 224	0	-nan
+# 225	0	-nan
+# 226	0	-nan
+# 227	0	-nan
+# 228	0	-nan
+# 229	0	-nan
+# 230	0	-nan
+# 231	0	-nan
+# 232	0	-nan
+# 233	0	-nan
+# 234	0	-nan
+# 235	0	-nan
+# 236	0	-nan
+# 237	0	-nan
+# 238	0	-nan
+# 239	0	-nan
+# 240	0	-nan
+# 241	0	-nan
+# 242	0	-nan
+# 243	0	-nan
+# 244	0	-nan
+# 245	0	-nan
+# 246	0	-nan
+# 247	0	-nan
+# 248	0	-nan
+# 249	0	-nan
+# 250	0	-nan
+# 251	0	-nan
+# 252	0	-nan
+# 253	0	-nan
+# 254	0	-nan
+# 255	0	-nan
+# 256	0	-nan
+# 257	0	-nan
+# 258	0	-nan
+# 259	0	-nan
+# 260	0	-nan
+# 261	0	-nan
+# 262	0	-nan
+# 263	0	-nan
+# 264	0	-nan
+# 265	0	-nan
+# 266	0	-nan
+# 267	0	-nan
+# 268	0	-nan
+# 269	0	-nan
+# 270	0	-nan
+# 271	0	-nan
+# 272	0	-nan
+# 273	0	-nan
+# 274	0	-nan
+# 275	0	-nan
+# 276	0	-nan
+# 277	0	-nan
+# 278	0	-nan
+# 279	0	-nan
+# 280	0	-nan
+# 281	0	-nan
+# 282	0	-nan
+# 283	0	-nan
+# 284	0	-nan
+# 285	0	-nan
+# 286	0	-nan
+# 287	0	-nan
+# 288	0	-nan
+# 289	0	-nan
+# 290	0	-nan
+# 291	0	-nan
+# 292	0	-nan
+# 293	0	-nan
+# 294	0	-nan
+# 295	0	-nan
+# 296	0	-nan
+# 297	0	-nan
+# 298	0	-nan
+# 299	0	-nan
+# 300	0	-nan
+# 301	0	-nan
+# 302	0	-nan
+# 303	0	-nan
+# 304	0	-nan
+# 305	0	-nan
+# 306	0	-nan
+# 307	0	-nan
+# 308	0	-nan
+# 309	0	-nan
+# 310	0	-nan
+# 311	0	-nan
+# 312	0	-nan
+# 313	0	-nan
+# 314	0	-nan
+# 315	0	-nan
+# 316	0	-nan
+# 317	0	-nan
+# 318	0	-nan
+# 319	0	-nan
+# 320	0	-nan
+# 321	0	-nan
+# 322	0	-nan
+# 323	0	-nan
+# 324	0	-nan
+# 325	0	-nan
+# 326	0	-nan
+# 327	0	-nan
+# 328	0	-nan
+# 329	0	-nan
+# 330	0	-nan
+# 331	0	-nan
+# 332	0	-nan
+# 333	0	-nan
+# 334	0	-nan
+# 335	0	-nan
+# 336	0	-nan
+# 337	0	-nan
+# 338	0	-nan
+# 339	0	-nan
+# 340	0	-nan
+# 341	0	-nan
+# 342	0	-nan
+# 343	0	-nan
+# 344	0	-nan
+# 345	0	-nan
+# 346	0	-nan
+# 347	0	-nan
+# 348	0	-nan
+# 349	0	-nan
+# 350	0	-nan
+# 351	0	-nan
+# 352	0	-nan
+# 353	0	-nan
+# 354	0	-nan
+# 355	0	-nan
+# 356	0	-nan
+# 357	0	-nan
+# 358	0	-nan
+# 359	0	-nan
+# 360	0	-nan
+# 361	0	-nan
+# 362	0	-nan
+# 363	0	-nan
+# 364	0	-nan
+# 365	0	-nan
+# 366	0	-nan
+# 367	0	-nan
+# 368	0	-nan
+# 369	0	-nan
+# 370	0	-nan
+# 371	0	-nan
+# 372	0	-nan
+# 373	0	-nan
+# 374	0	-nan
+# 375	0	-nan
+# 376	0	-nan
+# 377	0	-nan
+# 378	0	-nan
+# 379	0	-nan
+# 380	0	-nan
+# 381	0	-nan
+# 382	0	-nan
+# 383	0	-nan
+# 384	0	-nan
+# 385	0	-nan
+# 386	0	-nan
+# 387	0	-nan
+# 388	0	-nan
+# 389	0	-nan
+# 390	0	-nan
+# 391	0	-nan
+# 392	0	-nan
+# 393	0	-nan
+# 394	0	-nan
+# 395	0	-nan
+# 396	0	-nan
+# 397	0	-nan
+# 398	0	-nan
+# 399	0	-nan
+# 400	0	-nan
+# 401	0	-nan
+# 402	0	-nan
+# 403	0	-nan
+# 404	0	-nan
+# 405	0	-nan
+# 406	0	-nan
+# 407	0	-nan
+# 408	0	-nan
+# 409	0	-nan
+# 410	0	-nan
+# 411	0	-nan
+# 412	0	-nan
+# 413	0	-nan
+# 414	0	-nan
+# 415	0	-nan
+# 416	0	-nan
+# 417	0	-nan
+# 418	0	-nan
+# 419	0	-nan
+# 420	0	-nan
+# 421	0	-nan
+# 422	0	-nan
+# 423	0	-nan
+# 424	0	-nan
+# 425	0	-nan
+# 426	0	-nan
+# 427	0	-nan
+# 428	0	-nan
+# 429	0	-nan
+# 430	0	-nan
+# 431	0	-nan
+# 432	0	-nan
+# 433	0	-nan
+# 434	0	-nan
+# 435	0	-nan
+# 436	0	-nan
+# 437	0	-nan
+# 438	0	-nan
+# 439	0	-nan
+# 440	0	-nan
+# 441	0	-nan
+# 442	0	-nan
+# 443	0	-nan
+# 444	0	-nan
+# 445	0	-nan
+# 446	0	-nan
+# 447	0	-nan
+# 448	0	-nan
+# 449	0	-nan
+# 450	0	-nan
+# 451	0	-nan
+# 452	0	-nan
+# 453	0	-nan
+# 454	0	-nan
+# 455	0	-nan
+# 456	0	-nan
+# 457	0	-nan
+# 458	0	-nan
+# 459	0	-nan
+# 460	0	-nan
+# 461	0	-nan
+# 462	0	-nan
+# 463	0	-nan
+# 464	0	-nan
+# 465	0	-nan
+# 466	0	-nan
+# 467	0	-nan
+# 468	0	-nan
+# 469	0	-nan
+# 470	0	-nan
+# 471	0	-nan
+# 472	0	-nan
+# 473	0	-nan
+# 474	0	-nan
+# 475	0	-nan
+# 476	0	-nan
+# 477	0	-nan
+# 478	0	-nan
+# 479	0	-nan
+# 480	0	-nan
+# 481	0	-nan
+# 482	0	-nan
+# 483	0	-nan
+# 484	0	-nan
+# 485	0	-nan
+# 486	0	-nan
+# 487	0	-nan
+# 488	0	-nan
+# 489	0	-nan
+# 490	0	-nan
+# 491	0	-nan
+# 492	0	-nan
+# 493	0	-nan
+# 494	0	-nan
+# 495	0	-nan
+# 496	0	-nan
+# 497	0	-nan
+# 498	0	-nan
+# 499	0	-nan
+# 500	0	-nan
+#
+# 90%% threshold at 0
+# 99%% threshold at 0
+# 99.5%% threshold at 0
+# 99.8%% threshold at 0
+
+>t_low 0
+>t_extend 0
+>t_threshold 0
+>t_high 0
+

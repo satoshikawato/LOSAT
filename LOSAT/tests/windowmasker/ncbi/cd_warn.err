@@ -1,0 +1,11 @@
+FASTA-Reader: Start of first data line in seq is about 100% ambiguous nucleotides (shouldn't be over 40%)
+Possible duplication of sequences:
+subject: lcl|1 and query: lcl|1
+at intervals
+subject: 0 --- 40000
+query  : 0 --- 40000
+
+pass 1
+FASTA-Reader: Start of first data line in seq is about 100% ambiguous nucleotides (shouldn't be over 40%)
+pass 2
+FASTA-Reader: Start of first data line in seq is about 100% ambiguous nucleotides (shouldn't be over 40%)

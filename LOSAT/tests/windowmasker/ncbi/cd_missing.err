@@ -1,0 +1,20 @@
+Possible duplication of sequences:
+subject: lcl|1 and query: lcl|1
+at intervals
+subject: 4997 --- 34997
+query  : 10000 --- 40000
+
+Possible duplication of sequences:
+subject: lcl|2 and query: lcl|1
+at intervals
+subject: 3000 --- 33000
+query  : 10000 --- 40000
+
+Possible duplication of sequences:
+subject: lcl|2 and query: lcl|1
+at intervals
+subject: 8003 --- 38003
+query  : 10000 --- 40000
+
+Error: (CIOException::eRead) Read error
+Error: (106.16) Application's execution failed (CIOException::eRead) Read error

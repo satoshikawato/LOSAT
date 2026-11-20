@@ -103,6 +103,15 @@ def _place(text: bytes, i: int) -> int | None:
     return None if j is None else _tag(text, j)
 
 
+def _glue(out: bytearray) -> None:
+    """`wording::glue`: `: ` in place of a removed report or tag inside a line."""
+    kept = out.rstrip(b" ")
+    if kept and kept[-1:] not in (b":", b"\n"):
+        if out.endswith(b" "):
+            out.pop()
+        out += b": "
+
+
 def losat_bytes(text: bytes) -> bytes:
     """LOSAT's text of NCBI's `text` (`wording::losat_bytes`)."""
     if not any(needle in text for needle in (NCBI_USER_MANUAL_FOOTER, _HEADER, _NCBI_POSITION, b"::")):
@@ -121,6 +130,7 @@ def losat_bytes(text: bytes) -> bytes:
             if j > i + len(_HEADER):
                 end = _place(text, j) if text.startswith(b"T", j) else None
                 if end is not None:
+                    _glue(out)
                     i = end
                     continue
         if text.startswith(b"T", i) and out.endswith(b" "):
@@ -131,10 +141,7 @@ def losat_bytes(text: bytes) -> bytes:
         if text.startswith(b"(", i):
             end = _tag(text, i)
             if end is not None:
-                kept = out.rstrip(b" ")
-                if kept and kept[-1:] not in (b":", b"\n"):
-                    out.pop()
-                    out += b": "
+                _glue(out)
                 i = end
                 continue
         if text.startswith(_NCBI_POSITION, i):

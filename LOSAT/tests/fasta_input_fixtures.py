@@ -73,6 +73,10 @@ ENGINE = Path(__file__).resolve().parents[1]
 FIXTURES = ENGINE / "tests/fixtures/fasta_input"
 REL = "tests/fixtures/fasta_input"
 MANIFEST_DIR = ENGINE / "tests/fasta_input_fixtures"      # one <program>.tsv per program
+# NCBI's streams (`<row id>.err`, `.merged`, `.out`) of the rows whose NCBI stream holds an exception
+# report: LOSAT writes it in LOSAT's words (`losat_wording`), which a hash of NCBI's bytes cannot check.
+# Each file's sha256 is the manifest's.
+NCBI_STREAMS = MANIFEST_DIR / "ncbi"
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 TIMEOUT = 180
 # NCBI reads these and each one changes the batches or the report.
@@ -1519,8 +1523,10 @@ def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, st
     first_err = result["stderr"].split(b"\n")[0][:140].decode(errors="replace")
     if row.stdout_sha256 == "pending":
         return row, "pending", re.sub(r"[\t\r\n]+", " ", f"rc {result['rc']}: {first_err}")
-    # The manifest holds the hashes of NCBI's streams: LOSAT's footer is read as NCBI's for them,
-    # and NCBI's frozen bytes, where present, are read in LOSAT's words (`losat_wording`).
+    # The manifest holds the hashes of NCBI's streams, which LOSAT writes in LOSAT's words
+    # (`losat_wording`, AGENTS.md rule 8): LOSAT's footer is read as NCBI's for the hash; a stream
+    # whose NCBI bytes are in NCBI_STREAMS (an exception report) is compared with those bytes in
+    # LOSAT's words, after their hash is checked against the manifest.
     ncbi_footer = losat_wording.NCBI_USER_MANUAL_FOOTER
     losat_footer = losat_wording.USER_MANUAL_FOOTER
     if row.kind == "ncbi":
@@ -1530,6 +1536,14 @@ def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, st
     norm = (lambda b: b.replace(losat_footer, ncbi_footer)) if row.kind == "ncbi" else (lambda b: b)
     actual = {"rc": str(result["rc"]), "stdout_sha256": sha256(norm(result["stdout"])),
               "stderr_sha256": sha256(norm(result["stderr"])), "combined_sha256": sha256(norm(result["combined"]))}
+    for field, name, ext in (("stdout_sha256", "stdout", "out"), ("stderr_sha256", "stderr", "err"),
+                             ("combined_sha256", "combined", "merged")):
+        frozen = NCBI_STREAMS / f"{row.row_id}.{ext}"
+        if row.kind == "ncbi" and frozen.exists():
+            ncbi = frozen.read_bytes()
+            if sha256(ncbi) != getattr(row, field):
+                return row, "differs", f"{frozen.name} does not match the manifest"
+            actual[field] = getattr(row, field) if result[name] == losat_wording.losat_output_bytes(ncbi) else "differs"
     names = {"rc": "exit", "stdout_sha256": "stdout", "stderr_sha256": "stderr", "combined_sha256": "combined"}
     differing = [names[f] for f in EXPECTED if actual[f] != getattr(row, f)]
     if not differing:
@@ -1539,8 +1553,10 @@ def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, st
         detail.append(f"exit {actual['rc']}, expected {row.rc}")
     files = {"stdout": ("out", result["stdout"]), "stderr": ("err", result["stderr"]), "combined": ("merged", result["combined"])}
     for name in ("stdout", "stderr", "combined"):
-        if name in differing and expected_dir is not None and (expected_dir / f"{row.row_id}.{files[name][0]}").exists():
-            expected = (expected_dir / f"{row.row_id}.{files[name][0]}").read_bytes()
+        source = next((d / f"{row.row_id}.{files[name][0]}" for d in (NCBI_STREAMS, expected_dir)
+                       if d is not None and (d / f"{row.row_id}.{files[name][0]}").exists()), None)
+        if name in differing and source is not None:
+            expected = source.read_bytes()
             if row.kind == "ncbi":
                 expected = losat_wording.losat_output_bytes(expected)
             detail.append(f"{name} {first_difference(expected, files[name][1])}")

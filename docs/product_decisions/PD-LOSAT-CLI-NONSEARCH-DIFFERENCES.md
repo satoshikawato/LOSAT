@@ -38,7 +38,10 @@
   the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
   E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction); 1.22 2026-11-20 (exception 11:
-  messages in LOSAT's words; the Owner's instruction of 2026-11-20, line NW, NW DECISIONS 1, 5, 6)
+  messages in LOSAT's words; the Owner's instruction of 2026-11-20, line NW, NW DECISIONS 1, 5, 6;
+  exception 12: the SAM `@PG CL:` tag, recording `docs/decisions/OWNER_DECISIONS.md` entry 7 of
+  2026-10-19, Owner-delegated, which said the difference goes into a product decision; found by
+  line MAN's review)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -240,7 +243,9 @@ BLAST+.
      line for each exception of the chain) keeps the messages only: the first after the text
      before the report, each further one on its own line with NCBI's indentation; a post of an
      exception (`Error: (<class>::<code>) <message>`) drops the class and code, and inside a line
-     (`Application's initialization failed (<class>::<code>) <message>`) they become `: `;
+     (`Application's initialization failed (<class>::<code>) <message>`) they become `: `, as does a
+     report that follows text on the same line (NCBI's `<message>NCBI C++ Exception:` posts, which
+     read `<message>: <message>`);
      `(m_Pos = <n>)` reads `(position <n>)`;
    - LOSAT's refusals say `the option -logfile` where they said `the NCBI C++ Toolkit option
      -logfile`, and LOSAT Web's notices no longer call the running program BLAST+.
@@ -256,6 +261,15 @@ BLAST+.
    Release-notes sentence: Error messages refer to the LOSAT user manual and no longer show NCBI's
    C++ exception reports (source paths, class names); the `BLAST ... error:` prefixes and exit
    statuses are unchanged.
+
+12. **SAM `@PG CL:`** (version 1.22, 2026-11-20, Owner-delegated, recording the decision of
+   2026-10-19, `docs/decisions/OWNER_DECISIONS.md` entry 7). BLASTN `-outfmt 17` writes in the
+   `CL:` tag of the `@PG` line the command line LOSAT was run with, each argument (the program
+   name first) followed by one space, as NCBI's `GetCmdlineArgs` writes its own
+   (`LOSAT/src/cli.rs` `command_line_bytes`); a library call, which has no command line, writes no
+   `CL:` tag (`LOSAT/src/report/sam.rs` `SamDocument::finish`). The rest of the document is NCBI's
+   byte for byte; the fixture comparisons leave out this tag only (`strip_sam_cl` of
+   `LOSAT/tests/db_search_fixtures.py`, `LOSAT/tests/outfmt17_blastn.rs`).
 
 ## Decided handling that is not an exception
 

@@ -87,6 +87,9 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
             }
             if j > header.len() {
                 if let Some(place) = place(&rest[j..]) {
+                    // A report glued to the text before it (`Object type= BlastOutput2NCBI C++
+                    // Exception:`) is set off by `: `, as a tag inside a line is.
+                    glue(&mut out);
                     i += j + place;
                     changed = true;
                     continue;
@@ -102,15 +105,7 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
         }
         if rest[0] == b'(' {
             if let Some(tag) = tag(rest) {
-                let kept = out.iter().rposition(|&b| b != b' ');
-                let after_colon = match kept {
-                    None => true,
-                    Some(k) => matches!(out[k], b':' | b'\n'),
-                };
-                if !after_colon {
-                    out.pop();
-                    out.extend_from_slice(b": ");
-                }
+                glue(&mut out);
                 i += tag;
                 changed = true;
                 continue;
@@ -207,6 +202,18 @@ fn find(text: &[u8], needle: &[u8]) -> Option<usize> {
 
 fn contains(text: &[u8], needle: &[u8]) -> bool {
     text.windows(needle.len()).any(|window| window == needle)
+}
+
+/// What stands for a removed report or tag after the text before it: nothing at the start, after
+/// a line feed or after `:` (spaces after it kept); otherwise `: ` in place of a space before it.
+fn glue(out: &mut Vec<u8>) {
+    let kept = out.iter().rposition(|&b| b != b' ');
+    if kept.is_some_and(|k| !matches!(out[k], b':' | b'\n')) {
+        if out.last() == Some(&b' ') {
+            out.pop();
+        }
+        out.extend_from_slice(b": ");
+    }
 }
 
 /// The length of the place of an exception at the start of `text`:

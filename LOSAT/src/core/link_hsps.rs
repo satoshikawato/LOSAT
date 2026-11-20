@@ -1640,7 +1640,7 @@ fn next_larger(lh_helper: &[Helper], h_index: usize) -> usize {
 mod tests {
     use super::*;
 
-    // NCBI blast_parameters.c:788-814 with `DEFAULT_LONGEST_INTRON` 122: the values of
+    // NCBI blast_parameters.c:788-815 with `DEFAULT_LONGEST_INTRON` 122: the values of
     // `-max_intron_length` on both sides of each branch.
     #[test]
     fn the_longest_intron_of_a_translated_search_follows_ncbis_branches() {

@@ -124,10 +124,23 @@ rustix = { version = "1.1.6", default-features = false, features = ["std", "para
 # `IsIStreamEmpty` (`input_files::has_stream_position`), the read-only file mappings of the
 # RPS-BLAST profile files (`utils::mapped_file`: `CreateFileMappingW`, whose signature names
 # `SECURITY_ATTRIBUTES`, and `MapViewOfFile`), and the system time zone and character types that
-# the C runtime's `localtime` reads (`writedb::local_offset`: `GetTimeZoneInformation`,
+# the C runtime's `localtime` reads (`writedb::windows_zone`: `GetTimeZoneInformation`,
 # `GetStringTypeW`); only the features those need.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Time"] }
+
+# The local time zone on every target but Windows (`writedb::local_offset`; Owner 2026-11-20
+# 16:27 JST 「TZ=A」): jiff reads the zone file (TZif) or the POSIX rule that `TZ` gives, and
+# LOSAT finds the zone file where glibc finds it. Only `alloc`: no bundled time zone data and no
+# lookup of jiff's own (`tz-system`, `tzdb-*`), so a target without a zone file (the Web) is UTC.
+# License: Unlicense OR MIT; LOSAT takes MIT.
+[target.'cfg(not(windows))'.dependencies]
+jiff = { version = "0.2.46", default-features = false, features = ["alloc"] }
+
+# The unit tests of `writedb::windows_zone` compare UCRT's system zones with the POSIX rules that
+# jiff reads (`writedb::local_offset::offset_from_posix_tz`), on Windows too.
+[dev-dependencies]
+jiff = { version = "0.2.46", default-features = false, features = ["alloc"] }
 
 [features]
 default = ["parallel"]

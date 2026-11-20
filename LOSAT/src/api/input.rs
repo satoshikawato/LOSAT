@@ -441,6 +441,7 @@ impl<'a> Inputs<'a> {
 mod tests {
     use super::*;
 
+    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
     const PROTEIN: &[u8] =
         b">p1 a protein\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n";
 

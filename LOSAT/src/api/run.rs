@@ -887,6 +887,7 @@ pub fn run(
                         })
                         .collect(),
                     diagnostics: &mut sink,
+                    later_warnings: None,
                     hits: None,
                     observer: None,
                 };
@@ -950,6 +951,7 @@ pub fn run_to_file(
                     sink: OutputSink::Out(&mut file),
                 }],
                 diagnostics: &mut sink,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -1015,6 +1017,7 @@ fn collect_one(
                 })
                 .collect(),
             diagnostics: &mut sink,
+            later_warnings: None,
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };

@@ -371,6 +371,7 @@ impl Batches<'_> {
                     sink: OutputSink::Writer(&mut report),
                 }],
                 diagnostics: &mut sink,
+                later_warnings: None,
                 hits: Some(&mut on_hits),
                 observer: Some(&mut observer),
             };

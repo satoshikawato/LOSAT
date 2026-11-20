@@ -106,7 +106,13 @@ pub(super) struct ReportPrep<'a, 'o> {
 ///         }
 ///     }
 /// ```
-pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
+///
+/// Also returned: by query, the queries' own messages that a structured first format does not
+/// write, kept for the later formats that do (`Posts::later`, `ReportOutputs::later_warnings`);
+/// `None` where they are not kept (`ReportOutputs::keeps_later_query_warnings`).
+pub(super) fn query_warning_lines(
+    prep: &ReportPrep<'_, '_>,
+) -> (Vec<Vec<u8>>, Option<Vec<Vec<u8>>>) {
     let ReportPrep {
         args,
         outputs,
@@ -120,13 +126,12 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
         ..
     } = *prep;
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
-    // the warnings go with the first format.
-    let result_warnings = outputs
-        .formats
-        .first()
-        .and_then(crate::api::local_blast::FormatOutput::report_format)
-        .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
-    query_records
+    // the warnings go with the first format, or, where it is structured, they are kept for the
+    // later formats that write them (`later`).
+    let result_warnings = outputs.first_writes_query_warnings();
+    let later = outputs.keeps_later_query_warnings();
+    let mut later_lines = Vec::new();
+    let lines = query_records
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
@@ -146,8 +151,8 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
                 .get(q_idx)
                 .cloned()
                 .unwrap_or_default();
-            if result_warnings {
-                lines.extend(if let Some(psi) = args.psi_search.as_deref() {
+            if result_warnings || later {
+                let text = if let Some(psi) = args.psi_search.as_deref() {
                     // psiblast `-in_pssm`: the label is the PSSM's Seq-id, the record's local id;
                     // the messages add those of `PsiBlastSetupScoreBlock`.
                     pssm_hooks::pssm_query_warning(args.app.ncbi_name(), psi, record, &messages)
@@ -160,11 +165,16 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
                         record,
                         &messages,
                     )
-                });
+                };
+                match result_warnings {
+                    true => lines.extend(text),
+                    false => later_lines.push(text),
+                }
             }
             lines
         })
-        .collect()
+        .collect();
+    (lines, later.then_some(later_lines))
 }
 
 /// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).
@@ -952,6 +962,10 @@ pub(super) struct ReportSetup<'a> {
     pub(super) subject_source: BlastpSubjectSource<'a>,
     pub(super) subject_label: &'a str,
     pub(super) total_db_len: i64,
+    /// rpsblast: the HSPs of each query's profiles that left its merged list past the
+    /// formatter's cut (`rps_hooks::RpsSearched::unlisted`), which outfmt 7's count and the
+    /// prefetch's limit still count; empty otherwise.
+    pub(super) unlisted: &'a [usize],
 }
 
 /// The residues that the reports read of a database's listed subjects, read from the database
@@ -1292,7 +1306,13 @@ pub(super) fn report_values(
         hit_lists.len(),
         0,
         &batch_ranges,
-        |span| blastp_hit_list_hsp_count(&hit_lists[span]),
+        |span| {
+            blastp_hit_list_hsp_count(&hit_lists[span.clone()])
+                + setup
+                    .unlisted
+                    .get(span)
+                    .map_or(0, |counts| counts.iter().sum())
+        },
     );
     // `-out_pssm`'s PSSM, before it is made (a later query's PSSM error reruns the search without
     // the files, review 2 of line DBID weakbatch H2).
@@ -1383,7 +1403,8 @@ pub(super) fn report_values(
             .iter_mut()
             .enumerate()
             .map(|(query, hit_list_opt)| {
-                let found = blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt));
+                let found = blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt))
+                    + setup.unlisted.get(query).copied().unwrap_or(0);
                 if let Some(hit_list) = hit_list_opt {
                     hit_list.prune_by_size(
                         psiblast_kept

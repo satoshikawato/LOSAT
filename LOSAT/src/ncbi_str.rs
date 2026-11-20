@@ -1554,12 +1554,16 @@ mod tests {
     /// The message, the line and the position of an error (NCBI's `(m_Pos = <n>)`, which LOSAT
     /// writes as `(position <n>)`).
     fn failure(e: NcbiException) -> (String, u32, String) {
-        let what = e.what();
+        let what = String::from_utf8(e.what()).unwrap();
         let pos = what
             .rsplit_once(crate::wording::POSITION)
             .map(|(_, rest)| rest.trim_end_matches(")\n").to_string())
             .unwrap_or_default();
-        (e.get_msg().to_string(), e.site().line, pos)
+        (
+            String::from_utf8(e.get_msg().to_vec()).unwrap(),
+            e.site().line,
+            pos,
+        )
     }
 
     // makeblastdb 2.17.0 (the official Linux x64 release), probe of 2026-11-08 (cases
@@ -1871,7 +1875,7 @@ mod tests {
             );
             // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
             assert_eq!(
-                error.what(),
+                String::from_utf8(error.what()).unwrap(),
                 crate::wording::losat_text(&format!(
                     "NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line {line}: Error: \
                      (CStringException::eConvert) ncbi::NStr::{function}() - {message}\n"
@@ -2048,10 +2052,10 @@ mod tests {
         assert_eq!(string_to_uint_base(b"0x3FD00", 16).unwrap(), 0x3fd00);
         assert_eq!(string_to_uint_base(b"173", 10).unwrap(), 173);
         let failure = |e: NcbiException| {
-            let what = e.what();
+            let what = String::from_utf8(e.what()).unwrap();
             let pos = what.rsplit_once(crate::wording::POSITION).unwrap().1;
             (
-                e.get_msg().to_string(),
+                String::from_utf8(e.get_msg().to_vec()).unwrap(),
                 e.site().line,
                 pos.trim_end_matches(")\n").to_string(),
             )

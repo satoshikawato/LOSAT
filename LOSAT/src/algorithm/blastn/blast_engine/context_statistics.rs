@@ -369,9 +369,11 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         if crate::stats::setup::setup_subject_length(total_length, num_seqs, None).is_none() {
             let error = anyhow::Error::from(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: The average subject length is too short\n"
-                    .to_string()
-                    .into(),
+                message: format!(
+                    "BLAST engine error: {}\n",
+                    crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
+                )
+                .into(),
             });
             // A batch after the first: the batches before had no valid query (one with a
             // valid query would have raised the error), and NCBI has written their reports

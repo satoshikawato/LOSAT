@@ -7604,6 +7604,11 @@ fn post_process_hits_and_write(
         &subject_titles,
         &rows_of,
     )?;
+    // The queries' result warnings that a structured first format does not write are each later
+    // format's that writes them, to the caller's receiver of that format's
+    // (`ReportOutputs::later_warnings`).
+    // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+    let keeps_later = outputs.keeps_later_query_warnings();
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // ```c++
@@ -7653,7 +7658,10 @@ fn post_process_hits_and_write(
         // So do those of the formatters of a tabular field list that shows a taxonomy name
         // (`x_CheckTaxDB`, `algorithm::blastn::tabular`), and the Seq-annots' posts of the bytes
         // that NCBI's stream replaces (`seqalign::write_query_to`).
+        // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+        let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut format_warnings = (warning_lines.is_some()
+            || later.is_some()
             || crate::report::query_warnings::report_posts(format.report_format())
             || output_format
                 .tabular_spec()
@@ -7664,7 +7672,8 @@ fn post_process_hits_and_write(
                 first.unwrap_or(&[]),
                 report.archive,
                 &mut *outputs.diagnostics,
-            );
+            )
+            .with_later(query_warnings, later);
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`BlastnReportInputs::query_reads`).
             match first {
@@ -9379,7 +9388,7 @@ fn megablast_index(
     // A megablast search with a template (`-template_type` and `-template_length`, which
     // require each other) looks for no index.
     let warning = if args.template_length.is_some() {
-        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".to_string()
+        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".as_bytes().to_vec()
     } else {
         if index_name.contains(',') {
             return Ok(MegablastIndex::VolumeRange);
@@ -9423,16 +9432,19 @@ fn megablast_index(
         // `DbIndexInit`'s `result` (blast_dbindex.cpp:1145-1168): the new-style loader's
         // `e.what()`, a line feed, the old-style loader's `e.what()`; `ERR_POST_EX` adds
         // " Database index will not be used." (setup_factory.cpp:455).
-        format!(
-            "Warning: (1.1) [blastn] {}\n{} Database index will not be used.\n",
-            new_style.what(),
-            old_style.what()
-        )
+        [
+            b"Warning: (1.1) [blastn] ".as_slice(),
+            &new_style.what(),
+            b"\n",
+            &old_style.what(),
+            b" Database index will not be used.\n",
+        ]
+        .concat()
     };
     // One diagnostic: the archive saves it as one message.
     match &args.archive {
-        Some(handle) => handle.write_warning(diagnostics, warning.as_bytes())?,
-        None => diagnostics.write_all(warning.as_bytes())?,
+        Some(handle) => handle.write_warning(diagnostics, &warning)?,
+        None => diagnostics.write_all(&warning)?,
     }
     Ok(MegablastIndex::NotAsked)
 }
@@ -11702,12 +11714,11 @@ fn run_in_pool(
         // its set-up (`SetupQueries_OMF`, above), any other invalid query that of its
         // Karlin-Altschul parameters.
         // A structured format (outfmt 8, 12) writes no result warnings
-        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
-        let result_warnings = outputs
-            .formats
-            .first()
-            .and_then(crate::api::local_blast::FormatOutput::report_format)
-            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
+        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format, or, where
+        // it is structured, they are kept for the later formats that write them, each to the
+        // caller's receiver of its own (`Posts::later`, `ReportOutputs::later_warnings`).
+        let result_warnings = outputs.first_writes_query_warnings();
+        let keeps_later = outputs.keeps_later_query_warnings();
         let filtered_empty = match source {
             SubjectSource::Database(database) => database.filtered_empty(),
             _ => false,
@@ -11721,7 +11732,7 @@ fn run_in_pool(
             .step_by(2)
             .enumerate()
         {
-            if !result_warnings {
+            if !result_warnings && !keeps_later {
                 continue;
             }
             let mut messages = Vec::new();
@@ -11735,12 +11746,16 @@ fn run_in_pool(
             if batch.searched && filtered_empty {
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
-            warnings[start + index].lines(&query_warning(
+            let text = query_warning(
                 "blastn",
                 args.first_query_ordinal + query_input.ordinal(start + index),
                 &batch_records.searched()[index],
                 &messages,
-            ));
+            );
+            match result_warnings {
+                true => warnings[start + index].lines(&text),
+                false => warnings[start + index].later(&text),
+            }
         }
         for (index, messages) in query_fetches.into_iter().enumerate() {
             warnings[start + index].lines(&messages);

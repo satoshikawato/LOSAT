@@ -1470,6 +1470,7 @@ fn check_ncbi_options(
     // Each requested format's (the library's `-outfmt` values are its outputs', not `args.outfmt`).
     for choice in choices {
         formatting_handler_check(choice, Program::Tblastx)?;
+        crate::blastinput::app::html_format_check(choice.number, Program::Tblastx, args.html)?;
     }
     // The hit list size and the counts of the pairwise report
     // (`blastinput::report_counts`), with the handler's warnings.
@@ -2880,6 +2881,7 @@ fn write_tblastx_outputs(
                         // for the others, `PairwiseView::report_sort`).
                         sort: view.report_sort(args.formatting.report_sort()),
                         view,
+                        html: args.html,
                         ..crate::report::pairwise::PairwiseConfig::default()
                     };
                     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251 (quoted

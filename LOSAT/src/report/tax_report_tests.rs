@@ -477,7 +477,7 @@ fn the_texts_of_a_subjects_read_come_before_its_lookups() {
         length: 250,
         hsps: Some(vec![hsp(0, 3e-171, 461.0), hsp(1, 1e-3, 30.0)]),
     }];
-    let report = TaxReport::new(&queries, &subjects, lookups(names.as_ref())).unwrap();
+    let report = TaxReport::new(&queries, &subjects, lookups(names.as_ref()), false).unwrap();
     let reads = vec![vec![
         crate::report::query_warnings::SubjectRead::of_text(0, b"read A\n"),
         crate::report::query_warnings::SubjectRead::of_text(1, b"read B\n"),
@@ -604,7 +604,7 @@ fn a_query_that_ncbi_did_not_search_is_refused_after_its_query_block() {
             hsps: None,
         },
     ];
-    let report = TaxReport::new(&queries, &subjects, lookups(None)).unwrap();
+    let report = TaxReport::new(&queries, &subjects, lookups(None), false).unwrap();
     let mut out = Vec::new();
     for q_idx in 0..2 {
         let mut sink = OutputSink::Writer(&mut out);

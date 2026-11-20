@@ -1514,6 +1514,7 @@ fn write_pairwise(
         // `PairwiseView::report_sort`).
         sort: view.report_sort(options.report_sort()),
         view,
+        html: options.html,
         ..PairwiseConfig::default()
     };
     // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3c), made once.

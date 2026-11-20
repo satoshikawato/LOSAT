@@ -36,6 +36,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,
+        html: false,
         parse_deflines: false,
         id_scope: None,
         searchsp: None,

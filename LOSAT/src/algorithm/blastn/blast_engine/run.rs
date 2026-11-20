@@ -6516,6 +6516,8 @@ struct BlastnReportInputs<'a> {
     epilog: bool,
     /// `-show_gis` (the labels of the query-anchored sections, outfmt 1 to 4).
     show_gis: bool,
+    /// `-html` (`BlastnArgs::html`): the HTML form of the outfmt 0 and 18 reports.
+    html: bool,
     /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
     /// before the search (`write_pairwise_prologs`).
     prolog: bool,
@@ -7619,6 +7621,7 @@ fn post_process_hits_and_write(
                     // others, `PairwiseView::report_sort`).
                     sort: view.report_sort(report.formatting.report_sort()),
                     view,
+                    html: report.html,
                     ..PairwiseConfig::default()
                 };
                 // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3b).
@@ -7971,6 +7974,7 @@ fn write_custom_tabular(
             &queries,
             writer,
             warnings,
+            report.html,
         );
     }
     let tab = BlastnTabular {
@@ -8926,6 +8930,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
+        app::html_format_check(choice.number, Program::Blastn, args.html)?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
         // (`BLASTUngappedHspListToSeqAlign`: a subject's Seq-align of Dense-diags, and
         // objtools/align_format/sam.cpp:66-80 for SAM's one line per subject)
@@ -12353,6 +12358,7 @@ fn write_reports_untimed(
         finished_hit_lists: reported.is_some(),
         epilog,
         show_gis: args.show_gis,
+        html: args.html,
         prolog: outputs
             .formats
             .iter()

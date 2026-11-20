@@ -68,6 +68,9 @@ pub struct PairwiseConfig {
     /// The alignment section: outfmt 0's alignments, or the query-anchored section of outfmt 1
     /// to 4. The rest of the report is the same.
     pub view: PairwiseView,
+    /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
+    /// report.
+    pub html: bool,
 }
 
 impl Default for PairwiseConfig {
@@ -79,6 +82,7 @@ impl Default for PairwiseConfig {
             protein_matrix: ScoringMatrix::Blosum62,
             sort: Default::default(),
             view: PairwiseView::Pairwise,
+            html: false,
         }
     }
 }
@@ -2545,6 +2549,7 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
     writer: &mut W,
     query_title: &[u8],
     query_length: usize,
+    html: bool,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:732-734
     // ```c++
@@ -2554,9 +2559,26 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
     // ```
     // The ID of a local query is not shown (`believe_query` false), so the line is the
     // title, raw (no decoding), without the white space at its ends.
-    crate::cli::insert(writer, b"Query")?;
-    crate::cli::insert(writer, b"= ")?;
-    write_flatfile_wrapped(writer, truncate_spaces(query_title), 68)?;
+    // NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:724-731
+    // ```c++
+    //     if (html) {
+    //         out << "<b>" << label << "=</b> ";
+    //     } else if (tabular) {
+    //         out << "# " << label << ": ";
+    //     } else {
+    //         out << label << "= ";
+    //     }
+    // ```
+    // `-html` (D4 of the T4 survey): the label in bold and the line HTML-encoded and wrapped
+    // with `fWrap_HTMLPre` (`x_WrapOutputLine`, `report::html::write_html_wrapped`).
+    if html {
+        crate::cli::insert(writer, b"<b>Query=</b> ")?;
+        super::html::write_html_wrapped(writer, truncate_spaces(query_title), 68)?;
+    } else {
+        crate::cli::insert(writer, b"Query")?;
+        crate::cli::insert(writer, b"= ")?;
+        write_flatfile_wrapped(writer, truncate_spaces(query_title), 68)?;
+    }
     crate::cli::insert(writer, b"\nLength=")?;
     crate::cli::insert(writer, query_length.to_string().as_bytes())?;
     crate::cli::insert(writer, b"\n")
@@ -3444,7 +3466,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             .query_titles
             .get(q_idx)
             .map_or(&b""[..], |title| title.as_ref());
-        write_blastp_query_header(writer, query_title, query.query_length)?;
+        write_blastp_query_header(writer, query_title, query.query_length, self.config.html)?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
@@ -4709,7 +4731,12 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         //     m_Outfile << "\n\n";
         // ```
         writer.write_all(b"\n\n")?;
-        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
+        write_blastp_query_header(
+            writer,
+            &query.query_name,
+            query.query_length,
+            self.config.html,
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
@@ -5421,7 +5448,12 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         //     m_Outfile << "\n\n";
         // ```
         writer.write_all(b"\n\n")?;
-        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
+        write_blastp_query_header(
+            writer,
+            &query.query_name,
+            query.query_length,
+            self.config.html,
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
@@ -6876,7 +6908,12 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
         writeln!(writer)?;
         writeln!(writer)?;
-        write_blastp_query_header(writer, &self.query_titles[q_idx], query.query_length)?;
+        write_blastp_query_header(
+            writer,
+            &self.query_titles[q_idx],
+            query.query_length,
+            self.config.html,
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             // NCBI blast_results.cpp:82-97 leaves both Karlin blocks null
@@ -7549,7 +7586,12 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         // ```
         writeln!(writer)?;
         writeln!(writer)?;
-        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
+        write_blastp_query_header(
+            writer,
+            &query.query_name,
+            query.query_length,
+            self.config.html,
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             return self.foot(writer, q_idx);
@@ -8946,7 +8988,7 @@ mod tblastx_tests {
         ] {
             let title = reader_title(&defline);
             let mut out = Vec::new();
-            write_blastp_query_header(&mut out, &title, 330).unwrap();
+            write_blastp_query_header(&mut out, &title, 330, false).unwrap();
             assert_eq!(
                 out,
                 [&b"Query= "[..], &query_block, b"\nLength=330\n"].concat(),
@@ -9114,6 +9156,7 @@ mod tblastx_tests {
             protein_matrix: ScoringMatrix::Blosum62,
             sort: Default::default(),
             view: PairwiseView::Pairwise,
+            html: false,
         };
         let gapped_k = [0.041, 0.047, 0.041, 0.041];
         let write = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {

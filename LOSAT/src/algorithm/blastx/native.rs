@@ -575,6 +575,7 @@ fn run_inner(
         crate::blastinput::seq_range::RangeRole::Query,
     )?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
+    app::html_format_check(choice.number, Program::Blastx, args.html)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;

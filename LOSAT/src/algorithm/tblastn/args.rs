@@ -98,6 +98,15 @@ pub struct TblastnArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // ```c++
+    //         // Produce HTML?
+    //         arg_desc.AddFlag(kArgProduceHtml, "Produce HTML output?", true);
+    // ```
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // ```c++
     //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
@@ -731,6 +740,13 @@ impl TblastnArgs {
         // (`blastinput::report_counts`), with the handler's warnings. The formats of a
         // `run_local` call are those of `outfmts`; the command line has the one `-outfmt`.
         let own_outfmt = [choice.number];
+        for &number in outfmts.unwrap_or(&own_outfmt) {
+            crate::blastinput::app::html_format_check(
+                number,
+                crate::blastinput::app::Program::Tblastn,
+                self.html,
+            )?;
+        }
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
             "tblastn",
             outfmts.unwrap_or(&own_outfmt),

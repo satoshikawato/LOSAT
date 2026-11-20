@@ -137,6 +137,15 @@ pub struct BlastxArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // ```c++
+    //         // Produce HTML?
+    //         arg_desc.AddFlag(kArgProduceHtml, "Produce HTML output?", true);
+    // ```
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // ```c++
     //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
@@ -890,6 +899,9 @@ pub struct ResolvedOptions {
     pub outfmt: u8,
     /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
     pub show_gis: bool,
+    /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
+    /// outfmt 0 and 18 reports; false for rpstblastn, which has no `-html`.
+    pub html: bool,
     /// The tabular report with a field list or a delimiter (outfmt 6 and 7), or outfmt 10 or
     /// 20 (`TabularSpec::of`); `None` for the default outfmt 6 and 7 (the `std` fields and a
     /// tab, `TabularSpec::std`, which the reports write with the same shared writer, `tabular.rs`)
@@ -1518,6 +1530,7 @@ impl BlastxArgs {
             formatting: self.formatting,
             outfmt,
             show_gis: self.show_gis,
+            html: self.html,
             tabular,
             taxdb_found: false,
             subject_taxdb: None,

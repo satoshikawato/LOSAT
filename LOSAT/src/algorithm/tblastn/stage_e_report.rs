@@ -784,6 +784,7 @@ pub(super) fn render(
                     )
                     .expect("a pairwise view of formats 0 to 4"),
                     anchored.as_ref(),
+                    tabular.html,
                 )?,
                 // BLAST XML: one document per run, a header before the first query and a
                 // trailer after the last (`blast_xml`).
@@ -1522,6 +1523,8 @@ fn write_pairwise(
     // sequences `anchored`.
     view: crate::report::pairwise::PairwiseView,
     anchored: Option<&super::anchored::AnchoredSequences<'_>>,
+    // `-html`: the HTML form of the report (`TabularInputs::html`).
+    html: bool,
 ) -> Result<()> {
     ensure!(
         ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
@@ -1637,6 +1640,7 @@ fn write_pairwise(
         // `PairwiseView::report_sort`).
         sort: view.report_sort(formatting.report_sort()),
         view,
+        html,
         ..PairwiseConfig::default()
     };
     write_tblastn_pairwise_report(

@@ -357,6 +357,15 @@ pub struct BlastpArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // ```c++
+    //         // Produce HTML?
+    //         arg_desc.AddFlag(kArgProduceHtml, "Produce HTML output?", true);
+    // ```
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // ```c++
     //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
@@ -807,6 +816,9 @@ pub struct ResolvedBlastpArgs {
     pub parse_deflines: bool,
     /// `-show_gis`, for the same reports.
     pub show_gis: bool,
+    /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
+    /// outfmt 0 and 18 reports; false for psiblast and rpsblast, which have no `-html`.
+    pub html: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
     /// `-dbsize` (`eff_len_options->db_length`; 0 when it is not given).
@@ -1226,6 +1238,11 @@ impl BlastpArgs {
             &choice,
             crate::blastinput::app::Program::Blastp,
         )?;
+        crate::blastinput::app::html_format_check(
+            choice.number,
+            crate::blastinput::app::Program::Blastp,
+            self.html,
+        )?;
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`), with the handler's warnings.
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
@@ -1389,6 +1406,7 @@ impl BlastpArgs {
             subject: self.subject.clone().unwrap_or_default(),
             parse_deflines: self.parse_deflines,
             show_gis: self.show_gis,
+            html: self.html,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
             // ```c++
             //     if (args.Exist(kArgDb) && args[kArgDb]) {

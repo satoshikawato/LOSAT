@@ -219,7 +219,8 @@ impl RoundSections<'_> {
             .query_titles
             .get(q_idx)
             .map_or(&b""[..], |title| title.as_ref());
-        write_blastp_query_header(writer, query_title, query.query_length)?;
+        // psiblast refuses `-html` (`cli::UNPORTED_PSIBLAST_OWN_ARGS`).
+        write_blastp_query_header(writer, query_title, query.query_length, false)?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             if query.batch_skipped {

@@ -754,6 +754,7 @@ pub(super) fn write_pairwise(
         protein_matrix: args.scoring.matrix,
         sort: view.report_sort(args.sort),
         view,
+        html: args.html,
     };
     // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
     // (the file's values).
@@ -1142,6 +1143,7 @@ pub(super) fn write_custom_tabular(
             hit_lists,
             &mut writer,
             warnings.as_mut(),
+            args.html,
         )?;
         writer.flush()?;
         return Ok(());

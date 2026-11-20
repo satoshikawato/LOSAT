@@ -929,6 +929,13 @@ pub struct TaxReport {
     queries: Vec<Option<(Vec<Step>, Text)>>,
     /// Whether the batch's first lookup has written its texts (the texts of opening with it).
     wrote_first: std::cell::Cell<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:899
+    // ```c++
+    //     CTaxFormat *taxFormatRes = new CTaxFormat (*new_aln_set,*m_Scope,m_IsHTML ? CTaxFormat::eHtml:CTaxFormat::eText, false,max(kMinTaxFormatLineLength,kFormatLineLength));
+    // ```
+    /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
+    /// report.
+    pub html: bool,
 }
 
 impl TaxReport {
@@ -938,6 +945,7 @@ impl TaxReport {
         queries: &[TaxQuery<'_>],
         subjects: &dyn TaxSubjects,
         mut lookups: TaxLookups,
+        html: bool,
     ) -> Result<Self> {
         let queries = queries
             .iter()
@@ -953,6 +961,7 @@ impl TaxReport {
             lookups,
             queries,
             wrote_first: std::cell::Cell::new(false),
+            html,
         })
     }
 
@@ -976,15 +985,30 @@ impl TaxReport {
         // The report's insertions are NCBI's (`cli::insert`, `Text::insert_into`): `m_Outfile <<
         // reportCaption`, `m_Outfile << "\n"` (module docs), the `Query=` block's and
         // `out << orgReportData` (`organism_report`).
-        add_spaces(
-            b"Tax BLAST report",
-            u64::from(LINE_LENGTH),
-            Place::Center,
-            true,
-            true,
-        )
-        .insert_into(out)?;
-        crate::cli::insert(out, b"\n")?;
+        // NCBI reference (2.17.0): c++/src/algo/blast/format/blast_format.cpp:1462-1463, 879-884
+        // ```c++
+        //         reportCaption = m_IsHTML ? "<h1>" + reportCaption + "</h1>" : CAlignFormatUtil::AddSpaces(reportCaption,...);
+        //     if(m_IsHTML) {
+        //         m_Outfile <<  "<pre>";
+        //     }
+        //     else {
+        //         m_Outfile <<  "\n";
+        //     }
+        // ```
+        if self.html {
+            crate::cli::insert(out, b"<h1>Tax BLAST report</h1>")?;
+            crate::cli::insert(out, b"<pre>")?;
+        } else {
+            add_spaces(
+                b"Tax BLAST report",
+                u64::from(LINE_LENGTH),
+                Place::Center,
+                true,
+                true,
+            )
+            .insert_into(out)?;
+            crate::cli::insert(out, b"\n")?;
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:885-888
         // ```c++
         //     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
@@ -993,7 +1017,16 @@ impl TaxReport {
         //                                             results.GetRID());
         // ```
         // outfmt 0's `Query=` block (`kFormatLineLength`, 68).
-        crate::report::pairwise::write_blastp_query_header(out, title, length)?;
+        crate::report::pairwise::write_blastp_query_header(out, title, length, self.html)?;
+        // NCBI reference (2.17.0): c++/src/algo/blast/format/blast_format.cpp:891-893
+        // ```c++
+        //     if(m_IsHTML) {
+        //         m_Outfile <<  "</pre>";
+        //     }
+        // ```
+        if self.html {
+            crate::cli::insert(out, b"</pre>")?;
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:893-899
         // ```c++
         //     CConstRef<CSeq_align_set> aln_set = results.GetSeqAlign();
@@ -1104,7 +1137,7 @@ pub fn write_report(
 /// `parsed`, `plain` and `protein`), the lookups of the run's database that
 /// `names` carries (`TaxLookups::new`) and the reports (`TaxReport::new`), all made before the
 /// batch's first byte; `loads` what the reports load of each subject (`None`: every subject).
-/// `program` names the program in LOSAT's refusals and NCBI's messages.
+/// `program` names the program in LOSAT's refusals and NCBI's messages; `html`: `-html`.
 #[allow(clippy::too_many_arguments)]
 pub fn report_batch<'a>(
     queries: &[TaxQuery<'_>],
@@ -1114,9 +1147,10 @@ pub fn report_batch<'a>(
     loads: Option<&crate::report::db_subject::HitLoads>,
     names: Option<&TabularNames>,
     program: &str,
+    html: bool,
 ) -> Result<TaxReport> {
     let table = SubjectTable::new(queries, parsed, plain, protein, loads, program);
-    TaxReport::new(queries, &table, TaxLookups::new(names, program)?)
+    TaxReport::new(queries, &table, TaxLookups::new(names, program)?, html)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1023

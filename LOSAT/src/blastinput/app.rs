@@ -649,6 +649,29 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+// ```c++
+//         // Produce HTML?
+//         arg_desc.AddFlag(kArgProduceHtml, "Produce HTML output?", true);
+// ```
+/// LOSAT's refusal of `-html` with the format `number` when it is 1 to 4 (the query-anchored
+/// alignments), until item T4b of line RG writes their HTML: one check for the five programs, made
+/// where each one's formatting handler checks the format (`formatting_handler_check`), with the
+/// program's option `html`. The refusal's form is that of `cli::run_refusal`.
+pub fn html_format_check(number: i32, program: Program, html: bool) -> anyhow::Result<()> {
+    if html
+        && (output_format::QUERY_ANCHORED_IDENTITIES
+            ..=output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
+            .contains(&number)
+    {
+        anyhow::bail!(
+            "-html (with -outfmt 1, 2, 3 or 4) is not supported by LOSAT's {}",
+            program.name()
+        );
+    }
+    Ok(())
+}
+
 /// NCBI's error for the XInclude formats (13 and 14) written to standard output, after
 /// `Query is Empty!`.
 ///
@@ -1474,6 +1497,29 @@ mod tests {
         );
         for number in (0..=12).chain(15..=21) {
             assert!(xinclude_check(&choice(number)).is_ok());
+        }
+    }
+
+    // `-html` with the formats 1 to 4 is LOSAT's refusal (item T4b of line RG); the other formats
+    // and a run without `-html` pass.
+    #[test]
+    fn html_is_refused_with_the_formats_1_to_4_only() {
+        for program in PROGRAMS {
+            for number in 0..END_VALUE {
+                assert!(html_format_check(number, program, false).is_ok());
+                let checked = html_format_check(number, program, true);
+                if (1..=4).contains(&number) {
+                    assert_eq!(
+                        checked.unwrap_err().to_string(),
+                        format!(
+                            "-html (with -outfmt 1, 2, 3 or 4) is not supported by LOSAT's {}",
+                            program.name()
+                        )
+                    );
+                } else {
+                    assert!(checked.is_ok(), "{} outfmt {number}", program.name());
+                }
+            }
         }
     }
 

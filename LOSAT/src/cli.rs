@@ -877,7 +877,6 @@ const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "entrez_query",
     "filtering_db",
     "gilist",
-    "html",
     "import_search_strategy",
     "index_name",
     "negative_gilist",
@@ -907,7 +906,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "db_soft_mask",
     "entrez_query",
     "gilist",
-    "html",
     "import_search_strategy",
     "ipglist",
     "negative_gilist",
@@ -936,11 +934,13 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 // ```
 /// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine does
-/// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
+/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), `-html` (PS15a; blastp's `-html` is run, so
+/// psiblast no longer inherits its refusal), and the arguments that blastp's engine does not run
+/// either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
 /// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
 /// of line RG).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
+    "html",
     "ignore_msa_master",
     "in_msa",
     "msa_master_idx",
@@ -1472,7 +1472,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "db_soft_mask",
     "entrez_query",
     "gilist",
-    "html",
     "import_search_strategy",
     "negative_gilist",
     "remote",
@@ -1503,7 +1502,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "db_soft_mask",
     "entrez_query",
     "gilist",
-    "html",
     "import_search_strategy",
     "max_intron_length",
     "negative_gilist",
@@ -1527,7 +1525,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
 // ```
 // Named capabilities exist in NCBI but are explicitly outside the BLASTX product scope.
 const UNPORTED_BLASTX_ARGS: &[&str] = &[
-    "html",
     "gilist",
     "negative_gilist",
     "entrez_query",

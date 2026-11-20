@@ -9080,6 +9080,7 @@ fn write_reports_without_queries(
                     protein_matrix: args.scoring.matrix,
                     sort: args.sort,
                     view: view.unwrap_or_default(),
+                    html: args.html,
                 };
                 write_blastp_pairwise_report(
                     &[],
@@ -12595,6 +12596,7 @@ mod tests {
             db_filter: Default::default(),
             dbsize: None,
             show_gis: false,
+            html: false,
             parse_deflines: false,
             id_scope: None,
             searchsp: None,

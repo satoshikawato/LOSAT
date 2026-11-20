@@ -107,6 +107,9 @@ pub(super) struct TabularInputs {
     pub names: Option<TabularNames>,
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
+    /// `-html` (`TblastnArgs::html`): the HTML form of the outfmt 0 and 18 reports (outfmt 0's
+    /// pairwise writer reads it here too, `stage_e_report::write_pairwise`).
+    pub html: bool,
 }
 
 /// One custom tabular report of a run: `render`'s inputs that it reads.
@@ -294,6 +297,7 @@ pub(super) fn write_tblastn_tabular(
             &queries,
             writer,
             warnings,
+            tab.inputs.html,
         );
     }
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;

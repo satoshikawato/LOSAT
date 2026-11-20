@@ -81,6 +81,7 @@ def test_diagnostics_hold_the_bytes_that_the_command_line_writes(command_line, t
     # A subject without letters whose title is Latin-1 (`é` = E9): NCBI's warning quotes the title.
     query, subject = tmp_path / "q.fna", tmp_path / "s.faa"
     query.write_bytes(b">q\nATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGC\n")
+    # Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
     subject.write_bytes(b">s\xe9 t\n\n>s2\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSG\n")
     _, stderr = command_line("blastx", str(query), str(subject), ["-outfmt", "6"])
     assert b"s\xe9 t: Subject sequence contains no data" in stderr

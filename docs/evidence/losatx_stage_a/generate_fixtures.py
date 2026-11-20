@@ -13,6 +13,7 @@ from Bio import SeqIO
 ROOT=Path(__file__).resolve().parents[3]
 HERE=Path(__file__).resolve().parent
 CODES=[1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33]
+# Test protein: starts like E. coli AsnA (RefSeq NP_418200.1); the rest is not recorded.
 AA='MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQANLADKPEADKVKAKGDKVIGIDLGTTNSCVAIMDGTTPRVLENLEKKYP'
 CODONS=dict(zip('ACDEFGHIKLMNPQRSTVWY','GCT TGT GAT GAA TTT GGT CAT ATT AAA CTG ATG AAT CCT CAA CGT TCT ACT GTT TGG TAT'.split()))
 DNA=''.join(CODONS[a] for a in AA)

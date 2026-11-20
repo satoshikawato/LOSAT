@@ -341,7 +341,7 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             >
               in its order of <OptionName name="-sorthits" /></template
             >
-            (BLAST+'s <OptionName name="-num_alignments" />: <template v-if="outfmt0?.alignments !== undefined">{{ outfmt0.alignments }}</template
+            (<OptionName name="-num_alignments" />: <template v-if="outfmt0?.alignments !== undefined">{{ outfmt0.alignments }}</template
             ><template v-else>250</template
             ><template v-if="limitGiven">, here <OptionName name="-max_target_seqs" /></template
             >), and this subject <template v-if="sorted">is not one of them</template><template v-else>comes after them</template>. The outfmt 6

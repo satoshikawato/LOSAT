@@ -397,7 +397,8 @@ mod tests {
             (
                 "eConvert",
                 vec![
-                    "Cannot convert string 'abc' to Int8 (m_Pos = 0)".to_string(),
+                    crate::wording::losat_text("Cannot convert string 'abc' to Int8 (m_Pos = 0)")
+                        .into_owned(),
                     "Argument \"line_length\". Argument cannot be converted:  `abc'".to_string(),
                 ]
             )
@@ -482,7 +483,10 @@ mod tests {
             (
                 "eConvert",
                 vec![
-                    "Cannot convert string '\\343\\201\\202' to Int8 (m_Pos = 0)".to_string(),
+                    crate::wording::losat_text(
+                        "Cannot convert string '\\343\\201\\202' to Int8 (m_Pos = 0)"
+                    )
+                    .into_owned(),
                     "Argument \"ipg\". Argument cannot be converted:  `\u{3042}'".to_string(),
                 ]
             )

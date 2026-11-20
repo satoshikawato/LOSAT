@@ -256,7 +256,10 @@ fn run_messages_go_where_ncbi_sends_them() {
 
 /// NCBI's report of a registry file with the line `[x`, which ends the program (exit status 2),
 /// and its replay.
-const SECTION_REPORT: &str = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+/// NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+fn section_report() -> String {
+    losat::wording::losat_text("Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n").into_owned()
+}
 
 /// NCBI BLAST+ 2.17.0 (probes `conf_ok`, `conf_eq`, `conf_ini_bad`, `conf_bad`, `conf_dot`,
 /// `conf_nolocal_dot`): the file of `-conffile` is read in place of `<program>.ini` (a malformed
@@ -289,7 +292,7 @@ fn the_conffile_is_read_in_place_of_the_programs_ini() {
             let failed = run_in(&dir, &with, &[]);
             assert_eq!(
                 (failed.status.code(), text(&failed.stderr)),
-                (Some(2), SECTION_REPORT.repeat(2)),
+                (Some(2), section_report().repeat(2)),
                 "{program} {conffile:?}"
             );
             assert!(failed.stdout.is_empty());
@@ -312,7 +315,7 @@ fn the_conffile_is_read_in_place_of_the_programs_ini() {
                 text(&library.stderr),
                 fs::read(dir.join("log.txt")).unwrap()
             ),
-            (Some(1), SECTION_REPORT.repeat(2), cli_log),
+            (Some(1), section_report().repeat(2), cli_log),
             "{program} -logfile: the library"
         );
         fs::remove_file(dir.join("log.txt")).unwrap();
@@ -485,7 +488,8 @@ fn an_unreadable_conffile_and_a_last_word_without_value() {
     // A process that can open the file anyway (root) reads it as NCBI's would.
     let unreadable = fs::File::open(dir.join("c.ini")).is_err();
     let message = "Registry file \"./c.ini\" cannot be opened";
-    let report = format!("Error: (CAppException::eNoRegistry) {message}\nError: (106.15) Application's initialization failed (CAppException::eNoRegistry) {message}\n");
+    // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+    let report = losat::wording::losat_text(&format!("Error: (CAppException::eNoRegistry) {message}\nError: (106.15) Application's initialization failed (CAppException::eNoRegistry) {message}\n")).into_owned();
     for (program, search) in SEARCHES {
         let mut words = vec![program];
         words.extend(search);

@@ -206,11 +206,16 @@ mod tests {
 
     #[test]
     fn the_exceptions_report_ncbis_lines() {
-        let what = Utf8Error::SymbolToChar.exception().what();
-        assert!(what.ends_with("/src/corelib/ncbistr.cpp\", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)\n"), "{what}");
-        let what = Utf8Error::DecodeFirst.exception().what();
-        assert!(what.contains("line 7190: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeFirst() - Source string is not in UTF8 format (m_Pos = 0)"), "{what}");
-        let what = Utf8Error::DecodeNext.exception().what();
-        assert!(what.contains("line 7202: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeNext() - Source string is not in UTF8 format (m_Pos = 0)"), "{what}");
+        // NCBI's reports in LOSAT's words (`crate::wording::losat_text`).
+        let ncbi = |text: &str| crate::wording::losat_text(text).into_owned();
+        let error = Utf8Error::SymbolToChar.exception();
+        assert_eq!(error.site().line, 6901);
+        assert_eq!(error.what(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)\n"));
+        let error = Utf8Error::DecodeFirst.exception();
+        assert_eq!(error.site().line, 7190);
+        assert_eq!(error.what(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7190: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeFirst() - Source string is not in UTF8 format (m_Pos = 0)\n"));
+        let error = Utf8Error::DecodeNext.exception();
+        assert_eq!(error.site().line, 7202);
+        assert_eq!(error.what(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7202: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeNext() - Source string is not in UTF8 format (m_Pos = 0)\n"));
     }
 }

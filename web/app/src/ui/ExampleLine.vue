@@ -9,7 +9,7 @@
 import { computed, onBeforeUpdate, onUpdated, watch } from 'vue';
 import type { ProgramId } from 'losat/domain';
 import type { ExampleLoader } from '../application/examples';
-import { exampleById, exampleHost, examplesFor, type ExampleId, type ExampleSet } from '../domain/examples';
+import { exampleById, exampleHost, exampleQuerySources, examplesFor, type ExampleId, type ExampleSet } from '../domain/examples';
 import { announce } from './announcer';
 import { formatBytes } from './format';
 import HelpTip from './HelpTip.vue';
@@ -37,8 +37,14 @@ const help = computed(
       ? ''
       : `${props.examples.copyTo === 'folder' ? 'Save to folder…' : 'Download'} writes that file outside this browser's storage, ` +
         'which clearing the site data empties; "Open FASTA files…" opens it again. ') +
-    sets.value.map((set) => `${set.label}: ${set.provenance}`).join(' '),
+    sets.value.map((set) => `${set.label}: ${set.provenance}`).join(' ') +
+    querySources(exampleQuerySources(props.program)),
 );
+
+/** The sentence on where the mode's example queries come from. */
+function querySources(sources: readonly string[]): string {
+  return ` ${sources.length === 1 ? 'Query' : 'Queries'}: ${sources.join('; ')}.`;
+}
 
 /** The sentence beside a set's button. */
 function sentence(set: ExampleSet): string {

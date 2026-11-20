@@ -7144,6 +7144,7 @@ mod tests {
     // batches) and without (one, two, three).
     #[test]
     fn x_search_batches_takes_the_batches_whatever_their_number() {
+        // Test protein: made from the first residues of E. coli AsnA (RefSeq NP_418200.1) and other letters.
         let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 4];
         let subjects: Vec<Vec<u8>> = (0..2usize)
             .map(|n| {

@@ -52,8 +52,8 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.word_size = args.word_size.map(|size| size as i32);
     inputs.perc_identity = args.percent_identity;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
-    // (`-ungapped` with outfmt 11 is refused, `cli_output_formats`; the search strategy records
-    // it, probe `ung` of RG-F1.)
+    // (An ungapped search's archive: `UngappedMode TRUE`, no gapped `ka-block`, Dense-diags;
+    // the search strategy records it too, probe `ung` of RG-F1.)
     inputs.ungapped = args.ungapped;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);
     inputs.penalty = args.penalty;
@@ -160,6 +160,9 @@ pub(crate) struct CallBatches<'a> {
     pub minus_strand: bool,
     /// The queries of each batch of the call, in order; empty for a call that is one batch.
     pub spans: &'a [Range<usize>],
+    /// The search is not `-ungapped`: an ungapped search has no gapped Karlin-Altschul block
+    /// (`ka-blocks`) and its Seq-aligns are Dense-diags (`RunRecord::gapped`).
+    pub gapped: bool,
 }
 
 /// What the archive of a call needs: the call's batches and their results.
@@ -396,7 +399,12 @@ pub(crate) fn for_each_batch(
         let ka_blocks = match &context.karlin {
             Some(blocks) => [
                 ka_block(&blocks.ungapped, false),
-                ka_block(&blocks.gapped, true),
+                // An ungapped search has no gapped block (`KaBlock::missing`, as BLASTX's).
+                if call.gapped {
+                    ka_block(&blocks.gapped, true)
+                } else {
+                    KaBlock::missing(true)
+                },
             ],
             None => [KaBlock::missing(false), KaBlock::missing(true)],
         };
@@ -439,7 +447,7 @@ pub(crate) fn write_blastn_archives(
     let run = RunRecord {
         program: Program::Blastn,
         db_title: call.subjects.db_title(),
-        gapped: true,
+        gapped: call.batches.gapped,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
         for index in span.clone() {
@@ -669,7 +677,7 @@ mod tests {
         let native = |message: &str| {
             anyhow::Error::from(crate::cli::NativeError {
                 exit: 1,
-                message: message.to_string(),
+                message: message.to_string().into(),
             })
         };
         let lines = error_lines(

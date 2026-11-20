@@ -55,10 +55,9 @@
 // A search with `"database"` (`-db`) has no subject: the run takes subject handle 0 and the engine opens
 // the database and the lists of its filters by the argv's names in the run's working directory, which
 // the host preopens as `.` (abi_v2.md §3): the search's directory, as the CLI runs there (line WQA D12a,
-// 2026-11-20). The serial engine runs it on an instance whose `.` is that directory. The threaded engine
-// does not run it here: the Node thread host of LOSAT/tests (wasi_thread_host.js) gives a reactor's
-// threads no shared table of open files, so a descriptor of one thread is unknown on another; the
-// browser host's threads run these searches (web/app/tests/e2e/database.spec.ts).
+// 2026-11-20). Each engine runs it on an instance whose `.` is that directory; the threaded engine's
+// threads share the table of the files it opens (LOSAT/tests/wasi_files.js), as the browser host's
+// threads share theirs (web/packages/losat/src/infra/reactor/run-directory.ts).
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -345,9 +344,11 @@ async function openSerial(wasmPath, directory) {
   return { reactor, close: async () => {} };
 }
 
-async function openThreads(wasmPath) {
+// The threaded reactor; `directory` as openSerial's.
+async function openThreads(wasmPath, directory) {
   let reactor;
   const host = await createThreadHost(wasmPath, "threaded-reactor", [], {
+    directory,
     imports: { losat_host: { emit: (stream, ptr, len) => reactor.emit(stream, ptr, len) } },
   });
   reactor = new Reactor(host.instance.exports, () => host.memory);
@@ -802,8 +803,8 @@ async function main() {
   const results = [];
   const selected = (options.engines || "serial,threads").split(",");
   const engines = [
-    { name: "serial", open: () => openSerial(options.serial), threads: [1] },
-    { name: "threads", open: () => openThreads(options.threads), threads: [1, 2, 4] },
+    { name: "serial", open: (directory) => openSerial(options.serial, directory), threads: [1] },
+    { name: "threads", open: (directory) => openThreads(options.threads, directory), threads: [1, 2, 4] },
   ].filter((engine) => selected.includes(engine.name));
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
@@ -814,15 +815,12 @@ async function main() {
     const subjects = new Map(); // "program subject" -> handle, kept across runs
     const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
     let countsRegistered = 0, countsKept = 0;
-    const databases = new Map(); // a -db search's directory -> the serial instance whose "." it is
+    const databases = new Map(); // a -db search's directory -> the engine's instance whose "." it is
     for (const search of all) {
       const program = search.program;
-      if (search.database && engine.name !== "serial") {
-        console.log(`skip ${engine.name} ${search.cases.join(",")}: -db on the Node thread host (see the head of this file)`);
-        continue;
-      }
-      if (search.database && !databases.has(search.cwd)) databases.set(search.cwd, await openSerial(options.serial, search.cwd));
-      const reactor = search.database ? databases.get(search.cwd).reactor : own;
+      if (search.database && !databases.has(search.cwd)) databases.set(search.cwd, await engine.open(search.cwd));
+      const instance = search.database ? databases.get(search.cwd) : { reactor: own, waitForWorkers };
+      const reactor = instance.reactor;
       const query = inputPath(search, "-query"), subject = search.database ? undefined : inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
       const subjectKey = `${program} ${subject}`;
@@ -872,7 +870,7 @@ async function main() {
           shownIds = { query: response.query.records.map((record) => record.shown_id), subject: (response.subject?.records ?? []).map((record) => record.shown_id) };
         }
         const run = reactor.call("losat_web2_run", argv, ...handles);
-        if (waitForWorkers) await waitForWorkers();
+        if (instance.waitForWorkers) await instance.waitForWorkers();
         if (together) for (const handle of handles.filter((handle) => handle !== 0)) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
         if (search.expect === "failure") {
           checkFailure(run, expected, search, label);

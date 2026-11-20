@@ -28,7 +28,11 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   stack overflows on a PSSM's values nested thousands of levels deep (PD-LOSAT-NCBI-DEFECTS exception 15); `check`
   runs LOSAT as for any row.
 - `kind losat-rejection`: LOSAT exits with rc, stdout is empty, stderr contains the text after `expect: ` in covers
-  (to a ` | ` or the end); the hash columns are empty.
+  (to a ` | ` or the end); the hash columns are empty. A refusal after reports that NCBI writes too has stdout
+  cells: NCBI's stdout of the same command, or with `ncbi-near: ROW_ID` that of the `ncbi` row ROW_ID of the same
+  outfmt (a near input that NCBI runs to its end), and with `ncbi-near: ROW_ID first N bytes` its first N bytes. Where
+  NCBI crashes on the row's own command, its stdout depends on where the crash cuts it: `freeze` stops on such a run,
+  and the row takes a near row (or has empty stdout cells where LOSAT writes nothing before it refuses).
 - `db`: path relative to LOSAT/ (an empty cell is `-db ""`; `subject:PATH` runs `-subject PATH` in place of `-db`, for a
   psiblast losat-rejection row of a subject set); `extra_args` is split like a shell line; `outfmt` is one argument;
   `stdout_sha256`, `stdout_bytes` and `stderr_sha256` are written by `freeze`.

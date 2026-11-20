@@ -85,25 +85,6 @@ pub(crate) enum Constraint {
 
 impl Constraint {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4778-4794
-    // ```c++
-    // string CArgAllow_Integers::GetUsage(void) const
-    // {
-    //     if (m_MinMax.size() == 1) {
-    //         Int8 x_min = m_MinMax.begin()->first;
-    //         Int8 x_max = m_MinMax.begin()->second;
-    //         if (x_min == x_max) {
-    //             return NStr::Int8ToString(x_min);
-    //         } else if (x_min == kMin_Int && x_max != kMax_Int) {
-    //             return string("less or equal to ") + NStr::Int8ToString(x_max);
-    //         } else if (x_min != kMin_Int && x_max == kMax_Int) {
-    //             return string("greater or equal to ") + NStr::Int8ToString(x_min);
-    //         } else if (x_min == kMin_Int && x_max == kMax_Int) {
-    //             return kEmptyStr;
-    //         }
-    //     }
-    //     return CArgAllow_Int8s::GetUsage();;
-    // }
-    // ```
     // (`CArgAllow_Int8s::GetUsage` of one range, ncbiargs.cpp:4698-4724: `<min>..<max>`.)
     fn usage(self) -> String {
         match self {
@@ -839,36 +820,12 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
             _ => false,
         },
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
-        // ```c++
-        // bool CArgAllow_Int8s::Verify(const string& value) const
-        // {
-        //     Int8 val = s_StringToInt8(value);
-        //     ITERATE( set< TInterval >, pi, m_MinMax) {
-        //         if (pi->first <= val && val<= pi->second) {
-        //             return true;
-        //         }
-        //     }
-        //     return false;
-        // }
-        // ```
         // (`s_StringToInt8` reads the value as `integer_value` did, hexadecimal included.)
         Some(Constraint::Integers(min, max)) => match number {
             Some(Number::Integer(number)) => (min..=max).contains(&i64::from(number)),
             _ => false,
         },
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4821-4830
-        // ```c++
-        // bool CArgAllow_Doubles::Verify(const string& value) const
-        // {
-        //     double val = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
-        //     ITERATE( set< TInterval >, pi, m_MinMax) {
-        //         if (pi->first <= val && val<= pi->second) {
-        //             return true;
-        //         }
-        //     }
-        //     return false;
-        // }
-        // ```
         // (the conversion of `double_value`; a NaN is in no range.)
         Some(Constraint::Doubles(min, max, _)) => match number {
             Some(Number::Double(number)) => min <= number && number <= max,
@@ -999,23 +956,7 @@ fn double_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:489-498
-// ```c++
-// inline CArg_Boolean::CArg_Boolean(const string& name, const string& value)
-//     : CArg_String(name, value)
-// {
-//     try {
-//         m_Boolean = NStr::StringToBool(value);
-//     } catch (const CException& e) {
-//         NCBI_RETHROW(e,CArgException,eConvert, s_ArgExptMsg(GetName(),
-//             "Argument cannot be converted",value));
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2837-2838
-// ```c++
-//     NCBI_THROW2(CStringException, eConvert,
-//                 "String cannot be converted to bool", 0);
-// ```
 // As for `CArg_Int8`, the conversion's exception is the predecessor (its text is the first
 // message, with its position: `String cannot be converted to bool (m_Pos = 0)`).
 /// The value of an `eBoolean` key (`CArg_Boolean`).

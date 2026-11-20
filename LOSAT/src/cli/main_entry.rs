@@ -155,12 +155,6 @@ fn run_main_entry() -> Result<()> {
         std::process::exit(crate::segmasker::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp:39-42
-    // ```c++
-    // int main( int argc, char * argv[] )
-    // {
-    //     return CWinMaskApplication().AppMain(argc, argv);
-    // }
-    // ```
     // `losat windowmasker` too.
     if let Some(start) = started("windowmasker") {
         std::process::exit(crate::windowmasker::run(&argv[2..], start));

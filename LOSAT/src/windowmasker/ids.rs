@@ -21,33 +21,6 @@ pub(super) struct EmptyId {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:75-100
-/// ```c++
-/// const vector< Uint4 >
-/// CWinMaskUtil::CIdSet_TextMatch::split( const string & id_str )
-/// {
-///     vector< Uint4 > result;
-///     string tmp = id_str;
-///
-///     if( !tmp.empty() && tmp[tmp.length() - 1] == '|' )
-///         tmp = tmp.substr( 0, tmp.length() - 1 );
-///
-///     if( !tmp.empty() ) {
-///         string::size_type pos = ( tmp[0] == '>' ) ? 1 : 0;
-///         string::size_type len = tmp.length();
-///
-///         while( pos != string::npos && pos < len ) {
-///             result.push_back( pos );
-///
-///             if( (pos = tmp.find_first_of( "|", pos )) != string::npos ) {
-///                 ++pos;
-///             }
-///         }
-///     }
-///
-///     result.push_back( tmp.length() + 1 );
-///     return result;
-/// }
-/// ```
 fn split(id: &[u8]) -> Vec<usize> {
     let tmp = id.strip_suffix(b"|").unwrap_or(id);
     let mut result = Vec::new();
@@ -69,26 +42,6 @@ impl TextMatchIds {
     /// `CIdSet_TextMatch::insert( id_str )`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:103-123
-    /// ```c++
-    ///     Uint4 nwords = split( id_str ).size() - 1;
-    ///
-    ///     if( nwords == 0 ) {
-    ///         ERR_POST( Error
-    ///             << "CWinMaskConfig::CIdSet_TextMatch::insert(): bad id: "
-    ///             << id_str << ": ignoring");
-    ///     }
-    ///
-    ///     if( nword_sets_.size() < nwords ) {
-    ///         nword_sets_.resize( nwords );
-    ///     }
-    ///
-    ///     if( id_str[id_str.length() - 1] != '|' ) {
-    ///         nword_sets_[nwords - 1].insert( id_str );
-    ///     }else {
-    ///         nword_sets_[nwords - 1].insert(
-    ///                 id_str.substr( 0, id_str.length() - 1 ) );
-    ///     }
-    /// ```
     /// An id of no words (empty, `>`, `|`, `>|`) goes on to `nword_sets_[-1]`: `EmptyId`.
     pub(super) fn insert(&mut self, id: &[u8]) -> Result<(), EmptyId> {
         let nwords = split(id).len() - 1;
@@ -112,24 +65,6 @@ impl TextMatchIds {
     /// of the list with as many words.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:154-175
-    /// ```c++
-    ///     vector< Uint4 > word_starts = split( id_str );
-    ///
-    ///     for( Uint4 i = 0;
-    ///             i < nword_sets_.size() && i < word_starts.size() - 1; ++i ) {
-    ///         if( !nword_sets_[i].empty() ) {
-    ///             for( Uint4 j = 0; j < word_starts.size() - i - 1; ++j ) {
-    ///                 string pattern = id_str.substr(
-    ///                         word_starts[j],
-    ///                         word_starts[j + i + 1] - word_starts[j] - 1 );
-    ///
-    ///                 if( find( pattern, i ) ) {
-    ///                     return true;
-    ///                 }
-    ///             }
-    ///         }
-    ///     }
-    /// ```
     fn find_text(&self, id: &[u8]) -> bool {
         let starts = split(id);
         let words = starts.len() - 1;
@@ -153,22 +88,6 @@ impl TextMatchIds {
     /// `CIdSet_TextMatch::find( bsh )` of a sequence whose `GetTitle` is `title`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:126-145
-    /// ```c++
-    ///     CConstRef< CBioseq > seq = bsh.GetCompleteBioseq();
-    ///     string id_str = sequence::GetTitle( bsh );
-    ///
-    ///     if( !id_str.empty() ) {
-    ///         string::size_type pos = id_str.find_first_of( " \t" );
-    ///         id_str = id_str.substr( 0, pos );
-    ///     }
-    ///
-    ///     if( find( id_str ) ) return true;
-    ///     else if( id_str.substr( 0, 4 ) == "lcl|" ) {
-    ///         id_str = id_str.substr( 4, string::npos );
-    ///         return find( id_str );
-    ///     }
-    ///     else return false;
-    /// ```
     fn find(&self, title: &[u8]) -> bool {
         let end = title
             .iter()
@@ -189,20 +108,6 @@ impl TextMatchIds {
 /// line; a file that does not open gives none.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:471-484
-/// ```c++
-///     CNcbiIfstream file( file_name.c_str() );
-///     string line;
-///
-///     while( NcbiGetlineEOL( file, line ) ) {
-///         if( !line.empty() )
-///         {
-///             string::size_type stop( line.find_first_of( " \t" ) );
-///             string::size_type start( line[0] == '>' ? 1 : 0 );
-///             string id_str = line.substr( start, stop - start );
-///             id_list.insert( id_str );
-///         }
-///     }
-/// ```
 /// `NcbiGetlineEOL` ends a line at `\n`, `\r` or `\r\n` (a `\r` alone ends one too), and the
 /// last line needs no end. A line that starts with a space or a tab gives an empty id; one
 /// whose first space comes at 0 after `>` (`> x`) too.
@@ -233,12 +138,6 @@ pub(super) fn fill_id_list(name: &str) -> Result<TextMatchIds, EmptyId> {
 /// The lines of `NcbiGetlineEOL`: ended by `\n`, `\r\n` or a `\r` alone.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:191-224
-/// ```c++
-/// CNcbiIstream& NcbiGetlineEOL(CNcbiIstream& is, string& str, string::size_type* count)
-/// {
-///     return s_NcbiGetline(is, str, "\r\n", count);
-/// }
-/// ```
 /// (`s_NcbiGetline` stops at either delimiter and, after a `\r`, takes a `\n` that follows as
 /// part of the same end.)
 fn getline_eol(bytes: &[u8]) -> Vec<&[u8]> {
@@ -281,32 +180,6 @@ impl IdLists {
     /// `title` (asked only when a list is not empty).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:218-245
-    /// ```c++
-    ///     if( (ids == 0 || ids->empty()) &&
-    ///         (exclude_ids == 0 || exclude_ids->empty()) ) {
-    ///         return true;
-    ///     }
-    ///
-    ///     bool result = true;
-    ///
-    ///     if( ids != 0 && !ids->empty() )
-    ///     {
-    ///         result = false;
-    ///
-    ///         if( ids->find( bsh ) ) {
-    ///             result = true;
-    ///         }
-    ///     }
-    ///
-    ///     if( exclude_ids != 0 && !exclude_ids->empty() )
-    ///     {
-    ///         if( exclude_ids->find( bsh ) ) {
-    ///             result = false;
-    ///         }
-    ///     }
-    ///
-    ///     return result;
-    /// ```
     pub(super) fn consider(&self, title: &[u8]) -> bool {
         let mut result = true;
         if let Some(ids) = self.ids.as_ref().filter(|ids| !ids.is_empty()) {
@@ -337,55 +210,6 @@ pub(super) enum Title {
 /// representation, so of the function only these steps apply.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/seqtitle.cpp:131-178,286-296,371-412
-/// ```c++
-///     ITERATE (CBioseq_Handle::TId, idh, hnd.GetId()) {
-///         ...
-///         case CSeq_id::e_Tpg:
-///         case CSeq_id::e_Tpe:
-///         case CSeq_id::e_Tpd:
-///             third_party = true;
-///             break;
-///         ...
-///         case CSeq_id::e_Patent:
-///             pat_id = &id->GetPatent();
-///             break;
-/// ...
-///         CSeqdesc_CI it(hnd, CSeqdesc::e_Title, search_depth);
-///         if (it) {
-///             title = it->GetTitle();
-///         }
-/// ...
-///     // originally further down, but moved up to match the C version
-///     while (NStr::EndsWith(title, ".")  ||  NStr::EndsWith(title, " ")) {
-///         title.erase(title.end() - 1);
-///     }
-/// ...
-///     if (title.empty()  &&  pat_id.NotEmpty()) {
-///         title = "Sequence " + NStr::IntToString(pat_id->GetSeqid())
-///             + " from Patent " + pat_id->GetCit().GetCountry()
-///             + ' ' + pat_id->GetCit().GetSomeNumber();
-///     }
-/// ...
-///     if (title.empty()  &&  !htg_tech  &&  source.NotEmpty()) {
-///         title = s_TitleFromBioSource(*source, tech);
-///         if (title.empty()) {
-///             title = "No definition line found";
-///         }
-///     }
-///
-///     if (is_tsa  &&  !title.empty() ) {
-///         prefix = "TSA: ";
-///     } else if (third_party  &&  !title.empty() ) {
-///         bool tpa_start = NStr::StartsWith(title, "TPA: ", NStr::eNocase);
-///         if (tpa_exp) {
-///         ...
-///         } else if ( !tpa_start ) {
-///             prefix = "TPA: ";
-///         }
-///     }
-/// ...
-///     return prefix + title + suffix;
-/// ```
 /// (The steps for an empty title from the source of an NC, NM or NR accession, from a PDB
 /// descriptor or from a protein do not apply: they need a MolInfo, a feature or a descriptor
 /// the readers do not make, or a protein. The flags add no organism.)

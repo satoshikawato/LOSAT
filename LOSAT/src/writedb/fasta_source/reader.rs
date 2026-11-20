@@ -2395,22 +2395,6 @@ impl RecordState {
             let mut pos = 0;
             for gap in &self.gaps {
                 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1393-1410
-                // ```c++
-                //             const bool bHasSpecifiedGapType =
-                //                 ( (*it)->m_pGapType && *(*it)->m_pGapType != CSeq_gap::eType_unknown );
-                //             const bool bHasSpecifiedLinkEvid =
-                //                 ( ! (*it)->m_setOfLinkageEvidence.empty() &&
-                //                   ( (*it)->m_setOfLinkageEvidence.size() > 1 ||
-                //                     *(*it)->m_setOfLinkageEvidence.begin() != CLinkage_evidence::eType_unspecified ) );
-                //             if( bHasSpecifiedGapType || bHasSpecifiedLinkEvid )
-                //             {
-                //                 FASTA_WARNING((*it)->m_uLineNumber,
-                //                     "CFastaReader: Gap mods are ignored because gaps are "
-                //                     "becoming N's or X's in this case.",
-                //                     ILineError::eProblem_ModifierFoundButNoneExpected,
-                //                     "gapline" );
-                //             }
-                // ```
                 if gap.mods {
                     post_warning(
                         self.flags.ignored_problems,

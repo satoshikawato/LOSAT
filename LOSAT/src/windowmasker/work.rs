@@ -96,19 +96,6 @@ pub(super) fn unsupported(what: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:668-690 (AppMain's handlers of `Run`)
-// ```c++
-//         catch (CException& e) {
-//             NCBI_REPORT_EXCEPTION_X(16,
-//                                     "Application's execution failed", e);
-//             *got_exception = true;
-//             *exit_code = 3;
-//         }
-//         catch (exception& e) {
-//             ERR_POST_X(7, "Application's execution failed: " << e.what());
-//             *got_exception = true;
-//             *exit_code = 3;
-//         }
-// ```
 /// Writes the report of `failure` to the diagnostics; the exit status.
 pub(super) fn report(failure: Failure, diag: &mut Diag) -> i32 {
     match failure {
@@ -133,19 +120,6 @@ pub(super) fn report(failure: Failure, diag: &mut Diag) -> i32 {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:486-506
-/// ```c++
-/// const char * CWinMaskConfigException::GetErrCodeString() const
-/// {
-///     switch( GetErrCode() )
-///     {
-///     case eInputOpenFail:
-///
-///         return "can not open input stream";
-/// ...
-///     case eInconsistentOptions:
-///
-///         return "inconsistent program options";
-/// ```
 /// `CWinMaskConfigException` thrown at `line` of win_mask_config.cpp in `function`.
 pub(super) fn config_exception(
     line: u32,
@@ -180,13 +154,6 @@ pub(super) trait SequenceSource {
 /// none for `seqids` (`input` is `None` only for `blastdb`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:384-397
-/// ```c++
-///         if(determine_input && iformatstr != "seqids"){
-///             if( iformatstr == "fasta" )
-///                 reader = new CMaskFastaReader( *is, true, args["parse_seqids"] );
-///             else if( iformatstr == "blastdb" )
-///                 reader = new CMaskBDBReader( args[kInput].AsString() );
-/// ```
 pub(super) fn reader<'a, R: Read + 'a>(
     options: &Options<'_>,
     input: Option<R>,
@@ -298,27 +265,6 @@ impl SequenceSource for DatabaseSource {
 /// `CWinMaskConfig::x_GetWriter`: the writer of `-outfmt`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:282-318
-/// ```c++
-///     if (format == "interval") {
-///         CNcbiOstream& output = args[kOutput].AsOutputFile();
-///         retval = new CMaskWriterInt(output);
-///     } else if (format == "fasta") {
-///         CNcbiOstream& output = args[kOutput].AsOutputFile();
-///         retval = new CMaskWriterFasta(output);
-///     } else if (NStr::StartsWith(format, "seqloc_asn1_binary")) {
-///         ...
-///     } else if (NStr::StartsWith(format, "seqloc_")) {
-///         CNcbiOstream& output = args[kOutput].AsOutputFile();
-///         retval = new CMaskWriterSeqLoc(output, format);
-///     } else if (NStr::StartsWith(format, "maskinfo_asn1_binary")) {
-///         ...
-///     } else if (NStr::StartsWith(format, "maskinfo_")) {
-///         CNcbiOstream& output = args[kOutput].AsOutputFile();
-///         retval =
-///             new CMaskWriterBlastDbMaskInfo(output, format, 3,
-///                                eBlast_filter_program_windowmasker,
-///                                BuildAlgorithmParametersString(args));
-/// ```
 /// (`-outfmt` takes only the eight values of its constraint, of which none starts with
 /// `seqloc_asn1_binary` or `maskinfo_asn1_binary`. `BuildAlgorithmParametersString` gives an
 /// empty string: windowmasker has none of `locut`, `hicut`, `window` with `level` and
@@ -347,12 +293,6 @@ pub(super) fn writer(outfmt: &str) -> MaskWriter {
 /// configuration deletes the writer).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:203-206
-/// ```c++
-///     if(aConfig.InFmt() == "seqids"){
-///         ERR_POST(Error << "windowmasker with seqids input not implemented yet");
-///         return 1;
-///     }
-/// ```
 pub(super) fn run(
     options: &Options<'_>,
     source: Option<Box<dyn SequenceSource + '_>>,
@@ -389,17 +329,6 @@ pub(super) fn run(
 /// NCBI posts them: the factory's at once, the readers' after.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:208-232
-/// ```c++
-///     CMaskReader & theReader = aConfig.Reader();
-///     CMaskWriter & theWriter = aConfig.Writer();
-///     CSeqMasker theMasker( aConfig.LStatName(),
-///                           aConfig.WindowSize(),
-///                           ...
-///                           aConfig.MinScorePct(),
-///                           aConfig.ExtendScorePct(),
-///                           aConfig.ThresScorePct(),
-///                           aConfig.MaxScorePct() );
-/// ```
 fn masker(options: &Options<'_>, diag: &mut Diag) -> Result<SeqMasker, Failure> {
     let counts = UnitCounts::open_with_pct(
         Path::new(options.ustat),
@@ -424,15 +353,6 @@ fn masker(options: &Options<'_>, diag: &mut Diag) -> Result<SeqMasker, Failure> 
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:94-100
-/// ```c++
-///         if( (hval>>bc) + coll > M )
-///         {
-///             ostringstream r;
-///             r << "bad index at key " << hash.first
-///               << " : " << htp[hash.first];
-///             NCBI_THROW( Exception, eBadIndex, r.str() );
-///         }
-/// ```
 /// (`CSeqMaskerUsetHash::Exception::GetErrCodeString`: "bad index", :43-50.)
 const BAD_INDEX: ThrowSite = ThrowSite {
     file: "src/algo/winmask/seq_masker_uset_hash.cpp",
@@ -461,38 +381,6 @@ fn winmask_failure(ustat: &str, error: WinMaskError) -> Failure {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:238-280
-// ```c++
-//     if( aConfig.AppType() == CWinMaskConfig::eGenerateMasksWithDuster )
-//         duster = new CSDustMasker( aConfig.DustWindow(),
-//                                    aConfig.DustLevel(),
-//                                    aConfig.DustLinker() );
-//
-//     while( (aSeqEntry = theReader.GetNextSequence()).NotEmpty() )
-//     {
-//         if( aSeqEntry->Which() == CSeq_entry::e_not_set ) continue;
-//         ...
-//         for ( ;  bs_iter;  ++bs_iter) {
-//             CBioseq_Handle bsh = *bs_iter;
-//             if (bsh.GetBioseqLength() == 0) {
-//                 continue;
-//             }
-//
-//             if( CWinMaskUtil::consider( bsh, ids, exclude_ids ) )
-//             {
-//                 ...
-//                 unique_ptr< CSeqMasker::TMaskList > mask_info( theMasker( data ) );
-//                 CSeqMasker::TMaskList dummy;
-//
-//                 if( duster != 0 ) // Dust and merge with mask_info
-//                 {
-//                     unique_ptr< CSeqMasker::TMaskList > dust_info(
-//                         (*duster)( data, *mask_info.get() ) );
-//                     CSeqMasker::MergeMaskInfo( mask_info.get(), dust_info.get() );
-//                 }
-//
-//                 // theWriter.Print( bsh, *mask_info, aConfig.MatchId() );
-//                 theWriter.Print( bsh, *mask_info, GetArgs()["parse_seqids"] );
-// ```
 /// The masks of every sequence of `source`, printed by `writer`.
 fn mask_input(
     options: &Options<'_>,

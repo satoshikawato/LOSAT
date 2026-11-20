@@ -19,23 +19,6 @@ use super::work::{
 /// `CWinMaskApplication::Run` on `args`; the exit status.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:261-279
-/// ```c++
-///     if(type == eAny){
-///         if(args["mk_counts"])
-///             type = eComputeCounts;
-///         else if(args["convert"])
-///             type = eConvertCounts;
-///         else if(args["ustat"])
-///             type = eGenerateMasksWithDuster;
-///         else
-///             NCBI_THROW( CWinMaskConfigException, eInconsistentOptions,
-///                         "one of '-mk_counts', '-convert' or '-ustat <stat_file>' "
-///                         "must be specified" );
-///     }
-///
-///     if(type == eGenerateMasksWithDuster && !args["dust"].AsBoolean())
-///         type = eGenerateMasks;
-/// ```
 /// `stdin` is the standard input, which `-in -` reads.
 pub(super) fn run(
     args: &Args,
@@ -73,25 +56,6 @@ pub(super) fn run(
 /// The masking settings of `CWinMaskConfig` (`eGenerateMasks` or `eGenerateMasksWithDuster`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:322-368
-/// ```c++
-///       lstat_name( app_type >= eGenerateMasks ? args["ustat"].AsString() : "" ),
-///       t_low_pct( app_type != eConvertCounts && args["t_low_pct"] ? args["t_low_pct"].AsDouble() : -1.0 ),
-///       t_extend_pct( ... args["t_extend_pct"] ... ),
-///       t_thres_pct( ... args["t_thres_pct"] ... ),
-///       t_high_pct( ... args["t_high_pct"] ... ),
-///       textend( app_type >= eGenerateMasks && args["t_extend"] ? args["t_extend"].AsInteger() : 0 ),
-///       cutoff_score( app_type >= eGenerateMasks && args["t_thres"] ? args["t_thres"].AsInteger() : 0 ),
-///       max_score( app_type != eConvertCounts && args["t_high"] ? args["t_high"].AsInteger() : 0 ),
-///       min_score( app_type != eConvertCounts && args["t_low"] ? args["t_low"].AsInteger() : 0 ),
-///       window_size( app_type >= eGenerateMasks && args["window"] ? args["window"].AsInteger() : 0 ),
-/// ...
-///       dust_level( app_type == eGenerateMasksWithDuster ? args["dust_level"].AsInteger() : 0 ),
-/// ...
-///         set_max_score = args["set_t_high"]  ? args["set_t_high"].AsInteger()
-///                                             : 0;
-///         set_min_score = args["set_t_low"]   ? args["set_t_low"].AsInteger()
-///                                             : 0;
-/// ```
 /// `window_size` is a `Uint1` (`-window 300` is 44), the scores `Uint4`; their constraints keep
 /// them positive (`-t_extend` may be 0, which is the file's value as when it is not given).
 fn options<'a>(args: &'a Args, settings: &'a ApplicationSettings) -> Options<'a> {
@@ -134,26 +98,6 @@ fn options<'a>(args: &'a Args, settings: &'a ApplicationSettings) -> Options<'a>
 /// `CWinMaskConfig`'s constructor, then `work::run`; the exit status.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:320-327,375-401
-/// ```c++
-///       is( app_type >= eGenerateMasks && args[kInputFormat].AsString() != "blastdb"
-///                                      && determine_input ?
-///           ( !(args[kInput].AsString() == "-")
-///             ? new CNcbiIfstream( args[kInput].AsString().c_str() )
-///             : static_cast<CNcbiIstream*>(&NcbiCin) ) : NULL ), reader( NULL ), writer( NULL ),
-/// ...
-///         if( is && !*is )
-///         {
-///             NCBI_THROW( CWinMaskConfigException,
-///                         eInputOpenFail,
-///                         args[kInput].AsString() );
-///         }
-///
-///         if(determine_input && iformatstr != "seqids"){
-///             ... (the reader, quoted at `work::reader`)
-///         }
-///
-///         writer = x_GetWriter(args);
-/// ```
 /// The exceptions of the constructor leave it before its destructor could delete the writer:
 /// a `maskinfo_*` writer made then writes nothing (unlike one of `Run`, `work::run`).
 fn masking_run(
@@ -186,37 +130,6 @@ fn masking_run(
 /// exception.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:405-445
-/// ```c++
-///     string ids_file_name( args["ids"].AsString() );
-///     string exclude_ids_file_name( args["exclude_ids"].AsString() );
-///
-///     if(    !ids_file_name.empty()
-///         && !exclude_ids_file_name.empty() )
-///     {
-///         NCBI_THROW( CWinMaskConfigException, eInconsistentOptions,
-///                     "only one of -ids or -exclude_ids can be specified" );
-///     }
-///
-///     if( !ids_file_name.empty() ) {
-///         if( text_match ) {
-///             ids = new CIdSet_TextMatch;
-///         }else {
-///             if( iformatstr == "blastdb" )
-///                 ids = new CIdSet_SeqId;
-///             else
-///                 NCBI_THROW( CWinMaskConfigException, eInconsistentOptions,
-///                         "-text_match false can be used only with "
-///                         + string(kInputFormat) + " blastdb" );
-///         }
-///
-///         FillIdList( ids_file_name, *ids );
-///     }
-///
-///     if( !exclude_ids_file_name.empty() ) {
-///         ... (the same, line 437)
-///         FillIdList( exclude_ids_file_name, *exclude_ids );
-///     }
-/// ```
 /// `-text_match false` with `-infmt blastdb` matches the lists as Seq-ids (`CIdSet_SeqId`),
 /// whose messages for an id NCBI cannot parse name NCBI's build path: LOSAT refuses it. An id
 /// of no words is NCBI's crash (`ids::EmptyId`): refused.

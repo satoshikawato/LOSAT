@@ -13,11 +13,6 @@ pub(super) struct SDustMasker {
 /// `CWinMaskConfig`'s `dust_window` (64) and `dust_linker` (1).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:358-361
-/// ```c++
-///       dust_window( 64 ),
-///       dust_level( app_type == eGenerateMasksWithDuster ? args["dust_level"].AsInteger() : 0 ),
-///       dust_linker( 1 ),
-/// ```
 const DUST_WINDOW: u32 = 64;
 const DUST_LINKER: usize = 1;
 
@@ -27,11 +22,6 @@ impl SDustMasker {
     /// takes 20 for a level outside 2..64, `DustMasker::new`).
     ///
     /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_sdust_masker.cpp:67-69
-    /// ```c++
-    /// CSDustMasker::CSDustMasker( Uint4 arg_window, Uint4 arg_level, Uint4 arg_linker )
-    ///   : window( arg_window ), duster_( arg_level, arg_window, arg_linker )
-    /// {}
-    /// ```
     pub(super) fn new(level: i32) -> Self {
         SDustMasker {
             duster: DustMasker::new(level as u32, DUST_WINDOW as usize, DUST_LINKER),
@@ -43,44 +33,6 @@ impl SDustMasker {
     /// WindowMasker intervals `exclude` longer than the window, both ends included.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_sdust_masker.cpp:76-116
-    /// ```c++
-    ///     TMaskList * res( new TMaskList );
-    ///     TMaskList::const_iterator e_it = exclude_ranges.begin();
-    ///     TMaskList::const_iterator e_end = exclude_ranges.end();
-    ///     CSeqVector::const_iterator start_it = data.begin();
-    ///     CSeqVector::const_iterator current_it = data.begin();
-    ///     CSeqVector::const_iterator end_it = data.end();
-    ///
-    ///     if( e_it != e_end && e_it->first == 0 && e_it->second + 1 > window )
-    ///     {
-    ///         current_it = start_it + e_it->second - window + 2;
-    ///         ++e_it;
-    ///     }
-    ///
-    ///     do
-    ///     {
-    ///         Uint4 start_offset = current_it - start_it;
-    ///
-    ///         while( e_it != e_end && e_it->second - e_it->first + 1 <= window )
-    ///             ++e_it;
-    ///
-    ///         end_it = (e_it == e_end) ? data.end()
-    ///                                    : start_it + e_it->first + window;
-    ///         Uint4 stop_offset = end_it - start_it;
-    ///
-    ///         // Now dust.
-    ///         std::unique_ptr< TMaskList > result = duster_(
-    ///             data, start_offset, stop_offset );
-    ///
-    ///         res->insert( res->end(), result->begin(), result->end() );
-    ///
-    ///         if( e_it != e_end )
-    ///         {
-    ///             current_it = start_it + e_it->second - window + 2;
-    ///             ++e_it;
-    ///         }
-    ///     } while( end_it != data.end() );
-    /// ```
     /// `CSeqVector_CI::operator+` sets the position through `SetPos`, which stops at the
     /// sequence's end: `end_it` is at most `data.end()`. The duster's `stop` is the last
     /// position it reads (`CSymDustMasker` clamps it to the last letter).
@@ -129,52 +81,6 @@ impl SDustMasker {
 /// those that overlap or touch merged, into `dest`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:507-554
-/// ```c++
-///     if( src->empty() )
-///         return;
-///
-///     TMaskList::const_iterator si( src->begin() );
-///     TMaskList::const_iterator send( src->end() );
-///     TMaskList::iterator di( dest->begin() );
-///     TMaskList::iterator dend( dest->end() );
-///     TMaskList res;
-///     TMaskedInterval seg;
-///     TMaskedInterval next_seg;
-///
-///     if( di != dend && di->first < si->first )
-///         seg = *(di++);
-///     else seg = *(si++);
-///
-///     while( true )
-///     {
-///         if( si != send ) {
-///             if( di != dend ) {
-///                 if( si->first < di->first ) {
-///                     next_seg = *(si++);
-///                 } else {
-///                     next_seg = *(di++);
-///                 }
-///             } else {
-///                 next_seg = *(si++);
-///             }
-///         } else if( di != dend ) {
-///             next_seg = *(di++);
-///         } else {
-///             break;
-///         }
-///
-///         if( seg.second + 1 < next_seg.first ) {
-///             res.push_back( seg );
-///             seg = next_seg;
-///         }
-///         else if( seg.second < next_seg.second ) {
-///             seg.second = next_seg.second;
-///         }
-///     }
-///
-///     res.push_back( seg );
-///     dest->swap(res);
-/// ```
 /// (`seg.second + 1` is a `TSeqPos` sum; positions are below 2^32 - 1, so it does not wrap.)
 pub(super) fn merge_mask_info(dest: &mut Vec<(u32, u32)>, src: &[(u32, u32)]) {
     if src.is_empty() {

@@ -36,12 +36,6 @@
 //! }
 //! ```
 //! NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp:39-42
-//! ```c++
-//! int main( int argc, char * argv[] )
-//! {
-//!     return CWinMaskApplication().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
 //! ```c++
 //! int main(int argc, const char* argv[])

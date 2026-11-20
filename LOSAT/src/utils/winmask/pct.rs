@@ -26,17 +26,6 @@ impl PctSettings {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:206-214
-/// ```c
-/// static Uint4 s_GetCountByPct( double pct, std::vector< double > const & count_map )
-/// {
-///     for( size_t i( 0 ); i < count_map.size(); ++i )
-///     {
-///         if( count_map[i] >= pct ) return i;
-///     }
-///
-///     return count_map.size() - 1;
-/// }
-/// ```
 /// (`count_map` is not empty here.)
 fn count_by_pct(pct: f64, count_map: &[f64]) -> u32 {
     count_map
@@ -123,46 +112,6 @@ fn pct_line_refusal(line: &[u8]) -> WinMaskError {
 /// for a counts file of `stat_type`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:239-276
-/// ```c
-///         if( stat_type == eAscii || stat_type == eOAscii )
-///         {
-///             for( auto const & line : md )
-///             {
-///                 if( !line.empty() && line.substr( 0, 6 ) == "##pct:" )
-///                 {
-///                     double pct( 0.0 );
-///                     Uint4 count;
-///                     std::istringstream iss(
-///                         line.substr( 7, line.size() - 7 ) );
-///                     iss >> count >> pct;
-///                     count_map.push_back( pct );
-///                 }
-///             }
-///
-///             max_map_count = count_map.size() - 1;
-///         }
-///
-///         if( stat_type == eBinary || stat_type == eOBinary )
-///         {
-///             for( auto const & line : md )
-///             {
-///                 if( !line.empty() && line.substr( 0, 6 ) == "##pct:" )
-///                 {
-///                     std::istringstream iss(
-///                         line.substr( 7, line.size() - 7 ) );
-///                     iss >> max_map_count;
-///                     count_map.resize( max_map_count + 1 );
-///
-///                     for( size_t i( 0 ); i <= max_map_count; ++i )
-///                     {
-///                         iss >> count_map[i];
-///                     }
-///
-///                     break;
-///                 }
-///             }
-///         }
-/// ```
 /// A line of the six letters alone has failed before (`check_pct_lines`). The words that the
 /// stream reads must be the numbers NCBI's writer prints (`unsigned_word`, `double_word`), and a
 /// binary line must hold its `max_map_count + 1` values: else LOSAT refuses the line
@@ -209,30 +158,6 @@ fn count_map(metadata: &[Vec<u8>], stat_type: StatType) -> Result<Vec<f64>, WinM
 /// percentages, as NCBI posts it (before the reader's warnings and errors).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:278-299
-/// ```c
-///         if( count_map.empty() )
-///         {
-///             std::string pname;
-///             if( min_pct >= 0.0 ) pname += " min_pct";
-///             else if( extend_pct >= 0.0 ) pname += " extend_pct";
-///             else if( thres_pct >= 0.0 ) pname += " thres_pct";
-///             else if( max_pct >= 0.0 ) pname += " max_pct";
-///
-///             if( !pname.empty() )
-///             {
-///                 ERR_POST( Warning
-///                     << "counts file contains no percentage information;"
-///                     << pname << " settings will not be applied" );
-///             }
-///         }
-///         else
-///         {
-///             if( min_pct >= 0.0 ) min_count = s_GetCountByPct( min_pct, count_map );
-///             if( extend_pct >= 0.0 ) textend = s_GetCountByPct( extend_pct, count_map );
-///             if( thres_pct >= 0.0 ) threshold = s_GetCountByPct( thres_pct, count_map );
-///             if( max_pct >= 0.0 ) max_count = s_GetCountByPct( max_pct, count_map );
-///         }
-/// ```
 /// (The application's percentages are in 0..100 (`CArgAllow_Doubles`), so a given one is
 /// `>= 0.0`. With no percentage given the map is not used, so its values are not checked.)
 pub(super) fn apply_pct(

@@ -22,21 +22,6 @@ use crate::ncbi_version::Component;
 const PROGRAM: &str = "WINDOWMASKER";
 
 // NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:76,99-110
-// ```c++
-// const char * const CWinMaskApplication::USAGE_LINE
-//     = "Window based sequence masker";
-// ...
-// void CWinMaskApplication::Init(void)
-// {
-//     HideStdArgs(fHideLogfile | fHideConffile | fHideVersion | fHideDryRun);
-//     unique_ptr< CArgDescriptions > arg_desc( new CArgDescriptions );
-//
-//     // Set the program description
-//     arg_desc->SetUsageContext( GetArguments().GetProgramBasename(),
-//                                USAGE_LINE );
-//
-//     CWinMaskConfig::AddWinMaskArgs(*arg_desc);
-// ```
 /// The text of `windowmasker -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage` of the
 /// descriptions in `DESCS` after `HideStdArgs`), frozen. Its part before `OPTIONAL ARGUMENTS` is
 /// the usage that `-h` and the argument errors print.
@@ -45,96 +30,7 @@ const HELP: &str = include_str!("help.txt");
 const INT_MAX: i64 = i32::MAX as i64;
 
 // NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:50-213
-// ```c++
-//     arg_desc.SetCurrentGroup("WindowMasker options");
-//
-//     // Adding command line arguments descriptions
-//     if(type == eAny)
-//         arg_desc.AddOptionalKey( "ustat", "unit_counts",
-//                                  "file with unit counts",
-//                                  CArgDescriptions::eString);
-// ...
-//     if(determine_input)
-//         arg_desc.AddDefaultKey( kInput, "input_file_name", ...,
-//                                  CArgDescriptions::eInputFile, "-" );
-//     arg_desc.AddDefaultKey( kOutput, "output_file_name", ...,
-//                              CArgDescriptions::eOutputFile, "-" );
-//     if(type == eAny || type == eComputeCounts){
-//         arg_desc.AddDefaultKey( "checkdup", ..., CArgDescriptions::eBoolean, "false" );
-//         if(determine_input)
-//             arg_desc.AddDefaultKey( "fa_list", ..., CArgDescriptions::eBoolean, "false" );
-//         arg_desc.AddDefaultKey( "mem", ..., CArgDescriptions::eInteger, "1536" );
-//         arg_desc.AddDefaultKey( "meta", ..., CArgDescriptions::eString, "" );
-//         arg_desc.AddOptionalKey( "unit", ..., CArgDescriptions::eInteger );
-//         arg_desc.AddOptionalKey( "genome_size", ..., CArgDescriptions::eInteger );
-//         arg_desc.SetConstraint( "mem", new CArgAllow_Integers( 1, kMax_Int ) );
-//         arg_desc.SetConstraint( "unit", new CArgAllow_Integers( 1, 16 ) );
-//     }
-//     if(type == eAny || type >= eGenerateMasks){
-//         arg_desc.AddOptionalKey( "window", ..., CArgDescriptions::eInteger );
-//         arg_desc.AddOptionalKey( "t_extend", ..., CArgDescriptions::eInteger );
-//         arg_desc.AddOptionalKey( "t_thres", ..., CArgDescriptions::eInteger );
-//         arg_desc.AddOptionalKey( "set_t_high", ..., CArgDescriptions::eInteger );
-//         arg_desc.AddOptionalKey( "set_t_low", ..., CArgDescriptions::eInteger );
-//         arg_desc.SetConstraint( "window", new CArgAllow_Integers( 1, kMax_Int ) );
-//         arg_desc.SetConstraint( "t_extend", new CArgAllow_Integers( 0, kMax_Int ) );
-//         arg_desc.SetConstraint( "t_thres", new CArgAllow_Integers( 1, kMax_Int ) );
-//         arg_desc.SetConstraint( "set_t_high", new CArgAllow_Integers( 1, kMax_Int ) );
-//         arg_desc.SetConstraint( "set_t_low", new CArgAllow_Integers( 1, kMax_Int ) );
-//         arg_desc.AddFlag      ( "parse_seqids", "Parse Seq-ids in FASTA input", true );
-//         arg_desc.AddDefaultKey( kOutputFormat, ..., CArgDescriptions::eString, *kOutputFormats );
-//         ...
-//         arg_desc.SetConstraint( kOutputFormat, strings_allowed );
-//     }
-//     if(type != eConvertCounts){
-//         arg_desc.AddOptionalKey( "t_high", ..., CArgDescriptions::eInteger );
-//         arg_desc.AddOptionalKey( "t_high_pct", ..., CArgDescriptions::eDouble );
-//         arg_desc.AddOptionalKey( "t_thres_pct", ..., CArgDescriptions::eDouble );
-//         arg_desc.AddOptionalKey( "t_extend_pct", ..., CArgDescriptions::eDouble );
-//         arg_desc.AddOptionalKey( "t_low", ..., CArgDescriptions::eInteger );
-//         arg_desc.AddOptionalKey( "t_low_pct", ..., CArgDescriptions::eDouble );
-//         arg_desc.SetConstraint( "t_high", new CArgAllow_Integers( 1, kMax_Int ) );
-//         arg_desc.SetConstraint( "t_high_pct", new CArgAllow_Doubles( 0.0, 100.0 ) );
-//         ... (the same for t_thres_pct, t_extend_pct; t_low as t_high; t_low_pct as t_high_pct)
-//         arg_desc.AddDefaultKey( kInputFormat, ..., CArgDescriptions::eString, *kInputFormats );
-//         arg_desc.AddDefaultKey( "exclude_ids", ..., CArgDescriptions::eString, "" );
-//         arg_desc.AddDefaultKey( "ids", ..., CArgDescriptions::eString, "" );
-//         arg_desc.AddDefaultKey( "text_match", ..., CArgDescriptions::eBoolean, "T" );
-//         ...
-//         strings_allowed->Allow("seqids");
-//         arg_desc.SetConstraint( kInputFormat, strings_allowed );
-//     }
-//     if(type < eGenerateMasks){
-//         arg_desc.AddDefaultKey( "sformat", ..., CArgDescriptions::eString, "ascii" );
-//         arg_desc.SetConstraint( "sformat", (new CArgAllow_Strings())
-//                                  ->Allow( "ascii" )->Allow( "binary" )
-//                                  ->Allow( "oascii" )->Allow( "obinary" ) );
-//         arg_desc.AddDefaultKey( "smem", ..., CArgDescriptions::eInteger, "512" );
-//     }
-//     if(type == eAny || type >= eGenerateMasksWithDuster) {
-//         arg_desc.AddDefaultKey( "dust", ..., CArgDescriptions::eBoolean, "F" );
-//         arg_desc.AddDefaultKey( "dust_level", ..., CArgDescriptions::eInteger, "20" );
-//     }
-//
-//     if(type == eAny){
-//         arg_desc.AddFlag( "mk_counts", "generate frequency counts for a database" );
-//         arg_desc.AddFlag( "convert", "convert counts between different formats" );
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_cmdline_args.cpp:40-51
-// ```c++
-// const std::string kInput("in");
-// const std::string kInputFormat("infmt");
-// const std::string kOutput("out");
-// const std::string kOutputFormat("outfmt");
-// const size_t kNumInputFormats = 2;
-// const size_t kNumOutputFormats = 8;
-// const char* kInputFormats[] =  { "fasta", "blastdb" };
-// const char* kOutputFormats[] =
-//     { "interval", "fasta",
-//       "seqloc_asn1_bin", "seqloc_asn1_text", "seqloc_xml",
-//       "maskinfo_asn1_bin", "maskinfo_asn1_text", "maskinfo_xml",
-//     };
-// ```
 /// The arguments of `CWinMaskConfig::AddWinMaskArgs(arg_desc)` (`eAny`, the input determined)
 /// in the order it describes them; NCBI's reader adds the help flags before them and `-logfile`
 /// and `-conffile` after them (`ncbi_app::args`). The values that a `CArgAllow_Strings` allows
@@ -249,10 +145,6 @@ const DESCS: &[Desc] = &[
 const PCT: Constraint = Constraint::Doubles(0.0, 100.0, "0..100");
 
 // NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:212-254
-// ```c++
-//         arg_desc.CArgDescriptions::SetDependency( "mk_counts", CArgDescriptions::eExcludes, "outfmt" );
-//         ... (in the order below)
-// ```
 /// The `SetDependency` calls of `AddWinMaskArgs`, in their order.
 fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
     let excludes = |of: &'static str, names: &[&'static str]| {
@@ -318,14 +210,6 @@ fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:79-84
-// ```c++
-// CWinMaskApplication::CWinMaskApplication() {
-//     CRef<CVersion> version(new CVersion());
-//     version->SetVersionInfo(1, 0, 0);
-//     ...
-//     SetFullVersion(version);
-// }
-// ```
 /// windowmasker as NCBI's application runs it (`ncbi_app`): its own version and no prefix on
 /// its diagnostics.
 static TOOL: Tool = Tool {
@@ -343,35 +227,9 @@ static TOOL: Tool = Tool {
 /// algorithm and the four counts formats, which LOSAT's masker and counts readers implement.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:84-95
-/// ```c++
-///     version->AddComponentVersion( new CSeqMaskerVersion(
-///                 CSeqMasker::AlgoVersion ) );
-///     version->AddComponentVersion( new CSeqMaskerVersion(
-///                 CSeqMaskerOstat::StatAlgoVersion ) );
-///     version->AddComponentVersion( new CSeqMaskerVersion(
-///                 CSeqMaskerOstatAscii::FormatVersion ) );
-///     version->AddComponentVersion( new CSeqMaskerVersion(
-///                 CSeqMaskerOstatBin::FormatVersion ) );
-///     version->AddComponentVersion( new CSeqMaskerVersion(
-///                 CSeqMaskerOstatOptAscii::FormatVersion ) );
-///     version->AddComponentVersion( new CSeqMaskerVersion(
-///                 CSeqMaskerOstatOptBin::FormatVersion ) );
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:57-60,
 /// seq_masker_ostat.cpp:41-47 (`STAT_ALGO_*`), seq_masker_ostat_opt_bin.cpp:39-43 (and the other
 /// formats' `STAT_FMT_*`)
-/// ```c++
-/// #define WIN_MASK_ALGO_NAME "window-masker-algorithm"
-/// #define WIN_MASK_ALGO_VER_MAJOR 1
-/// #define WIN_MASK_ALGO_VER_MINOR 0
-/// #define WIN_MASK_ALGO_VER_PATCH 0
-/// ...
-/// #define STAT_FMT_COMPONENT_NAME "windowmasker-statistics-format-version"
-/// #define STAT_FMT_VER_MAJOR 1
-/// #define STAT_FMT_VER_MINOR 1
-/// #define STAT_FMT_VER_PATCH 0
-/// #define STAT_FMT_VER_PFX "obinary "
-/// ```
 const COMPONENTS: &[Component] = &[
     component("window-masker-algorithm", "", 0),
     component("windowmasker-statistics-algorithm-version", "", 0),
@@ -392,9 +250,6 @@ const fn component(name: &'static str, prefix: &'static str, minor: u32) -> Comp
 }
 
 // NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp
-// ```c++
-//     return CWinMaskApplication().AppMain(argc, argv);
-// ```
 /// Runs `windowmasker` with `words` (the command line after `losat windowmasker`), after its
 /// application start `start`, on the process's standard streams; the exit status.
 pub(crate) fn run(

@@ -2478,7 +2478,7 @@ mod tests {
             .map(|text| super::super::encoding::encode_protein_sequence(text))
             .collect();
         let db_letters: usize = subjects.iter().map(|subject| subject.aa_len).sum();
-        let search_spaces = contexts
+        let search_spaces: Vec<SearchSpace> = contexts
             .iter()
             .map(|ctx| {
                 let length_adjustment = 20_i64;

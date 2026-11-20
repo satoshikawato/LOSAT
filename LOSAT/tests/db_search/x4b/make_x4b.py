@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Build the databases of the `db.x4b.db*` rows (line RG item X4b-1 fix round 1, 2026-11-20).
+"""Build the databases of the `db.x4b.*` rows that search a database (line RG item X4b-1 fix rounds 1 and 2,
+2026-11-20 and 21).
 
 NCBI BLAST+ 2.17.0 makeblastdb is the comparison oracle only. The subjects are X4's crafted proteins back-translated
 with one codon per amino acid (`tests/fasta/x4b/ok1_fail_rc.fna`): sok1 in frame +1 and sfail in frame -1, which
 make tks_W's Smith-Waterman redo fail (`-use_sw_tback`, PD-LOSAT-NCBI-DEFECTS 1.55).
 
 - `fail`: sok1_nt (OID 0) and sfail_rc (OID 1), each with an accession line (`dbj|AB30000N.1|`): the `-db` form of
-  the `-subject` failure rows (`db.x4b.dbfail.*`).
+  the `-subject` failure rows (`db.x4b.dbfail.*`, `db.x4b.cut0.db.*`, `db.x4b.sp.db.fail.*`, `db.x4b.sp.two.db.*`).
 - `excl`: the same two and, at OID 2, `sx_rc`: sfail's first half with 8 substitutions, in frame -1, whose only line
   has a ti (`gnl|ti|9003`, as `tests/db_search/ll2`'s lineless sequences). tks_W's preliminary match on it comes
   after the one on sfail_rc in both of NCBI's stream orders (a worse best e-value with composition-based statistics,
   a higher OID without them). `neg.txt` lists only an id that no database holds: a negative seqid list with ids
   keeps sx_rc and removes its line, and NCBI's fetch with `check_oid_exclusion` excludes it at the redo
   (`seqsrc_seqdb.cpp:306-313`), after its early termination test; NCBI then sets the batch's status back to 0
-  (`blast_kappa.c:3560-3575`), which clears the failure of the match before (rows `db.x4b.excl.*`).
+  (`blast_kappa.c:3560-3575`), which clears the failure of the match before (rows `db.x4b.excl.*`,
+  `db.x4b.sp.db.excl.*`).
 - `polycg`: `tests/fasta/x4b/polycg.fna` (repeats of CCCCGGGGAA, no parsed Seq-ids), on which a PSSM finds no hit
   (rows `db.x4b.pssm.none.db.*`: `-in_pssm -use_sw_tback` ends as NCBI's).
 

@@ -471,8 +471,8 @@ impl BlastnDatabase {
     // }
     // ```
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
-    /// with the command line's errors. The total length is NCBI's `Int8`; one that the
-    /// engine cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
+    /// with the command line's errors. The total length is NCBI's `Int8`, which the engine holds
+    /// as such (`SubjectMetadata::db_len_total`) on every target.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         Self::open_restricted(name, settings, None, None, &mut std::io::sink())
     }
@@ -494,16 +494,8 @@ impl BlastnDatabase {
         // BLASTN has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
-        let (total, num_seqs) = db.statistics_numbers();
         // The setup's total is not negative (`DbStatistics::setup_total`).
-        let db_len_total = usize::try_from(total)
-            .ok()
-            .filter(|&letters| i64::try_from(letters).is_ok())
-            .with_context(|| {
-                format!(
-                    "a database of {total} letters is not supported by LOSAT's BLASTN on this platform"
-                )
-            })?;
+        let (db_len_total, num_seqs) = db.statistics_numbers();
         let metadata = SubjectMetadata {
             db_len_total,
             db_num_seqs: num_seqs,
@@ -2817,6 +2809,49 @@ mod tests {
         assert_eq!(database.name(), fixture("nucl_mv"));
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-910
+    // ```c
+    //    Int8 total_length = -1;
+    //    Int4 num_seqs = -1;
+    //
+    //    if (seq_src) {
+    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
+    //       if (total_length <= 0)
+    //           total_length = BlastSeqSrcGetTotLen(seq_src);
+    // ```
+    // An alias file's `LENGTH` of 2^32 letters or more over the 16 sequences of
+    // `tests/db_search/taxfilter/tfn` (`tests/db_search/dbcounts`, rows db.cnt.l4295.bn and
+    // db.cnt.avg2p32.bn) is NCBI's `Int8` on every target, wasm32's 32-bit `usize` included: the
+    // database opens and the statistics and the reports read the whole total.
+    #[test]
+    fn totals_of_2_to_the_32_letters_or_more_are_held_whole() {
+        for (name, total) in [
+            ("l4295", 4_294_967_296_000_000_000),
+            ("l4294", 4_294_967_295_999_999_999),
+            ("avg2p32", 68_719_476_736),
+        ] {
+            assert!(total > i64::from(u32::MAX), "{name}");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/dbcounts")
+                .join(name);
+            let database =
+                BlastnDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default())
+                    .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            let metadata = database.metadata();
+            assert_eq!(
+                (metadata.db_len_total, metadata.db_num_seqs),
+                (total, 16),
+                "{name}"
+            );
+            let shown = database.pairwise_database();
+            assert_eq!(
+                (shown.num_sequences, shown.total_letters),
+                (16, total),
+                "{name}"
+            );
+        }
+    }
+
     // blast_app_util.hpp:185-203 and seqdb.cpp:155-165: NCBI's errors with exit status 2,
     // LOSAT's refusals in LOSAT's wording, naming BLASTN.
     // (A path in an error text: Unix spelling.)
@@ -3430,7 +3465,7 @@ mod tests {
         let parsed_seqids = db.has_parsed_seqids().unwrap();
         BlastnDatabase {
             metadata: SubjectMetadata {
-                db_len_total: db.total_length() as usize,
+                db_len_total: db.total_length() as i64,
                 db_num_seqs: db.num_seqs() as i32,
             },
             db,

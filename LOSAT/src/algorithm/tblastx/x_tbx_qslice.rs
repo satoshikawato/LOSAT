@@ -279,6 +279,12 @@ impl XSliced {
     pub(super) fn slices(&self) -> &[XGroup] {
         &self.slices
     }
+
+    /// The group's slice tables, in slice order, to make their presence bytes
+    /// (`XPairPar::prepare`, LOSAT_X_TBXSCANBYTE).
+    pub(super) fn slices_mut(&mut self) -> &mut [XGroup] {
+        &mut self.slices
+    }
 }
 
 // No NCBI counterpart: the stub's `longest_chain` reads every table (module doc, item 5).
@@ -644,6 +650,7 @@ impl<M: TbxScore> XPairPar<M> {
             // `get_context_idx` reads only the batch's context bounds (`frame_bases`,
             // `num_contexts`), which every slice table carries.
             lookup: &group.slices[0].lookup,
+            ctx_of: &self.ctx_of,
             contexts: inp.contexts,
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
@@ -1109,6 +1116,7 @@ mod tests {
                 sliced: Some(direct),
                 mask_rule: None,
                 extents: Vec::new(),
+                ctx_of: x_ctx_table(&lookup, true),
             };
             let window = [40, 3 + BATCH as i32, 64][case % 3];
             let inp = XSubject {

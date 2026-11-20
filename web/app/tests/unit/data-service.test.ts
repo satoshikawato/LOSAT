@@ -6,6 +6,7 @@ import type { Compression, FileInflater, RecordScanner } from 'losat/ports';
 import { MEMORY_FULL_MESSAGE, RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
 import { DataService, STORED_CHECK_READS, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
+import { REFUSED_REASON } from '../../src/infra/data/session';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { NodeInflater } from './support/node-inflater';
 
@@ -196,7 +197,8 @@ describe('DataService runs and storage status', () => {
   it('reports the storage it uses, the session bytes and the cleanup state', async () => {
     let settle!: (value: { state: 'done'; removedSessions: number }) => void;
     const { data } = service({
-      fallbackReason: 'this browser has no Origin Private File System',
+      fallbackReason: REFUSED_REASON,
+      fallbackError: 'SecurityError: Security error when calling GetDirectory',
       cleanup: new Promise((resolve) => {
         settle = resolve;
       }),
@@ -204,7 +206,8 @@ describe('DataService runs and storage status', () => {
     });
     expect(await data.storageInfo()).toEqual({
       backend: 'memory',
-      fallbackReason: 'this browser has no Origin Private File System',
+      fallbackReason: REFUSED_REASON,
+      fallbackError: 'SecurityError: Security error when calling GetDirectory',
       sessionBytes: 0,
       estimate: { usage: 10, quota: 1000 },
       cleanup: { state: 'pending' },
@@ -253,6 +256,42 @@ describe('DataService runs and storage status', () => {
     stray.write(CUSTOM_OUTPUT, encoder.encode('x'));
     stray.end();
     await expect(data.commitRun('run-4')).rejects.toThrow('The engine wrote output stream 4, which this run does not write');
+  });
+
+  // The engine's signal of stream 9 (ABI v2 §5): an output that failed, alone in the search of the others or with its
+  // search in a run of two searches, is empty and named in the result with where its error is, as the engine said,
+  // also where no chunk of it came (line WQA's sweep, D7, 2026-11-19 and 2026-11-20); an empty output that the engine
+  // did not name is not.
+  it('names the outputs that the engine said failed in the result, with where their errors are, and keeps them empty', async () => {
+    const { data } = service();
+    const writer = new RunOutputWriter(await data.openRun('run-1'));
+    writer.write(0, encoder.encode('BLASTN 2.17.0+\n'));
+    writer.write(6, encoder.encode('row\n'));
+    writer.discard(0, 'diagnostics');
+    writer.write(7, encoder.encode('# BLASTN\n'));
+    writer.end();
+    const result = await data.commitRun('run-1');
+    expect(result.failed).toEqual([{ output: 0, error: 'diagnostics' }]);
+    expect(result.byteLengths).toEqual({ 0: 0, 6: 4, 7: 9 });
+    expect(await data.readOutput('run-1', 0)).toEqual(new Uint8Array(0));
+    const tabular = new RunOutputWriter(await data.openRun('run-2'));
+    tabular.discard(7, 'logfile');
+    tabular.discard(6, 'logfile');
+    tabular.write(0, encoder.encode('TBLASTX 2.17.0+\n'));
+    tabular.end();
+    expect((await data.commitRun('run-2')).failed).toEqual([
+      { output: 6, error: 'logfile' },
+      { output: 7, error: 'logfile' },
+    ]);
+    const nowhere = new RunOutputWriter(await data.openRun('run-4'));
+    nowhere.discard(6, 'nowhere');
+    nowhere.end();
+    expect((await data.commitRun('run-4')).failed).toEqual([{ output: 6, error: 'nowhere' }]);
+    const empty = new RunOutputWriter(await data.openRun('run-3'));
+    empty.end();
+    const none = await data.commitRun('run-3');
+    expect(none.byteLengths[0]).toBe(0);
+    expect(none.failed).toEqual([]);
   });
 
   it('refuses a second run with the same id and a commit of an unknown run', async () => {

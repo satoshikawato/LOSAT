@@ -127,7 +127,7 @@ FASTA files:
 - The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
   `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
   whose frame +1 is W W W, the last three letters of the query `xs_q.faa` (`MHYWWW`). NCBI BLAST+ translates a subject's
-  frames for its traceback only from 12 bases (blast_hits.c:1161-1163); with `-window_size 0` the one-hit HSP on `w11`
+  frames for its traceback only from 12 bases (blast_hits.c:1162-1164); with `-window_size 0` the one-hit HSP on `w11`
   reaches the traceback, which reads the translation never made (NCBI crashes, LOSAT refuses). `xs_*_s.fna` there:
   the same words and their reverse complements (`m11`, `m12`, frame -1) at 9, 11 and 12 bases, and `h11`/`h12`
   (`ATGCATTATTT`, M H Y in frame +1) for the PSSM `x2d_d50.asn.gz`, whose motif rows 18-20 score M H Y +25 each. `xs_long32_s.fna` is
@@ -469,6 +469,12 @@ title against a clean `-subject` or `-db`, a `-subject` title with a hit, a `-su
 `makeblastdb -in xb/xb_sp_clean.faa -dbtype prot -out xb_p -title "xb proteins" -blastdb_version 4` and
 `makeblastdb -in xb/xb_sn_clean.fna -dbtype nucl -out xb_n -title "xb nucleotides" -blastdb_version 4`. Every row is frozen from
 NCBI BLAST+ 2.17.0 (`freeze --only db.xb.`), the trace lines of its exceptions naming NCBI's own build path, which LOSAT prints.
+K4j (BLASTX titles that are not UTF-8, and every other byte class of K4h, in every report): `xj/` holds the inputs of the
+rows `db.xj.*` of `blastx.tsv` and `rpstblastn.tsv`, made by `make_xj_inputs.py` (its docstring names the files: one query
+title per byte class, `-subject` titles of every class, long titles, ASCII titles that `GenerateDefline` changes,
+`-parse_deflines` titles with the byte in the first word, empty subjects, rpstblastn queries); the `-db` rows search `xb_p`.
+Every row is frozen from NCBI BLAST+ 2.17.0 (`freeze --only db.xj.`). The titles that the rows `db.t7.*` (`t7/`) cover, a
+first word `Subject_N` with a byte NCBI cannot decode and single `x81` titles, are not repeated here.
 `xb/e2/` (K4h review 3, case E2: rows `db.xb.e2.*`) holds the BLASTP and BLASTN queries of `e2probe.py prep` (remaining-gaps
 K/k4h/review3/e2): q0 without hits, q1 titled `q1 a\xc3\xa9b z` that hits only `multidb/put` (`nut`), q2 that hits `multidb/pa` (`na`)
 and `put` (`nut`); `qmp` has the ASCII title `q1 ab z`, `qm1`'s q2 hits only `pa` (`na`), `qm2`'s only `put` (`nut`).

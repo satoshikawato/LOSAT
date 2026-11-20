@@ -1,0 +1,1 @@
+- Less memory for TBLASTN with many threads: the threads now share one copy of the lookup table's 32 KiB presence data, as in NCBI BLAST+, instead of each thread keeping its own. TBLASTN `-subject` at 64 threads peaks at 74.7 MiB instead of 76.2 MiB (NCBI BLAST+ 2.17.0: 77.2 MiB), and at 48 threads 2 % lower. Reports do not change.

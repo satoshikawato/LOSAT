@@ -31,9 +31,11 @@
 //!
 //! A packed subject (`LOSAT_X_TBNSTORE`, every `-db` sequence) is translated from its packed
 //! bytes (`x_packed_frames`), 32 codons of a phase at a time with AVX2 (`LOSAT_X_TBNXLATESIMD`,
-//! in the strict set: on unless it is `0`; elsewhere
-//! eight at a time from one word). With `LOSAT_X_STATS` set, `main` prints `[X_STATS]
-//! TBNXLATESIMD codons_vector= codons_scalar=` at exit, when a packed subject was translated.
+//! in the strict set: on unless it is `0`), 16 at a time with 128 bits where AVX2 does not run
+//! (`LOSAT_X_TBNXLATE128`: wasm32 simd128, and x86-64 with SSSE3 and SSE4.1; written in the form
+//! V8 compiles to the fewest instructions, `XW128`), elsewhere eight at a time from one word.
+//! With `LOSAT_X_STATS` set, `main` prints `[X_STATS] TBNXLATESIMD codons_vector= codons_scalar=`
+//! at exit, when a packed subject was translated.
 //!
 //! A long packed subject whose plan is made for its use alone (the search keeps no plan of it:
 //! fewer than four query batches, or a plan over the limit of kept plans, `XSubjectSide::keeps`)
@@ -865,8 +867,8 @@ fn x_phase_words<const PHASE: usize>(
 // No NCBI counterpart: reads LOSAT_X_TBNXLATESIMD once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_TBNXLATESIMD): whether a packed subject's frames are read with the
-/// vector loop (AVX2 on x86_64; elsewhere the variable changes nothing); a switch of the strict
-/// set, on unless it is `0`.
+/// vector loop (AVX2 or the 128-bit loop, `x_vector_loop`; where neither runs the variable
+/// changes nothing); a switch of the strict set, on unless it is `0`.
 fn x_xlate_simd() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNXLATESIMD"))
@@ -1515,80 +1517,104 @@ unsafe fn x_phase_one_avx2<const MINUS: bool>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
 // `x_phase_words`)
-// The loop of `x_phase_residues_avx2` with one 128-bit register: 16 codons a step, from the 12
-// bytes after bit `2 * phase` (made from two loads one byte apart), written once over the 128-bit
-// layer of `utils/xdrop_simd.rs` for x86-64 (SSSE3 and SSE4.1) and wasm32 (simd128). Two steps
-// differ from the AVX2 loop and give the same bytes: the upper six-bit fields of each 16-bit half
-// (AVX2: `vpmulhuw`, which wasm32 lacks) are moved down by 32-bit shifts, and each 16-entry table
-// is read with the index's low four bits, chosen by bits 4 and 5 as all-ones byte masks, so that
-// x86-64's `pshufb` and wasm32's `i8x16.swizzle` (which differ for indexes of 16 and more) read
-// the same entries. Same reads, same tables as the scalar loop.
+// The loop of `x_phase_residues_avx2` with one 128-bit register: 16 codons a step, written once
+// over the 128-bit layer of `utils/xdrop_simd.rs` for x86-64 (SSSE3 and SSE4.1) and wasm32
+// (simd128), in the form V8 compiles to the fewest instructions. The loop starts at codon `phase`
+// of the phase, the first whose first base is the first of a byte (base `4 * phase`, the first of
+// byte `phase`), so that each step reads the 12 bytes from a byte with one load; codons
+// `0..phase` are read one at a time. Each three bytes `b0 b1 b2` (four codons) are spread to the 16-bit halves `b0 b1` and
+// `b1 b2`, the second moved up four bits by a multiplication, so that every half holds its two
+// codons at bits 10-15 and 4-9 and two shifts give the residue index of every byte. Each table of
+// 64 residues is read as four tables of 16 at the index minus 0, 16, 32 and 48: an index byte
+// outside a table's 16 entries gives 0 (`pickz`, the rule of wasm32's `i8x16.swizzle`), so the
+// four reads are or-ed. The constants are made once before the loop (`hoisted`): in a loop LLVM
+// makes a wasm32 vector constant again at every use, which V8 builds with three or four
+// instructions, and turns the multiplication by powers of two into shifts by lane, which wasm32
+// lacks (eight lane moves). Same reads, same tables as the scalar loop.
 
-/// EXPERIMENT (LOSAT_X_TBNXLATE128): the residue index of every byte of `spread` (four codons per
-/// 32-bit lane: the group's bytes `b1 b0 b2 b1`, as `x_phase_residues_avx2` spreads them): codon
-/// 0 is bits 10-15 of the low 16-bit half (`b0 b1`), codon 1 bits 4-9, codon 2 bits 6-11 of the
-/// high half (`b1 b2`), codon 3 bits 0-5.
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): the constants of the 128-bit loops, made once.
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
 ))]
-#[inline(always)]
-unsafe fn x_codon_index_w128(
+#[derive(Clone, Copy)]
+struct XW128 {
+    /// The bytes `b1 b0 b2 b1` of every three bytes `b0 b1 b2`: the 16-bit halves `b0 b1`, `b1 b2`.
     spread: crate::utils::xdrop_simd::arch::V,
-) -> crate::utils::xdrop_simd::arch::V {
-    use crate::utils::xdrop_simd::arch::*;
-    // SAFETY (the block): register operations of the build's 128-bit instructions.
-    unsafe {
-        let first = shr32::<10>(and(spread, splat_i32(0x0000_FC00)));
-        let third = shr32::<6>(and(spread, splat_i32(0x0FC0_0000)));
-        let second_fourth = mullo16(and(spread, splat_i32(0x003F_03F0)), splat_i32(0x0100_0010));
-        or(or(first, third), second_fourth)
-    }
+    /// 1 in the low 16-bit half of every 32-bit lane, 16 in the high one.
+    up: crate::utils::xdrop_simd::arch::V,
+    /// Bits 8-13 of every 16-bit half.
+    high: crate::utils::xdrop_simd::arch::V,
+    /// -16 in every byte: an index minus 16, 32, 48 is that of the second, third, fourth 16
+    /// entries.
+    minus16: crate::utils::xdrop_simd::arch::V,
+    /// The byte order that reverses a register's 16 bytes.
+    backward: crate::utils::xdrop_simd::arch::V,
 }
 
-/// EXPERIMENT (LOSAT_X_TBNXLATE128): entry `index` (0..64) of the 64-byte table `table`, held as
-/// four registers of 16 entries, for every byte of `index`.
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
 ))]
-#[inline(always)]
-unsafe fn x_look64_w128(
-    table: &[crate::utils::xdrop_simd::arch::V; 4],
-    index: crate::utils::xdrop_simd::arch::V,
-) -> crate::utils::xdrop_simd::arch::V {
-    use crate::utils::xdrop_simd::arch::*;
-    // SAFETY (the block): register operations of the build's 128-bit instructions.
-    unsafe {
-        let low = and(index, splat8(15));
-        let bit4 = eq8(and(index, splat8(16)), splat8(16));
-        let bit5 = eq8(and(index, splat8(32)), splat8(32));
-        let first = blend8(pick(table[0], low), pick(table[1], low), bit4);
-        let second = blend8(pick(table[2], low), pick(table[3], low), bit4);
-        blend8(first, second, bit5)
+impl XW128 {
+    // No NCBI counterpart: the constants of LOSAT's vector loop; they are no value NCBI computes.
+    /// The constants (each `hoisted`).
+    #[inline(always)]
+    unsafe fn new() -> Self {
+        use crate::utils::xdrop_simd::arch::*;
+        const SPREAD: [u8; 16] = [1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10, 9, 11, 10];
+        const BACKWARD: [u8; 16] = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+        // SAFETY (the block): loads of the two 16-byte constants; register operations.
+        unsafe {
+            Self {
+                spread: hoisted(load(SPREAD.as_ptr())),
+                up: hoisted(splat_i32(0x0010_0001)),
+                high: hoisted(splat16(0x3F00)),
+                minus16: hoisted(splat8(-16)),
+                backward: hoisted(load(BACKWARD.as_ptr())),
+            }
+        }
     }
-}
 
-/// EXPERIMENT (LOSAT_X_TBNXLATE128): one step's residue indexes: the 16 codons of phase `phase`
-/// in the 12 bytes from `at` (`at + 17` bytes readable).
-#[cfg(any(
-    target_arch = "x86_64",
-    all(target_arch = "wasm32", target_feature = "simd128")
-))]
-#[inline(always)]
-unsafe fn x_step_index_w128(at: *const u8, phase: usize) -> crate::utils::xdrop_simd::arch::V {
-    use crate::utils::xdrop_simd::arch::*;
-    const SPREAD: [u8; 16] = [1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10, 9, 11, 10];
-    // SAFETY (the block): the caller makes bytes `at ..+ 17` readable.
-    unsafe {
-        let (bytes, next) = (load(at), load(at.add(1)));
-        let keep_left = splat8((0xFFu8 << (2 * phase)) as i8);
-        let keep_right = splat8(((1u16 << (2 * phase)) - 1) as u8 as i8);
-        let shifted = or(
-            and(shl16n(bytes, 2 * phase as u32), keep_left),
-            and(shr16n(next, 8 - 2 * phase as u32), keep_right),
-        );
-        x_codon_index_w128(pick(shifted, load(SPREAD.as_ptr())))
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
+    // `x_phase_words`)
+    /// One step's residue indexes: the 16 codons of the 12 bytes from `at`, the first codon's
+    /// first base the first of `at`'s byte (`at + 16` readable). Codon 0 of four (bytes `b0 b1
+    /// b2`) is bits 10-15 of the low 16-bit half (`b0 b1`), codon 1 bits 4-9, codon 2 bits 10-15
+    /// of the high half (`b1 b2`, moved up four bits), codon 3 bits 4-9.
+    #[inline(always)]
+    unsafe fn index(&self, at: *const u8) -> crate::utils::xdrop_simd::arch::V {
+        use crate::utils::xdrop_simd::arch::*;
+        // SAFETY (the block): the caller makes bytes `at ..+ 16` readable.
+        unsafe {
+            let halves = mullo16(pick(load(at), self.spread), self.up);
+            or(shr16n(halves, 10), and(shl16n(halves, 4), self.high))
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:595 (see `x_phase_words`)
+    // ```c
+    //             *prot_seq = translation[codon];
+    // ```
+    /// Entry `index` (0..64) of the 64-byte table `table`, held as four registers of 16 entries,
+    /// for every byte of `index`.
+    #[inline(always)]
+    unsafe fn look(
+        &self,
+        table: &[crate::utils::xdrop_simd::arch::V; 4],
+        index: crate::utils::xdrop_simd::arch::V,
+    ) -> crate::utils::xdrop_simd::arch::V {
+        use crate::utils::xdrop_simd::arch::*;
+        // SAFETY (the block): register operations of the build's 128-bit instructions.
+        unsafe {
+            let second = add8(index, self.minus16);
+            let third = add8(second, self.minus16);
+            let fourth = add8(third, self.minus16);
+            or(
+                or(pickz(table[0], index), pickz(table[1], second)),
+                or(pickz(table[2], third), pickz(table[3], fourth)),
+            )
+        }
     }
 }
 
@@ -1604,16 +1630,28 @@ unsafe fn x_table_w128(values: &[u8; 64]) -> [crate::utils::xdrop_simd::arch::V;
         .map(|k| unsafe { crate::utils::xdrop_simd::arch::load(values.as_ptr().add(16 * k)) })
 }
 
-/// The byte order that reverses a register's 16 bytes.
+// No NCBI counterpart: the bounds of LOSAT's vector loop; they are no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): the steps of the 128-bit loops of a phase of `codons`
+/// codons whose first base is base `phase` of `bytes` bytes: step `s` reads codons `phase + 16 *
+/// s ..+ 16` from bytes `phase + 12 * s ..+ 16`.
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
 ))]
-const X_BACKWARD: [u8; 16] = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+#[inline(always)]
+fn x_steps_w128(bytes: usize, phase: usize, codons: usize) -> usize {
+    let by_codons = codons.saturating_sub(phase) / 16;
+    let by_bytes = bytes
+        .checked_sub(phase + 16)
+        .map_or(0, |spare| spare / 12 + 1);
+    by_codons.min(by_bytes)
+}
 
-/// EXPERIMENT (LOSAT_X_TBNXLATE128): [`x_phase_residues`] for the groups of 16 codons whose bytes
-/// can be read with 17 bytes from the group's first; returns the codons done (a multiple of 16).
-/// The 128-bit form of [`x_phase_residues_avx2`].
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): [`x_phase_residues`] for the codons of the groups of 16
+/// codons from codon `phase` that can be read with 16 bytes from the group's first byte, and the
+/// `phase` codons before them; returns `16 *` the groups (every codon below it is written; the
+/// loop may also write the `phase` codons after it). The 128-bit form of
+/// [`x_phase_residues_avx2`].
 ///
 /// # Safety
 /// On x86-64 the CPU has SSSE3 and SSE4.1.
@@ -1632,29 +1670,37 @@ unsafe fn x_phase_residues_w128(
 ) -> usize {
     use crate::utils::xdrop_simd::arch::*;
     assert!(phase < 3 && plus.len() == codons + 2 && minus.len() == codons + 2);
-    // SAFETY (the block): the loads read `packed[3 * j / 4 ..+ 17]` (checked by the loop) and
-    // the 64-byte tables; the stores write `plus[1 + j ..+ 16]` and `minus[codons - j - 15 ..=
-    // codons - j]` (`j + 16 <= codons`, length `codons + 2`).
+    let steps = x_steps_w128(packed.len(), phase, codons);
+    // SAFETY (the block): step `s` reads `packed[phase + 12 * s ..+ 16]` and the 64-byte tables
+    // and writes `plus[1 + j ..+ 16]` and `minus[codons - j - 15 ..= codons - j]` for `j = phase +
+    // 16 * s` (`x_steps_w128`: `j + 16 <= codons`, length `codons + 2`).
     unsafe {
+        let k = XW128::new();
         let forward = x_table_w128(&tables.forward);
         let reverse = x_table_w128(&tables.reverse);
-        let backward = load(X_BACKWARD.as_ptr());
-        let mut j = 0;
-        while j + 16 <= codons && 3 * j / 4 + 17 <= packed.len() {
-            let index = x_step_index_w128(packed.as_ptr().add(3 * j / 4), phase);
-            store(plus.as_mut_ptr().add(1 + j), x_look64_w128(&forward, index));
+        for step in 0..steps {
+            let j = phase + 16 * step;
+            let index = k.index(packed.as_ptr().add(phase + 12 * step));
+            store(plus.as_mut_ptr().add(1 + j), k.look(&forward, index));
             store(
                 minus.as_mut_ptr().add(codons - j - 15),
-                pick(x_look64_w128(&reverse, index), backward),
+                pick(k.look(&reverse, index), k.backward),
             );
-            j += 16;
         }
-        j
     }
+    if steps > 0 {
+        for j in 0..phase {
+            let codon = x_packed_codon(packed, phase + 3 * j);
+            plus[1 + j] = tables.forward[codon];
+            minus[codons - j] = tables.reverse[codon];
+        }
+    }
+    16 * steps
 }
 
-/// EXPERIMENT (LOSAT_X_TBNXLATE128): [`x_phase_one`]'s vector loop with 16 codons a step; returns
-/// the codons done (a multiple of 16). The 128-bit form of [`x_phase_one_avx2`].
+/// EXPERIMENT (LOSAT_X_TBNXLATE128): [`x_phase_one`]'s vector loop with 16 codons a step, as
+/// [`x_phase_residues_w128`] for one strand; returns `16 *` the groups. The 128-bit form of
+/// [`x_phase_one_avx2`].
 ///
 /// # Safety
 /// On x86-64 the CPU has SSSE3 and SSE4.1.
@@ -1672,32 +1718,42 @@ unsafe fn x_phase_one_w128<const MINUS: bool>(
 ) -> usize {
     use crate::utils::xdrop_simd::arch::*;
     assert!(phase < 3 && out.len() == codons + 2);
-    // SAFETY (the block): the loads read `packed[3 * j / 4 ..+ 17]` (checked by the loop) and
-    // the 64-byte table; the store writes `out[1 + j ..+ 16]` or `out[codons - j - 15 ..=
-    // codons - j]` (`j + 16 <= codons`, length `codons + 2`).
+    let values = if MINUS {
+        &tables.reverse
+    } else {
+        &tables.forward
+    };
+    let steps = x_steps_w128(packed.len(), phase, codons);
+    // SAFETY (the block): step `s` reads `packed[phase + 12 * s ..+ 16]` and the 64-byte table
+    // and writes `out[1 + j ..+ 16]` or `out[codons - j - 15 ..= codons - j]` for `j = phase + 16
+    // * s` (`x_steps_w128`: `j + 16 <= codons`, length `codons + 2`).
     unsafe {
-        let table = x_table_w128(if MINUS {
-            &tables.reverse
-        } else {
-            &tables.forward
-        });
-        let backward = load(X_BACKWARD.as_ptr());
-        let mut j = 0;
-        while j + 16 <= codons && 3 * j / 4 + 17 <= packed.len() {
-            let index = x_step_index_w128(packed.as_ptr().add(3 * j / 4), phase);
-            let residues = x_look64_w128(&table, index);
+        let k = XW128::new();
+        let table = x_table_w128(values);
+        for step in 0..steps {
+            let j = phase + 16 * step;
+            let residues = k.look(&table, k.index(packed.as_ptr().add(phase + 12 * step)));
             if MINUS {
                 store(
                     out.as_mut_ptr().add(codons - j - 15),
-                    pick(residues, backward),
+                    pick(residues, k.backward),
                 );
             } else {
                 store(out.as_mut_ptr().add(1 + j), residues);
             }
-            j += 16;
         }
-        j
     }
+    if steps > 0 {
+        for j in 0..phase {
+            let residue = values[x_packed_codon(packed, phase + 3 * j)];
+            if MINUS {
+                out[codons - j] = residue;
+            } else {
+                out[1 + j] = residue;
+            }
+        }
+    }
+    16 * steps
 }
 
 #[cfg(test)]
@@ -2351,7 +2407,9 @@ mod tests {
     // No NCBI counterpart: test of LOSAT_X_TBNXLATE128's loops (wasm32 simd128, and the x86-64
     // SSSE3 / SSE4.1 build of the same code): for every phase of every length from 0 to 400 bases
     // and five long ones, and three genetic codes, the residues the 128-bit loops write are those
-    // of the word loop (`simd` false), and they write no other byte.
+    // of the word loop (`simd` false): every codon below the count they return, and the `phase`
+    // codons after it when the count is not 0 (their groups start at codon `phase`), and no
+    // other byte.
     #[test]
     #[cfg(any(
         target_arch = "x86_64",
@@ -2395,9 +2453,11 @@ mod tests {
                     assert_eq!(done % 16, 0);
                     vector_codons += done;
                     let what = format!("{length} bases, phase {phase}, genetic code {db_gencode}");
+                    // the codons the groups from codon `phase` write
+                    let written = if done > 0 { done + phase } else { 0 };
                     for j in 0..codons {
                         let (p, m) = (1 + j, codons - j);
-                        if j < done {
+                        if j < written {
                             assert_eq!(w_plus[p], plus[p], "plus codon {j}, {what}");
                             assert_eq!(w_minus[m], minus[m], "minus codon {j}, {what}");
                         } else {
@@ -2430,7 +2490,7 @@ mod tests {
                         assert_eq!(one, done, "{what}");
                         for j in 0..codons {
                             let at = if minus_strand { codons - j } else { 1 + j };
-                            let expected = if j < done { out[at] } else { UNTOUCHED };
+                            let expected = if j < written { out[at] } else { UNTOUCHED };
                             assert_eq!(
                                 w_out[at], expected,
                                 "codon {j}, minus {minus_strand}, {what}"
@@ -2444,6 +2504,98 @@ mod tests {
             }
         }
         assert!(vector_codons > 90_000, "{vector_codons}");
+    }
+
+    // No NCBI counterpart: test of LOSAT_X_TBNXLATE128's loops with hand-made codons: 1,024
+    // codons in which every codon index (0..64) stands at every one of the 16 places of a step,
+    // rotated by 0 to 40 codons and followed by 40 to 80 more (the end of the groups), after 0,
+    // 1 or 2 other bases (each phase within a byte), for every genetic code: codon `j` of the
+    // plus strand is `forward[index]` at `1 + j`, of the minus strand `reverse[index]` at
+    // `codons - j`, for every codon the loops count, and they count the 1,024.
+    #[test]
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))]
+    fn x_w128_loops_read_every_codon_at_every_place() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        #[cfg(target_arch = "x86_64")]
+        if !(std::arch::is_x86_feature_detected!("ssse3")
+            && std::arch::is_x86_feature_detected!("sse4.1"))
+        {
+            return;
+        }
+        // block `r` of 64 codons holds the indexes `(k + r) % 64`: place `k % 16` of a step
+        // sees `L + 16 q + r` for every `q` and `r`
+        let indexes: Vec<usize> = (0..16)
+            .flat_map(|r| (0..64).map(move |k| (k + r) % 64))
+            .collect();
+        for db_gencode in genetic_codes() {
+            let tables = x_codon_tables(db_gencode).unwrap();
+            for phase in 0..3 {
+                for more in [0, 1, 7, 15, 16, 17, 40] {
+                    let codon_of = |j: usize| indexes[(j + more) % indexes.len()];
+                    let codons = indexes.len() + 40 + more;
+                    let mut subject = b"TGA"[..phase].to_vec();
+                    for j in 0..codons {
+                        let index = codon_of(j);
+                        subject
+                            .extend([index >> 4, (index >> 2) & 3, index & 3].map(|b| b"ACGT"[b]));
+                    }
+                    let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+                    let what = format!("phase {phase}, rotation {more}, genetic code {db_gencode}");
+                    let mut plus = vec![0u8; codons + 2];
+                    let mut minus = vec![0u8; codons + 2];
+                    let mut out = [vec![0u8; codons + 2], vec![0u8; codons + 2]];
+                    // SAFETY: on x86-64 the CPU has SSSE3 and SSE4.1 (checked above).
+                    let done = unsafe {
+                        x_phase_residues_w128(
+                            store.packed(),
+                            phase,
+                            codons,
+                            tables,
+                            &mut plus,
+                            &mut minus,
+                        )
+                    };
+                    // SAFETY: as above.
+                    let one = unsafe {
+                        [
+                            x_phase_one_w128::<false>(
+                                store.packed(),
+                                phase,
+                                codons,
+                                tables,
+                                &mut out[0],
+                            ),
+                            x_phase_one_w128::<true>(
+                                store.packed(),
+                                phase,
+                                codons,
+                                tables,
+                                &mut out[1],
+                            ),
+                        ]
+                    };
+                    assert!(done >= indexes.len(), "{done} of {codons}, {what}");
+                    assert_eq!(one, [done, done], "{what}");
+                    for j in 0..done {
+                        let index = codon_of(j);
+                        let (forward, reverse) = (tables.forward[index], tables.reverse[index]);
+                        assert_eq!(
+                            (plus[1 + j], out[0][1 + j]),
+                            (forward, forward),
+                            "codon {j}, {what}"
+                        );
+                        assert_eq!(
+                            (minus[codons - j], out[1][codons - j]),
+                            (reverse, reverse),
+                            "codon {j}, {what}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     // No NCBI counterpart: test of the frame reuse; it does not change any value NCBI computes.

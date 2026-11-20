@@ -27,8 +27,12 @@ compared with <fixture_id>.db.out instead, NCBI's search with the subject as a d
 outside the lines that name the database (`normalize_database_lines`); its line says
 `exception` and how many lines differ from NCBI's local search (<fixture_id>.out).
 
+`--outfmts 5,13` keeps only the rows whose output format (the number that starts the `outfmt` cell, 0 when it is
+empty) is one of those numbers (`LOSAT/tests/check_wasm_threading.py` runs blastx's XML, XML2 and JSON rows through
+the WASI commands so).
+
 Usage: check_losat.py --losat LOSAT [--programs blastn,blastp,tblastn,tblastx,blastx,psiblast] [--threads N]
-       [--only PREFIX] [--library]
+       [--only PREFIX] [--outfmts N,...] [--library]
 """
 from __future__ import annotations
 
@@ -79,19 +83,29 @@ def normalize_database_lines(report: bytes) -> bytes:
     return b"\n".join(kept)
 
 
+def selected_rows(rows: list[dict[str, str]], programs: str, only: str = "", outfmts: str = "") -> list[dict[str, str]]:
+    """The rows of `programs` (names separated by commas) whose id starts with `only`, and, when `outfmts` names
+    numbers separated by commas, whose output format (the first word of `outfmt`) is one of them."""
+    names = set(programs.split(","))
+    formats = [number for number in outfmts.split(",") if number]
+    return [row for row in rows
+            if row["program"] in names and row["fixture_id"].startswith(only)
+            and (not formats or outfmt(row).split()[0] in formats)]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--losat", type=Path, required=True)
     parser.add_argument("--programs", default="blastn,blastp,tblastn,tblastx,blastx,psiblast")
     parser.add_argument("--threads", type=int)
     parser.add_argument("--only", default="")
+    parser.add_argument("--outfmts", default="",
+                        help="only the rows of these output formats, numbers separated by commas (default: all)")
     parser.add_argument("--library", action="store_true",
                         help="--losat is examples/library_command_line (the search through the library API)")
     args = parser.parse_args()
-    programs = set(args.programs.split(","))
     differing = []
-    rows = [row for row in read_manifest()[2]
-            if row["program"] in programs and row["fixture_id"].startswith(args.only)]
+    rows = selected_rows(read_manifest()[2], args.programs, args.only, args.outfmts)
     for row in rows:
         threads = ["-num_threads", str(args.threads)] if args.threads else []
         command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]

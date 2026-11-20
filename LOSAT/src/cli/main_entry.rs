@@ -660,11 +660,7 @@ fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
         std::process::exit(0);
     }
     // rpsbproc's arguments are not the single-dash words of the BLAST programs.
-    let message = if argv_is_rpsbproc {
-        crate::cli::render_rpsbproc_message(error)
-    } else {
-        crate::cli::render_message(error)
-    };
+    let message = crate::cli::command_line_message(error, argv_is_rpsbproc);
     // rpsbproc's messages and help are written without a panic on a closed stream
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
     if argv_is_rpsbproc {

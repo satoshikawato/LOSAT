@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,6 +27,7 @@ import xinclude_fixtures as xinclude  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
 sys.path.insert(0, str(fast.FIXTURE_DIR))
+import check_losat  # noqa: E402  (the -subject fixtures' checker)
 import run_oracle  # noqa: E402  (the outfmt 0 manifest's reader and writer)
 
 FROZEN, KNOWN, OTHER = "f" * 64, "a" * 64, "0" * 64
@@ -560,6 +562,64 @@ class SelectionTests(unittest.TestCase):
             self.assertIn(program, fast.program_dependents()[program])
 
 
+class OutputFormatSelectionTests(unittest.TestCase):
+    """`--outfmts` of the two fixture checkers, and the rows that check_wasm_threading.py runs with it: blastx's
+    BLAST XML, XML2 and JSON rows through each WASI command (`blastx_prescan_checkers`)."""
+
+    CELLS = ["5", "1", "16", "13", "6 qseqid sseqid", "15", "14", "0"]
+
+    def test_a_row_is_kept_by_the_first_word_of_its_format_whole(self):
+        rows = [{"row_id": f"r{index}", "program": "blastx", "outfmt": cell} for index, cell in enumerate(self.CELLS)]
+
+        def kept(outfmts: str, program: str = "blastx") -> list[str]:
+            args = argparse.Namespace(only="", program=program, outfmts=outfmts)
+            return [row["outfmt"] for row in rows if db_fixtures.selected(row, args)]
+
+        self.assertEqual(kept("5,13,14,15,16"), ["5", "16", "13", "15", "14"])
+        self.assertEqual(kept("1"), ["1"])
+        self.assertEqual(kept("6"), ["6 qseqid sseqid"])
+        self.assertEqual(kept(""), self.CELLS)
+        self.assertEqual(kept("5", "blastp"), [])
+        # `freeze` has no --outfmts: every row.
+        self.assertEqual(sum(db_fixtures.selected(row, argparse.Namespace(only="", program="")) for row in rows), 8)
+        # check_losat.py: the same rule, an empty cell being outfmt 0.
+        rows = [{"fixture_id": f"x{index}", "program": "blastx", "outfmt": cell}
+                for index, cell in enumerate(["", *self.CELLS])]
+        rows.append({"fixture_id": "y", "program": "blastp", "outfmt": "5"})
+
+        def subject(outfmts: str, programs: str = "blastx", only: str = "") -> list[str]:
+            return [row["fixture_id"] for row in check_losat.selected_rows(rows, programs, only, outfmts)]
+
+        self.assertEqual(subject("0"), ["x0", "x8"])
+        self.assertEqual(subject("5,16"), ["x1", "x3"])
+        self.assertEqual(subject("5", "blastx,blastp"), ["x1", "y"])
+        self.assertEqual(subject("", "blastx", "x1"), ["x1"])
+        self.assertEqual(len(subject("")), 9)
+
+    def test_the_wasi_section_runs_every_blastx_xml_and_json_row_of_both_sets(self):
+        import check_wasm_threading as wasm
+
+        formats = wasm.BLASTX_PRESCAN_FORMATS.split(",")
+        self.assertEqual(formats, ["5", "13", "14", "15", "16"])
+        subject = check_losat.selected_rows(run_oracle.read_manifest()[2], "blastx", "", wasm.BLASTX_PRESCAN_FORMATS)
+        args = argparse.Namespace(only="", program="blastx", outfmts=wasm.BLASTX_PRESCAN_FORMATS)
+        db = [row for row in db_fixtures.read_manifest()[1] if db_fixtures.selected(row, args)]
+        # Every format, in the -subject and the -db rows; every blastx row of these formats and no other.
+        for rows, every, number in [
+                (subject, [row for row in run_oracle.read_manifest()[2] if row["program"] == "blastx"],
+                 lambda row: run_oracle.outfmt(row).split()[0]),
+                (db, [row for row in db_fixtures.read_manifest()[1] if row["program"] == "blastx"],
+                 db_fixtures.format_number)]:
+            self.assertEqual(sorted({number(row) for row in rows}, key=int), formats)
+            self.assertEqual(rows, [row for row in every if number(row) in formats])
+        # The section's command lines are the checkers' own: with a prefix that no row has, each selects nothing
+        # and passes (no LOSAT runs).
+        for name, checker, _ in wasm.blastx_prescan_checkers(Path("no-such-losat")):
+            run = subprocess.run([sys.executable, *checker, "--only", "no-such-row"], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, (name, run.stderr))
+            self.assertRegex(run.stdout.splitlines()[-1], r"^# (fixtures=0 differing=\[\]|rows=0 differing=0 )", name)
+
+
 class StartupTraceNoticeTests(unittest.TestCase):
     """`check_startup_trace_notice` against stub executables standing in for `losat`."""
 
@@ -707,6 +767,89 @@ class NcbiUsageReportOffTests(unittest.TestCase):
                 self.assertEqual(fixtures.run_case(str(bin_dir / program), [], "x", "", "").stdout, b"true")
             self.assertEqual((fixtures_dir / f"{case[0]}.out").read_bytes(), b"false")
             self.assertIn("of false (", (fixtures_dir / "manifest.tsv").read_text())
+
+
+
+class WasmDbTotalRowsTests(unittest.TestCase):
+    """The -db rows that check_wasm_threading.py runs through each WASI command for a database total of 2^32
+    letters or more (`DB_TOTAL_ROWS`): NCBI's rows of one database whose alias file declares such a `LENGTH`
+    (below 2^63: from there NCBI's `Int8` is negative, and the statistics read the length of OID 0)."""
+
+    def test_the_rows_are_every_ncbi_row_of_one_database_of_2_to_the_32_letters_or_more(self):
+        import check_wasm_threading as watcher
+
+        def alias_length(row: dict[str, str]) -> int:
+            names = row["db"].split()
+            if len(names) != 1 or ":" in names[0]:
+                return 0
+            for suffix in (".nal", ".pal"):
+                alias = db_fixtures.ENGINE / (names[0] + suffix)
+                if alias.is_file():
+                    for line in alias.read_text().splitlines():
+                        key, _, value = line.partition(" ")
+                        if key == "LENGTH":
+                            return int(value)
+            return 0
+
+        rows = db_fixtures.read_manifest()[1]
+        expected = [row["row_id"] for row in rows if row["kind"] == "ncbi" and 2**32 <= alias_length(row) < 2**63]
+        self.assertEqual(sorted(watcher.DB_TOTAL_ROWS), sorted(expected))
+        self.assertEqual(len(set(watcher.DB_TOTAL_ROWS)), 8)
+        # The watcher selects each row by `--only` (a prefix of the row id): it names that row alone.
+        for row_id in watcher.DB_TOTAL_ROWS:
+            self.assertEqual([row["row_id"] for row in rows if row["row_id"].startswith(row_id)], [row_id])
+
+
+
+class WasmLocalTimeTests(unittest.TestCase):
+    """The local times that check_wasm_threading.py puts aside in the outputs of makeblastdb, blastdbcmd -info and
+    a search report of its local-time-and-path block (`local_times`), and its test that each is the local time of
+    its run (`is_local_time_of`)."""
+
+    def test_each_form_is_read_and_put_aside(self):
+        import calendar
+        import check_wasm_threading as watcher
+
+        log = (b"\n\nBuilding a new DB, current time: 11/18/2026 21:27:29\nNew DB name:   /w/db\n"
+               b"Adding sequences from FASTA; added 3 sequences in 0.00400209 seconds.\n")
+        self.assertEqual(watcher.local_times(log), (
+            b"\n\nBuilding a new DB, current time: <time>\nNew DB name:   /w/db\n"
+            b"Adding sequences from FASTA; added 3 sequences in <seconds> seconds.\n",
+            [(calendar.timegm((2026, 11, 18, 21, 27, 29)), 1)]))
+        # makeblastdb 2.17.0's form of a short build time.
+        self.assertEqual(watcher.local_times(b"added 1 sequences in 5.5e-05 seconds.\n")[0],
+                         b"added 1 sequences in <seconds> seconds.\n")
+        info = b"Database: t\n\t3 sequences; 2,700 total bases\n\nDate: Nov 8, 2026  9:07 PM\tLongest sequence: 900 bases\n"
+        self.assertEqual(watcher.local_times(info), (
+            b"Database: t\n\t3 sequences; 2,700 total bases\n\nDate: <time>\tLongest sequence: 900 bases\n",
+            [(calendar.timegm((2026, 11, 8, 21, 7, 0)), 60)]))
+        report = b"  Database: t\n    Posted date:  Jan 1, 2027  12:05 AM\n  Number of letters in database: 2,700\n"
+        self.assertEqual(watcher.local_times(report), (
+            b"  Database: t\n    Posted date:  <time>\n  Number of letters in database: 2,700\n",
+            [(calendar.timegm((2027, 1, 1, 0, 5, 0)), 60)]))
+        self.assertEqual(watcher.local_times(b"Date: Dec 31, 2026  12:59 PM\t")[1],
+                         [(calendar.timegm((2026, 12, 31, 12, 59, 0)), 60)])
+        # Text that only looks like a time stays.
+        other = b"Query= Date: Nov 8, 2026  9:07 PM\nbuilt 11/18/2026 21:27:29\n"
+        self.assertEqual(watcher.local_times(other), (other, []))
+
+    def test_a_time_is_the_local_time_of_its_run_in_the_zone(self):
+        import check_wasm_threading as watcher
+
+        started, ended = 1_795_000_000.4, 1_795_000_002.9
+        jst = 32400
+        # The log, to the second: any second of the run, one second of slack at each end.
+        for printed in [1_795_000_000 + jst, 1_795_000_002 + jst, 1_794_999_999 + jst, 1_795_000_003 + jst]:
+            self.assertTrue(watcher.is_local_time_of(printed, 1, jst, started, ended), printed)
+        for printed in [1_794_999_998 + jst, 1_795_000_004 + jst, 1_795_000_001]:
+            self.assertFalse(watcher.is_local_time_of(printed, 1, jst, started, ended), printed)
+        # The date, to the minute: the minute of the run's start or end.
+        minute = (1_795_000_000 + jst) // 60 * 60
+        self.assertTrue(watcher.is_local_time_of(minute, 60, jst, started, ended))
+        self.assertFalse(watcher.is_local_time_of(minute - 60, 60, jst, started, ended))
+        self.assertFalse(watcher.is_local_time_of(minute - jst, 60, jst, started, ended))
+        # UTC is the zone of offset 0.
+        self.assertTrue(watcher.is_local_time_of(1_795_000_001, 1, 0, started, ended))
 
 
 if __name__ == "__main__":

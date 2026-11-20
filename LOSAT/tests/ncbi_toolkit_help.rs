@@ -227,7 +227,6 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                     message.contains(&format!("-{name} is not supported by LOSAT's"))
                         || message.contains(&format!("-{name} ("))
                             && message.contains("is not supported by LOSAT's")
-                        || message.contains(&format!("unsupported BLASTX option '-{name}'"))
                         || program == "rpstblastn" && name == "ungapped",
                     "{program} -{name}: {message}"
                 );

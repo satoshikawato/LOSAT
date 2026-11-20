@@ -385,8 +385,9 @@ def pssm_problems(result: PssmResult, row: dict[str, str], frozen_dir: Path, fir
         for name, got in result.files:
             if sha256(got) == digests[name]:
                 continue
-            if name in stored_bytes:
-                out.append(f"{name} " + first_difference(stored_bytes[name], got))
+            want = stored_bytes.get(name)
+            if want is not None:
+                out.append(f"{name} " + first_difference(want, got))
             else:
                 out.append(f"{name} differs (sha256 {sha256(got)}, expected {digests[name]}; not frozen)")
     if result.stray:

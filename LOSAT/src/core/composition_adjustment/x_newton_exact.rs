@@ -94,6 +94,7 @@
 use super::adjust_scores::{
     COMPO_NUM_TRUE_AA, K_COMPO_ADJUST_ERR_TOLERANCE, K_COMPO_ADJUST_ITERATION_LIMIT,
 };
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -191,7 +192,7 @@ const P: usize = 24;
 /// `ln(1.0)` as the libm of this process computes it (not constant-folded).
 pub(super) fn ln_one() -> f64 {
     static LN_ONE: OnceLock<f64> = OnceLock::new();
-    *LN_ONE.get_or_init(|| std::hint::black_box(1.0f64).ln())
+    *LN_ONE.get_or_init(|| std::hint::black_box(1.0f64).glibc_ln())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:193-208
@@ -1319,7 +1320,7 @@ mod tests {
         let mut dinv = [0.0f64; NN];
         for v in dinv.iter_mut() {
             *v = if wide {
-                2f64.powf(xorshift(state) * 40.0 - 30.0)
+                2f64.glibc_pow(xorshift(state) * 40.0 - 30.0)
             } else {
                 1.0e-4 + xorshift(state) * 0.05
             };

@@ -20,7 +20,7 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   `*_algebraic` operations, FMA intrinsics (`_mm*_fmadd_*` and the other `_mm*_fm*` /
   `_mm*_fnm*`, `vfmaq_*`, `vfmsq_*`), or the Wasm `relaxed-simd` feature (its `relaxed_madd`
   fuses or not depending on the engine). The Wasm builds enable `+simd128` only.
-- **One fused multiply-add**, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
+- **Fused multiply-adds in two places.** First, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
   rounding error of a product in the double-double emulation of `expl` in the long-double line
   `result *= expl(-z * z) / z` of NCBI's `boost_erf.c`. The other call is its test
   `x_dekker_product_error_matches_fused_multiply_add`. `mul_add` rounds once (IEEE 754
@@ -40,15 +40,30 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   PGO and other inlining changes may move the site into a caller outside `stats::spouge`; the
   check then fails and names the function.
 
+  Second, `Fused::fma` in `utils/glibc_fma_libm.rs` (since 2026-11-20, #1344): every fused
+  operation of glibc 2.35's x86-64 FMA `exp`, `log` and `pow`, the functions NCBI BLAST+ called
+  for the reference output. Its test `the_emulated_fma_rounds_once` holds the other two calls.
+  On baseline x86-64 each entry point is chosen on its first call (the copy compiled with
+  `fma` when the CPU has FMA, else the emulation) and then called through a pointer, as glibc's
+  ifunc does: rustc drops `#[inline(never)]` on a `#[target_feature]` function, and a caller whose
+  features imply `fma` (`optimize_avx512`) inlined the copy. On aarch64 the entry points are never
+  inlined. So the FMA instructions stay in `losat::utils::glibc_fma_libm::` functions; on
+  baseline x86-64 the cold `exp_specialcase` calls the `fma` of compiler-builtins. In the
+  baseline x86-64 release binary of #1344 (2026-11-20): 88 FMA instructions in the `fused`
+  copies of `x86_fma::{exp,ln,log10,pow}` (15, 23, 23, 27) and one `fma` reference in
+  `exp_specialcase`.
+
   A new `mul_add` needs the same argument (the fused result is the value NCBI computes) and an
   entry in the checker's `MUL_ADD_SITES` (and, in another module, `MUL_ADD_FUNCTION_PREFIXES`).
-- **The C library's math functions.** `ln`, `exp`, `powf` and the other transcendental functions
-  call the platform's libm (glibc on Linux, Apple's libm on macOS, the UCRT on Windows, wasi-libc
-  in Wasm), as NCBI's C code does, so on one machine both get the same values. No build option
-  changes which function is called: glibc picks its variant (for example `__log_fma` on an
-  FMA-capable CPU) when it is loaded, from the CPU, not from LOSAT's target CPU. Do not
-  replace these calls by another implementation (LOSAT does not depend on the `libm` crate, and
-  `LOSAT/tests/check_fp_contract.py` rejects a call into it, `libm::<fn>`).
+- **The C library's math functions.** `exp`, `ln`, `log10` and `pow` (`powf`) come from
+  `utils/glibc_fma_libm.rs` on every target (since 2026-11-20, #1344): glibc 2.35's x86-64 FMA
+  versions, bit for bit, with `f64::mul_add` where the CPU has FMA and an exact emulation of the
+  FMA elsewhere (WebAssembly, x86-64 CPUs without FMA). NCBI's reference bytes were written with
+  glibc's FMA variants (`__log_fma` and the others, picked from the CPU when glibc is loaded);
+  the other libms (glibc without FMA, Apple's, the UCRT, wasi-libc) differ from them by 1 ULP on
+  some arguments. `LOSAT/clippy.toml` refuses the transcendental methods of `f64` and `f32`
+  outside the module; a new one is ported into it from glibc. Do not call the `libm` crate
+  (`LOSAT/tests/check_fp_contract.py` rejects `libm::<fn>`).
 - **Release builds.** `cargo build --release`: fat LTO, one codegen unit, `panic = "abort"`
   (`LOSAT/Cargo.toml`) and the x86-64 loop alignment of `LOSAT/.cargo/config.toml`, for the
   baseline CPU of the target; the AVX2 kernels are chosen at run time
@@ -365,6 +380,7 @@ export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
 export LOSAT_X_BNTBRANGE=1
+export LOSAT_X_BPCELL128=1
 export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCLUTSCANBF=1
 export LOSAT_X_BPDBCUT=1
@@ -484,6 +500,7 @@ export LOSAT_X_TBNXLATE128=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXBOARD=1
+export LOSAT_X_TBXCTXTABLE=1
 export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXFEWGROUPS=1
 export LOSAT_X_TBXHITBF=1
@@ -2490,15 +2507,16 @@ Rebuilding less:
   The loop after the list. Until 2026-11-02 three more strict-set switches, `LOSAT_X_BPFSEED`,
   `LOSAT_X_BPFSTAGE` and `LOSAT_X_BPFLEAN`, chose its form; they were folded into it (line SF S3, family
   bpf-seed-loop) and select nothing now: no variable is read, so `=0` and `=1` give the same run. What runs, in
-  `blastp/x_seed_fused_clut.rs`: on a table that takes the branch-free list (every flat table, natively), a subject
+  `blastp/x_seed_fused_clut.rs`: on a table that takes the branch-free list (every flat table), a subject
   where `XHitBf::fits` holds (`1 <= wordsize < window`, `0 <= diag_offset` and `diag_offset + length + 2 window <
   2^30`) runs `x_scan_flat_lean` if `XFlatCompressedLookup::x_pairs_fit` holds (a subject of a word or more, which
   keeps its sentinel, with the 15-letter alphabet and words of 2 to 6 letters), else `x_scan_flat_fseed_loop`; a
-  subject where `XHitBf::fits` fails runs `x_scan_flat_bf`, and wasm32 always runs `x_scan_flat_bf`. Only
+  subject where `XHitBf::fits` fails runs `x_scan_flat_bf` (wasm32 too since 2026-11-18; until then it ran
+  `x_scan_flat_bf` on every subject). Only
   `LOSAT_X_BPCLUTSCANBF=0` keeps the loop with the branch (`x_scan_flat_in::<false, _>`). With `LOSAT_X_STATS` (and the `xstats` feature) `main` prints
   `[X_STATS] BPFLAT lean=N fseed=N bf=N branch=N` at exit when one of them is not zero: the subjects that
-  `x_scan_flat_lean` (a subject of a word or more), `x_scan_flat_fseed_loop` (natively, a subject shorter than a
-  word), `x_scan_flat_bf` (past `XHitBf::fits`, and every subject on wasm32) and the loop with the branch (only
+  `x_scan_flat_lean` (a subject of a word or more), `x_scan_flat_fseed_loop` (a subject shorter than a
+  word), `x_scan_flat_bf` (past `XHitBf::fits`) and the loop with the branch (only
   `=0`) scanned; `tests/blastp_fast_scan_bf.rs` reads it. `x_scan_flat_fseed_loop`
   gives each hit to blastp's branch-free two-hit test (`XHitBf::test`) first, a flag-1 entry or a candidate on to
   `x_test_hit`, and reads no diagonal entry ahead; `x_scan_flat_lean` makes the list two offsets per step in a loop
@@ -2511,9 +2529,14 @@ Rebuilding less:
   (workstation, node 0, `cycles:u`): the branch-free test x0.90-0.96 on dense tables (#472: OrthoFinder's 1/10 of the
   Arabidopsis proteins x the zebrafish proteome x0.901, UniRef50 volume 00 `-db` 3 proteins x0.957, 10 proteins
   x0.912), the staged loop with the list two offsets per step x0.80-0.95 (#543: 3 proteins x0.795, 10 proteins x0.895),
-  and the out-of-line steps and copy x0.98-0.99 and x0.82 on 3 proteins x UniRef50 (#551). WebAssembly keeps
-  `x_scan_flat_bf` because there both were slower (Node 26, serial WASI command, 3 rounds, 3 proteins x UniRef50: the
-  branch-free test x1.06-1.09, the staged loop x1.13-1.18).
+  and the out-of-line steps and copy x0.98-0.99 and x0.82 on 3 proteins x UniRef50 (#551). WebAssembly kept
+  `x_scan_flat_bf` until 2026-11-18 because there both had been slower (Node 26, serial WASI command, 3 rounds, 3
+  proteins x UniRef50: the branch-free test x1.06-1.09, the staged loop x1.13-1.18); measured again on dev 7d968922d
+  (Node 26.8.2, serial WASI command, rotating rounds in one process, a shared machine at load 35-81; blastp-fast `-evalue 0.001` against OrthoFinder's
+  species 6, 6,600 proteins, every report identical), the same loops as natively took x0.80 the time of the whole
+  search with 1,000 proteins of species 4 (15/15 rounds faster; 3.85 hits per listed cell), x0.78 with 3,000 (6/7)
+  and x0.89-0.95 with 1 to 100 proteins and one of 1,806 residues, with x0.91-1.02 the instructions of the compiled
+  code and x0.72 its mispredicted branches at 1,000 proteins (callgrind), so wasm32 takes them since then.
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT`, with more than one thread) changes how that build is scheduled
@@ -2667,7 +2690,8 @@ Rebuilding less:
   job), with 13-18 % fewer branch mispredicts.
 - `LOSAT_X_BPMASKED=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-24;
   `=0` turns it off; acts only where `LOSAT_X_BPDEFER`'s deferred calls run: not with `LOSAT_X_BPDEFER=0` or
-  `LOSAT_X_BPDIAG_SIMD=0`, not without AVX2 (aarch64, WebAssembly), not with
+  `LOSAT_X_BPDIAG_SIMD=0`, not without AVX2 (aarch64, WebAssembly; there `LOSAT_X_BPCELL128`'s 128-bit
+  batches take the tables of `LOSAT_X_BPMASKEDMIN`'s rule where the target has them), not with
   `LOSAT_X_BPDIAG=0`, never in blastp-fast's loops on the compressed table (they have no AVX2 batches); and
   only on lookup tables with at least `LOSAT_X_BPMASKEDMIN` hits per used backbone cell, in hundredths,
   built-in 250, `0` every table) blastp's
@@ -2694,6 +2718,33 @@ Rebuilding less:
   the fly proteome took x1.148 at 1.11 hits per used cell (x1.192 against UniRef50 volume 00), x1.123 at 1.48
   (x1.071), x1.020 at 2.08, x0.987 at 2.60, x0.924 at 4.52, x0.928 at 7.07 and x0.935 at 10.38 (x0.919 against
   UniRef50 volume 00), so the built-in cutoff lies between 2.08 and 2.60.
+- `LOSAT_X_BPCELL128=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-11-18,
+  class platform, on by default; `=0` turns it off, `=2` runs it in place of the AVX2 batches on any x86-64
+  CPU with SSSE3, SSE4.1 and POPCNT, as a diagnostic for the tests; acts where `LOSAT_X_BPDIAG` is on and its
+  AVX2 batches do not run: the WebAssembly build (simd128) and x86-64 with SSSE3, SSE4.1 and POPCNT but no
+  AVX2, which ran the per-hit loop on every table before; only on the lookup tables `LOSAT_X_BPMASKEDMIN`
+  gives the masked batch, 250 hundredths of a hit per used cell, `0` every table, the others keep the
+  per-hit loop) blastp's fused loop tests a lookup cell's hits in batches of eight in two 128-bit vectors
+  (`blastp/x_seed_fused.rs` `x_cell_w128`; exactness argument in its module header): each batch is the test
+  of eight lanes of `LOSAT_X_BXCROSS128`'s kernel (`XCrossW128`, every lane at the cell's subject offset,
+  so the lane formulas are the AVX2 batch's), its candidates called at once in lane order, and the fewer
+  than eight hits after the cell's last batch are tested one after the other with `LOSAT_X_BPHITBF`'s
+  branch-free test (where the per-hit loop takes it) or `x_test_hit`. Neither `LOSAT_X_BPDEFER`'s deferral
+  nor the masked last batch is taken: both cost the WebAssembly build more than they save. With
+  `LOSAT_TIMING=1` the `x_bpdiag` line names `mode=w128` (the counts of the tables it batched) and the
+  `x_bpmasked` line gives the rule's (thread, table) choices (`tables_masked=` batched, `tables_deferred=`
+  left to the per-hit loop). Measured 2026-11-18 on the local machine (WSL2, no hardware counters; v4-W W2
+  s4): the serial WASI command under Node 26.8.2 (V8 TurboFan, `--no-liftoff --single-threaded`), the
+  instructions of the compiled module under callgrind against `dev` c648413ac, outputs identical in every
+  arm, query sets of Species4 x Species6 (`-subject`, `-evalue 0.001`): 1,000 proteins (122 hits per used
+  cell) 0.821 (138.3 -> 113.6 G) with 23 % fewer simulated branch mispredicts, 100 proteins (118) 0.842, 10
+  (14.7) 0.889, 3 (6.37) 0.940, 1 (3.72) 0.968, single proteins at 3.10 and 2.52 hits 1.013 and 1.002 (5-7 %
+  more simulated mispredicts from 3.10 to 6.37); below the cutoff the per-hit loop as before (2.42: 1.001;
+  with `LOSAT_X_BPMASKEDMIN=0` a prototype build gave 2.42 1.014, 1.97 1.012, 1.25 1.024). Wall time
+  of the same commands in one Node process (rotating rounds, load 20-45): 100 proteins x0.83-0.88 of `dev`
+  for the prototype forms tried, 7/7 rounds faster. Native AVX2 code is unchanged (machine code compared function by
+  function with `dev`); natively with `=2` (SSE) the 100-protein case runs 1.07 of the AVX2 default's
+  instructions.
 - BPSCANBF (graduated 2026-10-26, in the set since 2026-10-17; no variable; always on) (BLASTP, speed; acts in
   the fused loop on the standard lookup table; the compressed table keeps
   its scan) blastp's fused loop finds the lookup cells with hits by the
@@ -2721,8 +2772,9 @@ Rebuilding less:
   loss, and plan v4's rule that a switch that wins everywhere joins in the pull request that adds it).
 - `LOSAT_X_BPHITBF=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-20;
   `=0` turns it off) the per-hit loop of the fused seed loop (`blastp/x_seed_fused.rs` `x_cell_per_hit`, the
-  loop without `LOSAT_X_BPDIAG`'s batches: the default where the CPU has no AVX2, aarch64 and WebAssembly;
-  exactness argument in the module header) takes the two outcomes most hits of a flag-0 entry end in, too far
+  loop without `LOSAT_X_BPDIAG`'s batches: the default where the CPU has no AVX2, aarch64, and where
+  `LOSAT_X_BPCELL128`'s 128-bit batches do not take the table, WebAssembly's tables with few hits per used
+  cell; `LOSAT_X_BPCELL128` takes the test for a cell's last hits; exactness argument in the module header) takes the two outcomes most hits of a flag-0 entry end in, too far
   (`diff >= window`: `last_hit = s + diag_offset`) and overlap (`diff < wordsize`: nothing), without a branch,
   in doubled arithmetic: with the packed entry `raw`, `d2 = 2 (s + diag_offset) - (raw <<
   1)` is twice the reference's `diff` (a cleared entry holds `-window`), a candidate is `(d2 - 2 wordsize) as
@@ -4262,7 +4314,7 @@ Scheduling (each value computed by one thread with the original function; order 
   0.993-1.005 in every case. One thread (node 0, `perf stat`, outputs the same): instructions of dev, the switch and
   `=0` within 0.01 % (31,168 cDNAs 117.750 / 117.751 / 117.749 G; 1,775 cDNAs dc-megablast, megablast and blastn too).
 - `LOSAT_X_BNSEEDLISTS=1` (BLASTN `-task blastn`, `megablast` and `blastn-short`: the partitioned stages of
-  `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARNA` with `LOSAT_X_PAIRPARFOLD`, two threads or more, one unmasked subject, a
+  `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARNA` with `LOSAT_X_PAIRPARFOLD`, two threads or more, one subject, a
   query block above 8,000 letters; in the strict set from the pull request that added it, 2026-10-28:
   `LOSAT_X_BNSEEDLISTS=0` turns it off) gives those stages the form `LOSAT_X_DCSEEDLEAN` gives dc-megablast's
   (`x_pair_seed_part::seed_stage_part_lists`); each partition gets the same seeds in the same order, so the hits and
@@ -6150,9 +6202,9 @@ Scheduling (each value computed by one thread with the original function; order 
   (presence bits in half or more of the backbone cells, `x_scan_bf_for`), are scanned with tblastn's
   scan on presence bytes (`LOSAT_X_TBNSCANBYTE`, `tblastx/x_scan_byte.rs` `x_scan_one_range_byte`,
   exactness argument in its header): the table indexes of a block of 256 words made 16 at a time from
-  the letters, candidates listed from a presence vector of one byte per index (32 KB, built once per
-  group table), and each candidate copied once, NCBI's room test kept where the block could fill the
-  offset array. NCBI's range walk (`s_BlastAaScanSubject`, `blast_aascan.c:48-131`) is kept around
+  the letters, candidates listed from a presence vector of one byte per index (32 KB per group table,
+  made once the query batch's tables are built and freed with the table), and each candidate copied
+  once, NCBI's room test kept where the block could fill the offset array. NCBI's range walk (`s_BlastAaScanSubject`, `blast_aascan.c:48-131`) is kept around
   it, so every call returns NCBI's pairs and scan range (test
   `x_scan_subject_bf_and_compact_equal_ncbi_scan_on_random_subjects`, byte arm, against
   `s_blast_aa_scan_subject`). The offset arrays get `X_SCAN_BYTE_SLACK` (20) entries more while the
@@ -6164,9 +6216,47 @@ Scheduling (each value computed by one thread with the original function; order 
   3 rounds alternating, two runs, against dev ec6bd8123): x0.958-0.967, x0.965-0.967, ssDNA.prok.8
   x0.966-0.972, Easyfig's tblastx example x0.984-0.986, Galaxy's small tblastx test x0.999-1.010 (its
   tables are sparse; the same instructions). Branch misses x0.88-0.95. Heap peak (massif) the same
-  within 10 bytes: the presence bytes live with their group table, not at the peak. Probe: line DT
+  within 10 bytes: the presence bytes live with their group table, not at the peak. Until
+  fix/tbx-presence-scratch (2026-11-19) the bytes were made where each table was built; on Sakai x
+  MG1655 `-subject` at 16 threads (84 slice tables) they sat between the tables in the building
+  thread's heap, and glibc kept the 560 MiB of freed tables there after the seed release: max
+  RssAnon 2,225 MiB against 1,984 MiB with `=0` (line MEM, v4-MEM REPORT §28). Made in
+  `XPairPar::prepare` once every table of the batch is built (`x_pair_par.rs` `XGroup::x_make_presence`;
+  a lazy cell read in the scan changed the units' scan loop, +1.6 % instructions on ViPTreeGen's
+  Begomovirus.40 at one thread), they leave the
+  build's allocations as with `=0`: 1,983 MiB (median of 6 runs, 1,975-1,995; `=0` 1,986). Probe: line DT
   (tool-speed-20261115, DECISIONS 8); prefetching the candidates' cells or chain heads before the copy
   gave nothing more (x0.991-1.023).
+- `LOSAT_X_TBXCTXTABLE=1` TBLASTX (speed; in the strict set from the pull request that added it, 2026-11-17, on by
+  default; `=0` turns it off; `tblastx/x_pair_par.rs` `x_ctx_table`, `x_context_of`): the units' two-hit test finds the
+  context of a hit that passes it (NCBI's `BSearchContextInfo`, `blast_query_info.c:219-243`) in the
+  `XContextTable` (`common/x_context_table.rs`, the table blastp's and blastx's fused loops take), made once per query batch from the
+  frame bases in `XPairPar::prepare`: a coarse table of at most 16,384 entries gives the context at the start of the
+  offset's block, and a walk over the frame bases moves on to the last context that starts at or before the offset.
+  Cause removed: the binary search over every context of the batch (`BlastAaLookupTable::get_context_idx`; NCBI's
+  narrowing by the shortest and longest context is not ported) compared the hit's query offset with a frame base at
+  each step, a branch the data decides: on ViPTreeGen's 40 Autographivirales genomes all against all (six contexts a
+  batch) it was mispredicted about once per search, 27 % of the unit scan's mispredictions (precise
+  `br_misp_retired.all_branches`) and about 11 % of its cycles. The table gives the binary search's index for every
+  offset (no rule; an offset outside the table takes the binary search, and with `=0` the table covers no offset, so
+  every hit takes it: the path before). It acts where the unit path runs (`LOSAT_X_PAIRPAR`'s batches); the reference
+  frame loop keeps the binary search. Memory: one table per batch, a coarse table of at most 64 KiB (42 KiB for a 42 kb query) and a copy of
+  the frame bases (4 bytes a context). Tests:
+  the lib test `the_context_table_gives_the_binary_search_index` (`x_pair_par.rs`; 240 random layouts of 0 to 300
+  contexts with empty contexts, a first frame base above 0 and batches over 16,384 letters, every offset from below
+  the first base to past the end, against `get_context_idx`, and `=0`'s table) and `LOSAT/tests/tblastx_ctx_table.rs`
+  (one and three MelaMJNV pieces against PemoMJNVA at 1 and 2 threads: the default's report equals `=0`'s and the
+  reach row shows the table's path ran). Evidence (ws, line DT, ad-DT-9; one booked core of node 0, `-num_threads 1`, the same output in every run, against
+  dev 5436a3abb): wall time (warm-up + 5 rounds alternating, medians) ViPTreeGen's Autographivirales.40 47.15 ->
+  45.74 s x0.970 (every round of this form under dev's fastest), Begomovirus.40 x0.981, ssDNA.prok.8, Easyfig's
+  tblastx example and Galaxy's tblastx test x1.000 (at the clock's 10 ms); user-space cycles (perf stat, 3 rounds
+  alternating, medians) x0.967 (branch misses x0.760, instructions x0.984), x0.971, x0.986, x0.986, x0.996; Galaxy's
+  tblastn and blastx tests the same instructions. Memory (max RSS, 10 rounds alternating, medians): Autographivirales.40
+  24,948 -> 24,836 KiB, Begomovirus.40 16,262 -> 16,318 KiB (+56 KiB, the batch's coarse table); the heap peak
+  (valgrind massif) ssDNA.prok.8 170,225,864 B in both, Begomovirus.40 170,443,912 -> 170,444,232 B. A branch-free
+  binary search (`core::hint::select_unpredictable` in `get_context_idx`) gave cycles x0.971 / x0.980 / x0.987 /
+  x0.988 / x0.999 against dev eba441b86 on the same cases, where this form gave x0.964 / x0.968 / x0.985 / x0.983 /
+  x0.998, and was not taken.
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
   `tblastn/search_gapped.rs` `XUnitResiduesPool`): the plan of a packed subject (every `-db` sequence, `-subject`

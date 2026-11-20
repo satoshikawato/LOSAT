@@ -1,13 +1,14 @@
 // Deletions of saved WindowMasker counts between the tabs of the site (ports/counts.ts), over a
-// BroadcastChannel. The message carries only the taxonomy ID. A browser without BroadcastChannel
-// tells no other tab.
+// BroadcastChannel. The message carries only the taxonomy ID. A browser without BroadcastChannel,
+// or one that refuses it (site-channel.ts), tells no other tab.
 import type { CountsDeletions } from '../../ports/counts';
+import { siteChannel } from './site-channel';
 
 const CHANNEL = 'losat-web:windowmasker';
 
 export function browserCountsDeletions(): CountsDeletions {
-  if (typeof BroadcastChannel !== 'function') return { announce: () => undefined, subscribe: () => () => undefined };
-  const channel = new BroadcastChannel(CHANNEL);
+  const channel = siteChannel(CHANNEL);
+  if (channel === undefined) return { announce: () => undefined, subscribe: () => () => undefined };
   return {
     announce: (taxid) => channel.postMessage({ deleted: taxid }),
     subscribe(listener) {

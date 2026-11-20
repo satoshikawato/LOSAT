@@ -51,6 +51,7 @@
 
 use super::compo_scale::COMPO_SCORE_MIN;
 use crate::core::blast_util::BLASTAA_SIZE;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:38-43
 // ```c
@@ -755,7 +756,7 @@ impl<W: Default> SwRedoScratch<W> {
 /// }
 /// ```
 pub(crate) fn evalue_from_score(score: i32, lambda: f64, log_k: f64, searchsp: f64) -> f64 {
-    searchsp * (-(lambda * f64::from(score)) + log_k).exp()
+    searchsp * (-(lambda * f64::from(score)) + log_k).glibc_exp()
 }
 
 /// The significance test of a round (redo_alignment.c:1456-1474, quoted at

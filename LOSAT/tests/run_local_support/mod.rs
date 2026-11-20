@@ -239,10 +239,15 @@ pub struct Written {
     pub diagnostics: Vec<u8>,
 }
 
-/// The `index`-th tab-separated field of a tabular row.
+/// The `index`-th tab-separated field of a tabular row, as text (a title's bytes that are not
+/// UTF-8 as U+FFFD, as the library's hit records hold the ids).
 pub fn field(row: &[u8], index: usize) -> String {
-    let row = std::str::from_utf8(row).expect("utf-8 row").trim_end();
-    row.split('\t').nth(index).expect("field").to_string()
+    let row = String::from_utf8_lossy(row);
+    row.trim_end()
+        .split('\t')
+        .nth(index)
+        .expect("field")
+        .to_string()
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -365,29 +370,36 @@ pub fn assert_observer_ranges(outcome: &Outcome, [fmt0, fmt6, fmt7]: [usize; 3],
     for (hit, section) in hits.iter().zip(&sections) {
         let hsp = hit.index;
         let text = std::str::from_utf8(&out0[section.clone()]).expect("utf-8 section");
-        assert!(
-            text.starts_with(" Score ="),
-            "{context}: section {hsp}: {text:.20?}"
-        );
-        assert_eq!(
-            text.matches(" Score =").count(),
-            1,
-            "{context}: section {hsp}"
-        );
-        assert!(
-            text.contains(&format!("bits ({}),", hit.raw_score)),
-            "{context}: raw score of HSP {hsp}"
-        );
-        assert_eq!(
-            alignment_span(text, "Query"),
-            (hit.q_start, hit.q_end),
-            "{context}: query coordinates of HSP {hsp}"
-        );
-        assert_eq!(
-            alignment_span(text, "Sbjct"),
-            (hit.s_start, hit.s_end),
-            "{context}: subject coordinates of HSP {hsp}"
-        );
+        // NCBI writes this line in the place of each HSP of a subject whose title its definition
+        // line generator cannot decode (showalign.cpp:1977-1981;
+        // `pairwise::write_subject_alignments_part`).
+        let skipped = text.starts_with("Sequence with id ")
+            && text.ends_with(" no longer exists in database...alignment skipped\n");
+        if !skipped {
+            assert!(
+                text.starts_with(" Score ="),
+                "{context}: section {hsp}: {text:.20?}"
+            );
+            assert_eq!(
+                text.matches(" Score =").count(),
+                1,
+                "{context}: section {hsp}"
+            );
+            assert!(
+                text.contains(&format!("bits ({}),", hit.raw_score)),
+                "{context}: raw score of HSP {hsp}"
+            );
+            assert_eq!(
+                alignment_span(text, "Query"),
+                (hit.q_start, hit.q_end),
+                "{context}: query coordinates of HSP {hsp}"
+            );
+            assert_eq!(
+                alignment_span(text, "Sbjct"),
+                (hit.s_start, hit.s_end),
+                "{context}: subject coordinates of HSP {hsp}"
+            );
+        }
         // The section lies in one report block, the block of its query: the block of a query
         // is the same for all its HSPs and later for a later query (a query that the search
         // skips has no block, so the index of the block is not always the index of the query),
@@ -434,10 +446,16 @@ pub fn assert_observer_ranges(outcome: &Outcome, [fmt0, fmt6, fmt7]: [usize; 3],
         let first =
             index == 0 || (hit.q_idx, hit.s_idx) != (hits[index - 1].q_idx, hits[index - 1].s_idx);
         if first {
-            let text = std::str::from_utf8(&out0[heading.clone()]).expect("utf-8 heading");
+            // A heading's title is the bytes NCBI's definition line generator makes (they need not
+            // be UTF-8); a subject whose title it cannot decode has none (an empty heading,
+            // `pairwise::write_subject_alignments_part`), and its HSPs are the skipped lines.
+            let text = &out0[heading.clone()];
+            let skipped =
+                text.is_empty() && out0[sections[index].clone()].starts_with(b"Sequence with id ");
             assert!(
-                text.starts_with("> "),
-                "{context}: heading of HSP {index}: {text:.20?}"
+                skipped || text.starts_with(b"> "),
+                "{context}: heading of HSP {index}: {:.20?}",
+                String::from_utf8_lossy(text)
             );
             assert_eq!(
                 heading.end, sections[index].start,

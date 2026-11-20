@@ -8,10 +8,12 @@
 //! - A `-db` search's database read where it is searched (`x_db_stream`)
 //! - Mask helpers (`masks`)
 //! - The chunks of a translated subject frame and their scan ranges (`translated_chunks`)
+//! - The context of an offset of a concatenated query without the binary search (`x_context_table`)
 
 pub(crate) mod database;
 pub mod diagnostics;
 pub(crate) mod masks;
 pub(crate) mod tabular;
 pub(crate) mod translated_chunks;
+pub(crate) mod x_context_table;
 pub(crate) mod x_db_stream;

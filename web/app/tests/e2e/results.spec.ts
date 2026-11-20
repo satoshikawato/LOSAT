@@ -822,7 +822,7 @@ for (const c of PROGRAM_CASES) {
     await show(page, 'dotplot');
     const canvas = page.getByTestId('dotplot-canvas');
     await expect(canvas).toHaveAttribute('data-segments', (await page.getByTestId('results-dotplot').getByTestId('hsp-list').getAttribute('data-count'))!);
-    await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+ ${c.units.query}\\) against subject .* \\([\\d,]+ ${c.units.subject}\\)\\.`));
+    await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+\\u00a0${c.units.query}\\) against subject .* \\([\\d,]+\\u00a0${c.units.subject}\\)\\.`));
     await expect(page.getByTestId('dotplot-selected')).toContainText(
       `query ${fields[6]}–${fields[7]} ${c.units.query}, subject ${fields[8]}–${fields[9]} ${c.units.subject}` +
         (c.id === 'tblastn' ? `, subject frame ${frames}.` : c.id === 'blastx' ? `, query frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
@@ -830,7 +830,7 @@ for (const c of PROGRAM_CASES) {
     // The same scale on both axes, a residue counting as 3 nt against nucleotides (S13b decision
     // 26: TBLASTN's query, BLASTX's subject), unless the shorter side was raised to 120 px (then the
     // note says so).
-    const [queryLength, subjectLength] = /\(([\d,]+) \w+\) against subject .* \(([\d,]+) \w+\)\./
+    const [queryLength, subjectLength] = /\(([\d,]+)\u00a0\w+\) against subject .* \(([\d,]+)\u00a0\w+\)\./
       .exec(await text(page.getByTestId('dotplot')))!
       .slice(1)
       .map((n) => Number(n.replace(/,/g, '')));
@@ -847,7 +847,7 @@ for (const c of PROGRAM_CASES) {
     await expect(canvas).toHaveAttribute('data-titles', /^\[/);
     // A protein axis against a nucleotide one says, while to scale, that it is drawn at 3 nt per aa,
     // where its room holds the note with the unit (BLASTX's short subject axis may not).
-    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '(?:; drawn at 3 nt per aa)?' : '');
+    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '(?:; drawn at 3\u00a0nt per aa)?' : '');
     // Where the room is short, the ID is cut with an ellipsis and the unit kept.
     const subjectTitle = (await titles())[1];
     const shown = new RegExp(`^Subject (.+) \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})${drawnAt(c.units.subject, c.units.query)}\\)$`).exec(subjectTitle);
@@ -859,7 +859,7 @@ for (const c of PROGRAM_CASES) {
       // says; on a phone the 120 px minimum changes the scale, and the note says so instead (W4b
       // screen review finding 4).
       await expect(page.getByTestId('dotplot-scale-note')).toHaveCount(0);
-      expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3 nt per aa)`);
+      expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3\u00a0nt per aa)`);
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(page.getByTestId('dotplot-scale-note')).toBeVisible();
       await expect.poll(async () => (await titles())[0]).toBe(`Query ${fields[0]} (aa)`);
@@ -1061,6 +1061,33 @@ test('-num_alignments 0: outfmt 6 and 7 have no hits, and the notice says so', a
     await show(page, 'details');
     await expect(page.getByTestId('run-diagnostics')).toContainText('No hits are being saved');
   }
+});
+
+// outfmt 6 and 7 that fail alone in the run's one search (line WQA's sweep, D7, round 3, 2026-11-19): a subject titled
+// `Subject_9 bad x\x81y title`, whose title NCBI's GenerateDefline cannot decode, stops the tabular formats (the CLI's
+// -outfmt 6 and 7 exit 1), while outfmt 0, the argv's own, shows the hit with NCBI's "alignment skipped" line
+// (web/adapter/src/run.rs, a_subject_title_ncbi_cannot_decode_fails_the_tabular_streams_the_argv_does_not_ask_for).
+// The engine reports the outputs that failed (ABI v2 §5, stream 9): the notice says that outfmt 6 and 7 could not be
+// written, not that the query has no hits.
+test('outfmt 6 and 7 that could not be written: the notice says so, not that the query has no hits', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine writes every output');
+  const coding = 'ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG';
+  const subject = Buffer.concat([Buffer.from('>Subject_9 bad x'), Buffer.from([0x81]), Buffer.from(`y title\n${coding}\n`)]);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${coding}\n`);
+  await openFiles(page, 'subject', [{ name: 'subject.fa', text: subject }]);
+  await run(page, 1);
+  await openRun(page, 1);
+  const notice = page.locator('[data-testid="results-notice"][data-kind="no-tabular-output"]');
+  await expect(notice).toHaveText('outfmt 6 and 7 could not be written, so this run has no HSP records. Their error is under Warnings in Run details.');
+  expect(await noticeKinds(page)).toEqual(['no-tabular-output']);
+  await showOutput(page, 1, 0, false);
+  expect(await text(page.getByTestId('result-output'))).toContain('Sequence with id Subject_1 no longer exists in database...alignment skipped');
+  await expect(page.getByTestId('outputs-not-written')).toHaveCount(0);
+  await showOutput(page, 1, 6, false);
+  await expect(page.getByTestId('outputs-not-written')).toHaveText('outfmt 6 could not be written: its error is under Warnings in Run details.');
+  await show(page, 'details');
+  await expect(page.getByTestId('run-diagnostics')).toContainText('subject record 1 (Subject_9) has a title whose non-UTF-8 bytes');
 });
 
 test("BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line", async ({ page }) => {

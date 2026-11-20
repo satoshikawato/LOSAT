@@ -70,13 +70,15 @@ ARCHIVE_FORMAT, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOO
 sends no usage report with the run's parameters to NCBI). LOSAT's runs (`check`) keep the cleaned
 environment as it is.
 
-`check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--out TSV]` runs LOSAT with `-num_threads N`
+`check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--outfmts N,...] [--out TSV]` runs LOSAT with `-num_threads N`
 (default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, PRE_FETCH_SEQS_LIMIT, OLD_FSC,
 BL2SEQ_LEGACY, ADAPTIVE_CBS or CTOOLKIT_COMPATIBLE variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a
 taxonomy database or a BLASTDB), compares stdout,
 stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
+`--outfmts 5,13` keeps only the rows whose output format (the number that starts the `outfmt` cell) is one of
+those numbers (`check_wasm_threading.py` runs blastx's XML, XML2 and JSON rows through the WASI commands so).
 With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
 failure's exit status counts as any other failure's, a rejection row writes nothing to stdout there
 too (the library holds its output where the command line holds it), a row whose query the reader refuses is
@@ -484,8 +486,15 @@ def ncbi_stack(row: dict[str, str]) -> Callable[[], None] | None:
     return unlimited
 
 
+def format_number(row: dict[str, str]) -> str:
+    """The number of the row's output format: the first word of its `outfmt` cell (a custom spec follows it)."""
+    return (row["outfmt"].split() or [""])[0]
+
+
 def selected(row: dict[str, str], args: argparse.Namespace) -> bool:
-    return row["row_id"].startswith(args.only) and args.program in ("", row["program"])
+    formats = [number for number in getattr(args, "outfmts", "").split(",") if number]
+    return (row["row_id"].startswith(args.only) and args.program in ("", row["program"])
+            and (not formats or format_number(row) in formats))
 
 
 def freeze(args: argparse.Namespace) -> int:
@@ -620,7 +629,11 @@ def status_differs(observed: int, expected: int, library: bool) -> bool:
     return (observed != 0) != (expected != 0) if library else observed != expected
 
 
-def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
+def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str],
+              library: bool = False) -> tuple[str, str]:
+    """The row's status (`same`, `rejection`, `differs`, `library-skip`, `library-input-error`) and its
+    detail. Standard output, standard error, the exit status and the PSSM files are compared byte for
+    byte."""
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
     # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
@@ -708,7 +721,9 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems.append("stderr " + first_difference(err, run.stderr))
     if pssm:
         problems += xinclude.pssm_problems(pssms, row, FROZEN, first_difference)
-    return ("differs", "; ".join(problems)) if problems else ("same", "")
+    if problems:
+        return "differs", "; ".join(problems)
+    return "same", ""
 
 
 def check(args: argparse.Namespace) -> int:
@@ -744,6 +759,8 @@ def main() -> int:
     ck.add_argument("--threads", type=int, default=1)
     ck.add_argument("--program", choices=PROGRAMS, default="", help="only the rows of this program (default: all)")
     ck.add_argument("--only", default="")
+    ck.add_argument("--outfmts", default="",
+                    help="only the rows of these output formats, numbers separated by commas (default: all)")
     ck.add_argument("--out", type=Path)
     ck.add_argument("--library", action="store_true",
                     help="--losat is examples/library_command_line (the search through the library API)")

@@ -14,6 +14,8 @@ mod tblastx_band;
 mod tblastx_batch_pipe;
 #[path = "../tblastx_chunk_merge.rs"]
 mod tblastx_chunk_merge;
+#[path = "../tblastx_ctx_table.rs"]
+mod tblastx_ctx_table;
 #[path = "../tblastx_db_search.rs"]
 mod tblastx_db_search;
 #[path = "../tblastx_db_stream.rs"]
@@ -60,6 +62,8 @@ mod tblastx_seed_compact;
 mod tblastx_seed_release;
 #[path = "../tblastx_seed_unmap.rs"]
 mod tblastx_seed_unmap;
+#[path = "../tblastx_short_subject.rs"]
+mod tblastx_short_subject;
 #[path = "../tblastx_store.rs"]
 mod tblastx_store;
 #[path = "../tblastx_subject_next.rs"]

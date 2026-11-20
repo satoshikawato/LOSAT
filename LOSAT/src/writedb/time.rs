@@ -47,14 +47,16 @@ impl LocalTime {
     // ```
     // `CTime(CTime::eCurrent)` is the local time of the C library. LOSAT
     // calls no C library: the zone's offset from UTC comes from
-    // `local_offset`, which reads the zone as the C library does, and where
-    // the zone cannot be found (Windows, WASI, an unreadable zone file) the
-    // time is UTC.
+    // `local_offset`, which reads the zone as the C library does (glibc on
+    // Unix and on WASI, from the environment and the directories that the
+    // host gives; UCRT on Windows), and where the zone cannot be found (an
+    // unreadable zone file, a WASI host that gives neither `TZ` nor a zone
+    // file) or the C library gives no local time the time is UTC.
     /// The current local time, or `None` where the platform has no clock.
     pub fn now() -> Option<Self> {
         let seconds = unix_seconds()?;
         let offset = local_utc_offset(seconds).unwrap_or(0);
-        Some(Self::from_unix_seconds(seconds + i64::from(offset)))
+        Some(Self::from_unix_seconds(seconds + offset))
     }
 
     /// The calendar time `seconds` after 1970-01-01 00:00:00 (Gregorian

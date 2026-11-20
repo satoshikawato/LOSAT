@@ -24,6 +24,7 @@
 //! `preliminary_hit_from_local_match_hsp`, `query_nomask_sequence`, `X_NEWTON_LANES_MATCHES`, and
 //! for the parallel paths' choice `blastp_should_parallelize_stage` and `x_prelim_hsplist_count`.
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::ops::Range;
 use std::sync::OnceLock;
 
@@ -200,7 +201,7 @@ impl RedoParamsBuilder<'_> {
             // ```
             alphsize: BLASTAA_SIZE as i32,
             composition_test_index: i32::from(args.comp_based_stats.unified_p),
-            log_k: gapped_params.k.ln(),
+            log_k: gapped_params.k.glibc_ln(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3584-3690
             // ```c
             // localScalingFactor      /* i */
@@ -333,11 +334,6 @@ pub(super) struct RedoInputs<'a, P> {
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    pub(super) total_db_len: usize,
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
     pub(super) timing_enabled: bool,
 }
 
@@ -405,7 +401,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         args,
         subjects,
         blastp_num_threads,
-        total_db_len,
         ..
     } = *redo;
     #[cfg(all(
@@ -451,7 +446,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
                 blastp_num_threads,
                 subjects.len(),
                 kappa_parallel_query_indices.len(),
-                total_db_len,
             )
     };
     #[cfg(any(
@@ -482,7 +476,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
                 blastp_num_threads,
                 subjects.len(),
                 match_jobs,
-                total_db_len,
             ) {
                 Some(q_idx)
             } else {
@@ -541,7 +534,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
                     &[]
                 },
             ),
-            total_db_len,
         );
     #[cfg(all(
         feature = "parallel",

@@ -2356,10 +2356,14 @@ fn write_pairwise_prologs(
                         &mut writer,
                         crate::NCBI_BLAST_VERSION,
                         &tblastx_database_name(args),
-                        records.len(),
+                        records.len() as i64,
+                        // NCBI's `Int8` sum (seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
+                        // (Int8) (*iter)->length`).
                         match x_stored {
-                            Some((stores, _)) => stores.iter().map(|store| store.len()).sum(),
-                            None => records.iter().map(|r| r.seq().len()).sum(),
+                            Some((stores, _)) => {
+                                stores.iter().map(|store| store.len() as i64).sum()
+                            }
+                            None => records.iter().map(|r| r.seq().len() as i64).sum(),
                         },
                         None,
                     )?
@@ -2457,15 +2461,22 @@ fn write_tblastx_outputs(
         .iter()
         .map(|format| report::output_format(format.outfmt))
         .collect();
-    // Outfmt 0's refusal (formats 1 to 4 write a query's own record in its section,
-    // `query_anchored::aln_mix`, and end with NCBI's exception where NCBI's merge throws,
-    // `query_anchored::write_section`).
-    if args.parse_deflines
-        && output_formats.contains(&report::TblastxOutputFormat::Pairwise(
-            crate::report::pairwise::PairwiseView::Pairwise,
-        ))
-    {
-        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+    // Outfmt 0's refusal, each such output's (`refuse_shared_masks_in`; formats 1 to 4 write a
+    // query's own record in its section, `query_anchored::aln_mix`, and end with NCBI's exception
+    // where NCBI's merge throws, `query_anchored::write_section`).
+    if args.parse_deflines {
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
+            outputs
+                .formats
+                .iter_mut()
+                .zip(&output_formats)
+                .filter(|(_, output_format)| {
+                    **output_format
+                        == report::TblastxOutputFormat::Pairwise(
+                            crate::report::pairwise::PairwiseView::Pairwise,
+                        )
+                })
+                .map(|(format, _)| &mut format.refusal),
             run.queries,
             |query| {
                 run.query_stats
@@ -2824,14 +2835,16 @@ fn write_tblastx_outputs(
                         version: crate::NCBI_BLAST_VERSION.to_string(),
                         database_name: database.clone(),
                         // `-db`: the `Database:` lines are the database's (`database` below).
+                        // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
+                        // held in memory.
                         database_num_sequences: match &run.database {
-                            Some(database) => database.pairwise.num_sequences as usize,
-                            None => run.subjects.len(),
+                            Some(database) => database.pairwise.num_sequences,
+                            None => run.subjects.len() as i64,
                         },
                         database_total_letters: match &run.database {
-                            Some(database) => database.pairwise.total_letters as usize,
+                            Some(database) => database.pairwise.total_letters,
                             None => (0..run.subjects.len())
-                                .map(|s_idx| run.subject_letters.length(s_idx))
+                                .map(|s_idx| run.subject_letters.length(s_idx) as i64)
                                 .sum(),
                         },
                         matrix_name: args.matrix_name().to_string(),
@@ -4981,8 +4994,12 @@ impl BatchReports<'_> {
 /// average subject length (`context_cutoffs::context_cutoffs`); and LOSAT's refusals of what the
 /// search meets, an ungapped extension that scores higher past the end of its query frame
 /// (`extension::query_batch::refusal`, the Owner's decision of 2026-11-16 on line RG's Q-X2c: "the
-/// results of the query batches before are written") and a one-hit merge of lengths that add up to
-/// 0 (`OneHitChunkMerge::refuse`). The run then writes the same bytes whether its reports are
+/// results of the query batches before are written"), a one-hit merge of lengths that add up to 0
+/// (`OneHitChunkMerge::refuse`), the ungapped re-evaluation of HSPs on a subject (or its
+/// `-subject_loc` range) of fewer than 12 bases (`subject_loop::SubjectEmit::refuse_untranslated_frame`,
+/// PD-LOSAT-NCBI-DEFECTS 1.51) and the re-evaluation's fetch of a subject whose header cannot be read
+/// under a negative seqid list (`subject_loop::x_fetch_keeps`, NCBI's engine error there; the inner
+/// error stays a `FetchRefusal`). The run then writes the same bytes whether its reports are
 /// streamed or held (`report_stream`).
 pub(crate) use crate::blastinput::app::ErrorAfterBatchReports;
 
@@ -5409,7 +5426,8 @@ fn search_query_batch<S: TbxScore>(
     };
 
     // The negative seqid list's check of the re-evaluation's fetch, one for the batch
-    // (`FetchExcluded`), which the end of each subject reads (`subject_loop::SubjectEmit`).
+    // (`FetchExcluded`), which each subject with HSPs left for the re-evaluation reads
+    // (`subject_loop::SubjectEmit::reevaluation_fetch_keeps`).
     let fetch_excluded = subjects
         .seqdb()
         .and_then(crate::algorithm::common::database::FetchExcluded::of);
@@ -5799,11 +5817,16 @@ fn search_query_batch<S: TbxScore>(
         x_lap.lap(XStage::Link1);
         // The sort after the first linking call and the reap by the preliminary E-value
         // (`subject_link::sort_and_reap_after_first_link`).
-        let prelinked_ungapped_hits = subject_link::sort_and_reap_after_first_link(
+        let mut prelinked_ungapped_hits = subject_link::sort_and_reap_after_first_link(
             prelinked_ungapped_hits,
             &stage_args,
             &mut x_lap,
         );
+        // The re-evaluation's fetch of a subject with HSPs, which the negative seqid list may
+        // exclude before its letters are read (`subject_loop::SubjectEmit::reevaluation_fetch_keeps`).
+        if !prelinked_ungapped_hits.is_empty() && !subject_emit.reevaluation_fetch_keeps(s_idx) {
+            prelinked_ungapped_hits.clear();
+        }
 
         // A subject with ambiguous bases gets the frames of its letters here, after its
         // preliminary frames were freed, when HSPs are left for the re-evaluation (none are read
@@ -5828,6 +5851,24 @@ fn search_query_batch<S: TbxScore>(
         } else {
             (&s_frames, s_frames_report)
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2699-2705
+        // ```c
+        //       if (kTranslateSubject)
+        //          subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+        //       if (kNucleotideSubject) {
+        //          delete_hsp =
+        //              Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
+        //                 subject_start, word_params, sbp, kTranslateSubject);
+        // ```
+        // The re-evaluation of HSPs on a subject (its `-subject_loc` range) of fewer than 12 bases
+        // reads a frame NCBI never translates (`subject_loop::SubjectEmit::refuse_untranslated_frame`):
+        // the batch fails, and the subject goes on without HSPs to its end, which emits it.
+        if !prelinked_ungapped_hits.is_empty()
+            && crate::core::blast_hits::target_translation_never_made(s_len)
+        {
+            subject_emit.refuse_untranslated_frame(s_idx);
+            prelinked_ungapped_hits.clear();
+        }
         // The re-evaluation with the subject's letters (`subject_link::reevaluate_subject_hits`).
         let ungapped_hits = subject_link::reevaluate_subject_hits(
             sc,

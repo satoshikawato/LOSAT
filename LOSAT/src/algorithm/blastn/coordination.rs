@@ -92,7 +92,16 @@ pub struct SubjectMetadata {
     // db_length = BlastSeqSrcGetTotLen(seq_src);
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
-    pub db_len_total: usize,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-906
+    // ```c
+    //    Uint4 min_subject_length;
+    //    Int8 total_length = -1;
+    //    Int4 num_seqs = -1;
+    // ```
+    /// The statistics' total length, NCBI's `Int8` (`DbStatistics::setup_total` of a database,
+    /// the sum of a subject set's records): an alias file's `LENGTH` declares it, so it is not
+    /// bounded by the letters LOSAT holds (2^32 or more on a 32-bit target).
+    pub db_len_total: i64,
     /// The statistics' number of sequences, NCBI's `Int4` (`DbStatistics::setup_count`: negative
     /// for an alias file's negative `NSEQ`, or one of 2^31 or more).
     pub db_num_seqs: i32,
@@ -108,7 +117,8 @@ pub struct SequenceData<'a, R = FastaRecord> {
     // db_length = BlastSeqSrcGetTotLen(seq_src);
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
-    pub db_len_total: usize,
+    /// NCBI's `Int8` (`SubjectMetadata::db_len_total`).
+    pub db_len_total: i64,
     /// The statistics' number of sequences, NCBI's `Int4` (`DbStatistics::setup_count`: negative
     /// for an alias file's negative `NSEQ`, or one of 2^31 or more).
     pub db_num_seqs: i32,
@@ -869,14 +879,25 @@ pub fn finalize_task_config(
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
+// ```c++
+//     if(dbscan_mode)
+//     {
+// 	ITERATE(vector<BLAST_SequenceBlk*>, iter, m_ivSeqBlkVec)
+// 	{
+//             m_iTotalLength += (Int8) (*iter)->length;
+// 	}
+//     }
+// ```
 /// `length(index)` is the number of letters of record `index` (its letters, or with
-/// `LOSAT_X_BNSTORE` its packed subject's).
+/// `LOSAT_X_BNSTORE` its packed subject's); the total is NCBI's `Int8` sum of them (a length
+/// held in memory is at most `isize::MAX`, so each converts without loss).
 pub fn subject_metadata_from_records<R: InputRecord>(
     records: &[R],
     length: impl Fn(usize) -> usize,
 ) -> SubjectMetadata {
     SubjectMetadata {
-        db_len_total: (0..records.len()).map(length).sum(),
+        db_len_total: (0..records.len()).map(|index| length(index) as i64).sum(),
         db_num_seqs: i32::try_from(records.len()).unwrap_or(i32::MAX),
     }
 }
@@ -1749,5 +1770,25 @@ mod tests {
         assert_eq!(plus, [(2, 154)]);
         assert_eq!(masks("both"), plus);
         assert_eq!(masks("minus"), [(14, 86), (87, 154)]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181 (quoted at
+    // `subject_metadata_from_records`)
+    // ```c++
+    //             m_iTotalLength += (Int8) (*iter)->length;
+    // ```
+    // The total of a subject set is NCBI's `Int8` sum: two records of 3,000,000,000 letters each
+    // (each length below 2^32, as on wasm32) give 6,000,000,000, which a 32-bit `usize` sum would
+    // overflow.
+    #[test]
+    fn subject_set_total_is_ncbis_int8_sum() {
+        let records = [
+            FastaRecord::new("Subject_1", b"", b"A"),
+            FastaRecord::new("Subject_2", b"", b"C"),
+        ];
+        let metadata = subject_metadata_from_records(&records, |_| 3_000_000_000);
+        assert_eq!(metadata.db_len_total, 6_000_000_000);
+        assert!(metadata.db_len_total > i64::from(u32::MAX));
+        assert_eq!(metadata.db_num_seqs, 2);
     }
 }

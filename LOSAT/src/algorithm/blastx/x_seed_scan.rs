@@ -130,10 +130,11 @@ use crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
 use crate::algorithm::tblastx::x_aascan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use crate::algorithm::tblastx::x_scan_byte::{
-    x_kept_presence, x_mode, x_scan_one_range_byte, x_table_presence, XScanByte, X_SCAN_BYTE_SLACK,
+    x_kept_presence, x_mode, x_scan_one_range_byte, x_table_presence, XPresence, XScanByte,
+    X_SCAN_BYTE_SLACK,
 };
 use std::cell::RefCell;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 // No NCBI counterpart: reads the LOSAT_X_BXHITBF switch once; it does not change any value NCBI
 // computes.
@@ -166,7 +167,7 @@ pub(crate) fn x_bxscan_byte() -> XScanByte {
 /// the table was built pooled (`pooled`), so that its vectors go back to the pool when it is
 /// dropped (LOSAT_X_BXPOOLN1 builds a one-thread search's tables without the pool).
 pub struct XKeptPresence {
-    presence: OnceLock<Option<(Arc<[u8]>, bool)>>,
+    presence: OnceLock<Option<(XPresence, bool)>>,
     /// EXPERIMENT (LOSAT_X_BXCTXONCE): the context table of the query batch the table was built
     /// from (`x_seed_diag.rs` `x_with_context_table`), made by the first thread that needs it.
     pub(super) contexts: OnceLock<crate::algorithm::blastp::x_seed_fused::XContextTable>,
@@ -208,7 +209,7 @@ impl Lookup {
     /// EXPERIMENT (LOSAT_X_BXSCANBYTE): the presence bytes for `x_scan_one_range_byte` when `mode`
     /// scans this table that way (a standard table, the switch on, the table sparse if `mode`
     /// asks), built on the first call that needs them; else `None` (the scan before).
-    fn x_scan_presence(&self, mode: XScanByte) -> Option<&[u8]> {
+    fn x_scan_presence(&self, mode: XScanByte) -> Option<&XPresence> {
         match self {
             Self::Standard(table, kept) if mode.on() => {
                 x_kept_presence(mode, kept.presence.get_or_init(|| x_table_presence(table)))

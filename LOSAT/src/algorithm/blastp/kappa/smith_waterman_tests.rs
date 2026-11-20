@@ -10,6 +10,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, BlastCompoAdjustMode, BlastCompoGappingParams, BlastCompoSequenceData,
     BlastCompoSequenceRange, BlastRedoRangeResult, EMatrixAdjustRule,
 };
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 
 const SCALE: f64 = 32.0;
@@ -32,7 +33,7 @@ fn params(do_link_hsps: bool, cutoff_score: i32) -> BlastRedoAlignParams {
         compo_adjust_mode: BlastCompoAdjustMode::CompositionBasedStats,
         alphsize: crate::utils::matrix::BLASTAA_SIZE as i32,
         composition_test_index: 0,
-        log_k: 0.041f64.ln(),
+        log_k: 0.041f64.glibc_ln(),
         score_divisor: SCALE,
         smith_waterman: true,
         near_identical_cutoff: 0.0,

@@ -1826,7 +1826,7 @@ pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
 pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99 (`s_ArgExptMsg`, quoted in
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99 (`s_ArgExptMsg`, cited in
     // `utils::os_bytes`): the name's bytes (probe R1 of line LIB-B: BLASTX's `-query`,
     // `-subject` and `-out` of a name that is not UTF-8).
     let mut message =

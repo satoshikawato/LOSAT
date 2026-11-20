@@ -30,7 +30,7 @@ impl FoundDb {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1366-1427
-// (`CBlastDbFinder`, quoted at `find_files`): the names found are `std::string`s, opened and
+// (`CBlastDbFinder`, cited at `find_files`): the names found are `std::string`s, opened and
 // listed as their bytes.
 /// The path of the bytes of a name found in a directory (`utils::os_bytes::path_from_bytes`): a
 /// directory or database whose name is not UTF-8 is entered and listed as NCBI does (probe R6b of

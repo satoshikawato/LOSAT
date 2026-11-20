@@ -9,7 +9,7 @@ pub mod glibc_fma_libm;
 pub(crate) mod mapped_file;
 pub mod matrix;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99, 615-621 (a file name's bytes in
-// NCBI's messages, quoted in the module).
+// NCBI's messages, cited in the module).
 pub(crate) mod os_bytes;
 pub(crate) mod process_id;
 // No NCBI counterpart: whether two names are one file where there are no inode numbers (WASI).

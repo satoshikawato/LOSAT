@@ -511,7 +511,7 @@ const fn seqdb_site(file: &'static str, line: u32, function: &'static str) -> Th
 /// which LOSAT does not know the place: also the texts that `ncbi_message` gives of the codes
 /// `eTooManyOpenFiles` and `eMemoryMappingFailure`, which are the texts of the programs'
 /// `CATCH_ALL` and not the exception's own message, and `DB contains no ...`, which NCBI's reader
-/// never throws (it throws lmdb's error first, `InitDbi` quoted above).
+/// never throws (it throws lmdb's error first, `InitDbi` cited above).
 pub(crate) fn throw_site(message: &[u8]) -> Option<ThrowSite> {
     DATABASE_ERROR_SITES
         .iter()

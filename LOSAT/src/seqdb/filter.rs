@@ -1149,7 +1149,7 @@ fn entries_oid_tax_ids(
 }
 
 /// NCBI's text when a taxid list selects no OID of `entries` (`CSeqDBLMDBSet::TaxIdsToOids`,
-/// quoted at `SeqDb::restrict_taxids`).
+/// cited at `SeqDb::restrict_taxids`).
 fn tax_ids_not_found(entries: &[LmdbEntry]) -> Vec<u8> {
     let names: Vec<Vec<u8>> = entries
         .iter()

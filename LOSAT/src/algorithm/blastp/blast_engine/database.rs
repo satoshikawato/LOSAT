@@ -41,7 +41,7 @@ use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, SeqDb, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
 use crate::stats::KarlinParams;
-use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
+use crate::utils::matrix::BLASTAA_SIZE;
 
 use super::{
     ncbistdaa_to_ascii, BlastpHitList, BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch,
@@ -70,8 +70,6 @@ pub(super) use x_listed_lean::x_bp_listed_lean;
 pub(super) use x_redo_db_subjects::XShownResidues;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
-/// NCBIstdaa code of pyrrolysine (O).
-const NCBISTDAA_O: u8 = 26;
 /// NCBIstdaa code of the gap character (`-`), which is also the sentinel byte.
 const NCBISTDAA_GAP: u8 = 0;
 
@@ -300,26 +298,30 @@ pub(super) fn blastp_database_search_space(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1593
-// NCBI searches the stored bytes in place: a stored O (26) scores as X in every matrix
-// row and column, so the preliminary stage, which reads scores only, reads it as X (21),
-// as the `-subject` encoder does (`encode_protein_sequence`, after
-// blast_setup_cxx.cpp:894-899); the redo and the reports read the stored letter
-// (`ListedSubjects`). A stored gap character (0, which makeblastdb writes for `-` in a
-// protein FASTA) is searched as the residue it is in NCBI: row and column 0 stay
-// `BLAST_SCORE_MIN`, so an ungapped extension stops at it and a gapped alignment goes
-// round it with a gap, and NCBI's reports show it as `-` (`recount_shown_identities`).
-// A byte that is no NCBIstdaa residue (28 or more) indexes NCBI's matrix past its rows
-// and is rejected.
-/// Prepares the block `block` (the sequences from the ordinal id `range.first_ordinal`)
-/// for the search: O is read as X, and a sequence that LOSAT cannot search as NCBI does
-/// is an error that names its OID (`oids`, the database's) and `program`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:494-508
+// NCBI searches the stored bytes in place, O (26) included. Its lookup table indexes all 28 letters
+// (blast_aalookup.c:244), and the query never holds O (the query encoder reads it as X,
+// blast_setup_cxx.cpp:894-898), so a stored O meets a query word only as a neighbour: a word whose
+// score with O's row and column (those of X, blast_stat.c:1583-1593) is at the threshold or more. A
+// query word whose self score is under the threshold sits under its own letters only, so `AXA` (7
+// with BLOSUM62, threshold 11) meets a stored `AXA` and not a stored `AOA`. The search therefore
+// reads a stored O as it is: the score rows of the extension give it X's row and column, a PSSM its
+// own column O, and the redo and the reports read the stored letter (`ListedSubjects`). A stored
+// gap character (0, which makeblastdb writes for `-` in a protein FASTA) is searched as the residue
+// it is in NCBI: row and column 0 stay `BLAST_SCORE_MIN`, so an ungapped extension stops at it and
+// a gapped alignment goes round it with a gap, and NCBI's reports show it as `-`
+// (`recount_shown_identities`). A byte that is no NCBIstdaa residue (28 or more) indexes NCBI's
+// matrix past its rows and is rejected.
+/// Checks the block `block` (the sequences from the ordinal id `range.first_ordinal`) for the
+/// search, which reads its bytes as they are stored: a sequence that LOSAT cannot search as NCBI
+/// does is an error that names its OID (`oids`, the database's) and `program`.
 fn prepare_search_block(
-    block: &mut SequenceBlock,
+    block: &SequenceBlock,
     oids: crate::seqdb::OidMap<'_>,
     program: &str,
 ) -> Result<()> {
     let sequences = block.len();
-    let invalid = read_o_as_x(block.protein_bytes_mut());
+    let invalid = holds_non_residue_byte(block.protein_bytes());
     // A well-formed block holds one sentinel byte before its first sequence and one
     // after every sequence.
     let sentinels_in_place = (0..sequences).all(|i| {
@@ -341,24 +343,17 @@ fn prepare_search_block(
     bail!("a database block is not well-formed, which is not supported by LOSAT's {program}")
 }
 
-// No NCBI counterpart: LOSAT's check of a block's bytes (`prepare_search_block`; O read as X is
-// NCBI's rule, cited there). Every byte is written back (O as X, any other byte unchanged) and
-// the flag is made with `u8` lanes, so the compiler works on 16 bytes (32 with AVX2) at a time
-// with no branch per byte. With a branch for the write of each byte and a `usize` count of the
-// gap bytes, the loop took 38 % of the cycles of a one-thread blastp-fast `-db` search (one
-// 357-residue query against UniRef50 volume 00). The values are those of the byte-by-byte loop.
-/// Reads O as X in `bytes`; returns whether a byte is no NCBIstdaa residue (28 or more).
-fn read_o_as_x(bytes: &mut [u8]) -> bool {
+// No NCBI counterpart: LOSAT's check of a block's bytes (`prepare_search_block`). The flag is made
+// with `u8` lanes and no branch per byte, so the compiler works on 16 bytes (32 with AVX2) at a
+// time; a loop with a branch per byte and a `usize` count of the gap bytes had taken 38 % of the
+// cycles of a one-thread blastp-fast `-db` search (one 357-residue query against UniRef50 volume
+// 00).
+/// Whether a byte of `bytes` is no NCBIstdaa residue (28 or more).
+fn holds_non_residue_byte(bytes: &[u8]) -> bool {
     const _: () = assert!(BLASTAA_SIZE <= u8::MAX as usize);
     const BLASTAA_SIZE_U8: u8 = BLASTAA_SIZE as u8;
     let mut invalid = 0u8;
-    for residue in bytes.iter_mut() {
-        let byte = if *residue == NCBISTDAA_O {
-            ncbistdaa::X
-        } else {
-            *residue
-        };
-        *residue = byte;
+    for &byte in bytes {
         invalid |= u8::from(byte >= BLASTAA_SIZE_U8);
     }
     invalid != 0
@@ -367,10 +362,10 @@ fn read_o_as_x(bytes: &mut [u8]) -> bool {
 /// Reads the block `range` and prepares it for the search (`prepare_search_block`); the errors
 /// name `program`.
 fn read_search_block(db: &SeqDb, range: BlockRange, program: &str) -> Result<SequenceBlock> {
-    let mut block = db
+    let block = db
         .read_block(range)
         .map_err(|error| shared::search_read_error(error, program))?;
-    prepare_search_block(&mut block, db.oid_map(), program)?;
+    prepare_search_block(&block, db.oid_map(), program)?;
     Ok(block)
 }
 
@@ -702,14 +697,14 @@ impl ListedSubjects {
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1620-1636
     // Here the stored letter matters: a stored O (26) is not the X (21) that the query
-    // holds for its own O (blast_setup_cxx.cpp:894-899), so an O aligned to an O counts
+    // holds for its own O (blast_setup_cxx.cpp:894-898), so an O aligned to an O counts
     // against "near identical" and the subject is then SEG-filtered, where the same
     // records given as `-subject` (O read as X on both sides) are near identical. Shown
     // with the oracle (campaign dbsearch-20261012, `$BUILD_ROOT/dbsearch/db3/exp_o_near`;
     // fixture rows `db.o_stored.*`): NCBI `-db` gives 266 bits where `-subject` gives
     // 307. So the redo reads the stored bytes; its matrices score O as X
-    // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage uses
-    // scores only, which are the same for O and X (`prepare_search_block`).
+    // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage reads the
+    // stored bytes too (`prepare_search_block`).
     /// The listed subjects of a search with every residue read, as the reports of a search
     /// that makes records read them after the redo (`x_list`, then `x_read_shown` with
     /// `XShownResidues::Listed`); the unit tests of the titles start here. The searches
@@ -2439,6 +2434,9 @@ mod tests {
     use crate::seqdb::SeqDbError;
     use crate::stats::lookup_protein_params;
 
+    /// NCBIstdaa code of pyrrolysine (O).
+    const NCBISTDAA_O: u8 = 26;
+
     fn fixture(name: &str) -> String {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/seqdb/db")
@@ -2453,23 +2451,17 @@ mod tests {
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
     }
 
-    // The byte-by-byte loop that `read_o_as_x` replaces.
-    fn read_o_as_x_by_byte(bytes: &mut [u8]) -> bool {
-        let mut invalid = false;
-        for residue in bytes {
-            if *residue == NCBISTDAA_O {
-                *residue = ncbistdaa::X;
-            }
-            invalid |= usize::from(*residue) >= BLASTAA_SIZE;
-        }
-        invalid
+    // The byte-by-byte test that `holds_non_residue_byte` makes.
+    fn holds_non_residue_byte_by_byte(bytes: &[u8]) -> bool {
+        bytes
+            .iter()
+            .any(|&residue| usize::from(residue) >= BLASTAA_SIZE)
     }
 
     // Lengths across vectors of 16 and 32 bytes, gap bytes from none to all, O, the last residue
-    // (27), the first byte that is none (28) and 255: the bytes and the flag are those of the
-    // byte-by-byte loop.
+    // (27), the first byte that is none (28) and 255: the flag is that of the byte-by-byte test.
     #[test]
-    fn read_o_as_x_gives_the_values_of_the_byte_by_byte_loop() {
+    fn holds_non_residue_byte_gives_the_value_of_the_byte_by_byte_test() {
         let mut state = 0x9e37_79b9_7f4a_7c15u64;
         let mut next = || {
             state ^= state << 13;
@@ -2495,34 +2487,30 @@ mod tests {
                             }
                         })
                         .collect();
-                    let mut runs = bytes.clone();
-                    let mut by_byte = bytes;
-                    let expected = read_o_as_x_by_byte(&mut by_byte);
+                    let expected = holds_non_residue_byte_by_byte(&bytes);
                     flagged += usize::from(expected);
                     assert_eq!(
-                        read_o_as_x(&mut runs),
+                        holds_non_residue_byte(&bytes),
                         expected,
                         "length {length}, a gap every {gap_every}, {wrong:?}"
                     );
-                    assert_eq!(runs, by_byte);
                 }
             }
         }
         assert!(flagged > 20, "cases with a byte of 28 or more: {flagged}");
         // Every byte a gap.
-        let mut gaps = vec![NCBISTDAA_GAP; 1_000];
-        assert!(!read_o_as_x(&mut gaps));
-        // A byte of 28 alone: second, after the first vectors, last of the input; O next to it.
+        assert!(!holds_non_residue_byte(&[NCBISTDAA_GAP; 1_000]));
+        // A byte of 28 alone: second, after the first vectors, last of the input.
         for (length, at) in [(2usize, 1usize), (300, 224), (511, 510)] {
             let mut bytes = vec![1u8; length];
             bytes[at] = 28;
-            assert!(read_o_as_x(&mut bytes), "28 at {at} of {length}");
+            assert!(holds_non_residue_byte(&bytes), "28 at {at} of {length}");
         }
+        // O and J, the last two residues.
         let mut bytes = vec![1u8; 300];
         bytes[223] = NCBISTDAA_O;
-        bytes[224] = NCBISTDAA_O;
-        assert!(!read_o_as_x(&mut bytes));
-        assert_eq!((bytes[223], bytes[224]), (ncbistdaa::X, ncbistdaa::X));
+        bytes[224] = 27;
+        assert!(!holds_non_residue_byte(&bytes));
     }
 
     fn blosum62_gapped() -> KarlinParams {
@@ -2818,22 +2806,19 @@ mod tests {
         }
     }
 
-    // blast_stat.c:1583-1593: O scores as X. p03 of the fixture holds every NCBIstdaa
+    // blast_aalookup.c:494-508: NCBI searches a stored O as it is (the lookup meets it as a
+    // neighbour only, the matrix scores it as X). p03 of the fixture holds every NCBIstdaa
     // letter but the gap (`ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT`).
     #[test]
-    fn a_search_block_reads_o_as_x_and_keeps_the_other_letters() {
+    fn a_search_block_holds_the_stored_letters_o_included() {
         let database = open("prot_v4");
         let range = database.db.next_block(0, u64::MAX).unwrap();
         assert_eq!((range.first_ordinal, range.len()), (0, 10));
         let stored = database.db.read_block(range).unwrap();
         let block = read_search_block(&database.db, range, "BLASTP").unwrap();
         for i in 0..block.len() {
-            let expected: Vec<u8> = stored
-                .protein(i)
-                .iter()
-                .map(|&residue| if residue == 26 { 21 } else { residue })
-                .collect();
-            assert_eq!(block.protein(i), expected.as_slice(), "sequence {i}");
+            let expected = stored.protein(i);
+            assert_eq!(block.protein(i), expected, "sequence {i}");
             let subject = block_subject(&block, i);
             assert_eq!(subject.aa_len, expected.len());
             assert_eq!(subject.aa_seq.len(), expected.len() + 2);
@@ -2841,15 +2826,15 @@ mod tests {
                 (subject.aa_seq[0], subject.aa_seq[expected.len() + 1]),
                 (0, 0)
             );
-            assert_eq!(&subject.aa_seq[1..=expected.len()], expected.as_slice());
+            assert_eq!(&subject.aa_seq[1..=expected.len()], expected);
         }
         let letters: String = block
             .protein(2)
             .iter()
             .map(|&residue| ncbistdaa_to_ascii(residue))
             .collect();
-        assert_eq!(letters, "ABCDEFGHIKLMNPQRSTVWXYZUXJMHCENQT");
-        assert!(stored.protein(2).contains(&26) && !block.protein(2).contains(&26));
+        assert_eq!(letters, "ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT");
+        assert!(block.protein(2).contains(&NCBISTDAA_O));
     }
 
     #[test]
@@ -2869,14 +2854,14 @@ mod tests {
         let fifth = offset_of(&block, 5);
         let fifth_len = block.protein(5).len();
         block.protein_bytes_mut()[fifth..fifth + fifth_len].fill(0);
-        prepare_search_block(&mut block, database.db.oid_map(), "BLASTP").unwrap();
+        prepare_search_block(&block, database.db.oid_map(), "BLASTP").unwrap();
         assert_eq!(block.protein(3)[2], 0);
         assert!(block.protein(5).iter().all(|&residue| residue == 0));
         // A byte that is no NCBIstdaa residue in sequence 9.
         let mut block = database.db.read_block(range).unwrap();
         let position = offset_of(&block, 9);
         block.protein_bytes_mut()[position] = 28;
-        let error = prepare_search_block(&mut block, database.db.oid_map(), "BLASTP").unwrap_err();
+        let error = prepare_search_block(&block, database.db.oid_map(), "BLASTP").unwrap_err();
         assert!(
             format!("{error:#}").starts_with(
                 "database sequence 9 holds a byte that is no NCBIstdaa residue at position 1,"
@@ -2893,8 +2878,7 @@ mod tests {
                 let inside = offset_of(&block, 9) + 5;
                 block.protein_bytes_mut()[inside] = 0;
             }
-            let error =
-                prepare_search_block(&mut block, database.db.oid_map(), "BLASTP").unwrap_err();
+            let error = prepare_search_block(&block, database.db.oid_map(), "BLASTP").unwrap_err();
             assert!(
                 format!("{error:#}")
                     .starts_with("database sequence 0 is not between two NUL bytes"),
@@ -2932,7 +2916,7 @@ mod tests {
         let mut block = database.db.read_block(range).unwrap();
         let position = (0..7).map(|j| block.protein(j).len() + 1).sum::<usize>() + 1;
         block.protein_bytes_mut()[position] = 28;
-        let error = prepare_search_block(&mut block, database.db.oid_map(), "BLASTP").unwrap_err();
+        let error = prepare_search_block(&block, database.db.oid_map(), "BLASTP").unwrap_err();
         assert!(
             format!("{error:#}").starts_with(
                 "database sequence 9 holds a byte that is no NCBIstdaa residue at position 1,"
@@ -3552,6 +3536,45 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(single_dir);
             let _ = std::fs::remove_dir_all(multi_dir);
+        }
+
+        // blast_aalookup.c:494-508 (cited at `prepare_search_block`): NCBI scans the stored
+        // letters. Every driver of the preliminary stage gives the kernel each sequence as it is
+        // stored, O (26) of p03 included, between its sentinel bytes, on one volume and on six, at
+        // 1 and 3 threads (the window of LOSAT_X_BPDBKEEP in its two waiting sizes).
+        #[test]
+        fn every_driver_gives_the_kernel_the_stored_letters_o_included() {
+            let single = open("prot_v4");
+            let range = single.db.next_block(0, u64::MAX).unwrap();
+            let stored = single.db.read_block(range).unwrap();
+            assert_eq!(stored.len(), 10);
+            assert!(stored.protein(2).contains(&NCBISTDAA_O));
+            let volumes = open("prot_mv");
+            for (what, db) in [("one volume", &single), ("volumes", &volumes)] {
+                for threads in [1usize, 3] {
+                    let [narrow, wide] = waiting_windows(threads);
+                    for driver in [
+                        Driver::Cut,
+                        Driver::Of(BLOCK_BYTES),
+                        Driver::Made(BLOCK_BYTES),
+                        Driver::Kept(BLOCK_BYTES),
+                        Driver::Window(BLOCK_BYTES, narrow, None),
+                        Driver::Window(4096, wide, None),
+                    ] {
+                        let context = format!("{what}, {threads} threads, {driver:?}");
+                        let (seen, _) = search_with(db, threads, 2, driver).unwrap();
+                        assert_eq!(seen.len(), stored.len(), "{context}");
+                        for (i, (ordinal, _, letters)) in seen.iter().enumerate() {
+                            assert_eq!(*ordinal, i, "{context}");
+                            assert_eq!(
+                                letters.as_slice(),
+                                stored.protein_with_sentinels(i),
+                                "{context}, sequence {i}"
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         /// The windows that wait on the database of the tests: of 2 blocks per thread, and wider

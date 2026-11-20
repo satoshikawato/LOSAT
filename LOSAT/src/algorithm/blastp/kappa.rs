@@ -2208,7 +2208,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3543,3590-3592,3680
-    // (quoted at `evalue_adjust_contexts`): two batches of two queries. The first query of a
+    // (cited at `evalue_adjust_contexts`): two batches of two queries. The first query of a
     // batch reads the second's values, the last query of a batch its own.
     #[test]
     fn evalue_adjust_contexts_are_the_next_querys_of_the_batch_or_the_querys_own() {
@@ -2245,7 +2245,7 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:773-784,846-847 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:773-784,846-847 (cited at
     // `evalue_adjust_contexts`): a next query that is not valid keeps a length adjustment of 0
     // and the options' search space. With `-searchsp` that is the given space; without it the
     // space is 0, which unified P-values refuse (the error is the batch's, and its text names
@@ -2301,7 +2301,7 @@ mod tests {
             .expect("the query before the one without a search space has no match");
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:153-154 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:153-154 (cited at
     // `adjust_evalues_for_composition`): both effective lengths are at least 1.
     #[test]
     fn test_adjust_evalues_for_composition_keeps_effective_lengths_of_one() {

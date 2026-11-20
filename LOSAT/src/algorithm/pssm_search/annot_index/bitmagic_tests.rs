@@ -407,14 +407,122 @@ fn bits_set_in_a_gap_block_that_is_not_one() {
     // a bit set where the builds differ: the block of the id list 9, 5, whose bit 5 is 0 in the
     // scalar and SSE2 builds (which set it) and 1 in the SSE4.2 build (which leaves the block)
     let vector = ok(0, &stream(&[18, 2, 0, 9, 0, 5, 0, 0]));
-    let Kind::Gap(entries) = &vector.segs[0].kind else {
-        panic!("{:?}", vector.segs[0].kind);
+    let segs = &vector.one().expect("one vector").segs;
+    let Kind::Gap(entries) = &segs[0].kind else {
+        panic!("{:?}", segs[0].kind);
     };
-    let mut gap = Arr::block(entries, GAP_LEVELS[usize::from(gap_level(entries[0]))]);
+    let gap = Arr::of_block(
+        entries.to_vec(),
+        GAP_LEVELS[usize::from(gap_level(entries[0]))],
+    );
     assert_eq!(
-        gap_set_value(&mut gap, true, 5),
+        gap_set_value(&mut gap.clone(), true, 5, false, None),
         Err(Fail::Refuse(Rule::GapSearch))
     );
+    // each build alone: the scalar and SSE2 builds set the bit (a new run 5..=5), the SSE4.2
+    // build finds it set and leaves the block
+    for (build, changed) in [
+        (Build::Scalar, true),
+        (Build::Sse2, true),
+        (Build::Sse42, false),
+    ] {
+        let mut one = gap.clone();
+        gap_set_value(&mut one, true, 5, false, Some(build)).unwrap();
+        assert_eq!(one.written() != gap.written(), changed, "{build:?}");
+    }
+}
+
+#[test]
+fn a_count_past_broken_blocks_adds_each_builds_sums() {
+    // review 2's c02399: blocks whose scalar and SSE whole-block counts differ by multiples of
+    // 65536 in opposite ways, so that past them each build's `unsigned` total is the same
+    let data = hex(concat!(
+        "180EA10045156B1A301DD1336A41B641EF49185D778498896D92D89A57AA6DB71CDC66078DEDE8ED5EEF02",
+        "0E9800FAC2FAF37D1BC17C9A426F920100600A1F4E78B0677EB2CA8EF3830E6FAFF8CB45E537F10200"
+    ));
+    let vector = ok(u32::MAX, &data);
+    assert_eq!(vector.count_to(196608).unwrap(), 219241);
+}
+
+#[test]
+fn bits_that_leave_the_builds_different_blocks() {
+    // review 2's E1, E2, E0: token 18 makes block 0 the GAP block of the id list 9, 5 (not one);
+    // token 19 sets bit 5 in it, which the scalar and SSE2 builds' `gap_set_value` add and the
+    // SSE4.2 build's finds set: the data is decoded once for each build
+    let rows = |vector: &BitVector, rows: &[u32]| -> Vec<String> {
+        let answer = |result: Result<u64, Fail>| match result {
+            Ok(value) => value.to_string(),
+            Err(_) => "?".into(),
+        };
+        rows.iter()
+            .map(|&n| {
+                let bit = answer(vector.get_bit(n).map(u64::from));
+                format!("{n}:{bit}:{}", answer(vector.count_to(n)))
+            })
+            .collect()
+    };
+    let rows_e = [0, 4, 5, 6, 9, 10, 65535, 65536, 65540, 131071];
+    // E1: block 0 then made full (token 2): all builds hold the same vector
+    let e1 = ok(
+        u32::MAX,
+        &hex("181202000900050007FFFFFFFF13050007FFFFFFFF0200"),
+    );
+    assert!(e1.one().is_some());
+    assert_eq!(
+        rows(&e1, &rows_e).join(","),
+        "0:1:1,4:1:5,5:1:6,6:1:7,9:1:10,10:1:11,65535:1:65536,65536:0:65536,65540:0:65536,\
+         131071:0:65536"
+    );
+    // E2: block 1 gets bits too; the bits are the same in all builds, the ranks from row 5 on
+    // differ (scalar and SSE2 65539 at 131071, SSE4.2 65538)
+    let e2 = ok(u32::MAX, &hex("181202000900050007FFFFFFFF1305000200"));
+    assert!(e2.one().is_none());
+    assert_eq!(
+        rows(&e2, &rows_e).join(","),
+        "0:0:0,4:0:0,5:1:?,6:0:?,9:1:?,10:0:?,65535:0:?,65536:1:?,65540:1:?,131071:1:?"
+    );
+    // E0: the bit is not set; bit 5 is 1 in the SSE4.2 build only
+    let e0 = ok(u32::MAX, &hex("181202000900050000"));
+    assert_eq!(
+        rows(&e0, &rows_e[..7]).join(","),
+        "0:0:0,4:0:0,5:?:0,6:0:0,9:1:1,10:0:2,65535:0:2"
+    );
+}
+
+#[test]
+fn bits_set_in_a_gap_block_that_is_one_need_one_search() {
+    // the bits of a GAP block that is one, set one by one in any order (token 19, then token 7
+    // back to block 0), give the block of those bits, also past a level's limit
+    // (`extend_gap_block`) and past 1276 entries (a bitmap)
+    let mut state = 12345u32;
+    let mut next = || {
+        state = state.wrapping_mul(1103515245).wrapping_add(12345);
+        state >> 8
+    };
+    for count in [1usize, 2, 3, 60, 61, 62, 63, 130, 700, 1000] {
+        let mut tokens = Vec::new();
+        let mut bits = std::collections::BTreeSet::new();
+        for _ in 0..count {
+            let bit = (next() % 3000 * 7) as u16;
+            bits.insert(bit);
+            tokens.push(19);
+            tokens.extend(bit.to_le_bytes());
+            tokens.push(7);
+            tokens.extend(u32::MAX.to_le_bytes());
+        }
+        tokens.push(0);
+        let vector = ok(0, &stream(&tokens));
+        let want: Vec<(u32, u32)> = bits.iter().map(|&b| (u32::from(b), u32::from(b))).collect();
+        let got = vector.ranges();
+        let merged: Vec<(u32, u32)> = want.iter().fold(Vec::new(), |mut out, &(a, b)| {
+            match out.last_mut() {
+                Some(last) if last.1 + 1 == a => last.1 = b,
+                _ => out.push((a, b)),
+            }
+            out
+        });
+        assert_eq!(got, merged, "{count}");
+    }
 }
 
 #[test]
@@ -779,7 +887,7 @@ fn harness_walk(vector: &BitVector) -> Option<Vec<(u64, u64)>> {
         Some(last) if last.1 + 1 == a => last.1 = b,
         _ => out.push((a, b)),
     };
-    for seg in &vector.segs {
+    for seg in &vector.one()?.segs {
         match &seg.kind {
             Kind::Poison(_) => return None,
             Kind::Gap(gap) => {
@@ -799,11 +907,7 @@ fn harness_walk(vector: &BitVector) -> Option<Vec<(u64, u64)>> {
                     }
                 }
             }
-            _ => {
-                for (a, b) in seg.runs() {
-                    put(u64::from(a), u64::from(b));
-                }
-            }
+            _ => seg.each_run(&mut |a, b| put(u64::from(a), u64::from(b))),
         }
     }
     Some(out)

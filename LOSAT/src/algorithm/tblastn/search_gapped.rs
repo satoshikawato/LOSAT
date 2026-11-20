@@ -741,6 +741,8 @@ pub(super) struct PreliminaryProfile<'a> {
     pub(super) gap_xdrop: i32,
     pub(super) gapped_cutoff: &'a [i32],
     pub(super) hsp_num_max: usize,
+    /// `-subject_besthit`: each frame's list is filtered after each merge of a chunk.
+    pub(super) subject_besthit: bool,
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
@@ -1580,6 +1582,20 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
                     per_frame.clone(),
                 )
             });
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+            // `-subject_besthit` on the frame's list after each merge, before the frame is
+            // appended: the HSPs of other subject frames are not in it.
+            if profile.subject_besthit {
+                crate::core::blast_hits::subject_besthit(&mut per_frame, false, |(query, hsp)| {
+                    crate::core::blast_hits::BestHitExtent {
+                        context: *query as i64,
+                        query_frame: 0,
+                        offset: i64::from(hsp.q_start),
+                        end: i64::from(hsp.q_end),
+                        query_length: 0,
+                    }
+                });
+            }
         }
         // NCBI c++/src/algo/blast/core/blast_engine.c:840-850:
         // Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
@@ -1924,6 +1940,7 @@ pub(super) fn word_finder_profile<'a>(
         gap_xdrop: 38,
         gapped_cutoff: &TEST_NEVER[..word_xdrop.len()],
         hsp_num_max: i32::MAX as usize,
+        subject_besthit: false,
     }
 }
 
@@ -4221,6 +4238,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let preliminary = preliminary_hsps_of_letters(&refs, subject, 1, profile).unwrap();
         let trace = fs::read_to_string(concat!(
@@ -4344,6 +4362,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let preliminary = preliminary_hsps_of_letters(&[query], subject, 1, profile).unwrap();
         let trace = fs::read_to_string(concat!(
@@ -4431,6 +4450,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
         let trace = fs::read_to_string(format!("{root}gapped_events.tsv")).unwrap();
@@ -4509,6 +4529,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
         let actual = stages.appended.clone();
@@ -4633,6 +4654,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0, 0, i32::MAX],
             hsp_num_max: 3,
+            subject_besthit: false,
         };
         let changes = std::rc::Rc::new(std::cell::Cell::new(0usize));
         let hook = {
@@ -4740,6 +4762,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
         let appended = stages.list.clone();
@@ -4832,6 +4855,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
         let appended = stages.list.clone();
@@ -5017,6 +5041,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
         let appended = stages.list.clone();
@@ -5340,6 +5365,7 @@ mod tests {
                 gap_xdrop: 38,
                 gapped_cutoff: &[0],
                 hsp_num_max: i32::MAX as usize,
+                subject_besthit: false,
             };
             let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
             for (_, hsp, _) in stages.gapped {
@@ -5417,6 +5443,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[1],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&[query], subject, 32, profile).unwrap();
         let actual = stages
@@ -5490,6 +5517,7 @@ mod tests {
                 gap_xdrop: 38,
                 gapped_cutoff: &[0],
                 hsp_num_max: i32::MAX as usize,
+                subject_besthit: false,
             };
             let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
             let gapped = stages
@@ -5636,6 +5664,7 @@ mod tests {
                         gap_xdrop: 38,
                         gapped_cutoff: &[0],
                         hsp_num_max: i32::MAX as usize,
+                        subject_besthit: false,
                     };
                     let stages =
                         preliminary_stages(&[query], &letters, db_gencode, profile).unwrap();
@@ -5857,6 +5886,7 @@ mod tests {
                             gap_xdrop: 38,
                             gapped_cutoff: &[0],
                             hsp_num_max: i32::MAX as usize,
+                            subject_besthit: false,
                         };
                         let stages =
                             preliminary_stages(&[query], &letters, db_gencode, profile).unwrap();
@@ -5991,6 +6021,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
         let gapped = stages
@@ -6091,6 +6122,7 @@ mod tests {
             gap_xdrop: 12,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
         let gapped = stages
@@ -6196,6 +6228,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
         let gapped = stages
@@ -6337,6 +6370,7 @@ mod tests {
             gap_xdrop: 53,
             gapped_cutoff: &[0, 0, i32::MAX],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
         let gapped = stages.gapped.clone();
@@ -6495,6 +6529,7 @@ mod tests {
             gap_xdrop: 53,
             gapped_cutoff: &[0, 0, i32::MAX],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let integrated = preliminary_hsps_of_letters(&refs, subject, 1, profile).unwrap();
         let complete_path = &integrated;
@@ -6650,6 +6685,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[28],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&[query], &subject, 1, profile).unwrap();
         let chunked = stages.gapped.clone();
@@ -6910,6 +6946,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &expected_cutoffs,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let (integrated, events) =
             preliminary_hsps_traced(&refs, &subject, 1, profile, None).unwrap();
@@ -7205,6 +7242,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[30],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let (integrated, events) =
             preliminary_hsps_traced(&[query], &subject, 1, profile, None).unwrap();
@@ -7301,6 +7339,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let (integrated, events) =
             preliminary_hsps_traced(&[query], subject, 1, profile, None).unwrap();
@@ -7447,6 +7486,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let (integrated, events) =
             preliminary_hsps_traced(&[query], subject, 1, profile, None).unwrap();
@@ -7564,6 +7604,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let (integrated, events) =
             preliminary_hsps_traced(&[query], subject, 1, profile, None).unwrap();
@@ -7715,6 +7756,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let (integrated, events) =
             preliminary_hsps_traced(&[query], subject, 1, profile, None).unwrap();
@@ -7872,6 +7914,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let (integrated, events) =
             preliminary_hsps_traced(&[query], subject, 1, profile, None).unwrap();
@@ -8025,6 +8068,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let (integrated, events) =
             preliminary_hsps_traced(&[query], subject, 1, profile, None).unwrap();
@@ -8170,6 +8214,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let (integrated, events) =
             preliminary_hsps_traced(&[query], subject, 1, profile, None).unwrap();
@@ -8320,6 +8365,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &[30],
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stages = preliminary_stages(&[query], &subject, 1, profile).unwrap();
         let initial = stages.initial.clone();

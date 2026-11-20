@@ -281,6 +281,13 @@ const PSIBLAST: &[Case] = &[
         &["-culling_limit", "2"],
         &[After("WordThreshold", "Culling", "Integer(2)")],
     ),
+    // Recorded where `-culling_limit` is, with a query and with `-in_pssm` (NCBI BLAST+ 2.17.0,
+    // line NP O6b's strategy probe `ps_q_on.ss`, `ps_pssm_on.ss`).
+    (
+        "subject_besthit",
+        &["-subject_besthit"],
+        &[After("WordThreshold", "UseSubjectBestHit", "Boolean(true)")],
+    ),
     // `SetXDropoff` has no remote option (blast_options_cxx.cpp:588-590).
     ("xdrop_ungap", &["-xdrop_ungap", "8"], &[]),
     (
@@ -877,6 +884,17 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             "culling_limit",
             &["-culling_limit", "2"],
             &[After("SegFilteringHicut", "Culling", "Integer(2)")],
+        ),
+        // Recorded where `-culling_limit` is (NCBI BLAST+ 2.17.0, line NP O6b's strategy probe
+        // `tn_pssm_on.ss`).
+        (
+            "subject_besthit",
+            &["-subject_besthit"],
+            &[After(
+                "SegFilteringHicut",
+                "UseSubjectBestHit",
+                "Boolean(true)",
+            )],
         ),
         ("num_threads", &["-num_threads", "2"], &[]),
         ("mt_mode", &["-mt_mode", "1", "-num_threads", "2"], &[]),

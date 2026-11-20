@@ -169,8 +169,11 @@ impl SubjectPlan {
         self.split.start(length, ranges, false);
     }
 
-    /// The next hard chunk (`None`: none left), with the chunk overlap of the protein programs
-    /// (`DBSEQ_CHUNK_OVERLAP`; no merge across a mask reads it, `merge_chunk_lists`).
+    /// The next hard chunk (`None`: none left), with NCBI's chunk overlap (`DBSEQ_CHUNK_OVERLAP`,
+    /// which NCBI's merge takes after every chunk that ends a range, as it compares the chunk's
+    /// offset with the next range's left). BLASTP and BLASTX append each chunk's HSPs: a chunk
+    /// ends where its range does and no HSP reaches into the mask after it, so the merge finds
+    /// none past the next chunk's offset (blast_hits.c:2888-2899). A long range's chunks overlap.
     pub(crate) fn next_chunk(&mut self) -> Option<HardChunk> {
         self.split
             .next_chunk(crate::core::subject_split::DBSEQ_CHUNK_OVERLAP)

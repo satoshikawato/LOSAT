@@ -550,8 +550,8 @@ pub enum HardScan {
     /// start is refused at every word (the Owner's question Q1 of M4b: NCBI BLAST+ 2.17.0 crashes
     /// on some of these sequences and gives rows that differ from the near input's on others,
     /// M/m4b/SURVEY.md §4.1); a hard range longer than `MAX_DBSEQ_LEN`, which NCBI cuts into
-    /// chunks that its merge joins across their overlap, is refused (`HardMaskShape::LongRange`);
-    /// and in a one-hit scan (`-window_size 0`), whose word of a chunk shorter than the word can
+    /// chunks that its merge joins across their overlap, is refused (`HardMaskShape::LongRange`),
+    /// as is a mask that ends past the sequence (`HardMaskShape::PastEnd`); and in a one-hit scan (`-window_size 0`), whose word of a chunk shorter than the word can
     /// start an extension from letters past the chunk, a chunk shorter than `one_hit_word` is
     /// refused (`HardMaskShape::ShortChunk`; in a two-hit scan that word's hit has no other hit
     /// on its diagonal within the window, so it extends nothing).
@@ -562,8 +562,10 @@ pub enum HardScan {
     /// tblastn and tblastx (translated nucleotide subjects; series NP, M4b PR 2): the complement
     /// of a sequence's stored masks is mapped to each of its six frames (`x / 3`, the minus
     /// frames from frame -1's length; `common::translated_chunks::translated_frame_ranges`) and
-    /// each frame is chunked as a protein subject (residual 0). The one shape refused is
-    /// `TailMask` read per frame (`HardMaskShape::FrameTailMask`): both engines join the chunks
+    /// each frame is chunked as a protein subject (residual 0). The shapes refused are a mask
+    /// that ends past the sequence (`HardMaskShape::PastEnd`, as for the protein programs: its
+    /// last range would be inverted) and `TailMask` read per frame
+    /// (`HardMaskShape::FrameTailMask`): both engines join the chunks
     /// of a frame longer than `MAX_DBSEQ_LEN` across their overlap, as for an unmasked subject
     /// (no `LongRange`), and a chunk shorter than a word gives no hit in either scan, as NCBI's
     /// (the one-hit scan reads no word of it, aa_ungapped.c:762-766; the two-hit scan reads one,
@@ -632,6 +634,13 @@ pub enum HardMaskShape {
     /// HSP that ends at the mask, which NCBI writes once for each of those seeds; M/m4b/
     /// NOTES_M4B2.md).
     FrameTailMask { frame: i8, start: u32, end: u32 },
+    /// A mask `[start, end)` that ends past the sequence's `length` letters, in a protein program
+    /// (`HardScan::Protein`; series NP, M4b; review L1 of PR 1) or a translated one
+    /// (`HardScan::Translated`, PR 2: `length` bases). makeblastdb does not write such
+    /// a mask (it refuses one, writedb_impl.cpp:1376-1384), so only a database written by another
+    /// tool, or a damaged one, has it; where such a mask starts past the end, NCBI's chunk before
+    /// it runs past the sequence's letters (blast_engine.c:254-258).
+    PastEnd { start: u32, end: u32, length: usize },
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268 (quoted at
@@ -794,8 +803,9 @@ impl HardMaskShape {
     /// The protein programs' scan (`HardScan::Protein`, series NP, M4b) has chunks that start at
     /// their range's left, so that `ShortLastMask` (a residual before the final chunk's range)
     /// never occurs, every chunk scans a word, a mask that runs to the end after the chunk from the
-    /// start is `TailMask` at every word, and a hard range longer than `MAX_DBSEQ_LEN` is
-    /// `LongRange`.
+    /// start is `TailMask` at every word, a mask that ends past the sequence is `PastEnd` (before
+    /// its chunks: its last hard range would be inverted), and a hard range longer than
+    /// `MAX_DBSEQ_LEN` is `LongRange`.
     pub fn of_scan(
         masks: &[(u32, u32)],
         bounds: Option<(usize, usize)>,
@@ -857,10 +867,15 @@ impl HardMaskShape {
         use crate::core::subject_split::{
             complement_masks, HardChunk, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN,
         };
+        if matches!(scan, HardScan::Protein { .. }) {
+            if let Some(&(start, end)) = masks.iter().find(|&&(_, end)| end as usize > length) {
+                return Some(HardMaskShape::PastEnd { start, end, length });
+            }
+        }
         let mut ranges = std::mem::take(&mut split.ranges);
         complement_masks(masks, length, &mut ranges);
         if matches!(scan, HardScan::Protein { .. }) {
-            // The masks are sorted: no range is inverted.
+            // The masks are sorted and end within the sequence: no range is inverted.
             if let Some(&(left, right)) = ranges
                 .iter()
                 .find(|&&(left, right)| (right - left) as usize > MAX_DBSEQ_LEN)
@@ -937,6 +952,11 @@ impl HardMaskShape {
         if length < min_length {
             return None;
         }
+        // The masks are sorted: the last one ends last. Past the sequence, its nucleotide range
+        // would be inverted, and so would a frame's chunk of it.
+        if let Some(&(start, end)) = masks.last().filter(|&&(_, end)| end as usize > length) {
+            return Some(HardMaskShape::PastEnd { start, end, length });
+        }
         let frame_length =
             |frame: i8| (length + 1).saturating_sub(usize::from(frame.unsigned_abs())) / 3;
         let mut nucleotide = std::mem::take(&mut split.ranges);
@@ -1000,8 +1020,8 @@ impl HardMaskShape {
                 "has a mask, [{start}, {end}), after which frame {frame:+} (positions / 3) has no \
                  letter, so that the frame's chunk from its start runs to the frame's end, for \
                  which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk while it \
-                 extends within the chunk (rows that differ from a near input's; in tblastx the \
-                 same row repeated)"
+                 extends within the chunk (rows that differ from a near input's or with the \
+                 number of threads, the same row repeated in tblastx, or a crash)"
             ),
 
             HardMaskShape::Unsorted { before, mask } => format!(
@@ -1026,6 +1046,11 @@ impl HardMaskShape {
                 "has a range between its masks, [{left}, {right}), longer than the 5,000,000 \
                  letters of NCBI BLAST+ 2.17.0's chunks, whose overlapping chunks NCBI joins by a \
                  merge across their overlap"
+            ),
+            HardMaskShape::PastEnd { start, end, length } => format!(
+                "has a mask, [{start}, {end}), ending past its {length} letters, which \
+                 makeblastdb does not write (NCBI BLAST+ 2.17.0's chunk before a mask that \
+                 starts past the end reads past the sequence)"
             ),
         }
     }

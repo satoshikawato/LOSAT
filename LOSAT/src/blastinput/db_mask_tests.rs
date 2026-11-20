@@ -784,6 +784,23 @@ fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
     // A mask that ends past the shortest length: the length is read.
     assert_eq!(of(&[(1000, 1198)], (1197, 1200)), Ok(frame(2, 1000, 1198)));
     assert_eq!(reads.get(), 2);
+    // A mask that ends past the sequence (not written by makeblastdb) is refused as for the
+    // protein programs, before the frames.
+    let past = Some(HardMaskShape::PastEnd {
+        start: 300,
+        end: 1250,
+        length: 1200,
+    });
+    assert_eq!(of(&[(300, 1250)], (1197, 1200)), Ok(past));
+    assert_eq!(reads.get(), 3);
+    assert_eq!(
+        shape(&[(0, 100), (300, 1250)], 1200),
+        Some(HardMaskShape::PastEnd {
+            start: 300,
+            end: 1250,
+            length: 1200,
+        })
+    );
     assert!(HardMaskShape::FrameTailMask {
         frame: -1,
         start: 0,
@@ -791,4 +808,87 @@ fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
     }
     .text(scan)
     .contains("has a mask, [0, 100), after which frame -1 (positions / 3) has no letter"));
+}
+
+/// `HardMaskShape::of_scan` of the protein programs' scan (series NP, M4b): LOSAT's refusals that
+/// NCBI BLAST+ cannot freeze (a range longer than its chunks; a mask past the sequence, review L1
+/// of PR 1, which makeblastdb does not write), the ones that the rows db.pmask.*.rej.* also hold,
+/// and masks that the search takes.
+#[test]
+fn protein_shapes_of_the_hard_masks() {
+    let two_hit = HardScan::Protein { one_hit_word: None };
+    let one_hit = HardScan::Protein {
+        one_hit_word: Some(3),
+    };
+    let of = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
+        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan).unwrap()
+    };
+    // Masks within the sequence that leave every chunk a word or more: searched.
+    for scan in [two_hit, one_hit] {
+        assert_eq!(of(&[(10, 20), (50, 60)], 100, scan), None);
+        // A mask that ends at the end after another chunk: the last chunk is not the first.
+        assert_eq!(of(&[(10, 20), (50, 100)], 100, scan), None);
+    }
+    // A mask that runs to the end after the chunk from the start (Q1), at every word.
+    assert_eq!(
+        of(&[(10, 100)], 100, two_hit),
+        Some(HardMaskShape::TailMask {
+            start: 10,
+            end: 100
+        })
+    );
+    // Two letters between masks: the two-hit scan finds nothing there, the one-hit scan refuses.
+    assert_eq!(of(&[(10, 20), (22, 60)], 100, two_hit), None);
+    assert_eq!(
+        of(&[(10, 20), (22, 60)], 100, one_hit),
+        Some(HardMaskShape::ShortChunk {
+            offset: 20,
+            length: 2
+        })
+    );
+    // A mask that ends past the sequence, or starts past it: its own shape, not a long range.
+    let past = of(&[(10, 20), (90, 120)], 100, two_hit);
+    assert_eq!(
+        past,
+        Some(HardMaskShape::PastEnd {
+            start: 90,
+            end: 120,
+            length: 100
+        })
+    );
+    assert!(past
+        .unwrap()
+        .text(two_hit)
+        .starts_with("has a mask, [90, 120), ending past its 100 letters"));
+    assert_eq!(
+        of(&[(150, 160)], 100, one_hit),
+        Some(HardMaskShape::PastEnd {
+            start: 150,
+            end: 160,
+            length: 100
+        })
+    );
+    // A hard range longer than NCBI's chunks.
+    let long = crate::core::subject_split::MAX_DBSEQ_LEN + 100;
+    let shape = of(&[(10, 20)], long, two_hit);
+    assert_eq!(
+        shape,
+        Some(HardMaskShape::LongRange {
+            left: 20,
+            right: long as i32
+        })
+    );
+    assert!(shape
+        .unwrap()
+        .text(two_hit)
+        .contains("longer than the 5,000,000 letters"));
+    // At exactly MAX_DBSEQ_LEN letters the range is one chunk.
+    assert_eq!(
+        of(
+            &[(10, 20)],
+            crate::core::subject_split::MAX_DBSEQ_LEN + 20,
+            two_hit
+        ),
+        None
+    );
 }

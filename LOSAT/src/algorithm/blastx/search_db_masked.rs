@@ -21,6 +21,7 @@ use super::super::args::ResolvedOptions;
 use super::super::parameters::ContextParameters;
 use super::super::preliminary::{sort_by_score, PreliminaryHsp};
 use super::super::query_setup::PreparedQueryBatch;
+use super::super::results::subject_besthit_preliminary;
 use super::super::seed::{BxLookup, BxScoring, Diagonals};
 use super::super::subjects::Subjects;
 use super::super::x_db_stream::XReadError;
@@ -133,13 +134,19 @@ struct Masked<'a> {
 }
 
 impl Masked<'_> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:476-584
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:476-591
     // Each hard chunk is searched alone: its scan, its extensions, the purge of the HSPs with
     // common endpoints (gapped) and the sort by score; its HSPs move by the chunk's offset
-    // (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`). A
-    // protein's chunks start at their range's left (overlap 0) and no HSP reaches past its chunk,
-    // so the merge appends the chunk's HSPs and sorts the list by score
-    // (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766).
+    // (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`).
+    // NCBI's overlap there is not 0: it compares the chunk's offset with the left of the range
+    // after it (the chunker has already moved to it, blast_engine.c:254-258, 579-580) and takes
+    // the chunk overlap of 100. The merge only looks at the HSPs of the joined list that end past
+    // the new chunk's offset (blast_hits.c:2888-2899); a chunk ends where its range does and no
+    // HSP reaches into the mask after it, so there are none and the merge appends the chunk's
+    // HSPs and sorts the list by score (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766).
+    // TBLASTN's and TBLASTX's chunks of a long range overlap; this reason does not carry over.
+    // With `-subject_besthit` the filter then runs on the joined list after every chunk with HSPs
+    // (blast_engine.c:586-591, blast_hits.c:2538-2580), not once on the whole sequence's list.
     /// The sequence's computation with the matrix of `scoring`: the link cutoffs of its whole
     /// length (`compute_subject_with`), and its HSPs over the soft ranges or the hard chunks. A
     /// chunk shorter than the word holds no hit of the two-hit scan and is skipped; the one-hit
@@ -239,6 +246,7 @@ impl Masked<'_> {
                 &mut chunk_containment,
             )?;
             let offset = chunk.offset as i32;
+            let chunk_hits = !chunk_purged.is_empty();
             raw.extend(chunk_raw.into_iter().map(|hsp| shifted(hsp, offset)));
             purged.extend(chunk_purged.into_iter().map(|hsp| shifted(hsp, offset)));
             containment.extend(
@@ -246,6 +254,13 @@ impl Masked<'_> {
                     .into_iter()
                     .map(|(hsp, contained)| (shifted(hsp, offset), contained)),
             );
+            if options.subject_besthit && chunk_hits {
+                // The filter of the joined list after this chunk; the sink's own filter of the
+                // whole list after the last chunk deletes nothing more (the filter keeps no pair
+                // that it would delete).
+                sort_by_score(&mut purged);
+                subject_besthit_preliminary(&mut purged);
+            }
         }
         sort_by_score(&mut purged);
         Ok(SubjectComputation {

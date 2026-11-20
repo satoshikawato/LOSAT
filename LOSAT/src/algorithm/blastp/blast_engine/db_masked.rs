@@ -138,11 +138,16 @@ impl BlastpDbMasking<'_> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:476-584
 // Each hard chunk is searched alone: its scan, its gapped stage, the purge of the HSPs with
 // common endpoints and the sort by score; its HSPs move by the chunk's offset
-// (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`). A protein's
-// chunks start at their range's left (overlap 0) and no HSP reaches past its chunk, so no HSP is
-// in the merge's overlap strip and the merge appends the chunk's HSPs and sorts the list by score
-// (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766; no limit on the HSPs of a list in the
-// preliminary stage).
+// (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`). NCBI's
+// overlap there is not 0: it compares the chunk's offset with the left of the range after it
+// (the chunker has already moved to it, blast_engine.c:254-258, 579-580) and takes the chunk
+// overlap of 100. The merge only looks at the HSPs of the joined list that end past the new
+// chunk's offset (blast_hits.c:2888-2899); a chunk ends where its range does and no HSP reaches
+// into the mask after it, so there are none, and the merge appends the chunk's HSPs and sorts
+// the list by score (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766; no limit on the
+// HSPs of a list in the preliminary stage). TBLASTN's and TBLASTX's chunks of a long range
+// overlap; this reason does not carry over. With `-subject_besthit` the filter then runs on the
+// joined list after every chunk with HSPs (blast_engine.c:586-591, blast_hits.c:2537-2606).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:869-899
 // After the chunks, the E-values of the sequence's HSPs with its whole length and the reap by
 // the preliminary E-value.
@@ -151,8 +156,8 @@ impl BlastpDbMasking<'_> {
 /// word holds no hit of the two-hit scan (the word NCBI's scan reads at its start has no other
 /// hit on its diagonal within the window) and is skipped; the one-hit scan refuses such a chunk
 /// before the search (`HardMaskShape::ShortChunk`), as it refuses a mask that runs to the end
-/// after the chunk from the start (`HardMaskShape::TailMask`) and a range longer than
-/// `MAX_DBSEQ_LEN` (`HardMaskShape::LongRange`).
+/// after the chunk from the start (`HardMaskShape::TailMask`), a mask past the sequence's end
+/// (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN` (`HardMaskShape::LongRange`).
 fn hard_chunks(
     kernel: &BlastpPrelimKernel<'_>,
     scratch: &mut BlastpSubjectScratch,
@@ -191,6 +196,7 @@ fn hard_chunks(
             None,
         );
         let offset = chunk.offset as i32;
+        let chunk_hits = !scratch.preliminary_hsp_list.is_empty();
         masked
             .hits
             .extend(scratch.preliminary_hsp_list.drain(..).map(|mut hsp| {
@@ -199,6 +205,11 @@ fn hard_chunks(
                 hsp.gapped_subject_start += offset;
                 hsp
             }));
+        if kernel.args.subject_besthit && chunk_hits {
+            // The filter of the joined list after this chunk, in the merge's order.
+            masked.hits.sort_by(preliminary_score_compare);
+            kernel.subject_besthit(&mut masked.hits);
+        }
     }
     // The merge's order: by score, then the subject's offset and end, then the query's (a total
     // order among one query's HSPs, which are split by query below in this order).

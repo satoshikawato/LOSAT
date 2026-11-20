@@ -1707,6 +1707,15 @@ query's warning where `GetNumSeqs` is 0 (B, C, D); BLASTN and TBLASTX divide B's
 (SIGFPE: LOSAT's refusal). Frozen with the release build on the developer machine (2026-11-13; the same bytes as the
 workstation's probes p4c_dp, p4c_dn).
 
+Rows `db.ak.*.nseq0*`, `db.ak.*.e0len*`, `db.ak.*.e0stl*` (D1a-5 of line RG): a statistics count of 0 (`NSEQ 0`,
+or `e_nB`'s and `e_nC`'s totals over a volume of no OID) where every query has no letters to search (`../fasta/rps/alln.fna`,
+`allx.faa`): NCBI divides by the count only in the setup of a batch with a valid context, so it reports the run (exit 0);
+the rejection rows give it a valid query, where NCBI crashes (SIGFPE) and LOSAT refuses: `.b1` with `BATCH_SIZE=1` and
+`../fasta/rps/alln_q.fna` (`alln.fna`, then `taxfilter/q.fna`) or `allx_q649.faa` after the two reports NCBI writes
+before its crash (`ncbi-near`), `nseq0ns` over `aliaskeys/n_nseq0ns` (`NSEQ 0` over `arch_tbn_snucl_nonsq`, which has no
+sequence file) before the error of the missing file, which NCBI meets only after the division (TBLASTN with the Gumbel
+block, which does not divide: that error). Frozen with NCBI BLAST+ 2.17.0 on the workstation (`env_blast`).
+
 Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias
 files' counts, the formatter's reopening of each name, then the headers (before line DBID mixdb also the accession tables). `o_mix` and `o_mixs` are
 `multidb/na` (with the accession table) and `multidb/nnp` (without) under `NSEQ abc` / `STATS_NSEQ abc`, with `-seqidlist`
@@ -2140,8 +2149,20 @@ makeblastdb -in proth.faa -dbtype prot -out phmv -title "seg masks, volumes" -ma
 for c in mid head adjacent gap2 tiny neartail two_tail tail unsorted; do
   makeblastdb -in prot.faa -dbtype prot -out pe_$c -title "edge $c" -mask_data edge_$c.asnt
 done
+makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3a -title "parsed ids, p5 masked in the middle" -mask_data l3_mid.asnt
+makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3b -title "parsed ids, p5 masked at the head" -mask_data l3_head.asnt
+blastdb_aliastool -dblist "ph5 phmv" -dbtype prot -out pal -title "alias of ph5 and phmv"
+python3 ../make_dbmaskp_pbh.py WORK $NCBI_BIN OLD NEW .   # pbh.faa, edge_pbh.asnt, qbh.fna, pbh
 rm -f *.pjs
 ```
+
+The review of PR 1 added `pl3a` and `pl3b` (parsed Seq-ids; `l3_mid.asnt` and `l3_head.asnt` are `edge_mid.asnt` and
+`edge_head.asnt` with `local str "p5"` and one algorithm text, so that the two databases share the Seq-id `p5` under
+different masks), the alias file `pal`, and `pbh` with the blastx query `qbh.fna`: subjects that hold a weaker copy of a
+query stretch, a still weaker one starting a little before it, a hard-masked stretch, and a close copy of the stretch,
+on which `-subject_besthit` after every chunk (NCBI) and once after the merge differ. `make_dbmaskp_pbh.py` (seed 20261121)
+draws rounds of 400 such subjects and keeps the first three on which LOSAT before and after the fix differ (OLD and NEW
+are those two builds; NCBI 2.17.0's rows equal NEW's).
 
 `ps5`, `ph5` and `ph4` have the algorithms 21 (seg, defaults) and 22 (seg `-window 8 -locut 1.8 -hicut 2.1`); `phmv`
 (several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, so its `-db_hard_mask` rows are LOSAT's

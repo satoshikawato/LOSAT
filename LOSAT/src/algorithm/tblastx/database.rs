@@ -97,9 +97,9 @@ impl TblastxDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed =
             shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
-        // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
-        // number of sequences (`shared::check_statistics_count`).
-        shared::check_statistics_count(&db, PROGRAM)?;
+        // TBLASTX has no Gumbel block: the setup of a batch with a valid context divides by the
+        // statistics' number of sequences, a count of 0 LOSAT's refusal there
+        // (`context_cutoffs`, `shared::check_setup_count`).
         Ok(Self {
             db,
             name: name.to_string(),

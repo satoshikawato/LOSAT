@@ -114,6 +114,9 @@ pub(crate) struct QueryGroup<'h> {
     pub(crate) subject_hits: HashMap<u32, Vec<&'h PairwiseHit>>,
     pub(crate) subject_hit_indices: HashMap<u32, Vec<HspIndex>>,
     pub(crate) subject_titles: HashMap<u32, Vec<u8>>,
+    /// The rank of each subject's alignment heading (`heading_rank`), made at the first `-html`
+    /// heading of the query.
+    heading_ranks: std::sync::OnceLock<HashMap<u32, usize>>,
 }
 
 impl<'h> QueryGroup<'h> {
@@ -156,7 +159,40 @@ impl<'h> QueryGroup<'h> {
             subject_hits,
             subject_hit_indices,
             subject_titles,
+            heading_ranks: std::sync::OnceLock::new(),
         })
+    }
+
+    // NCBI reference (2.17.0): c++/src/objtools/align_format/showalign.cpp:1929, 2307
+    // ```c++
+    //     m_cur_align = m_currAlignSeqListIndex - 1;
+    //     ...
+    //         m_cur_align++;
+    // ```
+    /// The rank of subject `s_idx`'s alignment heading (NCBI's `m_cur_align`, the `blast_rank` of
+    /// its `-html` links, from 1 for each query): `x_PrintDefLine` counts each heading it starts,
+    /// which is once for a subject and once for each alignment of a subject whose heading throws
+    /// (`throws`: its title cannot be made; NCBI tries again at each alignment, as
+    /// `write_hsps_or_skips` notes). The ranks are made once, at the first call (only `-html`
+    /// headings call it); a heading that the registry fails throws in every subject, so it shows
+    /// no rank.
+    pub(crate) fn heading_rank(&self, s_idx: u32, throws: impl Fn(u32) -> bool) -> usize {
+        let ranks = self.heading_ranks.get_or_init(|| {
+            let mut started = 0;
+            self.subject_order
+                .iter()
+                .map(|&subject| {
+                    let rank = started + 1;
+                    started += if throws(subject) {
+                        self.subject_hits[&subject].len()
+                    } else {
+                        1
+                    };
+                    (subject, rank)
+                })
+                .collect()
+        });
+        ranks[&s_idx]
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1523-1530

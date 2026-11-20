@@ -32,6 +32,7 @@ use super::defline::{
     bioseq_title_from_source, generate_bioseq_defline, BioseqFacts, Defline, SourceTaxname,
     UnknownEncoding,
 };
+use super::html_ids::{self, HtmlHeading};
 
 /// A reported database sequence with parsed Seq-ids: its definition lines, its Seq-align id
 /// and the definition line of its Bioseq.
@@ -1647,17 +1648,63 @@ impl ParsedSubject {
     /// formatter splits into new ones (`PrepareBlastUngappedSeqalign` above). The generated title
     /// is made once, for the first line without a title; where it throws, `Err` with the Seq-id
     /// text of NCBI's line in place of each alignment (`heading_skipped_id`).
-    pub fn heading(&self, protein: bool, every_line: bool) -> Result<Vec<u8>, Vec<u8>> {
+    ///
+    /// With `-html` (`html`): each line's id is its link, the id, `</a>` after a link and its
+    /// anchor (`HtmlHeading::line_id`; a `-subject` record's anchor without the version, as
+    /// `x_PrintDefLine` writes a Bioseq without definition lines), then always a space and the
+    /// HTML-encoded title wrapped; a heading with more than 8 lines (NCBI's `maxNumBdl`: the
+    /// definition lines, or the strings of the positive list) hides those after the third in the
+    /// "more sequence titles" box (`html_ids::more_titles`, quoted there). The id link precedes
+    /// the title of each line (`x_FillAlnDispParams`); where the registry throws, `Err` with the
+    /// Seq-id text too (`HtmlHeading::skips`). The outer error is the report's.
+    pub fn heading(
+        &self,
+        protein: bool,
+        every_line: bool,
+        html: Option<HtmlHeading<'_>>,
+    ) -> std::io::Result<Result<Vec<u8>, Vec<u8>>> {
         let mut out = Vec::new();
         let mut generated = None;
         let mut first = true;
+        let max_lines = if every_line || self.use_this_seqid.is_empty() {
+            self.set.deflines.len()
+        } else {
+            self.use_this_seqid.len()
+        };
+        let (mut shown, mut id_label, mut hides) = (0, Vec::new(), false);
         for defline in &self.set.deflines {
             if !every_line && !self.heading_shows(defline) {
                 continue;
             }
+            shown += 1;
             let start = out.len();
             out.push(if first { b'>' } else { b' ' });
-            alignment_line_id(defline, self.show_gis, &mut out);
+            match html {
+                None => alignment_line_id(defline, self.show_gis, &mut out),
+                Some(html) => {
+                    if max_lines > html_ids::MAX_SHOWN_LINES && shown == html_ids::SHOWN_LINES + 1 {
+                        let hidden = max_lines - html_ids::SHOWN_LINES;
+                        html_ids::more_titles(&id_label, hidden, &mut out);
+                        hides = true;
+                    }
+                    if let Some(display) = defline.display_id() {
+                        match html.line_id(
+                            &defline.ids,
+                            display,
+                            defline.gi(),
+                            defline.taxid.unwrap_or(0),
+                            !self.record,
+                            |out| alignment_line_id(defline, self.show_gis, out),
+                            &mut out,
+                        ) {
+                            Ok(label) => id_label = label,
+                            Err(error) => {
+                                return HtmlHeading::skips(error, || self.skipped_id()).map(Err)
+                            }
+                        }
+                    }
+                }
+            }
             if !first || out.len() - start > 1 {
                 out.push(b' ');
             }
@@ -1668,14 +1715,20 @@ impl ParsedSubject {
                     Some(text) => text,
                     None => match self.bioseq_title(protein, false) {
                         Ok(defline) => generated.insert(defline.text),
-                        Err(UnknownEncoding) => return Err(self.skipped_id()),
+                        Err(UnknownEncoding) => return Ok(Err(self.skipped_id())),
                     },
                 },
             };
-            wrap_title(title, &mut out);
+            match html {
+                None => wrap_title(title, &mut out),
+                Some(_) => wrap_title(&crate::report::html::html_encode(title), &mut out),
+            }
             out.push(b'\n');
         }
-        Ok(out)
+        if hides {
+            out.extend_from_slice(b"</div>");
+        }
+        Ok(Ok(out))
     }
 
     /// Whether the heading shows the generated title for a definition line with the title
@@ -2841,7 +2894,12 @@ mod tests {
             "DAA10002.1 unnamed protein product"
         );
         assert_eq!(
-            text(&subject("tpg|DAA10002.1|").heading(true, false).unwrap()),
+            text(
+                &subject("tpg|DAA10002.1|")
+                    .heading(true, false, None)
+                    .unwrap()
+                    .unwrap()
+            ),
             ">DAA10002.1 TPA: unnamed protein product\n"
         );
         assert_eq!(description("pdb|2XYZ|B"), "2XYZ_B Chain B");
@@ -2852,7 +2910,12 @@ mod tests {
         );
         assert_eq!(description("ref|NC_100013.1|"), "NC_100013.1 ");
         assert_eq!(
-            text(&subject("ref|NC_100013.1|").heading(true, false).unwrap()),
+            text(
+                &subject("ref|NC_100013.1|")
+                    .heading(true, false, None)
+                    .unwrap()
+                    .unwrap()
+            ),
             ">NC_100013.1 \n"
         );
         assert_eq!(
@@ -2861,16 +2924,31 @@ mod tests {
         );
         assert_eq!(description("lcl|Subject_27"), "subject seven title");
         assert_eq!(
-            text(&subject("lcl|Subject_30").heading(true, false).unwrap()),
+            text(
+                &subject("lcl|Subject_30")
+                    .heading(true, false, None)
+                    .unwrap()
+                    .unwrap()
+            ),
             ">Subject_30 unnamed protein product\n"
         );
         assert_eq!(description("pdb|5ABC|D"), "5ABC_D Chain D");
         assert_eq!(
-            text(&subject("pdb|5ABC|D").heading(true, false).unwrap()),
+            text(
+                &subject("pdb|5ABC|D")
+                    .heading(true, false, None)
+                    .unwrap()
+                    .unwrap()
+            ),
             ">5ABC_D Chain D\n XP_100015.1 second\n"
         );
         assert_eq!(
-            text(&subject("lcl|Subject_36").heading(true, false).unwrap()),
+            text(
+                &subject("lcl|Subject_36")
+                    .heading(true, false, None)
+                    .unwrap()
+                    .unwrap()
+            ),
             ">Subject_36 unnamed protein product\n DAA10016.1 tpa second\n"
         );
         // A title from the source: the taxonomy database can name its organism.
@@ -3046,16 +3124,22 @@ mod tests {
         let subject = subject.under_positive_list(true);
         assert_eq!(strings(&subject), ["seqid:AF000001.1"]);
         // The heading leaves out the line the strings do not name, and `>` goes to the next.
-        assert_eq!(subject.heading(true, false).unwrap(), b">AF000001.1 t\n");
+        assert_eq!(
+            subject.heading(true, false, None).unwrap().unwrap(),
+            b">AF000001.1 t\n"
+        );
         // An ungapped Seq-align of two HSPs reaches the report without the strings.
         assert_eq!(
-            subject.heading(true, true).unwrap(),
+            subject.heading(true, true, None).unwrap().unwrap(),
             b">loc t\n AF000001.1 t\n"
         );
         // A local id alone: no string, every line in the heading.
         let subject = lines(vec![vec![local()]]).under_positive_list(true);
         assert!(subject.use_this_seqid().is_empty());
-        assert_eq!(subject.heading(true, false).unwrap(), b">loc t\n");
+        assert_eq!(
+            subject.heading(true, false, None).unwrap().unwrap(),
+            b">loc t\n"
+        );
         // A Seq-align id that is a GI: only GIs are named, and a line without one is left out.
         let subject = lines(vec![
             vec![ParsedSeqId::Gi(888), gb("GG000001", 1)],
@@ -3065,7 +3149,7 @@ mod tests {
         .under_positive_list(true);
         assert_eq!(strings(&subject), ["gi:888", "gi:890"]);
         assert_eq!(
-            subject.heading(true, false).unwrap(),
+            subject.heading(true, false, None).unwrap().unwrap(),
             b">GG000001.1 t\n GG000003.1 t\n"
         );
         // A name without an accession is not named; a PDB id is.
@@ -3086,7 +3170,7 @@ mod tests {
             lines(vec![vec![local()], vec![gb("AF000001", 1)]]).under_positive_list(false);
         assert!(subject.use_this_seqid().is_empty());
         assert_eq!(
-            subject.heading(true, false).unwrap(),
+            subject.heading(true, false, None).unwrap().unwrap(),
             b">loc t\n AF000001.1 t\n"
         );
     }
@@ -4042,7 +4126,7 @@ mod tests {
         );
         // The heading's own making of the title gives the same id (one GenerateDefline).
         assert_eq!(
-            bad.heading(false, false).unwrap_err(),
+            bad.heading(false, false, None).unwrap().unwrap_err(),
             bad.heading_skipped_id(false, false).unwrap()
         );
         assert_eq!(text(&bad.description(false).1.text), "Unknown");
@@ -4053,7 +4137,8 @@ mod tests {
         assert_eq!(
             text(
                 &subject(None, b"Homo sapiens")
-                    .heading(false, false)
+                    .heading(false, false, None)
+                    .unwrap()
                     .unwrap()
             ),
             ">AB000010.1 Homo sapiens\n"
@@ -4063,7 +4148,8 @@ mod tests {
             None
         );
         assert!(subject(Some(b"stored"), b"Bad \x81 name")
-            .heading(true, false)
+            .heading(true, false, None)
+            .unwrap()
             .is_ok());
     }
 
@@ -4281,7 +4367,7 @@ mod tests {
             assert_eq!(subject.shown_as_record(), local, "{defline}");
             if !local {
                 assert_eq!(
-                    text(&subject.heading(protein, false).unwrap()),
+                    text(&subject.heading(protein, false, None).unwrap().unwrap()),
                     heading,
                     "{defline}"
                 );
@@ -4329,7 +4415,7 @@ mod tests {
         );
         assert_eq!(heading.source(), &bacillus());
         assert_eq!(
-            text(&heading.heading(true, false).unwrap()),
+            text(&heading.heading(true, false, None).unwrap().unwrap()),
             ">AC400001.1 alpha, partial [Bacillus sp.]\n AD400001.1 alpha [Bacillus sp.]\n"
         );
         assert_eq!(
@@ -4357,7 +4443,7 @@ mod tests {
         .unwrap()
         .with_source(false, |_| panic!("a nucleotide title is not adjusted"));
         assert_eq!(
-            text(&nucleotide.heading(false, false).unwrap()),
+            text(&nucleotide.heading(false, false, None).unwrap().unwrap()),
             ">AC400001.1 alpha, partial [Bacillus sp.]\n AD400001.1 alpha, partial [Bacillus sp.]\n"
         );
         // The tabular word of `lcl|Subject_9nn`.

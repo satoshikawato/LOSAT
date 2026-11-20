@@ -492,6 +492,7 @@ impl RoundSections<'_> {
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
                 0..hsps,
+                None,
                 |writer, hit| {
                     write_hsp_info(writer, hit, config)?;
                     write_alignment(writer, hit, config)
@@ -508,6 +509,7 @@ impl RoundSections<'_> {
             &group.subject_hits[&s_idx],
             &group.subject_hit_indices[&s_idx],
             0..hsps,
+            None,
             |writer, hit| {
                 write_hsp_info(writer, hit, config)?;
                 write_alignment(writer, hit, config)

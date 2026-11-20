@@ -231,3 +231,166 @@ fn url_encoding_and_templates() {
     );
     assert_eq!(text(map_template(b"<@a@>x<@a@><@a", "a", b"1")), "1x1<@a");
 }
+
+/// The `-html` heading of a database sequence with the definition lines `lines` (ids, title) at
+/// rank `rank` of a report of `report`.
+fn heading(report: &HtmlReport, lines: &[(&str, &str)], rank: usize) -> String {
+    let deflines = lines
+        .iter()
+        .map(|(id, title)| crate::seqid::BlastDefline {
+            title: Some(title.as_bytes().to_vec()),
+            ids: ids(id),
+            ..Default::default()
+        })
+        .collect();
+    let subject = ParsedSubject::new(crate::seqid::DeflineSet { deflines }).unwrap();
+    let html = HtmlHeading {
+        report,
+        s_idx: 0,
+        rank,
+    };
+    text(subject.heading(true, false, Some(html)).unwrap().unwrap())
+}
+
+fn entrez(accession: &str, rank: usize) -> String {
+    format!("<a title=\"Show report for {accession}\" href=\"https://www.ncbi.nlm.nih.gov/protein/{accession}?report=genbank&log$=protalign&blast_rank={rank}&RID=0\" >")
+}
+
+// The alignment headings (D6, D7) of `bp.dm.f0.h` (lines 55, 117-127, 172, 187, 217, 232),
+// `bp.dp.f0.h` (line 56), `bp.s.f0.h` and `bp.s.f0.rc_localid.h` (first headings).
+#[test]
+fn heading_lines_with_links_anchors_and_hidden_titles() {
+    let report = HtmlReport::new(
+        &Arc::new(links(None, b"../../db/pmix_ids")),
+        [crate::seqdb::Oid::of_unrestricted(0)],
+    );
+    assert_eq!(
+        heading(&report, &[("pir||A12345", "pir subject")], 1),
+        format!(
+            ">{}pir||A12345</a><a name=A12345></a> pir subject\n",
+            entrez("A12345", 1)
+        )
+    );
+    assert_eq!(
+        heading(&report, &[("gnl|TI|12345", "trace subject")], 6),
+        ">\
+<a title=\"Show report for 12345\" href=\"https://www.ncbi.nlm.nih.gov/Traces/trace.cgi?cmd=retrieve&dopt=fasta&val=12345&RID=0\">\
+TI:12345</a><a name=TI:12345></a> trace subject\n"
+    );
+    // The GI names the anchor; the title is HTML-encoded.
+    assert_eq!(
+        heading(
+            &report,
+            &[("gi|1000|gb|AAA00001.1|", "gi and gb <&> \"q\"")],
+            7
+        ),
+        format!(
+            ">{}AAA00001.1</a><a name=1000></a> gi and gb &lt;&amp;&gt; &quot;q&quot;\n",
+            entrez("AAA00001.1", 7)
+        )
+    );
+    // No link: the id, then the anchor.
+    assert_eq!(
+        heading(&report, &[("gi|999", "gi only subject")], 9),
+        ">gi|999<a name=999></a> gi only subject\n"
+    );
+    assert_eq!(
+        heading(&report, &[("lcl|loc_x", "local & id")], 10),
+        ">loc_x<a name=loc_x></a> local &amp; id\n"
+    );
+    // Nine definition lines: the fourth to the ninth in the box of the third's label.
+    let nine: Vec<(String, String)> = (1..=9)
+        .map(|n| {
+            (
+                format!("ref|XP_00090{n}.1|"),
+                format!("nine titles {n} <&>"),
+            )
+        })
+        .collect();
+    let lines: Vec<(&str, &str)> = nine
+        .iter()
+        .map(|(id, t)| (id.as_str(), t.as_str()))
+        .collect();
+    let mut expected = String::new();
+    for n in 1..=9 {
+        expected.push(if n == 1 { '>' } else { ' ' });
+        if n == 4 {
+            expected.push_str("<a href=\"#\" title=\"Other sequence titles\"  onmouseover=\"showInfo(this)\" class=\"resArrowLinkW mdl hiding\" id=\"XP_000903.1\">6 more sequence titles</a>\n <div id=\"info_XP_000903.1\" class=\"helpbox mdlbox hidden\">");
+        }
+        let accession = format!("XP_00090{n}.1");
+        expected.push_str(&format!(
+            "{}{accession}</a><a name={accession}></a> nine titles {n} &lt;&amp;&gt;\n",
+            entrez(&accession, 3)
+        ));
+    }
+    expected.push_str("</div>");
+    assert_eq!(heading(&report, &lines, 3), expected);
+    // Eight lines show every line.
+    assert!(!heading(&report, &lines[..8], 3).contains("more sequence titles"));
+    // A sequence without parsed Seq-ids, and a `-subject` record without them (with and without
+    // the registry's `[LOCAL_ID] TOOL_URL`).
+    let start = |report: &HtmlReport, s_idx: u32| {
+        let mut out = Vec::new();
+        HtmlHeading {
+            report,
+            s_idx,
+            rank: 1,
+        }
+        .unparsed_start(&mut out)
+        .unwrap();
+        text(out)
+    };
+    assert_eq!(start(&report, 0), "><a name=BL_ORD_ID:0></a> ");
+    let records = HtmlReport::new(&Arc::new(links(None, b"")), []);
+    assert_eq!(start(&records, 2), "><a name=Subject_3></a> ");
+    let file: &[u8] = b"[LOCAL_ID]\nTOOL_URL=http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>\n";
+    let records = HtmlReport::new(&Arc::new(links(Some(file), b"")), []);
+    assert_eq!(
+        start(&records, 0),
+        ">http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1</a><a name=Subject_1></a> "
+    );
+}
+
+// `cfg.fmtbad.nd0.*.h`: a malformed registry file throws at a heading's first id link, which
+// NCBI catches for each alignment: the Seq-id text without the version.
+#[test]
+fn a_registry_that_throws_skips_the_heading() {
+    let bad = HtmlLinks {
+        registry: InitConfig::of(
+            "blastp",
+            Some((".ncbirc".into(), b"this line has no equals sign\n".to_vec())),
+            false,
+        )
+        .unwrap(),
+        db_name: Vec::new(),
+        nucleotide: false,
+    };
+    let report = HtmlReport::new(&Arc::new(bad), []);
+    let html = HtmlHeading {
+        report: &report,
+        s_idx: 0,
+        rank: 1,
+    };
+    let subject = ParsedSubject::new(crate::seqid::DeflineSet {
+        deflines: vec![crate::seqid::BlastDefline {
+            title: Some(b"t".to_vec()),
+            ids: ids("ref|XP_000101.1|"),
+            ..Default::default()
+        }],
+    })
+    .unwrap();
+    assert_eq!(
+        subject
+            .heading(true, false, Some(html))
+            .unwrap()
+            .unwrap_err(),
+        b"XP_000101"
+    );
+    let error = html.unparsed_start(&mut Vec::new()).unwrap_err();
+    assert_eq!(
+        HtmlHeading::skips(error, || html.unparsed_skipped_id()).unwrap(),
+        b"Subject_1"
+    );
+    let other = io::Error::other("write failed");
+    assert!(HtmlHeading::skips(other, Vec::new).is_err());
+}

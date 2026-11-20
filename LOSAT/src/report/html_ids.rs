@@ -127,13 +127,208 @@ impl HtmlReport {
     }
 }
 
+/// The `-html` data of one subject's alignment heading (`x_PrintDefLine`): the report's
+/// (`HtmlReport`), the subject's index `s_idx` and the heading's rank `rank` (NCBI's `m_cur_align`,
+/// from 1: `QueryGroup::heading_rank`), the `blast_rank` of its links.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HtmlHeading<'a> {
+    pub(crate) report: &'a HtmlReport,
+    pub(crate) s_idx: u32,
+    pub(crate) rank: usize,
+}
+
+impl HtmlHeading<'_> {
+    // NCBI reference (2.17.0): c++/src/objtools/align_format/showalign.cpp:2413-2449
+    // ```c++
+    //                     if(m_AlignOption&eHtml){
+    //                         out<< alnDispParams->id_url;
+    //                     }
+    //     ...
+    //                     if(m_AlignOption&eHtml){
+    //                         if(alnDispParams->id_url != NcbiEmptyString){
+    //                             out<<"</a>";
+    //                         }
+    //                         if(alnDispParams->gi != ZERO_GI){
+    //                             out<<"<a name="<<alnDispParams->gi<<"></a>";
+    //                             aln_vec_info->id_label = NStr::NumericToString(alnDispParams->gi);
+    //                         } else {
+    //                             out<<"<a name="<<alnDispParams->seqID->GetSeqIdString(true)<<"></a>";
+    //                             aln_vec_info->id_label = alnDispParams->label;
+    //                         }
+    // ```
+    // NCBI reference (2.17.0): c++/src/objtools/align_format/showalign.cpp:2209-2221, 2265-2271
+    // ```c++
+    // 		alnDispParams->label =  CAlignFormatUtil::GetLabel(alnDispParams->seqID,CSeq_id::eContent);//Just accession without db part like ref| or pdbd|
+    //     ...
+    // 		if(bdl->IsSetTaxid() &&  bdl->CanGetTaxid()){
+    // 			taxid = bdl->GetTaxid();
+    // 		}
+    //
+    //         alnDispParams->seqUrlInfo = x_InitSeqUrl(gi_in_use_this_gi,alnDispParams->label,taxid,ids);
+    //         if(m_AlignOption&eHtml){
+    //             alnDispParams->id_url = CAlignFormatUtil::GetIDUrl(alnDispParams->seqUrlInfo,&ids);
+    //     ...
+    // 	alnDispParams->gi = FindGi(bsp_handle.GetBioseqCore()->GetId());
+    // 	alnDispParams->seqID = FindBestChoice(bsp_handle.GetBioseqCore()->GetId(),CSeq_id::WorstRank);
+    // 	alnDispParams->label =  CAlignFormatUtil::GetLabel(alnDispParams->seqID,CSeq_id::eContent);
+    // 	if(m_AlignOption&eHtml){
+    //         alnDispParams->ids = bsp_handle.GetBioseqCore()->GetId();
+    //         alnDispParams->seqUrlInfo = x_InitSeqUrl(alnDispParams->gi,alnDispParams->label,ZERO_TAX_ID,alnDispParams->ids);
+    //         alnDispParams->id_url = CAlignFormatUtil::GetIDUrl(alnDispParams->seqUrlInfo,&alnDispParams->ids);
+    // ```
+    /// The id of one line of the heading after its `>` or space: the link of the id list `ids` (a
+    /// definition line's, or a `-subject` Bioseq's) with `heading_label` of `display` (their
+    /// `WorstRank`-best id) as the accession, the line's taxid `taxid` (0 for a `-subject` Bioseq)
+    /// and the heading's rank, then the plain id text (`id_text`), `</a>` after a link, and the
+    /// anchor (`anchor` of the line's GI `gi`, with the version for a definition line,
+    /// `with_version`). Returns the line's id label (`aln_vec_info->id_label`: the GI, else the
+    /// accession), the id of the "more sequence titles" block (`more_titles`). The registry's
+    /// exception (`id_url`) is the `io::Error`, which NCBI's `DisplaySeqalign` catches for each
+    /// alignment (`skips`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn line_id(
+        &self,
+        ids: &[ParsedSeqId],
+        display: &ParsedSeqId,
+        gi: i64,
+        taxid: i32,
+        with_version: bool,
+        id_text: impl FnOnce(&mut Vec<u8>),
+        out: &mut Vec<u8>,
+    ) -> io::Result<Vec<u8>> {
+        let mut accession = Vec::new();
+        heading_label(display, &mut accession);
+        let info = SeqUrlInfo {
+            accession: &accession,
+            rank: self.rank,
+            nucleotide: self.report.links.nucleotide,
+            place: LinkPlace::Heading,
+            taxid,
+        };
+        let link = id_url(ids, &info, &self.report.links, &mut io::stderr())?;
+        out.extend_from_slice(&link);
+        id_text(out);
+        if !link.is_empty() {
+            out.extend_from_slice(b"</a>");
+        }
+        anchor(gi, display, with_version, out);
+        Ok(if gi == 0 {
+            accession
+        } else {
+            gi.to_string().into_bytes()
+        })
+    }
+
+    // NCBI reference (2.17.0): c++/src/objtools/align_format/showalign.cpp:2312-2361
+    // ```c++
+    //             CRef<SAlnDispParams> alnDispParams
+    //                 (x_FillAlnDispParams(bsp_handle));
+    //             out << ">";
+    //     ...
+    //                 out<<alnDispParams->id_url;
+    //     ...
+    //             if(!((alnDispParams->seqID->AsFastaString().find("gnl|BL_ORD_ID") != string::npos) ||
+    // 		alnDispParams->seqID->AsFastaString().find("lcl|Subject_") != string::npos)){
+    //     ...
+    //                 if(alnDispParams->id_url != NcbiEmptyString){
+    //                     out<<"</a>";
+    //                 }
+    //     ...
+    //                     out<<"<a name="<<alnDispParams->seqID->GetSeqIdString()<<"></a>";
+    //     ...
+    //             out <<" ";
+    // ```
+    /// The first line of the heading of a subject without parsed Seq-ids up to its title: `>`, the
+    /// link of its id (`unparsed_id`: none for `gnl|BL_ORD_ID|<oid>`, the registry's `[LOCAL_ID]
+    /// TOOL_URL` for `lcl|Subject_<s_idx + 1>`) and `</a>` after one, the anchor
+    /// (`<a name=BL_ORD_ID:<oid>></a>`, `<a name=Subject_<s_idx + 1>></a>`; such an id has no
+    /// version, so a definition line's `GetSeqIdString(true)` and a `-subject` Bioseq's
+    /// `GetSeqIdString()` agree) and a space; neither id is shown. The registry's exception as
+    /// `line_id`'s.
+    pub(crate) fn unparsed_start(&self, out: &mut Vec<u8>) -> io::Result<()> {
+        let id = self.report.unparsed_id(self.s_idx);
+        out.push(b'>');
+        self.line_id(std::slice::from_ref(&id), &id, 0, 0, true, |_| {}, out)?;
+        out.push(b' ');
+        Ok(())
+    }
+
+    /// `GetSeqIdString()` of the subject without parsed Seq-ids (`BL_ORD_ID:<oid>`,
+    /// `Subject_<s_idx + 1>`): the id of NCBI's line in place of each of its alignments where the
+    /// registry throws (`skips`).
+    pub(crate) fn unparsed_skipped_id(&self) -> Vec<u8> {
+        let mut id = Vec::new();
+        label::content(&self.report.unparsed_id(self.s_idx), false, &mut id);
+        id
+    }
+
+    // NCBI reference (2.17.0): c++/src/objtools/align_format/showalign.cpp:1954-1981
+    // ```c++
+    //                 try{
+    //     ...
+    //                         x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+    //     ...
+    //                 } catch (const CException&){
+    //                     out << "Sequence with id "
+    //                         << (avRef->GetSeqId(1)).GetSeqIdString().c_str()
+    //                         <<" no longer exists in database...alignment skipped\n";
+    //                     continue;
+    //                 }
+    // ```
+    /// Whether the error `error` of a heading's id link is the registry's exception, which NCBI
+    /// catches for each alignment of the subject (its line in place of the alignment, with
+    /// `skipped_id`): `Ok` with that id; any other error stays the report's.
+    pub(crate) fn skips(
+        error: io::Error,
+        skipped_id: impl FnOnce() -> Vec<u8>,
+    ) -> io::Result<Vec<u8>> {
+        match crate::ncbi_exception::NcbiException::of_io_error(&error) {
+            Some(_) => Ok(skipped_id()),
+            None => Err(error),
+        }
+    }
+}
+
+// NCBI reference (2.17.0): c++/src/objtools/align_format/showalign.cpp:2389-2397, 2474-2476
+// ```c++
+//                         if (m_AlignOption&eHtml && (int)(maxNumBdl) > k_MaxDeflinesToShow && numBdl == k_MinDeflinesToShow + 1){
+//                             //Show first 3 deflines out of 8 or more, hide the rest
+//                             string mdlTag = aln_vec_info->id_label;
+//                             //string mdlTag = id_label  + "_" + NStr::IntToString(m_cur_align);
+//                             out << "<a href=\"#\" title=\"Other sequence titles\"  onmouseover=\"showInfo(this)\" class=\"resArrowLinkW mdl hiding\" id=\"" <<
+//                                 mdlTag << "\">" << maxNumBdl - k_MinDeflinesToShow << " more sequence titles" << "</a>\n";
+//
+//                             out << " <div id=\"" << "info_" << mdlTag << "\" class=\"helpbox mdlbox hidden\">";
+//                             bMultipleDeflines = true;
+//                         }
+//     ...
+//             if(m_AlignOption&eHtml && bMultipleDeflines) {
+//                 out << "</div>";
+//             }
+// ```
+/// The lines a heading shows before it hides the rest (`k_MinDeflinesToShow`), where it has more
+/// than `MAX_SHOWN_LINES` (`k_MaxDeflinesToShow`).
+pub(crate) const SHOWN_LINES: usize = 3;
+pub(crate) const MAX_SHOWN_LINES: usize = 8;
+
+/// The "more sequence titles" link of a heading that hides `hidden` lines, after the space of the
+/// first hidden line: its id is the label of the last shown line (`id_label`, `line_id`), and the
+/// hidden lines follow in the `info_<id_label>` box, which `</div>` closes before `Length=`.
+pub(crate) fn more_titles(id_label: &[u8], hidden: usize, out: &mut Vec<u8>) {
+    out.extend_from_slice(b"<a href=\"#\" title=\"Other sequence titles\"  onmouseover=\"showInfo(this)\" class=\"resArrowLinkW mdl hiding\" id=\"");
+    out.extend_from_slice(id_label);
+    out.extend_from_slice(b"\">");
+    out.extend_from_slice(hidden.to_string().as_bytes());
+    out.extend_from_slice(b" more sequence titles</a>\n <div id=\"info_");
+    out.extend_from_slice(id_label);
+    out.extend_from_slice(b"\" class=\"helpbox mdlbox hidden\">");
+}
+
 /// Where a link is written: a description row (`x_FillDeflineAndId`, `isAlignLink` false, NCBI's
 /// empty RID) or an alignment heading (`x_InitSeqUrl`, `isAlignLink` true, RID `0`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkPlace {
     Description,
-    // The alignment headings (D6, D7; line RG T4a2, next) make it; the allowance goes with them.
-    #[cfg_attr(not(test), allow(dead_code))]
     Heading,
 }
 
@@ -344,8 +539,6 @@ pub fn description_accession(display_id: &ParsedSeqId, out: &mut Vec<u8>) {
 /// `CAlignFormatUtil::GetLabel(seqID, CSeq_id::eContent)` of a heading's id (showalign.cpp:2208,
 /// 2266; `eContent` converts to `with_version` true): the accession of its link and, without a
 /// GI, the id of the "more sequence titles" block.
-// The alignment headings (D6, D7; line RG T4a2, next) call it; the allowance goes with them.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn heading_label(id: &ParsedSeqId, out: &mut Vec<u8>) {
     label::format_label(id, true, out);
 }
@@ -384,8 +577,6 @@ pub fn score_link(gi: i64, accession: &[u8], out: &mut Vec<u8>) {
 /// The anchor of a heading line: `<a name=` the GI, or without one `GetSeqIdString` of the id,
 /// with its version for a database's definition line and without for a `-subject` Bioseq
 /// (`with_version`), then `></a>`.
-// The alignment headings (D6, D7; line RG T4a2, next) call it; the allowance goes with them.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn anchor(gi: i64, id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
     out.extend_from_slice(b"<a name=");
     if gi == 0 {

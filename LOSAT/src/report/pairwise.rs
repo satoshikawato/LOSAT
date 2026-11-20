@@ -4,6 +4,7 @@
 //!
 //! Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
 
+use super::html_ids::HtmlHeading;
 use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, format_total_bitscore_ncbi};
 use super::serial::asn_text::itoa_i32;
 use crate::api::local_blast::{FormatProbe, HspIndex};
@@ -722,6 +723,12 @@ pub fn write_subject_header<W: Write>(
 /// ```
 /// The alignments of the HSPs `part` of the subject's (the heading with the first); the parts of
 /// `0..hits.len()` in order write its bytes (`x_pairwise_par`'s pieces).
+///
+/// With `-html` (`html`) the heading is `>`, the link of `lcl|Subject_N` (the registry's `[LOCAL_ID]
+/// TOOL_URL`, if any) and `</a>` after one, `<a name=Subject_N></a>`, a space and the
+/// HTML-encoded title wrapped (`HtmlHeading::unparsed_start`; the link precedes the title,
+/// `x_FillAlnDispParams(bsp_handle)`), and where the registry throws NCBI's line is written in
+/// place of each alignment too (`HtmlHeading::skips`).
 #[allow(clippy::too_many_arguments)]
 fn write_subject_alignments_part<W: Write>(
     writer: &mut W,
@@ -733,33 +740,214 @@ fn write_subject_alignments_part<W: Write>(
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
-    mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+    html: Option<HtmlHeading<'_>>,
+    write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
     let heading = super::defline::generate_defline(title, protein, false);
-    if part.start == 0 {
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.subject_begin(first_index);
+    let attempt = |html: HtmlHeading<'_>| -> io::Result<Result<Vec<u8>, Vec<u8>>> {
+        let mut lines = Vec::new();
+        if let Err(error) = html.unparsed_start(&mut lines) {
+            return HtmlHeading::skips(error, || html.unparsed_skipped_id()).map(Err);
         }
-        if let Ok(heading) = &heading {
-            write_subject_header(writer, &heading.text, None, hits[0].subject_length)?;
+        Ok(match &heading {
+            Ok(heading) => {
+                super::db_subject::wrap_title(&super::html::html_encode(&heading.text), &mut lines);
+                lines.push(b'\n');
+                Ok(lines)
+            }
+            Err(super::defline::UnknownEncoding) => Err(record_skipped_id(parsed, s_idx)),
+        })
+    };
+    let skipped = match html {
+        Some(html) if part.start == 0 => {
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_begin(first_index);
+            }
+            let skipped = match attempt(html)? {
+                Ok(lines) => {
+                    write_heading_lines(writer, &lines, hits[0].subject_length)?;
+                    None
+                }
+                Err(id) => Some(id),
+            };
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_end(first_index);
+            }
+            skipped
         }
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.subject_end(first_index);
+        Some(html) => attempt(html)?.err(),
+        None => {
+            if part.start == 0 {
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.subject_begin(first_index);
+                }
+                if let Ok(heading) = &heading {
+                    write_subject_header(writer, &heading.text, None, hits[0].subject_length)?;
+                }
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.subject_end(first_index);
+                }
+            }
+            heading
+                .as_ref()
+                .err()
+                .map(|_| record_skipped_id(parsed, s_idx))
+        }
+    };
+    let retry =
+        html.map(|html| move || -> io::Result<Option<Vec<u8>>> { Ok(attempt(html)?.err()) });
+    write_hsps_or_skips(
+        writer,
+        probe,
+        hits,
+        hsp_indices,
+        part,
+        skipped,
+        retry,
+        write_hsp,
+    )
+}
+
+/// The alignment heading of one subject of a report: a database sequence's or a `-subject`
+/// record's with parsed Seq-ids (`DatabaseHeading`), or a `-subject` record's without them, with
+/// its title (`write_subject_alignments_part`).
+#[derive(Clone, Copy)]
+enum SubjectHeading<'a> {
+    Database(DatabaseHeading<'a>),
+    Record(&'a [u8]),
+}
+
+impl SubjectHeading<'_> {
+    /// Whether the heading's title cannot be made (NCBI's line in place of each alignment).
+    fn throws(self, protein: bool) -> bool {
+        match self {
+            SubjectHeading::Database(heading) => {
+                matches!(heading.skipped_id(protein, None), Ok(Some(_)))
+            }
+            SubjectHeading::Record(title) => {
+                super::defline::generate_defline(title, protein, false).is_err()
+            }
         }
     }
-    for (hit, &hsp_index) in hits[part.clone()].iter().zip(&hsp_indices[part]) {
+}
+
+/// The heading of subject `s_idx` of `group` in a report whose subjects' parsed Seq-ids are
+/// `parsed` (by subject index): the definition lines of one with them (`DatabaseHeading::parsed`
+/// with `gapped`), else a database sequence's stored title (`database`, the sources `sources`) or
+/// a `-subject` record's title.
+fn group_heading<'g>(
+    group: &'g super::x_pairwise_par::QueryGroup<'_>,
+    parsed: &'g [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    sources: &'g [super::defline::SourceTaxname],
+    database: bool,
+    gapped: bool,
+    s_idx: u32,
+) -> SubjectHeading<'g> {
+    let title = &group.subject_titles[&s_idx];
+    match parsed_subject(parsed, s_idx) {
+        Some(subject) => SubjectHeading::Database(DatabaseHeading::parsed(
+            subject,
+            gapped,
+            group.own_hsps(s_idx),
+        )),
+        None if database => {
+            SubjectHeading::Database(DatabaseHeading::Title(title, stored_source(sources, s_idx)))
+        }
+        None => SubjectHeading::Record(title),
+    }
+}
+
+/// The alignments of the HSPs `part` of subject `s_idx` of `group` (its heading with the first):
+/// the subject's heading is `heading_of(s_idx)` (a database heading or a `-subject` record's,
+/// `write_database_subject_alignments_part`, `write_subject_alignments_part`; `records`: the
+/// `-subject` records' parsed Seq-ids), each HSP by `write_hsp`. With `-html` (`html`, the
+/// report's links) the heading's rank counts the headings of the subjects before it
+/// (`QueryGroup::heading_rank` with `heading_of`), made only then.
+#[allow(clippy::too_many_arguments)]
+fn write_subject_part<'h, W: Write>(
+    writer: &mut W,
+    probe: Option<&mut FormatProbe<'_>>,
+    group: &super::x_pairwise_par::QueryGroup<'_>,
+    s_idx: u32,
+    part: std::ops::Range<usize>,
+    protein: bool,
+    html: Option<&super::html_ids::HtmlReport>,
+    records: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    heading_of: impl Fn(u32) -> SubjectHeading<'h>,
+    write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+) -> io::Result<()> {
+    let html = html.map(|report| HtmlHeading {
+        report,
+        s_idx,
+        rank: group.heading_rank(s_idx, |subject| heading_of(subject).throws(protein)),
+    });
+    let (hits, indices) = (
+        &group.subject_hits[&s_idx],
+        &group.subject_hit_indices[&s_idx],
+    );
+    match heading_of(s_idx) {
+        SubjectHeading::Database(heading) => write_database_subject_alignments_part(
+            writer, probe, heading, protein, hits, indices, part, html, write_hsp,
+        ),
+        SubjectHeading::Record(title) => write_subject_alignments_part(
+            writer, probe, s_idx, records, title, protein, hits, indices, part, html, write_hsp,
+        ),
+    }
+}
+
+/// The heading `lines` of a subject (each line ending with a newline), `Length=` when the length
+/// is known, and one blank line.
+fn write_heading_lines<W: Write>(
+    writer: &mut W,
+    lines: &[u8],
+    length: Option<usize>,
+) -> io::Result<()> {
+    writer.write_all(lines)?;
+    if let Some(length) = length {
+        writeln!(writer, "Length={length}")?;
+    }
+    writeln!(writer)
+}
+
+/// The HSPs `part` of a subject (`hits`, `hsp_indices`) after its heading: each by `write_hsp`,
+/// or NCBI's line in place of each where the heading was not made (`skipped`, the Seq-id text of
+/// the line; showalign.cpp:1976-1981, quoted at `write_subject_alignments_part`). NCBI sets
+/// `previousId` only after a heading, so each alignment of a skipped subject makes its heading
+/// again: with `-html` the next one's attempt is `retry` (its id links, whose registry posts
+/// again where it throws).
+#[allow(clippy::too_many_arguments)]
+fn write_hsps_or_skips<W: Write>(
+    writer: &mut W,
+    mut probe: Option<&mut FormatProbe<'_>>,
+    hits: &[&PairwiseHit],
+    hsp_indices: &[HspIndex],
+    part: std::ops::Range<usize>,
+    mut skipped: Option<Vec<u8>>,
+    mut retry: Option<impl FnMut() -> io::Result<Option<Vec<u8>>>>,
+    mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+) -> io::Result<()> {
+    for (at, (hit, &hsp_index)) in hits[part.clone()]
+        .iter()
+        .zip(&hsp_indices[part])
+        .enumerate()
+    {
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
             probe.begin(hsp_index);
         }
-        match heading {
-            Ok(_) => write_hsp(writer, hit)?,
-            Err(super::defline::UnknownEncoding) => {
-                write_skipped_alignment(writer, &record_skipped_id(parsed, s_idx))?
+        if at > 0 && skipped.is_some() {
+            if let Some(retry) = retry.as_mut() {
+                skipped = retry()?;
             }
+        }
+        match &skipped {
+            None => write_hsp(writer, hit)?,
+            Some(id) => write_skipped_alignment(writer, id)?,
         }
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
@@ -836,7 +1024,8 @@ fn write_database_subject_alignments_part<W: Write>(
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
-    mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+    html: Option<HtmlHeading<'_>>,
+    write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
     let skipped = if part.start == 0 {
@@ -845,30 +1034,26 @@ fn write_database_subject_alignments_part<W: Write>(
             probe.subject_begin(first_index);
         }
         let skipped =
-            write_database_subject_heading(writer, title, protein, hits[0].subject_length)?;
+            write_database_subject_heading(writer, title, protein, hits[0].subject_length, html)?;
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
             probe.subject_end(first_index);
         }
         skipped
     } else {
-        title.skipped_id(protein)
+        title.skipped_id(protein, html)?
     };
-    for (hit, &hsp_index) in hits[part.clone()].iter().zip(&hsp_indices[part]) {
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.begin(hsp_index);
-        }
-        match &skipped {
-            None => write_hsp(writer, hit)?,
-            Some(id) => write_skipped_alignment(writer, id)?,
-        }
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.end(hsp_index);
-        }
-    }
-    Ok(())
+    let retry = html.map(|html| move || title.skipped_id(protein, Some(html)));
+    write_hsps_or_skips(
+        writer,
+        probe,
+        hits,
+        hsp_indices,
+        part,
+        skipped,
+        retry,
+        write_hsp,
+    )
 }
 
 /// NCBI's line in place of an alignment whose heading it cannot make (showalign.cpp:1976-1981,
@@ -896,15 +1081,53 @@ impl<'a> DatabaseHeading<'a> {
     /// id <id> no longer exists in database...alignment skipped`, showalign.cpp:1976-1981, quoted
     /// at `ParsedSubject::heading_skipped_id`) where the heading's generated title throws: an empty
     /// stored title made from a name that NCBI cannot decode (`SourceTaxname::undecodable_id`), or
-    /// the generated title of a sequence with parsed Seq-ids (`heading_skipped_id`).
-    fn skipped_id(self, protein: bool) -> Option<Vec<u8>> {
-        match self {
+    /// the generated title of a sequence with parsed Seq-ids (`heading_skipped_id`). With `-html`
+    /// (`html`) the heading is made (`html_lines`: its id links come first and the registry can
+    /// throw), as NCBI makes it for each alignment until it succeeds.
+    fn skipped_id(
+        self,
+        protein: bool,
+        html: Option<HtmlHeading<'_>>,
+    ) -> io::Result<Option<Vec<u8>>> {
+        if let Some(html) = html {
+            return Ok(self.html_lines(protein, html)?.err());
+        }
+        Ok(match self {
             DatabaseHeading::Title([], source) => source.undecodable_id().map(<[u8]>::to_vec),
             DatabaseHeading::Title(..) => None,
             DatabaseHeading::Parsed(subject, every_line) => {
                 subject.heading_skipped_id(protein, every_line)
             }
+        })
+    }
+
+    /// The `-html` heading's lines (`write_lines`' with links, anchors and HTML-encoded titles),
+    /// or the Seq-id text of NCBI's line in place of each alignment: the definition lines of a
+    /// sequence with parsed Seq-ids (`ParsedSubject::heading`), else `>`, `<a name=BL_ORD_ID:N></a>`,
+    /// a space and the stored title (`HtmlHeading::unparsed_start`; `bp.dp.f0.h`).
+    fn html_lines(
+        self,
+        protein: bool,
+        html: HtmlHeading<'_>,
+    ) -> io::Result<Result<Vec<u8>, Vec<u8>>> {
+        let (title, source) = match self {
+            DatabaseHeading::Parsed(subject, every_line) => {
+                return subject.heading(protein, every_line, Some(html));
+            }
+            DatabaseHeading::Title(title, source) => (title, source),
+        };
+        let mut lines = Vec::new();
+        if let Err(error) = html.unparsed_start(&mut lines) {
+            return HtmlHeading::skips(error, || html.unparsed_skipped_id()).map(Err);
         }
+        Ok(match stored_heading_title(title, source, protein) {
+            Ok(title) => {
+                super::db_subject::wrap_title(&super::html::html_encode(&title), &mut lines);
+                lines.push(b'\n');
+                Ok(lines)
+            }
+            Err(id) => Err(id.to_vec()),
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:340-359
@@ -936,36 +1159,33 @@ impl<'a> DatabaseHeading<'a> {
     /// parsed Seq-ids the line of each definition line (`ParsedSubject::heading`). Where the title
     /// made for the heading throws it writes nothing and gives the Seq-id text of NCBI's line in
     /// place of each alignment (`skipped_id`). The title is made once.
-    fn write_lines<W: Write>(self, writer: &mut W, protein: bool) -> io::Result<Option<Vec<u8>>> {
-        let (title, source) = match self {
-            DatabaseHeading::Title(title, source) => (title, source),
-            DatabaseHeading::Parsed(subject, every_line) => {
-                return match subject.heading(protein, every_line) {
-                    Ok(lines) => writer.write_all(&lines).map(|()| None),
-                    Err(id) => Ok(Some(id)),
+    /// With `-html` (`html`) the lines are `html_lines`.
+    fn write_lines<W: Write>(
+        self,
+        writer: &mut W,
+        protein: bool,
+        html: Option<HtmlHeading<'_>>,
+    ) -> io::Result<Option<Vec<u8>>> {
+        let lines = match (self, html) {
+            (_, Some(html)) => self.html_lines(protein, html)?,
+            (DatabaseHeading::Parsed(subject, every_line), None) => {
+                subject.heading(protein, every_line, None)?
+            }
+            (DatabaseHeading::Title(title, source), None) => {
+                return match stored_heading_title(title, source, protein) {
+                    Ok(heading) => {
+                        writer.write_all(b">")?;
+                        write_wrapped(writer, &heading)?;
+                        writer.write_all(b"\n").map(|()| None)
+                    }
+                    Err(id) => Ok(Some(id.to_vec())),
                 };
             }
         };
-        let generated;
-        let heading: &[u8] = if title.is_empty() {
-            if let Some(id) = source.undecodable_id() {
-                return Ok(Some(id.to_vec()));
-            }
-            // NCBI makes an empty title from the Bioseq's source (`showalign.cpp:2250-2255`,
-            // quoted at `ParsedSubject::generated_title_fetched`; LOSAT refuses a source that it
-            // refuses before the report, `StoredTitle::check_shown_source`).
-            let facts = super::defline::BioseqFacts::of_source(source.name().ok().flatten());
-            generated = super::defline::generate_bioseq_defline(title, protein, false, &facts)
-                .map(|defline| defline.text)
-                .unwrap_or_default();
-            &generated
-        } else {
-            title
-        };
-        writer.write_all(b">")?;
-        write_wrapped(writer, heading)?;
-        writer.write_all(b"\n")?;
-        Ok(None)
+        match lines {
+            Ok(lines) => writer.write_all(&lines).map(|()| None),
+            Err(id) => Ok(Some(id)),
+        }
     }
 
     /// The heading of a subject with parsed Seq-ids and `hsps` HSPs in a search that is
@@ -979,6 +1199,31 @@ impl<'a> DatabaseHeading<'a> {
     ) -> Self {
         DatabaseHeading::Parsed(subject, !gapped && hsps > 1)
     }
+}
+
+/// The title of the heading of a database sequence without parsed Seq-ids: its stored `title`, or
+/// of an empty one the title that NCBI makes from the Bioseq's `source` (`showalign.cpp:2250-2255`,
+/// quoted at `ParsedSubject::generated_title_fetched`; LOSAT refuses a source that it refuses
+/// before the report, `StoredTitle::check_shown_source`); `Err` with the Seq-id text of NCBI's
+/// line in place of each alignment where that throws (`SourceTaxname::undecodable_id`).
+fn stored_heading_title<'t>(
+    title: &'t [u8],
+    source: &'t super::defline::SourceTaxname,
+    protein: bool,
+) -> Result<std::borrow::Cow<'t, [u8]>, &'t [u8]> {
+    if !title.is_empty() {
+        return Ok(title.into());
+    }
+    if let Some(id) = source.undecodable_id() {
+        return Err(id);
+    }
+    let facts = super::defline::BioseqFacts::of_source(source.name().ok().flatten());
+    Ok(
+        super::defline::generate_bioseq_defline(title, protein, false, &facts)
+            .map(|defline| defline.text)
+            .unwrap_or_default()
+            .into(),
+    )
 }
 
 /// The source of the subject `s_idx` without parsed Seq-ids among `sources`, the sources of a
@@ -1002,8 +1247,9 @@ fn write_database_subject_heading<W: Write>(
     heading: DatabaseHeading<'_>,
     protein: bool,
     length: Option<usize>,
+    html: Option<HtmlHeading<'_>>,
 ) -> io::Result<Option<Vec<u8>>> {
-    if let Some(id) = heading.write_lines(writer, protein)? {
+    if let Some(id) = heading.write_lines(writer, protein, html)? {
         return Ok(Some(id));
     }
     if let Some(length) = length {
@@ -3555,39 +3801,18 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         part: std::ops::Range<usize>,
     ) -> io::Result<()> {
         let config = self.config;
-        let parsed = parsed_subject(self.parsed_subjects, s_idx);
-        if self.database.is_some() || parsed.is_some() {
-            let heading = match parsed {
-                Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
-                None => DatabaseHeading::Title(
-                    &group.subject_titles[&s_idx],
-                    stored_source(self.subject_sources, s_idx),
-                ),
-            };
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                heading,
-                true,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                part,
-                |writer, hit| {
-                    write_hsp_info(writer, hit, config)?;
-                    write_alignment(writer, hit, config)
-                },
-            );
-        }
-        write_subject_alignments_part(
+        let (parsed, sources) = (self.parsed_subjects, self.subject_sources);
+        let database = self.database.is_some();
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            self.parsed_subjects,
-            &group.subject_titles[&s_idx],
-            true,
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
             part,
+            true,
+            config.html.as_ref(),
+            parsed,
+            |subject| group_heading(group, parsed, sources, database, true, subject),
             |writer, hit| {
                 write_hsp_info(writer, hit, config)?;
                 write_alignment(writer, hit, config)
@@ -4908,41 +5133,19 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
         // id is not shown), as BLASTP's (`write_database_subject_alignments_part`), or the lines
         // of the definition lines of one with parsed Seq-ids.
-        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
-        if self.report.database.is_some() || parsed.is_some() {
-            let heading = match parsed {
-                Some(subject) => {
-                    DatabaseHeading::parsed(subject, self.report.gapped, group.own_hsps(s_idx))
-                }
-                None => DatabaseHeading::Title(
-                    &group.subject_titles[&s_idx],
-                    stored_source(&self.report.subject_sources, s_idx),
-                ),
-            };
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                heading,
-                false,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                part,
-                |writer, hit| {
-                    write_hsp_info(writer, hit, config)?;
-                    write_alignment(writer, hit, config)
-                },
-            );
-        }
-        write_subject_alignments_part(
+        let report = self.report;
+        let (parsed, sources) = (&report.parsed_subjects[..], &report.subject_sources[..]);
+        let (database, gapped) = (report.database.is_some(), report.gapped);
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            &self.report.parsed_subjects,
-            &group.subject_titles[&s_idx],
-            false,
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
             part,
+            false,
+            config.html.as_ref(),
+            parsed,
+            |subject| group_heading(group, parsed, sources, database, gapped, subject),
             |writer, hit| {
                 write_hsp_info(writer, hit, config)?;
                 write_alignment(writer, hit, config)
@@ -5642,36 +5845,21 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         // A database sequence's heading is its stored title after `>` (as BLASTP's,
         // BLASTN's and TBLASTN's `-db` reports), or the lines of the definition lines of one
         // with parsed Seq-ids.
-        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
-        if self.database.is_some() || parsed.is_some() {
-            let heading = match parsed {
-                Some(subject) => DatabaseHeading::parsed(subject, false, group.own_hsps(s_idx)),
-                None => DatabaseHeading::Title(
-                    &group.subject_titles[&s_idx],
-                    stored_source(&self.report.subject_sources, s_idx),
-                ),
-            };
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                heading,
-                false,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                part,
-                write_hsp,
-            );
-        }
-        write_subject_alignments_part(
+        let (parsed, sources) = (
+            &self.report.parsed_subjects[..],
+            &self.report.subject_sources[..],
+        );
+        let database = self.database.is_some();
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            &self.report.parsed_subjects,
-            &group.subject_titles[&s_idx],
-            false,
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
             part,
+            false,
+            config.html.as_ref(),
+            parsed,
+            |subject| group_heading(group, parsed, sources, database, false, subject),
             write_hsp,
         )
     }
@@ -6027,6 +6215,7 @@ mod tests {
             &[&hit],
             &[0],
             0..1,
+            None,
             |writer: &mut Vec<u8>, _| writer.write_all(b"<hsp>\n"),
         )
         .unwrap();
@@ -7116,36 +7305,18 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         // A database sequence's heading is its stored title after `>` (as BLASTP's
         // and BLASTN's `-db` reports), or the lines of the definition lines of one with
         // parsed Seq-ids.
-        let parsed = parsed_subject(self.parsed_subjects, s_idx);
-        if self.database.is_some() || parsed.is_some() {
-            let heading = match parsed {
-                Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
-                None => DatabaseHeading::Title(
-                    &group.subject_titles[&s_idx],
-                    stored_source(self.subject_sources, s_idx),
-                ),
-            };
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                heading,
-                false,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                part,
-                write_hsp,
-            );
-        }
-        write_subject_alignments_part(
+        let (parsed, sources) = (self.parsed_subjects, self.subject_sources);
+        let database = self.database.is_some();
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            self.parsed_subjects,
-            &group.subject_titles[&s_idx],
-            false,
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
             part,
+            false,
+            config.html.as_ref(),
+            parsed,
+            |subject| group_heading(group, parsed, sources, database, true, subject),
             write_hsp,
         )
     }
@@ -7617,50 +7788,42 @@ impl BlastxSections<'_> {
             write_blastx_alignment(writer, hit, config)?;
             writeln!(writer)
         };
-        let (hits, indices) = (
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
-        );
-        let parsed = match self.database {
-            Some((_, _, parsed, _)) => parsed_subject(parsed, s_idx),
-            None => parsed_subject(self.records_parsed, s_idx),
+        let heading_of = |s_idx: u32| {
+            let parsed = match self.database {
+                Some((_, _, parsed, _)) => parsed_subject(parsed, s_idx),
+                None => parsed_subject(self.records_parsed, s_idx),
+            };
+            match (parsed, self.database) {
+                (Some(subject), _) => SubjectHeading::Database(DatabaseHeading::parsed(
+                    subject,
+                    self.options.gapped,
+                    group.own_hsps(s_idx),
+                )),
+                (None, Some((_, titles, _, sources))) => SubjectHeading::Database(
+                    DatabaseHeading::Title(&titles[s_idx as usize], stored_source(sources, s_idx)),
+                ),
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
+                // ```c++
+                // 	alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+                // ```
+                (None, None) => SubjectHeading::Record(
+                    self.record_titles
+                        .get(s_idx as usize)
+                        .copied()
+                        .unwrap_or_default(),
+                ),
+            }
         };
-        let heading = match (parsed, self.database) {
-            (Some(subject), _) => Some(DatabaseHeading::parsed(
-                subject,
-                self.options.gapped,
-                group.own_hsps(s_idx),
-            )),
-            (None, Some((_, titles, _, sources))) => Some(DatabaseHeading::Title(
-                &titles[s_idx as usize],
-                stored_source(sources, s_idx),
-            )),
-            (None, None) => None,
-        };
-        if let Some(heading) = heading {
-            return write_database_subject_alignments_part(
-                writer, probe, heading, true, hits, indices, part, write_hsp,
-            );
-        }
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
-        // ```c++
-        // 	alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
-        // ```
-        let title = self
-            .record_titles
-            .get(s_idx as usize)
-            .copied()
-            .unwrap_or_default();
-        write_subject_alignments_part(
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            self.records_parsed,
-            title,
-            true,
-            hits,
-            indices,
             part,
+            true,
+            config.html.as_ref(),
+            self.records_parsed,
+            heading_of,
             write_hsp,
         )
     }
@@ -9287,6 +9450,7 @@ mod tblastx_tests {
             &hits[&0],
             &[0, 1],
             0..hits[&0].len(),
+            None,
             |_, _| panic!("no HSP is written"),
         )
         .unwrap();

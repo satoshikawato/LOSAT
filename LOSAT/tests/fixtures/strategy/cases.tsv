@@ -483,6 +483,9 @@ tblastn.db.list.f11.batches	tblastn	BATCH_SIZE=1	-query tests/db_search/seqidlis
 tblastn.db.list.none.f11	tblastn	BATCH_SIZE=1	-query tests/db_search/seqidlist/q_multi.faa -db tests/db_search/taxfilter/tfn -seqidlist tests/db_search/seqidlist/sl_none.txt -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.db.list.f11.batches	tblastx	BATCH_SIZE=1	-query tests/db_search/seqidlist/q_multi.fna -db tests/db_search/taxfilter/tfn -negative_taxidlist tests/db_search/taxfilter/tl_neg.txt -no_taxid_expansion -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.db.list.none.f11	tblastx	BATCH_SIZE=1	-query tests/db_search/seqidlist/q_multi.fna -db tests/db_search/taxfilter/tfn -seqidlist tests/db_search/seqidlist/sl_none.txt -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+tblastx.sub.sumf	tblastx	-	-query tests/fasta/outfmt0/x3_q20.fna -subject tests/fasta/outfmt0/x3_s20.fna -sum_stats false -evalue 1e-30 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+tblastx.sub.intron100	tblastx	-	-query tests/fasta/outfmt0/x3_q20.fna -subject tests/fasta/outfmt0/x3_s20.fna -max_intron_length 100 -evalue 1e-30 -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+tblastx.db.sumf	tblastx	-	-query tests/db_search/xslice_q.fna -db tests/db_search/xslice -sum_stats false -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.pssm.db.d3.c10_user	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c10_user.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastn.db.in_pssm.d3.c10_user	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c10_user.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.pssm.db.d3.c11_delay	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c11_delay.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

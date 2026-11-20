@@ -149,7 +149,7 @@ Strategy files:
 | :--- | :--- |
 | `-task rmblastn` | Refused. |
 | `-reward 0` | Refused (exit status 1). The message is shown below the table. |
-| `-ungapped` with `-outfmt` 8, 9, 11, 12 or 17 | Refused. |
+| `-ungapped` with `-outfmt 17` (SAM) | Refused. |
 | `-filtering_db`, `-index_name` | Refused. |
 | `-use_index true` with a megablast search of a database that has a MegaBLAST index (made by `makembindex`) | Refused. |
 | `-use_index true` with a `-db` value that has a comma (old-style index volumes) | Refused. |
@@ -288,8 +288,6 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | Option or value | What happens |
 | :--- | :--- |
 | `-strand` | Refused. |
-| `-sum_stats` | Refused. |
-| `-max_intron_length` other than 0 | Refused. |
 | `-subject_besthit` | Refused. |
 | `-query_gencode 32`, `-db_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
 | An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension passes into the next frame of the query | Refused. See Rare inputs. |

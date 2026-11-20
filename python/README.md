@@ -28,7 +28,7 @@ outcome.diagnostics                     # what the command line writes to its st
 pip install pylosat
 ```
 
-PyPI has wheels for CPython 3.10 and later on Linux (x86_64, aarch64), macOS (arm64, x86_64) and Windows (x64). On other platforms pip builds pylosat from its source distribution, which needs Rust 1.92 or later ([rustup](https://rustup.rs/)).
+PyPI has wheels for CPython 3.10 and later on Linux (x86_64, aarch64; glibc 2.17 or later), macOS (arm64, x86_64) and Windows (x64). On other platforms pip builds pylosat from its source distribution, which needs Rust 1.92 or later ([rustup](https://rustup.rs/)).
 
 To build a wheel from the repository instead, use [maturin](https://www.maturin.rs/):
 
@@ -119,4 +119,4 @@ See [`python/AGENTS.md`](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/pyth
 
 ## License
 
-MIT. See [LICENSE](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE).
+LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/THIRD_PARTY_NOTICES).

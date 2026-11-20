@@ -358,6 +358,8 @@ fn parse_blastn_args(
         outfmt: "6".to_string(),
         archive: None,
         export_search_strategy: None,
+        import_search_strategy: None,
+        import: None,
         strategy: None,
         command_line: None,
         // The command line's progress bar; a web search writes nothing to standard error.
@@ -489,6 +491,8 @@ fn parse_tblastx_args(
         subject_loc: None,
         archive: None,
         export_search_strategy: None,
+        import_search_strategy: None,
+        import: None,
         strategy: None,
         tabular_taxdb: None,
         subject_taxdb: None,

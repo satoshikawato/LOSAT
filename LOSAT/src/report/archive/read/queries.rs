@@ -83,7 +83,7 @@ pub enum RenderError {
     /// and the run ends before any search.
     Exception(NcbiException),
     /// What LOSAT does not reproduce: the part of the queries, for a message
-    /// "<part> is not supported by LOSAT's <program>".
+    /// `"<part> is not supported by LOSAT's <program>"`.
     Unsupported(String),
 }
 

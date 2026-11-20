@@ -1019,6 +1019,11 @@ pub fn run(
     mut args: TblastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
+    // `RecoverSearchStrategy` first (tblastx_app.cpp:106-111): the strategy's options and inputs
+    // become the run's arguments (`archive::apply_strategy`).
+    if args.import_search_strategy.is_some() {
+        args = crate::algorithm::tblastx::archive::apply_strategy(args)?;
+    }
     args.id_scope = args.parse_deflines.then(Default::default);
     // NCBI's score block looks for the file of a `-matrix` that its tables do not have when it
     // sets up a batch (`TblastxArgs::find_matrix_file`); the run refuses it there, as the name
@@ -1101,6 +1106,13 @@ pub fn run(
         }
         None => &mut stderr,
     };
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+    if let Some(import) = &args.import {
+        diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
+            &import.warnings,
+            "tblastx",
+        ))?;
+    }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
     // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
@@ -1152,7 +1164,11 @@ pub fn run(
     input_files::check_utf8_file_name(&args.query, "query", "TBLASTX")?;
     // NCBI opens the query file inside `Run` too: its error is saved and an error archive
     // follows.
-    let query_file = match input_files::open_input(&args.query, "query", "TBLASTX") {
+    let query_file = match crate::report::archive::read::import::ImportRun::open_query(
+        args.import.as_ref(),
+        &args.query,
+        "TBLASTX",
+    ) {
         Ok(file) => file,
         Err(error) => {
             write_run_error_archive(&args, archive.as_ref(), &error);
@@ -1298,11 +1314,18 @@ fn read_subject_set(
     // ```
     // The first handler opens and reads the subjects (an empty subject set fails there),
     // as BLASTN's `run`.
-    let Some(subject_path) = args.subject.clone() else {
-        return Err(crate::blastinput::app::missing_subject_error());
+    // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for `-subject`.
+    let subject_file = match (
+        args.import.as_ref().and_then(|run| run.subjects.as_ref()),
+        &args.subject,
+    ) {
+        (Some(file), _) => input_files::InputFile::from(file.try_clone()?),
+        (None, Some(subject_path)) => {
+            input_files::check_utf8_file_name(subject_path, "subject", "TBLASTX")?;
+            input_files::open_input(subject_path, "subject", "TBLASTX")?
+        }
+        (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
     };
-    input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTX")?;
-    let subject_file = input_files::open_input(&subject_path, "subject", "TBLASTX")?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // ```c++
     //             subj_input_stream = &args[kArgSubject].AsInputFile();
@@ -1463,10 +1486,14 @@ fn check_ncbi_options(
     // ```
     // The query options handler comes after the filtering handler and before the
     // formatting handler (tblastx_args.cpp:44-125).
-    let query_range = crate::blastinput::seq_range::parse_optional_range(
-        args.query_loc.as_deref(),
-        crate::blastinput::seq_range::RangeRole::Query,
-    )?;
+    // An imported strategy's query range stands for `-query_loc`'s (`archive::apply_strategy`).
+    let query_range = match args.import.as_ref().and_then(|import| import.query_range) {
+        Some(range) => Some(range),
+        None => crate::blastinput::seq_range::parse_optional_range(
+            args.query_loc.as_deref(),
+            crate::blastinput::seq_range::RangeRole::Query,
+        )?,
+    };
     // Each requested format's (the library's `-outfmt` values are its outputs', not `args.outfmt`).
     for choice in choices {
         formatting_handler_check(choice, Program::Tblastx)?;
@@ -1483,6 +1510,14 @@ fn check_ncbi_options(
         &args.formatting,
     )?;
     diagnostics.write_all(&warnings)?;
+    // An imported strategy's warnings for the options it replaces
+    // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
+    if let Some(import) = &args.import {
+        diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
+            &import.option_warnings,
+            "tblastx",
+        ))?;
+    }
     // (`threshold <= 0` is false for NaN, as in C.)
     if args.word_threshold() <= 0.0 {
         return Err(options_error("Non-zero threshold required"));
@@ -2355,7 +2390,9 @@ fn write_pairwise_prologs(
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
                         crate::NCBI_BLAST_VERSION,
-                        &tblastx_database_name(args),
+                        &crate::report::pairwise::scan_mode_definition(
+                            &args.subject_label().to_string(),
+                        ),
                         records.len() as i64,
                         // NCBI's `Int8` sum (seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
                         // (Int8) (*iter)->length`).
@@ -2833,7 +2870,13 @@ fn write_tblastx_outputs(
                     );
                     let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
                         version: crate::NCBI_BLAST_VERSION.to_string(),
-                        database_name: database.clone(),
+                        database_name: match &run.database {
+                            Some(_) => database.clone(),
+                            // An imported strategy's subjects name no input (an empty tag).
+                            None => crate::report::pairwise::scan_mode_definition(
+                                &args.subject_label().to_string(),
+                            ),
+                        },
                         // `-db`: the `Database:` lines are the database's (`database` below).
                         // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
                         // held in memory.

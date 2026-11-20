@@ -92,10 +92,11 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
         .and_then(crate::report::archive::options::seg_filter);
     inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
     inputs.db_gencode = i32::from(args.db_gencode);
+    inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
-        .map_or(500, |size| size as i32);
+        .map_or(args.formatting.recorded_hitlist_start(), |size| size as i32);
     if let Ok((mode, _)) =
         crate::blastinput::app::parse_comp_based_stats(&args.comp_based_stats, false, false)
     {
@@ -649,4 +650,151 @@ mod tests {
         assert_eq!(lowercase_runs(b"MWME"), []);
         assert_eq!(lowercase_runs(b""), []);
     }
+}
+
+/// `-import_search_strategy` of TBLASTN (`RecoverSearchStrategy`, `SetOptionsForSavedStrategy`,
+/// blast_args.cpp:3800-3836, quoted at `blastp::archive::apply_strategy`): the arguments of a
+/// command line that gives nothing (the strategy task's defaults) with the strategy's options set
+/// on them in the file's order, and from `args` only what NCBI's re-read argument classes take:
+/// the query options, `-out`, the formatting options, the threads and the database arguments
+/// when `-db` or `-subject` is given. The run then goes on as any other (one search path).
+pub(crate) fn apply_strategy(args: super::args::TblastnArgs) -> Result<super::args::TblastnArgs> {
+    use crate::blastinput::app::Program;
+    use crate::report::archive::read::import::{self, Command, Start};
+    use crate::report::archive::read::options::{EProgram, Setter};
+    let program = Program::Tblastn.name();
+    let path = args.import_search_strategy.clone().expect("an import");
+    let start = import::start(
+        &Command {
+            path: &path,
+            program,
+            override_query: args.query.as_os_str() != "-",
+            override_subject: args.db.is_some() || args.subject.is_some(),
+            use_index_set: false,
+        },
+        "tblastn",
+    )?;
+    if start.imported.program() != EProgram::Tblastn {
+        return Err(start.unported_program(program));
+    }
+    let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "tblastn"])?;
+    let crate::cli::Commands::Tblastn(mut out) = cli.command else {
+        unreachable!("the arguments of tblastn")
+    };
+    let mut run = start.run(args.parse_deflines, program)?;
+    run.query_range = start.query_range(args.query_loc.as_ref(), program)?;
+    // `CQueryOptionsArgs`, `CStdCmdLineArgs`, `CFormattingArgs`, `CMTArgs`.
+    out.query = args.query;
+    out.query_loc = args.query_loc;
+    out.lcase_masking = args.lcase_masking;
+    out.parse_deflines = args.parse_deflines;
+    out.id_scope = args.id_scope;
+    out.out = args.out;
+    out.outfmt = args.outfmt;
+    out.show_gis = args.show_gis;
+    out.num_descriptions = args.num_descriptions;
+    out.num_alignments = args.num_alignments;
+    out.max_target_seqs = args.max_target_seqs;
+    out.formatting = args.formatting;
+    out.num_threads = args.num_threads;
+    out.mt_mode = args.mt_mode;
+    out.import_search_strategy = Some(path);
+    // `CBlastDatabaseArgs` when the command line gives the database or the subjects, else the
+    // strategy's.
+    // `-dbsize` with `-db` or `-subject` is set after the strategy's options, unless the
+    // strategy's search space trumps it (blast_args.cpp:2565-2572).
+    let mut cli_dbsize = None;
+    if args.db.is_some() || args.subject.is_some() {
+        out.db = args.db;
+        out.subject = args.subject;
+        out.subject_loc = args.subject_loc;
+        out.db_filter = args.db_filter;
+        cli_dbsize = args.dbsize;
+    } else if let Some(name) = start.database() {
+        out.db = Some(name.to_string());
+        out.db_filter = start.db_filter(program)?;
+        if start.db_mask().is_some() {
+            return Err(Start::unported(
+                "a search strategy with a database mask",
+                program,
+            ));
+        }
+    } else if start.has_subjects() {
+        // The Owner's decision F2-Q1 (2026-11-20 「Q1=C」): a strategy's subjects are searched
+        // once, as with `-num_threads 1`, whatever `-num_threads` says (NCBI searches them once per
+        // thread: its thread check reads only the command line's `-subject`).
+        out.num_threads = 1;
+    }
+    out.task = start.imported.program().task_name().to_string();
+    let options = &start.imported.options.options;
+    let mut seg = import::SegSetters::default();
+    let (mut cbs, mut unified_p) = (None, 0);
+    for setter in &options.setters {
+        if seg.take(setter) {
+            continue;
+        }
+        match setter {
+            Setter::EvalueThreshold(v) => out.evalue = Some(*v),
+            Setter::WordSize(n) => out.word_size = Some(*n),
+            Setter::WordThreshold(n) => out.threshold = Some(f64::from(*n)),
+            Setter::WindowSize(n) => out.window_size = Some(*n),
+            Setter::MatrixName(name) => out.matrix = Some(name.clone()),
+            Setter::GapOpeningCost(n) => out.gap_open = Some(*n),
+            Setter::GapExtensionCost(n) => out.gap_extend = Some(*n),
+            Setter::GapXDropoff(v) => out.xdrop_gap = Some(*v),
+            Setter::GapXDropoffFinal(v) => out.xdrop_gap_final = Some(*v),
+            Setter::CompositionBasedStats(n) => cbs = Some(*n),
+            Setter::UnifiedP(n) => unified_p = *n,
+            Setter::CullingLimit(n) => out.culling_limit = Some(*n),
+            Setter::EffectiveSearchSpace(n) => {
+                out.searchsp = Some(*n);
+                run.searchsp_from_strategy = true;
+            }
+            Setter::DbLength(n) => out.dbsize = Some(*n),
+            Setter::HitlistSize(n) => out.formatting.hitlist_start = usize::try_from(*n).ok(),
+            Setter::MaxHspsPerSubject(n) => {
+                out.max_hsps = usize::try_from(*n).ok().filter(|n| *n > 0)
+            }
+            Setter::QueryCovHspPerc(v) => out.qcov_hsp_perc = Some(*v),
+            Setter::MaskAtHash(on) => out.soft_masking = Some(*on),
+            Setter::GappedMode(gapped) => out.ungapped = !*gapped,
+            Setter::SumStatisticsMode(on) => out.sum_stats = Some(*on),
+            Setter::DbGeneticCode(n) => {
+                out.db_gencode = u8::try_from(*n).map_err(|_| {
+                    Start::unported("a search strategy with this database genetic code", program)
+                })?
+            }
+            Setter::LongestIntronLength(n) => out.max_intron_length = Some(*n),
+            Setter::DustFiltering(false)
+            | Setter::RepeatFiltering(false)
+            | Setter::SmithWatermanMode(false)
+            | Setter::OutOfFrameMode(false) => {}
+            other => return Err(Start::unported_setter(other, program)),
+        }
+    }
+    if let Some(value) = seg.value() {
+        out.seg = Some(value);
+    }
+    if let Some(mode) = cbs {
+        if !(0..=3).contains(&mode) || unified_p != 0 {
+            return Err(Start::unported(
+                &format!("a search strategy with composition-based statistics {mode} (unified P {unified_p})"),
+                program,
+            ));
+        }
+        out.comp_based_stats = mode.to_string();
+    }
+    if out.searchsp.is_none() {
+        if let Some(size) = cli_dbsize {
+            out.dbsize = Some(size);
+        }
+    }
+    import::formatting_early_return(
+        &mut out.formatting,
+        out.num_descriptions.is_some(),
+        out.num_alignments.is_some(),
+        &out.outfmt,
+    );
+    out.import = Some(run);
+    Ok(out)
 }

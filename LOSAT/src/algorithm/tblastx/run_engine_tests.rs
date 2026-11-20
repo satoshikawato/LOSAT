@@ -64,6 +64,8 @@ fn db_gencode_controls_local_subject_search_translation() {
         subject_loc: None,
         archive: None,
         export_search_strategy: None,
+        import_search_strategy: None,
+        import: None,
         strategy: None,
         tabular_taxdb: None,
         subject_taxdb: None,

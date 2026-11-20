@@ -6426,6 +6426,8 @@ struct SamTarget<'a> {
 /// What the pairwise report, the hit records and the query warnings need besides the
 /// final hit list.
 struct BlastnReportInputs<'a> {
+    /// The pairwise report's name of the subjects (`ShownSubjects::pairwise_name`).
+    pairwise_subject_title: &'a str,
     queries: &'a [FastaRecord],
     /// The texts of the subjects that each query's report reads one by one (its batch's
     /// prefetch off), by query, which the first format's writer places where it reads them
@@ -7454,7 +7456,7 @@ fn post_process_hits_and_write(
             report,
             unsearched.clone(),
             query_titles,
-            subject_title,
+            report.pairwise_subject_title,
         )?)
     } else {
         None
@@ -8016,6 +8018,11 @@ pub fn run(
     // The command line's progress bar (`BlastnArgs::progress_bar`; no NCBI counterpart). The
     // library API and the web entries come through `run_local` and leave it off.
     args.progress_bar = true;
+    // `RecoverSearchStrategy` first (blastn_app.cpp:128-133): the strategy's options and inputs
+    // become the run's arguments (`archive::apply_strategy`).
+    if args.import_search_strategy.is_some() {
+        args = crate::algorithm::blastn::archive::apply_strategy(args)?;
+    }
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -8145,6 +8152,13 @@ pub fn run(
         }
         None => &mut stderr,
     };
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+    if let Some(import) = &args.import {
+        diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
+            &import.warnings,
+            "blastn",
+        ))?;
+    }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
     // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
@@ -8206,7 +8220,11 @@ pub fn run(
     check_utf8_file_name(&args.query, "query", "BLASTN")?;
     // NCBI opens the query file inside `Run` too (`CStdCmdLineArgs` in its handler of the
     // arguments does not): its error is saved and an error archive follows.
-    let query_file = match open_input(&args.query, "query", "BLASTN") {
+    let query_file = match crate::report::archive::read::import::ImportRun::open_query(
+        args.import.as_ref(),
+        &args.query,
+        "BLASTN",
+    ) {
         Ok(file) => file,
         Err(error) => {
             write_run_error_archive(&args, archive.as_ref(), &error);
@@ -8366,19 +8384,31 @@ fn read_cli_subjects(
     diagnostics: &mut (dyn std::io::Write + Send),
     keep_deflines: bool,
 ) -> Result<CliSubjects> {
-    let Some(subject_path) = args.subject.as_deref() else {
-        // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
-        return Err(crate::cli::NativeError {
-            exit: 1,
-            message: format!(
-                "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\n{}\n",
-                crate::wording::USER_MANUAL_FOOTER
-            ),
+    // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for `-subject`.
+    let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
+    let subject_path = match (imported, args.subject.as_deref()) {
+        (Some(_), _) => None,
+        (None, Some(path)) => Some(path),
+        (None, None) => {
+            // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
+            return Err(crate::cli::NativeError {
+                exit: 1,
+                message: format!(
+                    "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\n{}\n",
+                    crate::wording::USER_MANUAL_FOOTER
+                ),
+            }
+            .into());
         }
-        .into());
     };
-    check_utf8_file_name(subject_path, "subject", "BLASTN")?;
-    let subject_file = open_input(subject_path, "subject", "BLASTN")?;
+    let subject_file = match (imported, subject_path) {
+        (Some(file), _) => crate::blastinput::input_files::InputFile::from(file.try_clone()?),
+        (None, Some(path)) => {
+            check_utf8_file_name(path, "subject", "BLASTN")?;
+            open_input(path, "subject", "BLASTN")?
+        }
+        (None, None) => unreachable!("an error above"),
+    };
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // ```c++
     //             subj_input_stream = &args[kArgSubject].AsInputFile();
@@ -8810,8 +8840,12 @@ fn search_cli(
 ///                                      "Invalid specification of query location");
 ///     }
 /// ```
+/// An imported strategy's query range stands for `-query_loc`'s (`archive::apply_strategy`).
 fn parse_query_range(args: &BlastnArgs) -> Result<Option<SequenceRange>> {
-    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query)
+    match args.import.as_ref().and_then(|import| import.query_range) {
+        Some(range) => Ok(Some(range)),
+        None => parse_optional_range(args.query_loc.as_deref(), RangeRole::Query),
+    }
 }
 
 /// The ranges of a search: the query range as given, and the subjects' ranges.
@@ -8948,6 +8982,16 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     let (counts, warnings) = crate::algorithm::blastn::scoring::report_counts_of(args, &outfmts)?;
     args.report_counts = counts;
     outputs.diagnostics.write_all(&warnings)?;
+    // An imported strategy's warnings for the options it replaces
+    // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
+    if let Some(import) = &args.import {
+        outputs
+            .diagnostics
+            .write_all(&crate::report::archive::read::import::ImportRun::lines(
+                &import.option_warnings,
+                "blastn",
+            ))?;
+    }
     check_scoring_options(args)
 }
 
@@ -10089,7 +10133,14 @@ impl<'a> SubjectSource<'a> {
 /// (`User specified sequence set (Input: PATH)`; the `-db` value for a database), the
 /// counts, and for a database the lines of `GetBlastDbInfo` (`PairwiseDatabase`).
 struct ShownSubjects {
+    /// The name of the tabular and the other reports: `User specified sequence set (Input:
+    /// PATH)` for a subject set (an imported strategy's subjects: an empty PATH), the `-db`
+    /// value for a database.
     name: String,
+    /// The pairwise report's name (`report::pairwise::scan_mode_definition`; the `-db` value
+    /// for a database): an empty input tag (an imported strategy's subjects) names no input
+    /// (`I.blastn.sub.alone`).
+    pairwise_name: String,
     /// The statistics' number of sequences, NCBI's `Int4` (`SubjectMetadata::db_num_seqs`).
     num_seqs: i32,
     /// The statistics' total length, NCBI's `Int8` (`SubjectMetadata::db_len_total`).
@@ -10109,6 +10160,9 @@ impl ShownSubjects {
                     "User specified sequence set (Input: {})",
                     args.subject_path().display()
                 ),
+                pairwise_name: crate::report::pairwise::scan_mode_definition(
+                    &args.subject_path().display().to_string(),
+                ),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
                 database: None,
@@ -10116,6 +10170,7 @@ impl ShownSubjects {
             },
             SubjectSource::Database(database) => ShownSubjects {
                 name: database.name().to_string(),
+                pairwise_name: database.name().to_string(),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
                 database: Some(database.pairwise_database_masked(args.db_mask_resolved.as_ref())),
@@ -11947,7 +12002,7 @@ fn write_format_prolog(
             &mut writer,
             crate::NCBI_BLAST_VERSION,
             megablast,
-            &shown.name,
+            &shown.pairwise_name,
             // Printed for a subject set only (a database prints `database`).
             i64::from(shown.num_seqs),
             shown.total_letters,
@@ -12305,6 +12360,7 @@ fn write_reports_untimed(
     // A subject set's subjects are all loaded (`database_loads`).
     let every_loaded = crate::report::db_subject::HitLoads::default();
     let report_inputs = BlastnReportInputs {
+        pairwise_subject_title: &subjects.shown.pairwise_name,
         query_reads: &query_reads,
         queries: query_records,
         subjects: subject_letters,

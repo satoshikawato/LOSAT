@@ -45,11 +45,12 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::options::{import_request, EProgram, ImportedOptions, SeqRange};
+use super::options::{import_request, EProgram, ImportedOptions, SeqRange, Setter};
 use super::queries::{render_queries, RenderError};
 use super::request::{Queries, Request, Subject};
 use crate::cli::NativeError;
 use crate::ncbi_exception::NcbiException;
+use crate::report::archive::options::{Param, ParamValue};
 use crate::report::serial::asn_types::read::ReadError;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
 use crate::report::serial::asn_types::table::named;
@@ -726,6 +727,9 @@ pub(crate) struct ImportRun {
     /// The strategy's query range (`Start::query_range`), which the program's query options
     /// take in place of `-query_loc`'s.
     pub(crate) query_range: Option<crate::blastinput::seq_range::SequenceRange>,
+    /// The strategy's parameters as its setters record them, in the file's order: the
+    /// archive's options (`options::OptionInputs::imported`).
+    pub(crate) recorded: Vec<crate::report::archive::options::Param>,
 }
 
 impl ImportRun {
@@ -821,6 +825,14 @@ impl Start {
             ),
             searchsp_from_strategy: false,
             query_range: None,
+            recorded: self
+                .imported
+                .options
+                .options
+                .setters
+                .iter()
+                .flat_map(recorded_params)
+                .collect(),
         })
     }
 
@@ -831,6 +843,13 @@ impl Start {
             Some(ImportedSubject::Database(name)) => Some(name),
             _ => None,
         }
+    }
+
+    /// Posts the import's warnings for an error that `SetOptionsForSavedStrategy` raises before
+    /// the run's diagnostics exist (`ncbi_name`: the program's NCBI name).
+    pub(crate) fn post_warnings(&self, ncbi_name: &str) {
+        use std::io::Write;
+        let _ = std::io::stderr().write_all(&ImportRun::lines(&self.imported.warnings, ncbi_name));
     }
 
     /// The strategy's taxid lists over its database (`s_ImportDatabase`, blast_app_util.cpp:468-495):
@@ -964,4 +983,222 @@ impl Start {
 pub(crate) enum DbMaskAlgorithm {
     Id(i32),
     Key(String),
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
+// ```c++
+//     int hitlist_size = opt.GetHitlistSize();
+//     ...
+//     if(hitlist_size > BLAST_HITLIST_SIZE )
+//     {
+//     	if((!args.Exist(kArgNumDescriptions) || !args[kArgNumDescriptions]) &&
+//            (!args.Exist(kArgNumAlignments) || !args[kArgNumAlignments]) &&
+//     	   (m_OutputFormat <= eFlatQueryAnchoredNoIdentities)) {
+//     		m_NumDescriptions = hitlist_size;
+//     		m_NumAlignments = hitlist_size/ 2;
+//     		return;
+//     	}
+//     }
+// ```
+/// The formatting handler's early return for an imported hit list size above 500 (no
+/// `-num_descriptions`, no `-num_alignments`, a pairwise format): it reads none of the options
+/// after it, so `-line_length`, `-sorthits` and `-sorthsps` keep their defaults (probe
+/// `I.blastn.mts600.ll`); the report counts follow it (`report_counts_from`).
+pub(crate) fn formatting_early_return(
+    formatting: &mut crate::blastinput::report_counts::FormattingArgs,
+    num_descriptions_given: bool,
+    num_alignments_given: bool,
+    outfmt: &str,
+) {
+    let pairwise = crate::blastinput::app::parse_formatting_string(outfmt)
+        .is_ok_and(|format| format.number <= 4);
+    if formatting.hitlist_start.is_some_and(|size| size > 500)
+        && !num_descriptions_given
+        && !num_alignments_given
+        && pairwise
+    {
+        formatting.line_length = None;
+        formatting.sort_hits = None;
+        formatting.sort_hsps = None;
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:759-791,841-874
+// ```c++
+//    if (m_QueryOpts->filtering_options->dustOptions)  // free previous structure so we provide defaults.
+//         m_QueryOpts->filtering_options->dustOptions =
+//              SDustOptionsFree(m_QueryOpts->filtering_options->dustOptions);
+//    if (val == false)  // filtering should be turned off
+//        return;
+//    SDustOptionsNew(&(m_QueryOpts->filtering_options->dustOptions));
+// ...
+//     if (m_QueryOpts->filtering_options->dustOptions == NULL)
+//        SDustOptionsNew(&(m_QueryOpts->filtering_options->dustOptions));
+//     m_QueryOpts->filtering_options->dustOptions->level = level;
+// ...
+//     if (m_QueryOpts->filtering_options->segOptions == NULL)
+//        SSegOptionsNew(&(m_QueryOpts->filtering_options->segOptions));
+//     m_QueryOpts->filtering_options->segOptions->window = window;
+// ```
+/// The DUST or SEG options as a strategy's setters leave them, in the file's order:
+/// `SetDustFiltering`/`SetSegFiltering` drop the options and, when true, make them again with
+/// their defaults; a parameter's setter makes them with their defaults when absent and sets its
+/// value. Untouched (`None`), the task's default stays.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FilterSetters<T: Copy> {
+    defaults: T,
+    state: Option<Option<T>>,
+}
+
+impl<T: Copy> FilterSetters<T> {
+    fn on(&mut self, on: bool) {
+        self.state = Some(on.then_some(self.defaults));
+    }
+
+    fn set(&mut self, change: impl FnOnce(&mut T)) {
+        let mut options = self.state.flatten().unwrap_or(self.defaults);
+        change(&mut options);
+        self.state = Some(Some(options));
+    }
+}
+
+/// DUST's level, window and linker (`SDustOptionsNew`: 20, 64, 1).
+pub(crate) type DustSetters = FilterSetters<(i32, i32, i32)>;
+/// SEG's window, low and high cut (`SSegOptionsNew`: 12, 2.2, 2.5).
+pub(crate) type SegSetters = FilterSetters<(i32, f64, f64)>;
+
+impl Default for DustSetters {
+    fn default() -> Self {
+        FilterSetters {
+            defaults: (20, 64, 1),
+            state: None,
+        }
+    }
+}
+
+impl Default for SegSetters {
+    fn default() -> Self {
+        FilterSetters {
+            defaults: (12, 2.2, 2.5),
+            state: None,
+        }
+    }
+}
+
+impl DustSetters {
+    /// Takes a DUST setter (`true`), or leaves any other.
+    pub(crate) fn take(&mut self, setter: &super::options::Setter) -> bool {
+        use super::options::Setter;
+        match *setter {
+            Setter::DustFiltering(on) => self.on(on),
+            Setter::DustFilteringLevel(n) => self.set(|o| o.0 = n),
+            Setter::DustFilteringWindow(n) => self.set(|o| o.1 = n),
+            Setter::DustFilteringLinker(n) => self.set(|o| o.2 = n),
+            _ => return false,
+        }
+        true
+    }
+
+    /// The `-dust` value of the options the setters left, `None` when untouched.
+    pub(crate) fn value(&self) -> Option<String> {
+        self.state.map(|state| match state {
+            None => "no".to_string(),
+            Some((level, window, linker)) => format!("{level} {window} {linker}"),
+        })
+    }
+}
+
+impl SegSetters {
+    /// Takes a SEG setter (`true`), or leaves any other.
+    pub(crate) fn take(&mut self, setter: &super::options::Setter) -> bool {
+        use super::options::Setter;
+        match *setter {
+            Setter::SegFiltering(on) => self.on(on),
+            Setter::SegFilteringWindow(n) => self.set(|o| o.0 = n),
+            Setter::SegFilteringLocut(v) => self.set(|o| o.1 = v),
+            Setter::SegFilteringHicut(v) => self.set(|o| o.2 = v),
+            _ => return false,
+        }
+        true
+    }
+
+    /// The `-seg` value of the options the setters left, `None` when untouched.
+    pub(crate) fn value(&self) -> Option<String> {
+        self.state.map(|state| match state {
+            None => "no".to_string(),
+            Some((window, locut, hicut)) => format!("{window} {locut} {hicut}"),
+        })
+    }
+}
+
+/// The parameters a setter of the builder records in the options handle (`CBlastOptions`'s
+/// `Set*` calls `m_Remote->SetValue` with the field of the value it takes): the archive of an
+/// imported run lists them where NCBI's handle does. `StrandOption`, whose `strand-type` value
+/// LOSAT never writes, records nothing here (no program takes it from a strategy).
+fn recorded_params(setter: &Setter) -> Vec<Param> {
+    use crate::report::archive::fields as f;
+    use ParamValue::{BigInteger, Boolean, Evalue, Integer, Real, Str};
+    let one = |field, value| vec![Param::new(field, value)];
+    match setter {
+        Setter::BestHitScoreEdge(v) => one(f::BEST_HIT_SCORE_EDGE, Real(*v)),
+        Setter::BestHitOverhang(v) => one(f::BEST_HIT_OVERHANG, Real(*v)),
+        Setter::CompositionBasedStats(v) => one(f::COMPOSITION_BASED_STATS, Integer(*v)),
+        Setter::CullingLimit(v) => one(f::CULLING_LIMIT, Integer(*v)),
+        Setter::DbGeneticCode(v) => one(f::DB_GENETIC_CODE, Integer(*v)),
+        Setter::DbLength(v) => one(f::DB_LENGTH, BigInteger(*v)),
+        Setter::DustFiltering(v) => one(f::DUST_FILTERING, Boolean(*v)),
+        Setter::DustFilteringLevel(v) => one(f::DUST_FILTERING_LEVEL, Integer(*v)),
+        Setter::DustFilteringWindow(v) => one(f::DUST_FILTERING_WINDOW, Integer(*v)),
+        Setter::DustFilteringLinker(v) => one(f::DUST_FILTERING_LINKER, Integer(*v)),
+        Setter::DomainInclusionThreshold(v) => one(f::DOMAIN_INCLUSION_THRESHOLD, Real(*v)),
+        Setter::EffectiveSearchSpace(v) => one(f::EFFECTIVE_SEARCH_SPACE, BigInteger(*v)),
+        Setter::EvalueThreshold(v) => one(f::EVALUE_THRESHOLD, Evalue(*v)),
+        Setter::FilterString(v) => one(f::FILTER_STRING, Str(v.clone())),
+        Setter::GapExtensionCost(v) => one(f::GAP_EXTENSION_COST, Integer(*v)),
+        Setter::GapOpeningCost(v) => one(f::GAP_OPENING_COST, Integer(*v)),
+        Setter::GapTracebackAlgorithm(v) => one(f::GAP_TRACEBACK_ALGORITHM, Integer(*v)),
+        Setter::GapTrigger(v) => one(f::GAP_TRIGGER, Real(*v)),
+        Setter::GapXDropoff(v) => one(f::GAP_X_DROPOFF, Real(*v)),
+        Setter::GapXDropoffFinal(v) => one(f::GAP_X_DROPOFF_FINAL, Real(*v)),
+        Setter::GapExtnAlgorithm(v) => one(f::GAP_EXTN_ALGORITHM, Integer(*v)),
+        Setter::HitlistSize(v) => one(f::HITLIST_SIZE, Integer(*v)),
+        Setter::InclusionThreshold(v) => one(f::INCLUSION_THRESHOLD, Real(*v)),
+        Setter::IgnoreMsaMaster(v) => one(f::IGNORE_MSA_MASTER, Boolean(*v)),
+        Setter::LongestIntronLength(v) => one(f::LONGEST_INTRON_LENGTH, Integer(*v)),
+        Setter::MbTemplateLength(v) => one(f::MB_TEMPLATE_LENGTH, Integer(i32::from(*v))),
+        Setter::MbTemplateType(v) => one(f::MB_TEMPLATE_TYPE, Integer(i32::from(*v))),
+        Setter::MatchReward(v) => one(f::MATCH_REWARD, Integer(*v)),
+        Setter::MatrixName(v) => one(f::MATRIX_NAME, Str(v.clone())),
+        Setter::MismatchPenalty(v) => one(f::MISMATCH_PENALTY, Integer(*v)),
+        Setter::MaskAtHash(v) => one(f::MASK_AT_HASH, Boolean(*v)),
+        Setter::MaxHspsPerSubject(v) => one(f::MAX_HSPS_PER_SUBJECT, Integer(*v)),
+        Setter::OutOfFrameMode(v) => one(f::OUT_OF_FRAME_MODE, Boolean(*v)),
+        Setter::PhiPattern { pattern, .. } => one(f::PHI_PATTERN, Str(pattern.clone())),
+        Setter::PercentIdentity(v) => one(f::PERCENT_IDENTITY, Real(*v)),
+        Setter::PseudoCount(v) => one(f::PSEUDO_COUNT, Integer(*v)),
+        Setter::QueryGeneticCode(v) => one(f::QUERY_GENETIC_CODE, Integer(*v)),
+        Setter::QueryCovHspPerc(v) => one(f::QUERY_COV_HSP_PERC, Real(*v)),
+        Setter::RepeatFiltering(v) => one(f::REPEAT_FILTERING, Boolean(*v)),
+        Setter::RepeatFilteringDb(v) => one(f::REPEAT_FILTERING_DB, Str(v.clone())),
+        Setter::StrandOption(_) => Vec::new(),
+        Setter::SegFiltering(v) => one(f::SEG_FILTERING, Boolean(*v)),
+        Setter::SegFilteringWindow(v) => one(f::SEG_FILTERING_WINDOW, Integer(*v)),
+        Setter::SegFilteringLocut(v) => one(f::SEG_FILTERING_LOCUT, Real(*v)),
+        Setter::SegFilteringHicut(v) => one(f::SEG_FILTERING_HICUT, Real(*v)),
+        Setter::SumStatisticsMode(v) => one(f::SUM_STATISTICS_MODE, Boolean(*v)),
+        Setter::SmithWatermanMode(v) => one(f::SMITH_WATERMAN_MODE, Boolean(*v)),
+        // `SetGappedMode(!v)` records `UngappedMode`, the value read.
+        Setter::GappedMode(v) => one(f::GAPPED_MODE, Boolean(!*v)),
+        Setter::UnifiedP(v) => one(f::UNIFIED_P, Integer(*v)),
+        Setter::SubjectBestHit => one(f::SUBJECT_BEST_HIT, Boolean(true)),
+        Setter::WindowMaskerTaxId(v) => one(f::WINDOW_MASKER_TAX_ID, Integer(*v)),
+        Setter::WindowSize(v) => one(f::WINDOW_SIZE, Integer(*v)),
+        Setter::WordSize(v) => one(f::WORD_SIZE, Integer(*v)),
+        Setter::WordThreshold(v) => one(f::WORD_THRESHOLD, Integer(*v)),
+        // `SetUseIndex(true, name, true)`, as `CMbIndexArgs` records it (`options::Class::MbIndex`).
+        Setter::UseIndex { index_name } => vec![
+            Param::new(f::FORCE_MB_INDEX, Boolean(false)),
+            Param::new(f::MB_INDEX_NAME, Str(index_name.clone())),
+        ],
+    }
 }

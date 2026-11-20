@@ -175,6 +175,28 @@ pub struct BlastxArgs {
     // options are read.
     #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgInputSearchStrategy,
+    //                             "filename",
+    //                             "Search strategy to use",
+    //                             CArgDescriptions::eInputFile);
+    //     arg_desc.SetDependency(kArgInputSearchStrategy,
+    //                            CArgDescriptions::eExcludes,
+    //                            kArgOutputSearchStrategy);
+    // ```
+    // The search strategy to import (`report::archive::read::import`), read by `run` before the
+    // other options (`archive::apply_strategy`).
+    #[arg(
+        long,
+        value_name = "filename",
+        conflicts_with = "export_search_strategy",
+        help = "Search strategy to use"
+    )]
+    pub import_search_strategy: Option<PathBuf>,
+    /// The run state of an imported search strategy (`archive::apply_strategy`).
+    #[arg(skip)]
+    pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:99-100
     // ```c++
     //         arg_desc.AddDefaultKey(kTask, "task_name", "Task to execute",
@@ -1239,7 +1261,10 @@ impl BlastxArgs {
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`). A `-max_target_seqs` below 1 (a caller of `run_local`
         // sets it; the command line's is at least 1) is NCBI's hit list size below 1.
-        let counts = crate::blastinput::report_counts::report_counts(
+        let counts = crate::blastinput::report_counts::report_counts_from(
+            self.formatting
+                .hitlist_start
+                .unwrap_or(crate::blastinput::report_counts::BLAST_HITLIST_SIZE),
             i32::from(outfmt),
             max_target_seqs_count(self.max_target_seqs),
             self.num_descriptions,
@@ -1503,7 +1528,10 @@ impl BlastxArgs {
             //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
             // ```
             // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307, `parameters::gumbel_block`).
-            old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
+            old_fsc: crate::report::archive::read::import::ImportRun::old_fsc(
+                self.import.as_ref(),
+                self.searchsp,
+            ),
             window_size,
             evalue: self.evalue,
             sum_stats: self.sum_stats.unwrap_or(true),
@@ -1583,7 +1611,14 @@ impl BlastxArgs {
         self,
         settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     ) -> Result<()> {
-        super::native::run(&self, settings)
+        // `RecoverSearchStrategy` first (blastx_app.cpp:130-135): the strategy's options and
+        // inputs become the run's arguments (`archive::apply_strategy`).
+        let args = if self.import_search_strategy.is_some() && self.rpstblastn.is_none() {
+            super::archive::apply_strategy(self)?
+        } else {
+            self
+        };
+        super::native::run(&args, settings)
     }
 
     /// The program of the run's texts (`ProgramName`).

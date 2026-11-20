@@ -149,6 +149,28 @@ pub struct TblastxArgs {
     // (`report::archive::strategy`), created by `run` before the other options are read.
     #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgInputSearchStrategy,
+    //                             "filename",
+    //                             "Search strategy to use",
+    //                             CArgDescriptions::eInputFile);
+    //     arg_desc.SetDependency(kArgInputSearchStrategy,
+    //                            CArgDescriptions::eExcludes,
+    //                            kArgOutputSearchStrategy);
+    // ```
+    // The search strategy to import (`report::archive::read::import`), read by `run` before the
+    // other options (`archive::apply_strategy`).
+    #[arg(
+        long,
+        value_name = "filename",
+        conflicts_with = "export_search_strategy",
+        help = "Search strategy to use"
+    )]
+    pub import_search_strategy: Option<PathBuf>,
+    /// The run state of an imported search strategy (`archive::apply_strategy`).
+    #[arg(skip)]
+    pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]
     pub query_gencode: u8,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]

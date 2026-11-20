@@ -89,10 +89,11 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
         .seg
         .as_deref()
         .and_then(crate::report::archive::options::seg_filter);
+    inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
-        .map_or(500, |size| size as i32);
+        .map_or(args.formatting.recorded_hitlist_start(), |size| size as i32);
     if let Ok((mode, unified_p)) =
         crate::blastinput::app::parse_comp_based_stats(&args.comp_based_stats, true, false)
     {
@@ -601,12 +602,15 @@ pub(crate) fn apply_strategy(args: BlastpArgs) -> Result<BlastpArgs> {
     out.import_search_strategy = Some(path);
     // `CBlastDatabaseArgs` when the command line gives the database or the subjects, else the
     // strategy's.
+    // `-dbsize` with `-db` or `-subject` is set after the strategy's options, unless the
+    // strategy's search space trumps it (blast_args.cpp:2565-2572).
+    let mut cli_dbsize = None;
     if args.db.is_some() || args.subject.is_some() {
         out.db = args.db;
         out.subject = args.subject;
         out.subject_loc = args.subject_loc;
         out.db_filter = args.db_filter;
-        out.dbsize = args.dbsize;
+        cli_dbsize = args.dbsize;
     } else if let Some(name) = start.database() {
         out.db = Some(name.to_string());
         out.db_filter = start.db_filter(program)?;
@@ -624,9 +628,12 @@ pub(crate) fn apply_strategy(args: BlastpArgs) -> Result<BlastpArgs> {
     }
     let options = &start.imported.options.options;
     out.task = start.imported.program().task_name().to_string();
-    let (mut seg, mut seg_window, mut seg_locut, mut seg_hicut) = (None, None, None, None);
+    let mut seg = import::SegSetters::default();
     let (mut cbs, mut unified_p) = (None, 0);
     for setter in &options.setters {
+        if seg.take(setter) {
+            continue;
+        }
         match setter {
             Setter::EvalueThreshold(v) => out.evalue = Some(*v),
             Setter::WordSize(n) => out.word_size = Some(*n),
@@ -651,10 +658,6 @@ pub(crate) fn apply_strategy(args: BlastpArgs) -> Result<BlastpArgs> {
                 out.max_hsps_per_subject = usize::try_from(*n).ok().filter(|n| *n > 0)
             }
             Setter::QueryCovHspPerc(v) => out.qcov_hsp_perc = Some(*v),
-            Setter::SegFiltering(on) => seg = Some(*on),
-            Setter::SegFilteringWindow(n) => seg_window = Some(*n),
-            Setter::SegFilteringLocut(v) => seg_locut = Some(*v),
-            Setter::SegFilteringHicut(v) => seg_hicut = Some(*v),
             Setter::MaskAtHash(on) => out.soft_masking = Some(*on),
             Setter::SmithWatermanMode(on) => out.use_sw_tback = *on,
             Setter::GappedMode(gapped) => out.ungapped = !*gapped,
@@ -663,17 +666,8 @@ pub(crate) fn apply_strategy(args: BlastpArgs) -> Result<BlastpArgs> {
             other => return Err(Start::unported_setter(other, program)),
         }
     }
-    if let Some(on) = seg {
-        out.seg = Some(match (on, seg_window, seg_locut, seg_hicut) {
-            (false, ..) => "no".to_string(),
-            (true, Some(w), Some(l), Some(h)) => format!("{w} {l} {h}"),
-            (true, None, None, None) => "yes".to_string(),
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "a search strategy with a part of the SEG parameters is not supported by LOSAT's {program}"
-                ))
-            }
-        });
+    if let Some(value) = seg.value() {
+        out.seg = Some(value);
     }
     if let Some(mode) = cbs {
         if !(0..=3).contains(&mode) {
@@ -683,6 +677,17 @@ pub(crate) fn apply_strategy(args: BlastpArgs) -> Result<BlastpArgs> {
         }
         out.comp_based_stats = format!("{mode}{}", if unified_p != 0 { "u" } else { "" });
     }
+    if out.searchsp.is_none() {
+        if let Some(size) = cli_dbsize {
+            out.dbsize = Some(size);
+        }
+    }
+    import::formatting_early_return(
+        &mut out.formatting,
+        out.num_descriptions.is_some(),
+        out.num_alignments.is_some(),
+        &out.outfmt,
+    );
     out.import = Some(run);
     Ok(out)
 }

@@ -17,7 +17,7 @@
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`BlastpReports`, `BlastpRanges`, `BlastpReport`, `ShownSubjects`, `ShownQueries`,
-//! `query_record_masks`, `mask_query_rows`, `blastp_scan_mode_definition`,
+//! `query_record_masks`, `mask_query_rows`,
 //! `write_blastp_tabular_hit_lists`) and its sibling modules `anchored`, `database`, `psi_round`,
 //! `pssm_hooks`, `query_rows` and `x_soft_subject`.
 
@@ -29,9 +29,9 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    anchored, blastp_scan_mode_definition, database, mask_query_rows, psi_round, pssm_hooks,
-    query_record_masks, query_rows, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
-    BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
+    anchored, database, mask_query_rows, psi_round, pssm_hooks, query_record_masks, query_rows,
+    write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges, BlastpReport, BlastpReports,
+    ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -806,7 +806,7 @@ pub(super) fn write_pairwise(
         .collect();
     let pairwise_report = BlastpPairwiseReport {
         version: crate::NCBI_BLAST_VERSION.to_string(),
-        database_name: blastp_scan_mode_definition(subject_input_label),
+        database_name: crate::report::pairwise::scan_mode_definition(subject_input_label),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
         // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.

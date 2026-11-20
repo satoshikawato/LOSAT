@@ -377,6 +377,9 @@ pub struct OptionInputs {
     /// psiblast's `-num_iterations`: the request's `Web_StepNumber` with `-db`
     /// (`ArchiveRequest::step_number`).
     pub num_iterations: Option<i32>,
+    /// An imported strategy's parameters as its setters record them, in the file's order
+    /// (`CBlastOptionsBuilder::GetSearchOptions`): they replace the command line's classes.
+    pub imported: Option<Vec<Param>>,
 }
 
 impl OptionInputs {
@@ -426,6 +429,7 @@ impl OptionInputs {
             pseudocount: 0,
             gap_trigger: 22.0,
             num_iterations: None,
+            imported: None,
         }
     }
 }
@@ -707,6 +711,9 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
         for param in task_calls(&inputs.task) {
             list.set(param.field(), param.value);
         }
+    }
+    if let Some(imported) = &inputs.imported {
+        return replayed_options(list, imported, inputs);
     }
     let matrix = inputs.matrix.clone().unwrap_or_else(|| {
         if inputs.task == "blastp-short" {
@@ -1077,6 +1084,42 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp (`x_Process_Query`
 /// callers set the service from the options: `blastn` task `megablast` and `dc-megablast`
 /// give "megablast", every other task "plain").
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3811-3828
+// ```c++
+//     m_QueryOptsArgs->ExtractAlgorithmOptions(args, opts);
+//     m_StdCmdLineArgs->ExtractAlgorithmOptions(args, opts);
+//     m_RemoteArgs->ExtractAlgorithmOptions(args, opts);
+//     m_DebugArgs->ExtractAlgorithmOptions(args, opts);
+//     m_FormattingArgs->ExtractAlgorithmOptions(args, opts);
+//     m_MTArgs->ExtractAlgorithmOptions(args, opts);
+//     if (CBlastDatabaseArgs::HasBeenSet(args)) {
+//           m_BlastDbArgs->ExtractAlgorithmOptions(args, opts);
+//     }
+//     if (CMbIndexArgs::HasBeenSet(args)) {
+// ```
+/// The options of an imported strategy: the handle `CBlastOptionsFactory::Create` makes for the
+/// strategy's program (`list`), each setter of the file replayed over it in the file's order,
+/// then the classes `SetOptionsForSavedStrategy` extracts again: `CFormattingArgs` sets the
+/// hitlist size, `CBlastDatabaseArgs` the command line's `-dbsize` (`dbsize` holds it, or the
+/// strategy's value, which then keeps its place) and `CMbIndexArgs` the index.
+fn replayed_options(mut list: ParamList, imported: &[Param], inputs: &OptionInputs) -> Vec<Param> {
+    for param in imported {
+        list.set(param.field(), param.value.clone());
+    }
+    list.set(
+        fields::HITLIST_SIZE,
+        ParamValue::Integer(inputs.hitlist_size),
+    );
+    if let Some(size) = inputs.dbsize {
+        list.set(fields::DB_LENGTH, ParamValue::BigInteger(size));
+    }
+    if let Some(name) = &inputs.mb_index_name {
+        list.set(fields::FORCE_MB_INDEX, ParamValue::Boolean(false));
+        list.set(fields::MB_INDEX_NAME, ParamValue::Str(name.clone()));
+    }
+    list.into_params()
+}
+
 pub fn service(kind: impl Into<RequestKind>, task: &str) -> &'static str {
     match kind.into() {
         RequestKind::Blastn if matches!(task, "megablast" | "dc-megablast") => "megablast",

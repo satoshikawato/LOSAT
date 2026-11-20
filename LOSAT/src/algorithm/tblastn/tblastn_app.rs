@@ -108,6 +108,11 @@ impl TblastnArgs {
         use crate::blastinput::input_files;
         use crate::blastinput::seq_range;
         let mut args = self;
+        // `RecoverSearchStrategy` first (tblastn_app.cpp:123-128): the strategy's options and
+        // inputs become the run's arguments (`archive::apply_strategy`).
+        if args.import_search_strategy.is_some() && matches!(io, RunIo::Files) {
+            args = super::archive::apply_strategy(args)?;
+        }
         args.id_scope = args.parse_deflines.then(Default::default);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
         // ```c
@@ -168,6 +173,13 @@ impl TblastnArgs {
             }
             None => &mut stderr,
         };
+        // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+        if let Some(import) = &args.import {
+            diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
+                &import.warnings,
+                "tblastn",
+            ))?;
+        }
         // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
         // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
         // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
@@ -210,11 +222,19 @@ impl TblastnArgs {
             Ok(if args.db.is_some() {
             (Vec::new(), seq_range::Placements::default(), None)
         } else {
-            let Some(subject_path) = args.subject.clone() else {
-                return Err(app::missing_subject_error());
+            // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for
+            // `-subject`.
+            let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
+            let subject_path = match (&args.subject, imported) {
+                (_, Some(_)) => std::path::PathBuf::new(),
+                (Some(path), None) => path.clone(),
+                (None, None) => return Err(app::missing_subject_error()),
             };
             // Web ABI v1's subjects are the call's bytes: no file to name or open.
             let subject_input = match &io {
+                RunIo::Files if imported.is_some() => Input::File(
+                    input_files::InputFile::from(imported.expect("imported subjects").try_clone()?),
+                ),
                 RunIo::Files => {
                     input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTN")?;
                     Input::File(input_files::open_input(&subject_path, "subject", "TBLASTN")?)
@@ -381,7 +401,11 @@ impl TblastnArgs {
                 input_files::check_utf8_file_name(&args.query, "query", "TBLASTN")?;
                 // NCBI opens the query file inside `Run` too: its error is saved and an error
                 // archive follows.
-                match input_files::open_input(&args.query, "query", "TBLASTN") {
+                match crate::report::archive::read::import::ImportRun::open_query(
+                    args.import.as_ref(),
+                    &args.query,
+                    "TBLASTN",
+                ) {
                     Ok(file) => Input::File(file),
                     Err(error) => {
                         write_run_error_archive(&args, &io, archive.as_ref(), &error);
@@ -1400,7 +1424,7 @@ fn write_first_batch_prologs(
     program: &str,
 ) -> Result<()> {
     let name = subject_path.map_or_else(String::new, |path| {
-        format!("User specified sequence set (Input: {})", path.display())
+        crate::report::pairwise::scan_mode_definition(&path.display().to_string())
     });
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
     // ```c++
@@ -1570,7 +1594,10 @@ fn search(
         //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
         // ```
         // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
-        old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
+        old_fsc: crate::report::archive::read::import::ImportRun::old_fsc(
+            args.import.as_ref(),
+            args.searchsp,
+        ),
     };
     // Without the Gumbel block NCBI's shortest subject length is the statistics' average
     // (blast_setup.c:975), which divides by their number of sequences.
@@ -1578,8 +1605,17 @@ fn search(
         database.check_statistics_count()?;
     }
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
+    // An imported strategy's subjects have no input file (an empty tag).
+    let no_input = std::path::PathBuf::new();
     let subject_path = match database {
         Some(_) => None,
+        None if args
+            .import
+            .as_ref()
+            .is_some_and(|run| run.subjects.is_some()) =>
+        {
+            Some(&no_input)
+        }
         None => Some(
             args.subject
                 .as_ref()

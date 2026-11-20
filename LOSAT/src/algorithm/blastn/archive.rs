@@ -95,10 +95,11 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.window_size = args.window_size;
     inputs.no_greedy = args.no_greedy;
     inputs.mb_index_name = args.megablast_index_name().map(str::to_string);
+    inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
-        .map_or(500, |size| size as i32);
+        .map_or(args.formatting.recorded_hitlist_start(), |size| size as i32);
     inputs
 }
 
@@ -711,4 +712,210 @@ mod tests {
         // A text with `Error: ` and another exit status is not one of `CATCH_ALL`'s reports.
         assert!(error_lines(&native("Error: something\n"), false).is_none());
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3810-3830
+// ```c++
+//     m_QueryOptsArgs->ExtractAlgorithmOptions(args, opts);
+//     m_StdCmdLineArgs->ExtractAlgorithmOptions(args, opts);
+//     m_RemoteArgs->ExtractAlgorithmOptions(args, opts);
+//     m_DebugArgs->ExtractAlgorithmOptions(args, opts);
+//     m_FormattingArgs->ExtractAlgorithmOptions(args, opts);
+//     m_MTArgs->ExtractAlgorithmOptions(args, opts);
+//     if (CBlastDatabaseArgs::HasBeenSet(args)) {
+//           m_BlastDbArgs->ExtractAlgorithmOptions(args, opts);
+//     }
+//     if (CMbIndexArgs::HasBeenSet(args)) {
+// ```
+/// `-import_search_strategy` of BLASTN (`RecoverSearchStrategy`, `SetOptionsForSavedStrategy`):
+/// the arguments of a command line that gives nothing (the strategy task's defaults) with the
+/// strategy's options set on them in the file's order, and from `args` only what NCBI's
+/// re-read argument classes take: the query options, `-out`, the formatting options, the
+/// threads, the database arguments when `-db` or `-subject` is given and `-use_index` when
+/// given. The run then goes on as any other (one search path).
+pub(crate) fn apply_strategy(args: BlastnArgs) -> Result<BlastnArgs> {
+    use crate::report::archive::read::import::{self, Command, DbMaskAlgorithm, Start};
+    use crate::report::archive::read::options::{EProgram, Setter};
+    let program = Program::Blastn.name();
+    let path = args.import_search_strategy.clone().expect("an import");
+    let start = import::start(
+        &Command {
+            path: &path,
+            program,
+            override_query: args.query.as_os_str() != "-",
+            override_subject: args.db.is_some() || args.subject.is_some(),
+            use_index_set: args.use_index == Some(true),
+        },
+        "blastn",
+    )?;
+    if !matches!(
+        start.imported.program(),
+        EProgram::Blastn | EProgram::Megablast | EProgram::DiscMegablast
+    ) {
+        return Err(start.unported_program(program));
+    }
+    let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "blastn"])?;
+    let crate::cli::Commands::Blastn(mut out) = cli.command else {
+        unreachable!("the arguments of blastn")
+    };
+    // `CMbIndexArgs::ExtractAlgorithmOptions` (blast_args.cpp:3386-3412): `-use_index true` of
+    // task megablast (the command line's `-task`) names its index by `-db`, which the strategy's
+    // database is not (probe `I.blastn.db.useidx`).
+    if args.use_index == Some(true) && args.task == "megablast" && args.db.is_none() {
+        start.post_warnings("blastn");
+        return Err(crate::blastinput::app::options_error(
+            "Can not deduce database index name",
+        ));
+    }
+    let mut run = start.run(args.parse_deflines, program)?;
+    run.query_range = start.query_range(args.query_loc.as_ref(), program)?;
+    // `CQueryOptionsArgs`, `CStdCmdLineArgs`, `CFormattingArgs`, `CMTArgs`, `CMbIndexArgs`.
+    out.query = args.query;
+    out.query_loc = args.query_loc;
+    out.strand = args.strand;
+    out.lcase_masking = args.lcase_masking;
+    out.parse_deflines = args.parse_deflines;
+    out.id_scope = args.id_scope;
+    out.out = args.out;
+    out.outfmt = args.outfmt;
+    out.show_gis = args.show_gis;
+    out.num_descriptions = args.num_descriptions;
+    out.num_alignments = args.num_alignments;
+    out.max_target_seqs = args.max_target_seqs;
+    out.formatting = args.formatting;
+    out.num_threads = args.num_threads;
+    out.mt_mode = args.mt_mode;
+    out.use_index = args.use_index;
+    out.command_line = args.command_line;
+    out.progress_bar = args.progress_bar;
+    out.import_search_strategy = Some(path);
+    // `CBlastDatabaseArgs` when the command line gives the database or the subjects, else the
+    // strategy's.
+    // `-dbsize` with `-db` or `-subject` is set after the strategy's options, unless the
+    // strategy's search space trumps it (blast_args.cpp:2565-2572).
+    let mut cli_dbsize = None;
+    if args.db.is_some() || args.subject.is_some() {
+        out.db = args.db;
+        out.subject = args.subject;
+        out.subject_loc = args.subject_loc;
+        out.db_filter = args.db_filter;
+        out.db_mask = args.db_mask;
+        cli_dbsize = args.dbsize;
+    } else if let Some(name) = start.database() {
+        out.db = Some(name.to_string());
+        out.db_filter = start.db_filter(program)?;
+        if let Some((algorithm, kind)) = start.db_mask() {
+            let value = match algorithm {
+                DbMaskAlgorithm::Id(id) => id.to_string(),
+                DbMaskAlgorithm::Key(key) => key,
+            };
+            match kind {
+                1 => out.db_mask.db_soft_mask = Some(value),
+                2 => out.db_mask.db_hard_mask = Some(value),
+                _ => {
+                    return Err(Start::unported(
+                        "a search strategy with this database masking type",
+                        program,
+                    ))
+                }
+            }
+        }
+    } else if start.has_subjects() {
+        // The Owner's decision F2-Q1 (2026-11-20 「Q1=C」): a strategy's subjects are searched
+        // once, as with `-num_threads 1`, whatever `-num_threads` says (NCBI searches them once per
+        // thread or aborts: its thread check reads only the command line's `-subject`).
+        out.num_threads = 1;
+    }
+    out.task = start.imported.program().task_name().to_string();
+    let options = &start.imported.options.options;
+    let mut dust = import::DustSetters::default();
+    let (mut extension, mut traceback) = (None, None);
+    let (mut template_type, mut template_length) = (None, None);
+    for setter in &options.setters {
+        if dust.take(setter) {
+            continue;
+        }
+        match setter {
+            Setter::EvalueThreshold(v) => out.evalue = Some(*v),
+            Setter::WordSize(n) => out.word_size = usize::try_from(*n).ok(),
+            Setter::WindowSize(n) => out.window_size = Some(*n),
+            Setter::MatchReward(n) => out.reward = Some(*n),
+            Setter::MismatchPenalty(n) => out.penalty = Some(*n),
+            Setter::GapOpeningCost(n) => out.gap_open = Some(*n),
+            Setter::GapExtensionCost(n) => out.gap_extend = Some(*n),
+            Setter::GapXDropoff(v) => out.xdrop_gap = Some(*v),
+            Setter::GapXDropoffFinal(v) => out.xdrop_gap_final = Some(*v),
+            Setter::GapExtnAlgorithm(n) => extension = Some(*n),
+            Setter::GapTracebackAlgorithm(n) => traceback = Some(*n),
+            Setter::CullingLimit(n) => out.culling_limit = Some(*n),
+            Setter::EffectiveSearchSpace(n) => out.searchsp = Some(*n),
+            Setter::DbLength(n) => out.dbsize = Some(*n),
+            Setter::HitlistSize(n) => out.formatting.hitlist_start = usize::try_from(*n).ok(),
+            Setter::MaxHspsPerSubject(n) => {
+                out.max_hsps_per_subject = usize::try_from(*n).ok().filter(|n| *n > 0)
+            }
+            Setter::QueryCovHspPerc(v) => out.qcov_hsp_perc = Some(*v),
+            Setter::PercentIdentity(v) => out.percent_identity = Some(*v),
+            Setter::SubjectBestHit => out.subject_besthit = true,
+            Setter::MaskAtHash(on) => out.soft_masking = Some(*on),
+            Setter::GappedMode(gapped) => out.ungapped = !*gapped,
+            Setter::WindowMaskerTaxId(n) => out.window_masker_taxid = Some(*n),
+            Setter::MbTemplateType(n) => template_type = Some(*n),
+            Setter::MbTemplateLength(n) => template_length = Some(*n),
+            Setter::SegFiltering(false) | Setter::RepeatFiltering(false) => {}
+            other => return Err(Start::unported_setter(other, program)),
+        }
+    }
+    if let Some(value) = dust.value() {
+        out.dust_filtering = Some(value);
+    }
+    // `-no_greedy` sets both algorithms to dynamic programming (blast_args.cpp:701-704); the
+    // greedy pair is megablast's default.
+    match (extension, traceback) {
+        (None, None) => {}
+        (Some(0), Some(0)) => out.no_greedy = true,
+        (Some(1), Some(1)) if out.task == "megablast" => {}
+        _ => {
+            return Err(Start::unported(
+                "a search strategy with this pair of gapped extension algorithms",
+                program,
+            ))
+        }
+    }
+    match (template_type, template_length) {
+        (None, None) => {}
+        (Some(kind), Some(length)) => {
+            out.template_type = Some(match kind {
+                0 => super::disc_lookup::DiscWordType::Coding,
+                1 => super::disc_lookup::DiscWordType::Optimal,
+                2 => super::disc_lookup::DiscWordType::TwoTemplates,
+                _ => {
+                    return Err(Start::unported(
+                        "a search strategy with this discontiguous template type",
+                        program,
+                    ))
+                }
+            });
+            out.template_length = Some(length);
+        }
+        _ => {
+            return Err(Start::unported(
+                "a search strategy with a template type or length alone",
+                program,
+            ))
+        }
+    }
+    if out.searchsp.is_none() {
+        if let Some(size) = cli_dbsize {
+            out.dbsize = Some(size);
+        }
+    }
+    import::formatting_early_return(
+        &mut out.formatting,
+        out.num_descriptions.is_some(),
+        out.num_alignments.is_some(),
+        &out.outfmt,
+    );
+    out.import = Some(run);
+    Ok(out)
 }

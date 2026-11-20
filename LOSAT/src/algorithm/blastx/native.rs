@@ -390,8 +390,13 @@ fn run_inner(
     };
     // `-subject -` is `cin` (ncbiargs.cpp:717-721, quoted at `input_files::open_input`), the
     // stream that `-query -` names too: one owner opens both (`open_input`).
+    // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for `-subject`.
+    let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
+        (None, _) if imported.is_some() => Some(crate::blastinput::input_files::InputFile::from(
+            imported.expect("imported subjects").try_clone()?,
+        )),
         (None, Some(path)) => Some(
             crate::blastinput::input_files::open_input(path, "subject", program.upper)
                 .map_err(early_archive_error)?,
@@ -416,6 +421,13 @@ fn run_inner(
         }
         None => Box::new(crate::cli::CliStderr::process()),
     };
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+    if let Some(import) = &args.import {
+        stderr.write_all(&crate::report::archive::read::import::ImportRun::lines(
+            &import.warnings,
+            "blastx",
+        ))?;
+    }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
     // `CStdCmdLineArgs`, which opens the query and the output: its warning before theirs (probe
@@ -471,9 +483,12 @@ fn run_inner(
     if args.db.is_none() && subjects.is_empty() {
         return Err(early_archive_error(engine("Empty CBlastQueryVector")));
     }
-    let mut query_file =
-        crate::blastinput::input_files::open_input(&args.query, "query", program.upper)
-            .map_err(early_archive_error)?;
+    let mut query_file = crate::report::archive::read::import::ImportRun::open_query(
+        args.import.as_ref(),
+        &args.query,
+        program.upper,
+    )
+    .map_err(early_archive_error)?;
     // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
     // hold the whole document in memory (`blast_xml::HeldOutput`), decided below before the
     // search.
@@ -570,14 +585,26 @@ fn run_inner(
     // The filtering handler comes before the query options handler (blastx_args.cpp:87-107):
     // NCBI's error of `-seg` first (`local::check_filtering`).
     super::local::check_filtering(args)?;
-    let query_range = crate::blastinput::seq_range::parse_optional_range(
-        args.query_loc.as_deref(),
-        crate::blastinput::seq_range::RangeRole::Query,
-    )?;
+    // An imported strategy's query range stands for `-query_loc`'s (`archive::apply_strategy`).
+    let query_range = match args.import.as_ref().and_then(|import| import.query_range) {
+        Some(range) => Some(range),
+        None => crate::blastinput::seq_range::parse_optional_range(
+            args.query_loc.as_deref(),
+            crate::blastinput::seq_range::RangeRole::Query,
+        )?,
+    };
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;
+    // An imported strategy's warnings for the options it replaces
+    // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
+    if let Some(import) = &args.import {
+        stderr.write_all(&crate::report::archive::read::import::ImportRun::lines(
+            &import.option_warnings,
+            "blastx",
+        ))?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     // ```c++
     //     catch (const blast::CInputException& e) {                               \
@@ -728,7 +755,12 @@ fn run_inner(
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
         // FIFO) or `-query -` cannot be read a second time: the read before the search would
         // take every byte (DECISIONS 22). Refused before the search.
-        if args.query.as_os_str() == "-"
+        // An imported strategy's queries are an unnamed regular file read through its handle.
+        let imported_queries = args
+            .import
+            .as_ref()
+            .is_some_and(|run| run.queries.is_some());
+        if (args.query.as_os_str() == "-" && !imported_queries)
             || !query_file.metadata().is_ok_and(|m| m.is_file())
             || !crate::blastinput::input_files::has_stream_position(&query_file)
         {
@@ -936,8 +968,9 @@ fn run_inner(
             pairwise,
             reported: &no_reported,
         },
+        // An imported strategy's subjects have no input file (an empty tag).
         _ => ShownSubjects::Fasta {
-            path: subject_path.expect("a subject file without -db"),
+            path: subject_path.unwrap_or(std::path::Path::new("")),
             parsed: &records_parsed,
         },
     };
@@ -3172,7 +3205,10 @@ fn x_flow(
 /// The formatting handler's warnings of a BLASTX run with output format `outfmt`
 /// (`ReportCounts::warnings`).
 pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
-    crate::blastinput::report_counts::report_counts(
+    crate::blastinput::report_counts::report_counts_from(
+        args.formatting
+            .hitlist_start
+            .unwrap_or(crate::blastinput::report_counts::BLAST_HITLIST_SIZE),
         outfmt,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,

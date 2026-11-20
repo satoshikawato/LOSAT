@@ -85,6 +85,16 @@ pub struct FormattingArgs {
 }
 
 impl FormattingArgs {
+    /// The hit list size a run's options record (the archive's and the strategy's
+    /// `HitlistSize`) when neither `-max_target_seqs` nor the report counts set it: the start of
+    /// the formatting handler ([`FormattingArgs::hitlist_start`], 500 by default).
+    pub fn recorded_hitlist_start(&self) -> i32 {
+        self.hitlist_start
+            .map_or(BLAST_HITLIST_SIZE as i32, |size| {
+                i32::try_from(size).unwrap_or(i32::MAX)
+            })
+    }
+
     /// The width of the pairwise alignment rows (`m_LineLength`): `-line_length`, or NCBI's
     /// `kDfltLineLength` (`report::pairwise::DEFAULT_LINE_LENGTH`).
     pub fn line_length(&self) -> usize {

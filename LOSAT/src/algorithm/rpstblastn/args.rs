@@ -269,6 +269,8 @@ impl RpstblastnArgs {
             xdrop_gap_final: None,
             out: self.out,
             export_search_strategy: self.export_search_strategy,
+            import_search_strategy: None,
+            import: None,
             task: "blastx".to_string(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-67
             // ```c++

@@ -9009,9 +9009,9 @@ fn x_block_shown_titles_allowed(
 }
 
 /// The `Database:` text of the pairwise reports of a local `-subject` search
-/// (`blastp_scan_mode_definition` of `blastp_subject_tag`).
+/// (`report::pairwise::scan_mode_definition` of `blastp_subject_tag`).
 fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
-    blastp_scan_mode_definition(&blastp_subject_tag(args, subject_label))
+    crate::report::pairwise::scan_mode_definition(&blastp_subject_tag(args, subject_label))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:242-243
@@ -9038,26 +9038,6 @@ fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> String 
         BlastpApp::Psiblast | BlastpApp::Rpsblast => String::new(),
         BlastpApp::Blastp if subject_label.is_empty() => args.subject.display().to_string(),
         BlastpApp::Blastp => subject_label.to_string(),
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:418-424
-// ```c++
-// 	if (tag == "")
-// 		info.definition = string("User specified sequence set.");
-// 	else
-// 	{
-// 		info.definition = string("User specified sequence set ") +
-// 			string("(Input: ") + tag + string(").");
-// 	}
-// ```
-/// The definition of a subject set in the pairwise report (`FillScanModeBlastDbInfo`), without
-/// its period, which the writers add (`ensure_trailing_period`).
-fn blastp_scan_mode_definition(tag: &str) -> String {
-    if tag.is_empty() {
-        "User specified sequence set".to_string()
-    } else {
-        format!("User specified sequence set (Input: {tag})")
     }
 }
 

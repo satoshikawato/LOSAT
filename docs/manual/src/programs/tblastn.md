@@ -69,6 +69,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-matrix` | `BLOSUM62` | Scoring matrix: BLOSUM45, 50, 62, 80, 90 or PAM30, 70, 250 |
 | `-gapopen`, `-gapextend` | 11, 1 | Gap costs |
 | `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3 |
+| `-use_sw_tback` | off | Align the final results again with Smith-Waterman |
 | `-seg` | `12 2.2 2.5` | Low-complexity filter |
 | `-sum_stats` | `true` | Use sum statistics for groups of alignments |
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
@@ -111,7 +112,8 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `tblastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped`, `-use_sw_tback` and `-subject_besthit`.
+- `-ungapped` and `-subject_besthit`.
+- With `-use_sw_tback`, the rare query and subject pairs on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
 - `-best_hit_overhang` and `-best_hit_score_edge`.
 - An `-evalue` of 1.7976931348623157e308 or more.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).

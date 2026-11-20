@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.53
+- Version: 1.54
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -196,7 +196,12 @@
   a redone match, on which NCBI crashes, rule 3; X4 fix round 4: a negative `CHUNK_SIZE` that
   leaves a chunk without a query also after the reports of the batches before; 2026-11-20, review
   3 of X4: so does the rejection that version 1.1 kept of the negative pair whose chunks leave
-  gaps)
+  gaps);
+  1.54 2026-11-20 (TBLASTN `-use_sw_tback`, line RG item X4b-1: the explicit rejections of 1.53,
+  a Smith-Waterman redo that NCBI repeats without end and a failed batch whose first query holds
+  a redone match, on which NCBI's clean-up crashes, extended from BLASTP to TBLASTN, rule 3,
+  within the class of 1.30, after the reports of the query batches before; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.53, line RG item X4)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1548,6 +1553,31 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   NCBI's of a near input that fails at the same step, rows `db.x4.sw.fail.f.0` and
   `db.x4.sw.fail.h_anchor.*`; `db.x4.sw.fail.f.6` and `db.x4.sw.fail.g.6`, whose first query holds
   none, end in `Traceback failed`).
+
+- TBLASTN `-use_sw_tback` (version 1.54, 2026-11-20, line RG item X4b-1, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07, within the class of 1.30 and the rules of 1.53; P2,
+  P3: the same match body and round loop as BLASTP's,
+  `core::composition_adjustment::smith_waterman_match`): TBLASTN's redo of a match holds the
+  windows of all its frames (`s_WindowsFromTranslatedAligns`, sorted by frame), in one call
+  (`Blast_RedoOneMatchSmithWaterman`), with composition-based statistics 0 to 3. A window of two or
+  more preliminary HSPs in which a score of 0 is significant (in e-value mode, `-sum_stats false`
+  or a `-max_intron_length` of 1 to 4, when the query's effective search space times K is below
+  `-evalue`; with sum statistics only where the cutoff score is 0 or below, which a Spouge cutoff
+  of 0 gives, a tiny `-dbsize`) makes NCBI's round loop reach the score of 0: where the query's
+  first letter scores the window's first subject letter (after SEG) above 0 NCBI never ends, and
+  LOSAT refuses (exit 1, "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI
+  BLAST+ 2.17.0 ... is not supported by LOSAT's TBLASTN"; probes `tbn.fail.*`, `tbn.endless.*` of
+  line RG X4b's survey, NCBI still running at 120 s); otherwise the match's redo fails and frees the
+  alignments of its earlier windows too, a failed last match fails the batch's traceback (`BLAST
+  engine error: Traceback failed`, exit status 3, NCBI probe `tbn.fail.a.rc`), and a failed last
+  match after the batch's first query kept a redone match crashes NCBI's clean-up as in 1.53, which
+  LOSAT refuses (exit 1, "... with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by
+  LOSAT's TBLASTN"). Both refusals come after the reports of the query batches before, as in 1.53.
+  Fixture rows `db.x4b.fail.*` and `db.x4b.rej.*`; `LOSAT/tests/tblastn_sw_tback.rs`; crafted
+  inputs `LOSAT/tests/fasta/x4b` (X4's proteins back-translated). With `-db` and sum statistics
+  (the default) the cutoff score is NCBI's floor of 1 (`BLAST_Cutoffs` from `new_cutoff = 1`,
+  SeqDB's shortest length 10): no score of 0 is significant there, and the redo makes every local
+  alignment down to that score, slow but finite: LOSAT gives NCBI's output (rows `db.x4b.cut.*`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

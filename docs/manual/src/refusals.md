@@ -254,7 +254,6 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | Option or value | What happens |
 | :--- | :--- |
 | `-ungapped` | Refused. |
-| `-use_sw_tback` | Refused. |
 | `-subject_besthit` | Refused. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7) | Refused, as in `blastp`. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
@@ -262,6 +261,7 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) or more | Refused. NCBI's `tblastn` crashes on some inputs with it. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback | Refused. NCBI crashes. |
+| `-use_sw_tback` on a query and subject that NCBI never finishes, or on a query batch that NCBI crashes on | Refused, as in `blastp`. See Rare inputs. |
 | `-in_pssm` | See the next section. |
 
 <details>
@@ -275,6 +275,9 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 - With `-in_pssm` and a PSSM whose `-` column scores above NCBI's minimum, a one-hit alignment whose gapped start lies past the end of NCBI's translation of the subject (after its last frame). NCBI's gapped alignment reads the byte after its end, which it never sets, or past it.
 - A one-hit alignment whose gapped start lies after the end of its frame's translation and that reaches NCBI's traceback. NCBI reads a byte its translation does not set there.
 - The report of a one-hit alignment whose traceback starts on the end marker. NCBI places its column past the subject's end, and LOSAT does not reproduce that result yet. Such alignments that NCBI drops before its reports give NCBI's output.
+- With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.
+- With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, as in LOSAT.
+- For both, LOSAT writes the results of the query batches before and then stops with the error.
 
 </details>
 

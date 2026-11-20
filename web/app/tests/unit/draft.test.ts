@@ -1281,6 +1281,8 @@ describe('SearchDraft submit', () => {
     expect(await refusal('-db_gencode 4')).toBe('-db_gencode is set in the form: Genetic code');
     draft.setProgram('blastp');
     expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
+    draft.setProgram('tblastn');
+    expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
   });
 
   // WA-FM-04, WA-FM-05: the CLI prints its help for -h, and its messages for these name

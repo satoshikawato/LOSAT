@@ -1035,6 +1035,7 @@ describe('SearchDraft accessions from the fastest source (line WF-3)', () => {
 
 describe('SearchDraft accessions by groups, one site a press (line WF-5)', () => {
   const C1 = '>C_AA004835.1 SARS-CoV-2\nMESLVPGFNE\n';
+  // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
   const C2 = '>C_AA000002.1 other\nMKTAYIAKQR\n';
   const P = '>sp|P12345|AATM_RABIT\nMALLHS\n';
   const records = { 'C_AA004835.1': C1, 'C_AA000002.1': C2, P12345: P };

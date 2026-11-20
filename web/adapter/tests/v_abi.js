@@ -377,14 +377,6 @@ function nativeEnv(search) {
   return env;
 }
 
-// The formatting handler's warnings (blast_args.cpp:2947-2989): the CLI writes those of
-// -num_descriptions, -line_length and -sorthits for formats above 4 only, that of -sorthsps for
-// formats other than 0, and that of the few matches for the hit list size of the format.
-const HANDLER = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches|The parameter -line_length is not applicable|The parameter -sorthits is ignored|The parameter -sorthsps is ignored)/;
-// The structured formats, whose writers do not write the queries' warnings (abi_v2.md §5,
-// `ReportFormat::writes_query_warnings`).
-const STRUCTURED = new Set([5, 8, 9, 11, 12, 13, 14, 15, 16, 17]);
-
 // The hit list size that the CLI derives for the output format `number` from the options of `argv`
 // (`report_counts`, NCBI blast_args.cpp:2894-2973): the formats of a run with the same size are one
 // search (abi_v2.md §7).
@@ -400,12 +392,18 @@ function hitListSize(argv, number) {
 }
 
 // The lines of `text` (each with its line end) that it has more times than `held` (line -> copies),
-// in order, of those that `keep` keeps; `held` then holds them (the adapter's `Diagnostics`).
-function linesAfter(held, text, keep = () => true) {
+// in order; `held` then holds them (the adapter's `Diagnostics`). The adapter compares the error
+// of a format that failed alone as one text (`Diagnostics::error`), and this compares its lines
+// too: the two agree while no line of an error is a line that stream 3 already holds from another
+// text. NCBI's exception reports and posts end with an empty line, so a case where two such texts
+// meet (BLASTX's HSPs of length 0 with -outfmt 5: the post of the XML and the refusals of 6, 7 and
+// 0, the adapter's test `formats_that_stop_after_a_query_warning_add_it_once`) is not one for this
+// harness (reviews r2 L2 and r3 L5 of 2026-11-20).
+function linesAfter(held, text) {
   const copies = new Map();
   let added = "";
   for (const line of text.split(/(?<=\n)/)) {
-    if (line === "" || !keep(line)) continue;
+    if (line === "") continue;
     const copy = (copies.get(line) || 0) + 1;
     copies.set(line, copy);
     if (copy > (held.get(line) || 0)) added += line;
@@ -431,10 +429,11 @@ function searchOrder(formats) {
 // `stderr` is stream 3 of a run that completes (§5): `own`, then the lines of the other formats'
 // standard error that it does not hold, each line as many times as one of them has it more often
 // than stream 3 holds it, the formats of the argv's own search first (the tabular ones, then those
-// up to 4); for a structured -outfmt, whose writer does not write the queries' warnings, only the
-// formatting handler's lines of the formats of its search, and the error of one that fails alone
-// (the lines of its standard error that are not warnings: LOSAT's refusal of outfmt 0 of a record
-// that is both a query and a subject and has masks, line WQA's sweep, D7, 2026-11-19).
+// up to 4). A structured -outfmt's run does not write the queries' warnings, which the other
+// formats' runs add (line WQA's sweep, D3 review r3 M2, 2026-11-19: this harness kept only the
+// formatting handler's lines of the other formats there, and so took their loss), as they add the
+// error of a format that fails alone (LOSAT's refusal of outfmt 0 of a record that is both a query
+// and a subject and has masks, line WQA's sweep, D7, 2026-11-19).
 function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
   const stderrs = new Map(), failed = new Map();
@@ -485,7 +484,6 @@ function nativeOutputs(native, search, scratch) {
   if (!failure) {
     const number = parseInt(outfmt, 10);
     const size = hitListSize(search.argv, number);
-    const structured = ownFormat === null && STRUCTURED.has(number);
     const others = FORMATS[search.program].filter((format) => format !== ownFormat);
     const same = searchOrder(others.filter((format) => hitListSize(search.argv, format) === size));
     const other = searchOrder(others.filter((format) => hitListSize(search.argv, format) !== size));
@@ -493,11 +491,7 @@ function nativeOutputs(native, search, scratch) {
     // The CLI's standard error as bytes (latin1 keeps each byte): a reader warning may hold bytes that are not
     // UTF-8 (`Unknown gap-type: caf\xe9`, a `>?` gap line's mods; line WQA's D13, 2026-11-20).
     let text = linesAfter(held, own.toString("latin1"));
-    for (const format of same) {
-      const keep = structured ? (line) => HANDLER.test(line) || (failed.get(format) && !line.startsWith("Warning: ")) : undefined;
-      text += linesAfter(held, stderrs.get(format).toString("latin1"), keep);
-    }
-    for (const format of other) text += linesAfter(held, stderrs.get(format).toString("latin1"));
+    for (const format of [...same, ...other]) text += linesAfter(held, stderrs.get(format).toString("latin1"));
     stderr = Buffer.from(text, "latin1");
     failedStreams = others.filter((format) => failed.get(format)).sort((a, b) => a - b);
   }
@@ -555,6 +549,10 @@ function checkHits(streams, program, label, queryIds, shownIds) {
   const rows = out6.toString().split("\n").filter(Boolean);
   assert.equal(records.length, rows.length, `${label}: one record per outfmt 6 row`);
   const ranks = new Map();
+  // BLASTN's matrix-only scoring (`-task rmblastn`, reward 0 and penalty 0) opens its report with
+  // RMBLASTN and shows the raw score alone (` Score = 27204`; blast_format.cpp:168-177,
+  // showalign.cpp:3586-3591,3605); the other searches show `<bits> bits (<raw>),`.
+  const rawScoreOnly = out0.subarray(0, 9).toString() === "RMBLASTN ";
   records.forEach((record, index) => {
     assert.equal(record.index, index, `${label}: index`);
     const rank = ranks.get(record.q_idx) || 0;
@@ -591,7 +589,8 @@ function checkHits(streams, program, label, queryIds, shownIds) {
       return;
     }
     assert.ok(section.startsWith(" Score ="), `${label}: out0 of HSP ${index}`);
-    assert.ok(section.includes(`bits (${record.raw_score}),`), `${label}: raw score in out0 of HSP ${index}`);
+    const score = rawScoreOnly ? section.startsWith(` Score = ${record.raw_score}\n`) : section.includes(`bits (${record.raw_score}),`);
+    assert.ok(score, `${label}: raw score in out0 of HSP ${index}`);
     const heading = out0.subarray(record.out0_subject[0], record.out0_subject[1]).toString();
     // A local id that is not shown leaves "> " before the title; under -parse_deflines the
     // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19).
@@ -617,7 +616,8 @@ function checkSurface(reactor, native) {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
       assert.ok(flags.includes("-window_masker_db"), "blastn: -window_masker_db");
       const task = description.parameters.find((parameter) => parameter.flag === "-task");
-      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short"), "blastn: tasks in -task's help");
+      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short") && task.help.includes("rmblastn"),
+                "blastn: tasks in -task's help");
     }
   }
   // validate: accepted argv, and CLI errors with the CLI's words. An accepted argv says whether its run reads the inputs
@@ -656,8 +656,7 @@ function checkSurface(reactor, native) {
                       ["blastn", "-query", "q", "-subject", "s", "-nosuchoption", "1"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding",
-                       "-template_length", "17"],
-                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"]]) {
+                       "-template_length", "17"]]) {
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
@@ -699,8 +698,9 @@ function checkSurface(reactor, native) {
     assert.equal(validated.error, cli.stderr.toString(), `-outfmt ${outfmt}: the CLI's message`);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-out", "x"].join("\0")).error, /not accepted/);
-  // The tasks of Session SD and NCBI's option check of a template (blast_options.c:1247-1261).
-  for (const task of ["dc-megablast", "blastn-short"]) {
+  // The tasks of Session SD and line RG X6, and NCBI's option check of a template
+  // (blast_options.c:1247-1261).
+  for (const task of ["dc-megablast", "blastn-short", "rmblastn"]) {
     assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", task].join("\0")).status, 0, task);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",

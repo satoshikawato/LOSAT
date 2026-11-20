@@ -8,7 +8,7 @@ use anyhow::{bail, Result};
 
 use super::wordfinder::{word_finder, RpsInitHsp, RpsWordParams, RpsWordScratch};
 use super::ProfileSlice;
-use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, TreeHsp};
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
@@ -26,6 +26,9 @@ pub(crate) struct RpsPrelim<'a> {
     pub(crate) rows: &'a [[i32; 28]],
     /// The profiles' row offsets (`lookup->rps_seq_offsets`, `num_profiles + 1` of them).
     pub(crate) offsets: &'a [i32],
+    /// The unit's concatenated length `Lc` (`RpsRun::concat_length`, `query->length` of
+    /// `BLAST_GetGappedScore`): the interval tree covers `[0, Lc + 1]`.
+    pub(crate) concat_length: i32,
     /// `score_params->gap_open` and `gap_extend` (the options' costs times the scale).
     pub(crate) gap_open: i32,
     pub(crate) gap_extend: i32,
@@ -169,6 +172,21 @@ impl RpsPrelim<'_> {
         } = scratch;
         init_hsps.clear();
         word_finder(&self.word, word, subject, init_hsps);
+        // An extension that reads past the rows what NCBI cannot (`RpsRows::past`; only where
+        // `Lc` is above them).
+        if let Some(past) = self.word.rows.past {
+            if past
+                .overran
+                .swap(false, std::sync::atomic::Ordering::Relaxed)
+            {
+                bail!(
+                    "an RPS-BLAST volume searched as {} concatenated positions, above the {} rows of its profiles (an alias file's LENGTH and NSEQ over one volume, or a volume reached twice), whose ungapped extension of a query runs past the row after the last profile, or reads that row past the .rps file's last memory page (NCBI BLAST+ 2.17.0 then reads past its score matrix), is not supported by LOSAT's {}",
+                    self.concat_length,
+                    self.rows.len(),
+                    self.program
+                );
+            }
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:497
         // ```c
         //             if (init_hitlist->total == 0) continue;
@@ -433,8 +451,9 @@ impl RpsPrelim<'_> {
         subject_seq: &[u8],
         subject_len: usize,
     ) -> Result<()> {
-        let concat_length = self.rows.len() as i32;
-        tree.reset_with_bounds(0, concat_length + 1, 0, subject_len as i32 + 1);
+        // `Lc + 1` is at most 2^30 + 1 (`RpsUnit::check_engine_length`); an `Lc` below the
+        // rows leaves the regions of later profiles past the tree's end.
+        tree.reset_with_bounds(0, self.concat_length + 1, 0, subject_len as i32 + 1);
         for init in init_hsps {
             let mut init = *init;
             let context = context_of(self.offsets, init.q_off);
@@ -509,7 +528,47 @@ impl RpsPrelim<'_> {
                 q_idx: self.query_index,
                 s_idx: context as u32,
             };
-            tree.add_hsp(
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:603-657,703-712
+            // and :102-109 (s_IntervalNodeInit)
+            // ```c
+            //     while (1) {
+            //         ...
+            //         middle = ((Int8) nodes[root_index].leftend +
+            //                   (Int8) nodes[root_index].rightend) / 2;
+            //
+            //         if (region_end < middle) {
+            //         ...
+            //         else if (region_start > middle) {
+            //             ...
+            //             old_index = nodes[root_index].rightptr;
+            //             if (nodes[old_index].hsp == NULL) {
+            //                 root_index = old_index;
+            //                 continue;
+            //             }
+            //             else {
+            //                 which_half = eIntervalTreeRight;
+            //             }
+            //         ...
+            //         mid_index = s_IntervalNodeInit(tree, root_index, which_half, &retval);
+            // ...
+            //         new_node->leftend = (Int4) midpt + 1;
+            //         new_node->rightend = parent_node->rightend;
+            // ```
+            // The tree's root is `[0, R]`, `R = Lc + 1`. A region (the HSP's profile offset plus
+            // its query range) that starts past `R` goes right at every node `[l, R]` of the
+            // right spine (its middle is at most `R`) and becomes the leaf at the spine's end; a
+            // second one in the same tree (a query's, a frame's for RPSTBLASTN) meets that leaf,
+            // and the split makes `[R + 1, R]`, whose middle is `R` again: both go right, and
+            // `BlastIntervalTreeAddHSP` splits that node without end while its node pool doubles
+            // (memory runs out). A region that starts at or before `R` and ends past it straddles
+            // a middle of the spine and ends in a subject tree. Below `R = 0` (an `Lc` of -2 or
+            // less) every middle of the spine is below the regions' starts. `try_add_hsp` finds the
+            // insertion that makes such a node, after NCBI's end-point checks (which may drop the
+            // HSP or the leaf it would meet): only an `Lc` below the rows (an alias file's
+            // `LENGTH` and `NSEQ` over one volume) leaves regions past the end, and the search
+            // stops there (LOSAT's refusal of the query batch; at most one region past the end in
+            // a tree is NCBI's search).
+            if !tree.try_add_hsp(
                 TreeHsp {
                     query_offset: hsp.query_start,
                     query_end: hsp.query_end,
@@ -522,8 +581,15 @@ impl RpsPrelim<'_> {
                     subject_frame_sign: 0,
                 },
                 query_start,
-                IndexMethod::QueryAndSubject,
-            );
+            ) {
+                bail!(
+                    "an RPS-BLAST volume searched as {} concatenated positions, below the {} rows of its profiles (an alias file's LENGTH and NSEQ over one volume), where two gapped alignments of a query start past position {} (NCBI BLAST+ 2.17.0's interval tree then splits a node without end), is not supported by LOSAT's {}",
+                    self.concat_length,
+                    self.rows.len(),
+                    i64::from(self.concat_length) + 1,
+                    self.program
+                );
+            }
             hsps.push(hsp);
         }
         Ok(())

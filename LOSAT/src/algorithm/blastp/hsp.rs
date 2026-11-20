@@ -338,6 +338,9 @@ pub(crate) struct BlastCompoHeap {
     pub worst_evalue: f64,
     pub array: Option<Vec<BlastCompoHeapRecord>>,
     pub heap_array: Option<Vec<BlastCompoHeapRecord>>,
+    /// No NCBI counterpart: `false` for a heap of a redo that ends no match early
+    /// ([`BlastCompoHeap::without_early_end`]); `filled_to_cutoff` and `may_fill` are then `false`.
+    pub x_ends_early: bool,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:50-57
@@ -909,7 +912,22 @@ impl BlastCompoHeap {
             worst_evalue: 0.0,
             array: Some(array),
             heap_array: None,
+            x_ends_early: true,
         }
+    }
+
+    /// The heap of a query whose redo ends no match early: the early termination test
+    /// (`blast_compo_early_termination`) reads it as not filled to its cutoff, whatever it holds.
+    ///
+    /// For BLASTP with unified P-values (`ResolvedBlastpArgs::redone_match_heap`). NCBI's test can
+    /// end only matches of the last query of a query batch (the heaps of the queries after the
+    /// one in work are still empty), and that query's E-values are the ones NCBI adjusts with
+    /// values read past its array. LOSAT's result for it is NCBI's report of the query when a
+    /// copy of it follows in the batch (PD-LOSAT-NCBI-DEFECTS, the exception for unified
+    /// P-values): there the query is not the last, and NCBI redoes every match of it.
+    pub(crate) fn without_early_end(mut self) -> Self {
+        self.x_ends_early = false;
+        self
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:221-238
@@ -1049,7 +1067,26 @@ impl BlastCompoHeap {
     // }
     // ```
     pub(crate) fn filled_to_cutoff(&self) -> bool {
-        self.n >= self.heap_threshold && self.worst_evalue <= self.ecutoff
+        self.x_ends_early && self.n >= self.heap_threshold && self.worst_evalue <= self.ecutoff
+    }
+
+    /// Whether `more` insertions can fill the heap to its cutoff (`filled_to_cutoff`): the bound
+    /// that the window redo's look ahead uses (`x_redo_par::x_end_above`). No NCBI counterpart.
+    #[cfg_attr(
+        all(
+            not(test),
+            not(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))
+        ),
+        expect(
+            dead_code,
+            reason = "used only with `parallel` threads (x_redo_par) and by unit tests"
+        )
+    )]
+    pub(crate) fn may_fill(&self, more: usize) -> bool {
+        self.x_ends_early && self.n.saturating_add(more) >= self.heap_threshold
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:391-414
@@ -2677,6 +2714,40 @@ mod tests {
             COMPO_HEAP_EVALUE_STRETCH * ecutoff,
             &heaps
         ));
+    }
+
+    // No NCBI counterpart: the heap of a redo that ends no match early (unified P-values).
+    #[test]
+    fn a_heap_without_early_end_is_never_filled_to_its_cutoff() {
+        let ecutoff = 0.002;
+        let significant = |oid: u32, evalue: f64| {
+            let mut list = BlastpHspList {
+                oid,
+                query_index: 0,
+                hsps: vec![BlastpHsp::from_hit(make_hit(60, 1, 10, 1, 10))],
+                best_evalue: evalue,
+            };
+            list.hsps[0].e_value = evalue;
+            list
+        };
+        let mut heaps = vec![
+            BlastCompoHeap::new(2, ecutoff),
+            BlastCompoHeap::new(2, ecutoff).without_early_end(),
+        ];
+        for heap in &mut heaps {
+            heap.insert(significant(1, 1e-20), 1e-20, 60, 1);
+            heap.insert(significant(2, 1e-10), 1e-10, 60, 2);
+        }
+        let weak = COMPO_HEAP_EVALUE_STRETCH * ecutoff * 2.0;
+        assert!(heaps[0].filled_to_cutoff() && heaps[0].may_fill(0));
+        assert!(blast_compo_early_termination(weak, &heaps[..1]));
+        // The same matches in a heap without an early end: it keeps them and ends nothing.
+        assert_eq!(heaps[1].n, 2);
+        assert!(!heaps[1].filled_to_cutoff() && !heaps[1].may_fill(5));
+        assert!(!blast_compo_early_termination(weak, &heaps[1..]));
+        assert!(!blast_compo_early_termination(weak, &heaps));
+        // A match within the cutoff would still be inserted, as in any heap.
+        assert!(heaps[1].would_insert(1e-30, 70, 3));
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2494-2514

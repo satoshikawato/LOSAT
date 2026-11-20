@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastOutput2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+  <report>
+    <Report>
+      <program>tblastx</program>
+      <version>TBLASTX 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+          <subjects>Subject_3</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <filter>L;</filter>
+          <query-gencode>1</query-gencode>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>qx2 minus strand gene</query-title>
+              <query-len>129</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>sx2</id>
+                      <title>sx2 minus strand gene</title>
+                    </HitDescr>
+                  </description>
+                  <len>208</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>92.2508</bit-score>
+                      <score>195</score>
+                      <evalue>1.64153e-24</evalue>
+                      <identity>36</identity>
+                      <positive>36</positive>
+                      <query-from>13</query-from>
+                      <query-to>120</query-to>
+                      <query-frame>-1</query-frame>
+                      <hit-from>68</hit-from>
+                      <hit-to>175</hit-to>
+                      <hit-frame>-1</hit-frame>
+                      <align-len>36</align-len>
+                      <gaps>0</gaps>
+                      <qseq>DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY</qseq>
+                      <hseq>DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY</hseq>
+                      <midline>DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>sx1</id>
+                      <title>sx1 plus strand gene</title>
+                    </HitDescr>
+                  </description>
+                  <len>218</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>48.721</bit-score>
+                      <score>100</score>
+                      <evalue>3.0289e-13</evalue>
+                      <identity>17</identity>
+                      <positive>19</positive>
+                      <query-from>61</query-from>
+                      <query-to>120</query-to>
+                      <query-frame>-1</query-frame>
+                      <hit-from>79</hit-from>
+                      <hit-to>138</hit-to>
+                      <hit-frame>1</hit-frame>
+                      <align-len>20</align-len>
+                      <gaps>0</gaps>
+                      <qseq>DPKIRDGPMAVMKVWESYCF</qseq>
+                      <hseq>DPKIRDGPMAVMKGWENYCW</hseq>
+                      <midline>DPKIRDGPMAVMK WE+YC+</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>21.2285</bit-score>
+                      <score>40</score>
+                      <evalue>3.0289e-13</evalue>
+                      <identity>9</identity>
+                      <positive>9</positive>
+                      <query-from>13</query-from>
+                      <query-to>45</query-to>
+                      <query-frame>-1</query-frame>
+                      <hit-from>142</hit-from>
+                      <hit-to>174</hit-to>
+                      <hit-frame>1</hit-frame>
+                      <align-len>11</align-len>
+                      <gaps>0</gaps>
+                      <qseq>ANMSAHVLMKY</qseq>
+                      <hseq>ANMSWKVLMKY</hseq>
+                      <midline>ANMS  VLMKY</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>12</hsp-len>
+                  <eff-space>4836</eff-space>
+                  <kappa>0.133956144488482</kappa>
+                  <lambda>0.317605957635731</lambda>
+                  <entropy>0.401214524497119</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>

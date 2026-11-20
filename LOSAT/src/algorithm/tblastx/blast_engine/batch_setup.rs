@@ -1,7 +1,7 @@
 //! The set-up of a TBLASTX query batch that `search_query_batch` does before its subjects: the
-//! search's flags and word values (`batch_flags`), the six frames of the batch's queries with
-//! their masks (`query_frames`), and the batch's lookup table with its contexts and X-dropoffs
-//! (`batch_lookup`).
+//! search's flags and word values (`batch_flags`), the frames of the batch's queries (six, or
+//! the three of the strand that `-strand` names) with their masks (`query_frames`), and the
+//! batch's lookup table with its contexts and X-dropoffs (`batch_lookup`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:158-277
 //! (`BlastInitialWordParametersNew`); c++/src/algo/blast/api/blast_setup_cxx.cpp:484-658
@@ -20,6 +20,7 @@ use super::{
     x_drop_raw_score, x_pair_par, x_query_frames, DiagnosticCounters, GeneticCode, KarlinParams,
     QueryContext, QueryFrame, SegMasker, Subjects, TblastxArgs, TbxScore,
 };
+use crate::algorithm::blastn::args::QueryStrand;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::utils::threading::SearchPool;
@@ -198,6 +199,19 @@ pub(super) fn query_frames(
         .iter()
         .map(|r| generate_frames(r.seq(), query_code))
         .collect();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:200-215 (with
+    // `-strand plus` contexts 3-5 of every query, with `minus` contexts 0-2, have length 0;
+    // `s_QueryInfo_SetContext` at :65-87 gives such a context no letters in the buffer and no
+    // separator, and marks it invalid)
+    // The frames of the strand that is not searched are dropped here, once per batch: the batch's
+    // buffer, lookup table, Karlin blocks, cutoffs and search spaces then hold the searched
+    // frames only, as NCBI's (a frame of no letters is already absent, `generate_frames`).
+    let (plus, minus) = QueryStrand::from_option(&args.strand).searched();
+    if !(plus && minus) {
+        for frames in &mut query_frames {
+            frames.retain(|frame| if frame.frame > 0 { plus } else { minus });
+        }
+    }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Translate, t_translate);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:404-406

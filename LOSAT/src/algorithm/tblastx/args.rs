@@ -155,6 +155,13 @@ pub struct TblastxArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
     #[arg(long)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1951-1957 (the
+    // query strand of the programs whose query is nucleotide: blastn, blastx, tblastx)
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:128 (the query reader takes it)
+    // The search translates the query's frames of the strands it names (`QueryStrand`,
+    // `blast_engine/batch_setup.rs` `query_frames`); the subject keeps its six frames.
+    #[arg(long, default_value = "both", value_parser = ["both", "plus", "minus"])]
+    pub strand: String,
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-214, 276-278
     // TBLASTX has no gapped X-drops (blast_args.cpp:216-229, `!m_IsTblastx`). Read by

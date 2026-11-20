@@ -58,7 +58,7 @@ use crate::utils::matrix::standard_score;
 mod culling;
 mod database;
 // `-db_soft_mask` and `-db_hard_mask` (series NP, M4b): the kernels of a masked database search,
-// chosen once per call in place of `process_subject` and `process_own_subject`.
+// chosen once per call in place of the kernel (`prelim_run::run_preliminary_with`).
 mod db_masked;
 // The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
@@ -11129,7 +11129,7 @@ fn run_call(
         prelim_hitlist_size,
         prelim_evalue,
     } = call_setup::prelim_cutoffs(&call_statistics, preliminary_exact_spaces)?;
-    // The statistics of each subject (`per_subject`), which `process_own_subject` reads.
+    // The statistics of each subject (`per_subject`), which `prelim_run::run_preliminary_with` reads.
     let subject_parameters = call_setup::subject_parameters(
         &call_statistics,
         &preliminary_option_spaces,
@@ -11194,8 +11194,9 @@ fn run_call(
         sum_stats: sum_stats.as_ref(),
     };
     // The kernel of one subject (`prelim_kernel::BlastpPrelimKernel::search_subject`: its scan,
-    // ungapped extensions and gapped half) with what it reads of the call; `process_subject` and
-    // `process_own_subject` below call it with the subject's preliminary statistics `values`.
+    // ungapped extensions and gapped half) with what it reads of the call; the preliminary stage
+    // calls it with the subject's preliminary statistics `values` (`prelim_run::
+    // run_preliminary_with`), alone or inside the masked kernels (`db_masked.rs`).
     let kernel = prelim_kernel::BlastpPrelimKernel {
         args: &args,
         query_ids: &query_ids,
@@ -11218,60 +11219,6 @@ fn run_call(
         timing_enabled,
         timing: &timing,
     };
-    // The kernel with the setup's statistics, and with the subject's own where NCBI computes the
-    // statistics of each subject (`per_subject`: only a database's blocks, which take the one or
-    // the other once per call below, so that the default path has no test per subject).
-    let process_subject = |scratch: &mut BlastpSubjectScratch,
-                           s_idx: usize,
-                           subject: BlastpSubjectRef<'_>,
-                           subject_result: &mut BlastpSubjectResult| {
-        kernel.search_subject(scratch, s_idx, subject, subject_result, &batch_values)
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
-    // ```c
-    //        if (db_length == 0) {
-    //            /* This is not a database search, hence need to recalculate and save
-    //             the effective search spaces and length adjustments for all
-    //             queries based on the length of the current single subject
-    //             sequence. */
-    //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
-    //                           seq_arg.seq->length, score_options, query_info,
-    //                           sbp, hit_params, word_params,
-    //                           eff_len_params)) != 0)
-    //               return status;
-    //       }
-    // ```
-    // Once per subject that has letters, before its scan: the kernel reads the subject's own
-    // statistics (`subject_parameters`).
-    let process_own_subject =
-        |scratch: &mut BlastpSubjectScratch,
-         s_idx: usize,
-         subject: BlastpSubjectRef<'_>,
-         subject_result: &mut BlastpSubjectResult| {
-            if subject.aa_len == 0 {
-                return kernel.search_subject(
-                    scratch,
-                    s_idx,
-                    subject,
-                    subject_result,
-                    &batch_values,
-                );
-            }
-            match subject_parameters(subject.aa_len) {
-                Ok(parameters) => kernel.search_subject(
-                    scratch,
-                    s_idx,
-                    subject,
-                    subject_result,
-                    &parameters.values(args.evalue),
-                ),
-                Err(overflow) => {
-                    subject_result.reset(s_idx);
-                    subject_space_overflow.note(overflow);
-                }
-            }
-        };
-
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
     // ```c
     // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
@@ -11342,64 +11289,38 @@ fn run_call(
         rps_gapped_k,
         rps_multi_volume,
     } = match db_masking.as_ref() {
-        None => prelim_run::run_preliminary(
+        None => prelim_run::run_preliminary_with(
             &prelim_stage,
-            &process_subject,
-            &process_own_subject,
+            &|scratch: &mut BlastpSubjectScratch,
+              s_idx: usize,
+              subject: BlastpSubjectRef<'_>,
+              subject_result: &mut BlastpSubjectResult,
+              values: &BlastpPrelimValues<'_>| {
+                kernel.search_subject(scratch, s_idx, subject, subject_result, values)
+            },
+            &batch_values,
+            &subject_parameters,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             &mut culling,
             outputs,
         )?,
-        Some(masking) => {
-            // `process_subject` and `process_own_subject` with the masked kernel.
-            let masked_subject =
-                |scratch: &mut BlastpSubjectScratch,
-                 s_idx: usize,
-                 subject: BlastpSubjectRef<'_>,
-                 subject_result: &mut BlastpSubjectResult| {
-                    masking.search_subject(
-                        &kernel,
-                        scratch,
-                        s_idx,
-                        subject,
-                        subject_result,
-                        &batch_values,
-                    )
-                };
-            let masked_own_subject =
-                |scratch: &mut BlastpSubjectScratch,
-                 s_idx: usize,
-                 subject: BlastpSubjectRef<'_>,
-                 subject_result: &mut BlastpSubjectResult| {
-                    if subject.aa_len == 0 {
-                        return masked_subject(scratch, s_idx, subject, subject_result);
-                    }
-                    match subject_parameters(subject.aa_len) {
-                        Ok(parameters) => masking.search_subject(
-                            &kernel,
-                            scratch,
-                            s_idx,
-                            subject,
-                            subject_result,
-                            &parameters.values(args.evalue),
-                        ),
-                        Err(overflow) => {
-                            subject_result.reset(s_idx);
-                            subject_space_overflow.note(overflow);
-                        }
-                    }
-                };
-            prelim_run::run_preliminary(
-                &prelim_stage,
-                &masked_subject,
-                &masked_own_subject,
-                &mut preliminary_hit_lists,
-                &mut x_compact_hit_lists,
-                &mut culling,
-                outputs,
-            )?
-        }
+        Some(masking) => prelim_run::run_preliminary_with(
+            &prelim_stage,
+            &|scratch: &mut BlastpSubjectScratch,
+              s_idx: usize,
+              subject: BlastpSubjectRef<'_>,
+              subject_result: &mut BlastpSubjectResult,
+              values: &BlastpPrelimValues<'_>| {
+                masking.search_subject(&kernel, scratch, s_idx, subject, subject_result, values)
+            },
+            &batch_values,
+            &subject_parameters,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &mut culling,
+            outputs,
+        )?,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
     // ```c++

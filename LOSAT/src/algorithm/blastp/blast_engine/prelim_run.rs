@@ -31,8 +31,9 @@ use anyhow::Result;
 use super::{
     blastp_timing_start, culling, database, preliminary_search_error, pssm_hooks, rps_hooks,
     run_resolved_in_pool, update_blastp_preliminary_hit_lists, x_block_input, x_lookup_ahead,
-    BlastpRanges, BlastpReports, BlastpRuntimeLookup, BlastpSubjectRef, BlastpSubjectResult,
-    BlastpSubjectScratch, BlastpSubjectSource, BlastpTiming, PrelimCollector, PrelimOnly,
+    BlastpPrelimValues, BlastpRanges, BlastpReports, BlastpRuntimeLookup, BlastpSubjectParameters,
+    BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpSubjectSource, BlastpTiming,
+    PrelimCollector, PrelimOnly,
 };
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -45,7 +46,7 @@ use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::RangedBatch;
 use crate::stats::search_space::SearchSpace;
-use crate::stats::setup::SubjectSpaceOverflow;
+use crate::stats::setup::{SearchSpaceOverflow, SubjectSpaceOverflow};
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 use crate::utils::threading::SearchPool;
 
@@ -161,6 +162,79 @@ pub(super) struct PrelimOutcome {
 ///             m_NumThreads != CThreadable::kMinNumThreads) {
 ///             m_NumThreads = CThreadable::kMinNumThreads;
 /// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
+// A search without a database (`db_length` 0) recomputes the search spaces, cutoffs and links of
+// every query from the length of each subject before its scan.
+/// The preliminary stage with the search of one subject `search` (`BlastpPrelimKernel::
+/// search_subject`, or with `-db_soft_mask` or `-db_hard_mask` the masked kernels of
+/// `db_masked.rs`, chosen once per call so that a search without them keeps its kernel): with the
+/// setup's statistics `batch_values` (`process_subject`), and where NCBI computes the statistics
+/// of each subject (`per_subject`) with the subject's own, `subject_parameters` of its length with
+/// the options' E-value (`process_own_subject`; a search space that overflows is noted in the
+/// stage's `subject_space_overflow` and the subject gives no hits). A subject without letters takes
+/// the setup's.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_preliminary_with<S, P>(
+    stage: &PrelimRun<'_>,
+    search: &S,
+    batch_values: &BlastpPrelimValues<'_>,
+    subject_parameters: &P,
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    culling: &mut Option<culling::PrelimCulling>,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<PrelimOutcome>
+where
+    S: Fn(
+            &mut BlastpSubjectScratch,
+            usize,
+            BlastpSubjectRef<'_>,
+            &mut BlastpSubjectResult,
+            &BlastpPrelimValues<'_>,
+        ) + Sync,
+    P: Fn(usize) -> Result<BlastpSubjectParameters, SearchSpaceOverflow> + Sync,
+{
+    let evalue = stage.args.evalue;
+    let overflow = stage.subject_space_overflow;
+    let process_subject = |scratch: &mut BlastpSubjectScratch,
+                           s_idx: usize,
+                           subject: BlastpSubjectRef<'_>,
+                           subject_result: &mut BlastpSubjectResult| {
+        search(scratch, s_idx, subject, subject_result, batch_values)
+    };
+    let process_own_subject =
+        |scratch: &mut BlastpSubjectScratch,
+         s_idx: usize,
+         subject: BlastpSubjectRef<'_>,
+         subject_result: &mut BlastpSubjectResult| {
+            if subject.aa_len == 0 {
+                return search(scratch, s_idx, subject, subject_result, batch_values);
+            }
+            match subject_parameters(subject.aa_len) {
+                Ok(parameters) => search(
+                    scratch,
+                    s_idx,
+                    subject,
+                    subject_result,
+                    &parameters.values(evalue),
+                ),
+                Err(error) => {
+                    subject_result.reset(s_idx);
+                    overflow.note(error);
+                }
+            }
+        };
+    run_preliminary(
+        stage,
+        &process_subject,
+        &process_own_subject,
+        preliminary_hit_lists,
+        x_compact_hit_lists,
+        culling,
+        outputs,
+    )
+}
+
 /// No NCBI counterpart: `use_parallel`, the pool for a subject set, whose output is the one
 /// thread's.
 pub(super) fn run_preliminary<K, O>(

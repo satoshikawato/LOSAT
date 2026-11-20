@@ -1,7 +1,7 @@
 //! The preliminary search of a database sequence in a BLASTP search with `-db_soft_mask` or
 //! `-db_hard_mask` (series NP, M4b): `run_call` chooses these kernels once per call, in place of
-//! `process_subject` and `process_own_subject`, so that a search without the options keeps its
-//! kernel (`prelim_kernel.rs`).
+//! the kernel that `prelim_run::run_preliminary_with` calls, so that a search without the options
+//! keeps its kernel (`prelim_kernel.rs`).
 //!
 //! - A sequence without masks of the algorithm is searched as in a search without the options.
 //! - `-db_soft_mask`: the complement of the sequence's masks is its scan ranges; the extensions
@@ -72,8 +72,8 @@ impl BlastpDbMasking<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:162-176
     // The sequence's masks are its soft ranges or its hard ranges (`s_BackupSubject`).
     /// The kernel of database sequence `s_idx` (its ordinal id) with the statistics `values` (the
-    /// setup's, or the sequence's own, `process_own_subject`): `kernel`'s search without masks,
-    /// over the soft ranges, or over the hard chunks.
+    /// setup's, or the sequence's own: `prelim_run::run_preliminary_with`): `kernel`'s search
+    /// without masks, over the soft ranges, or over the hard chunks.
     pub(super) fn search_subject(
         &self,
         kernel: &BlastpPrelimKernel<'_>,

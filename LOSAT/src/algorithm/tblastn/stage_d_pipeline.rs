@@ -40,6 +40,7 @@ use crate::algorithm::blastp::protein_query_split::{
     protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     ProteinQueryChunk,
 };
+use crate::algorithm::common::database::{FetchExcluded, FetchMarks};
 use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
 use crate::core::composition_adjustment::adjust_scores::{
@@ -49,6 +50,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, BlastCompoAdjustMode, BlastCompoQueryInfo, BlastCompoSequenceData,
     BlastRedoAlignParams, EMatrixAdjustRule,
 };
+use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
 use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::spouge::{blast_spouge_stoe, lookup_protein_gumbel_params, BlastGumbelBlk};
 use crate::stats::tables::{
@@ -1622,21 +1624,6 @@ fn run_local_search_with_redo<R: MatchRedo>(
     {
         return Err(sw_batch_failed(false));
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
-    // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
-    // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
-    // negative seqid list keeps without a line: its lists leave here, after the trim of
-    // `ADAPTIVE_CBS`, before the redo or the traceback (tblastn is gapped: `-ungapped` is
-    // refused).
-    if let Some(excluded) = profile.fetch_excluded {
-        excluded
-            .retain(&mut preliminary_lists, |(_, oid, _)| {
-                u32::try_from(*oid).ok()
-            })
-            .map_err(|failed| {
-                crate::algorithm::common::database::FetchExcluded::refusal(failed, "TBLASTN")
-            })?;
-    }
     // NCBI c++/src/algo/blast/core/blast_hspstream.c:91-96,158-204,
     // 569-610: the ordinary traceback stream sorts HSP lists by decreasing
     // OID, then each batch reads from the end; equal-OID query lists were
@@ -1660,9 +1647,21 @@ fn run_local_search_with_redo<R: MatchRedo>(
         preliminary_lists.sort_by(|(qa, oa, _), (qb, ob, _)| oa.cmp(ob).then_with(|| qb.cmp(qa)));
     }
 
+    // The subject of a list in the stream, for NCBI's fetches with `check_oid_exclusion`.
+    let list_ordinal = |(_, oid, _): &(usize, usize, LinkedHspList)| u32::try_from(*oid).ok();
+    let fetch_refusal = |failed| FetchExcluded::refusal(failed, "TBLASTN");
     // NCBI blast_traceback.c:1486-1498 (quoted at `match_redo`): the Smith-Waterman redo runs
     // without composition-based statistics too.
     if !compo_adjust_mode.is_enabled() && !R::SMITH_WATERMAN {
+        // NCBI blast_traceback.c:1567-1577 (cited at `blastp::blast_engine::database::
+        // exclude_fetched`): the traceback's fetches (`check_oid_exclusion`) exclude a subject that
+        // the negative seqid list keeps without a line; its lists leave here, after the trim of
+        // `ADAPTIVE_CBS` (tblastn is gapped: `-ungapped` is refused).
+        if let Some(excluded) = profile.fetch_excluded {
+            excluded
+                .retain(&mut preliminary_lists, list_ordinal)
+                .map_err(fetch_refusal)?;
+        }
         // NCBI c++/src/algo/blast/core/blast_traceback.c:1481-1501,
         // 1644-1707,1763-1776: the control path performs ordinary
         // traceback and posttraceback statistics, then result post-pipes.
@@ -1682,12 +1681,23 @@ fn run_local_search_with_redo<R: MatchRedo>(
             pool,
         );
     }
-    // With a `-db` stream, the subjects of the lists, each read
+    // The redo's fetches (`s_MatchingSequenceInitialize`, `check_oid_exclusion`) exclude the
+    // same subjects; their lists stay in the stream as markers (`FetchMarks`): the loops below test
+    // a marker's early termination as any list's, and one that passes clears NCBI's status of the
+    // Smith-Waterman redo (`SwBatchStatus::excluded_at_fetch`) and is neither redone nor kept.
+    let excluded_at_fetch =
+        FetchMarks::of(profile.fetch_excluded, &preliminary_lists, list_ordinal)
+            .map_err(fetch_refusal)?;
+    // With a `-db` stream, the subjects of the lists that the redo fetches, each read
     // when first aligned, held until their last match is done (LOSAT_X_TBNSTAGEDROP; with it off
     // until the redo ends).
     let x_stage = super::x_db_stream::XStageSubjects::new(
         subjects,
-        preliminary_lists.iter().map(|(_, oid, _)| *oid),
+        preliminary_lists
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !excluded_at_fetch.excluded(*index))
+            .map(|(_, (_, oid, _))| *oid),
     );
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2352-2384,2418-2479,
@@ -1754,12 +1764,16 @@ fn run_local_search_with_redo<R: MatchRedo>(
             )?,
         )?
     };
-    // NCBI blast_kappa.c:3100-3108 (`localScalingFactor`, `match_redo::MatchRedo::scale`).
-    let scale = match_redo.scale(compo_adjust_mode);
+    // NCBI blast_kappa.c:3100-3108: `localScalingFactor`, the redo parameters' (32 with
+    // composition-based statistics, 1 without them, where only the Smith-Waterman redo runs).
+    let scale = redo_params.score_divisor;
     let scaled = KarlinParams {
         lambda: gapped.lambda / scale,
         ..gapped
     };
+    // `kbp->logK` of the redo's block (the scaling leaves K): read by the Smith-Waterman redo of
+    // e-value mode and by the normalization of each kept match.
+    let log_k = gapped.k.glibc_ln();
     let scaled_by_context = vec![scaled; queries.len()];
     // NCBI c++/src/algo/blast/core/blast_kappa.c:411-427;
     // core/blast_parameters.c:1245-1253: postredo link, when enabled, uses
@@ -1823,7 +1837,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
             profile.genetic_code,
             redo_params,
             scaled.lambda,
-            gapped.k.glibc_ln(),
+            log_k,
             scoring.matrix,
             oid,
             heaps,
@@ -1878,8 +1892,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
             best_evalue: postredo.best_evalue,
             best_score: postredo.hsps[0].hsp.score,
         };
-        let bits =
-            normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), scale);
+        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, log_k, scale);
         let mut target = TargetTranslation::of(subject, &code);
         let mut owned: Vec<_> = survivors.into_iter().map(Some).collect();
         let payloads = postredo
@@ -1990,7 +2003,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // again in order). A match depends only on its own preliminary list.
     // NCBI's status of the last match that the Smith-Waterman redo reached (`status_code_tld`,
     // `match_redo::match_outcome`); the X-drop redo has none.
-    let mut sw_last_failed = false;
+    let mut sw_status = SwBatchStatus::default();
     // The Smith-Waterman redo of e-value mode reads the heaps (`match_redo::MatchRedo::
     // reads_heaps`): its matches are redone in stream order on this thread, as NCBI's
     // `-num_threads 1` redoes them.
@@ -2048,13 +2061,18 @@ fn run_local_search_with_redo<R: MatchRedo>(
                 })
                 .collect::<Result<Vec<_>>>()?;
             let batch_size = pool.threads().saturating_mul(32).max(64);
-            for batch in preliminary_lists.chunks(batch_size) {
+            for (chunk, batch) in preliminary_lists.chunks(batch_size).enumerate() {
+                let first = chunk * batch_size;
                 // Early termination only becomes true as the heaps fill, so a match
                 // that is skipped now is also skipped at its turn; anything else is
-                // rechecked in order below.
+                // rechecked in order below. A marker (`excluded_at_fetch`) is never redone.
                 let wanted: Vec<bool> = batch
                     .iter()
-                    .map(|(_, _, list)| !compo_early_termination(list.best_evalue, &heaps))
+                    .enumerate()
+                    .map(|(at, (_, _, list))| {
+                        !excluded_at_fetch.excluded(first + at)
+                            && !compo_early_termination(list.best_evalue, &heaps)
+                    })
                     .collect();
                 let lpt = x_tbn_redo_lpt() && {
                     let acts = wanted.iter().filter(|&&wanted| wanted).count() > 1;
@@ -2102,12 +2120,18 @@ fn run_local_search_with_redo<R: MatchRedo>(
                             .collect()
                     })
                 };
-                for ((context, oid, list), result) in batch.iter().zip(computed) {
+                for (at, ((context, oid, list), result)) in batch.iter().zip(computed).enumerate() {
+                    let excluded = excluded_at_fetch.excluded(first + at);
                     if compo_early_termination(list.best_evalue, &heaps) {
-                        // A redone match was done in redo_item (LOSAT_X_TBNSTAGEDROP).
-                        if result.is_none() {
+                        // A redone match was done in redo_item (LOSAT_X_TBNSTAGEDROP); a marker's
+                        // subject is not on the stage.
+                        if result.is_none() && !excluded {
                             x_stage.done(*oid);
                         }
+                        continue;
+                    }
+                    if excluded {
+                        sw_status.excluded_at_fetch();
                         continue;
                     }
                     if let Some(ref mut trace) = observer {
@@ -2130,7 +2154,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                         ),
                     };
                     let item =
-                        match_outcome::<R, _>(item, &mut sw_last_failed, redo_params.do_link_hsps)?;
+                        match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)?;
                     keep_item(*context, &mut heaps, item);
                 }
             }
@@ -2142,13 +2166,23 @@ fn run_local_search_with_redo<R: MatchRedo>(
         if x_tbn_redo_lpt() {
             crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", false);
         }
-        for (context, oid, list) in preliminary_lists {
+        for (index, (context, oid, list)) in preliminary_lists.into_iter().enumerate() {
             // NCBI c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736:
             // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
             //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
             // query_index = localMatch->query_index;
+            let excluded = excluded_at_fetch.excluded(index);
             if compo_early_termination(list.best_evalue, &heaps) {
-                x_stage.done(oid);
+                // A marker's subject is not on the stage.
+                if !excluded {
+                    x_stage.done(oid);
+                }
+                continue;
+            }
+            // NCBI blast_kappa.c:3560-3575 (quoted at `FetchMarks`): the fetch excludes the
+            // marker's subject, and the status returns to 0.
+            if excluded {
+                sw_status.excluded_at_fetch();
                 continue;
             }
             if let Some(ref mut trace) = observer {
@@ -2167,14 +2201,14 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     .reads_heaps(&redo_params)
                     .then_some(&mut heaps[..]),
             );
-            let item = match_outcome::<R, _>(item, &mut sw_last_failed, redo_params.do_link_hsps)?;
+            let item = match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)?;
             keep_item(context, &mut heaps, item);
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (quoted at
     // `match_redo::sw_batch_failed`)
     // The status of the last match the Smith-Waterman redo reached fails the batch.
-    if R::SMITH_WATERMAN && sw_last_failed {
+    if R::SMITH_WATERMAN && sw_status.failed() {
         return Err(sw_batch_failed(
             heaps.first().is_some_and(|heap| heap.len() > 0),
         ));

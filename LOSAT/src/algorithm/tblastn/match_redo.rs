@@ -40,7 +40,7 @@ use crate::core::composition_adjustment::redo_alignment::{
 };
 use crate::core::composition_adjustment::smith_waterman_match::{
     redo_one_match_smith_waterman, sw_batch_failed_error, sw_endless_error,
-    unadjusted_square_matrix, SwMatchScratch, SwRedoEndless, SwRedoFailed,
+    unadjusted_square_matrix, SwBatchStatus, SwMatchScratch,
 };
 use crate::sequence::packed_subject::SubjectNt;
 
@@ -56,10 +56,6 @@ pub(super) trait MatchRedo: Sync {
 
     /// A thread's memory for the redo.
     fn scratch(&self) -> Self::Scratch;
-
-    /// NCBI's `localScalingFactor` (blast_kappa.c:3100-3108): 32 with composition-based
-    /// statistics, 1 without them (where only the Smith-Waterman redo runs).
-    fn scale(&self, mode: BlastCompoAdjustMode) -> f64;
 
     /// Whether a match's redo reads the heaps of the redone matches (the Smith-Waterman
     /// significance test of e-value mode): the matches are then redone in stream order on one
@@ -101,11 +97,6 @@ impl MatchRedo for XDropRedo {
     #[inline(always)]
     fn scratch(&self) -> GapAlignScratch {
         GapAlignScratch::new()
-    }
-
-    #[inline(always)]
-    fn scale(&self, _mode: BlastCompoAdjustMode) -> f64 {
-        32.0
     }
 
     #[inline(always)]
@@ -175,14 +166,6 @@ impl MatchRedo for SmithWatermanRedo {
 
     fn scratch(&self) -> SwMatchScratch {
         SwMatchScratch::new()
-    }
-
-    fn scale(&self, mode: BlastCompoAdjustMode) -> f64 {
-        if mode.is_enabled() {
-            32.0
-        } else {
-            1.0
-        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1456-1473
@@ -257,43 +240,24 @@ impl MatchRedo for SmithWatermanRedo {
 }
 
 /// The result of one redone match in the batch's loop, and NCBI's status of the last match the
-/// redo reached (`failed`, `status_code_tld`): a Smith-Waterman redo that fails
-/// (`SwRedoFailed`) leaves the match without alignments and sets the status, the next match that
-/// the redo reaches clears it (a match that early termination skips leaves it); a redo that does
-/// not end in NCBI (`SwRedoEndless`) is LOSAT's refusal of the batch (`sw_endless`). The X-drop
-/// redo's result as it is.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3577,3644-3646
-/// ```c
-///                     *pStatusCode = s_MatchingSequenceInitialize(
-/// ...
-///                 *pStatusCode = s_ResultHspToDistinctAlign(
-/// ...
-///                     if (*pStatusCode != 0) {
-///                         goto match_loop_cleanup;
-///                     }
-/// ```
+/// redo reached (`status`, core's `SwBatchStatus`, which owns the rule): a Smith-Waterman redo
+/// that fails (`SwRedoFailed`) leaves the match without alignments and sets the status, the next
+/// match that the redo reaches clears it (a match that early termination skips leaves it; a
+/// list whose subject the fetch excludes clears it too, `SwBatchStatus::excluded_at_fetch`); a
+/// redo that does not end in NCBI (`SwRedoEndless`) is LOSAT's refusal of the batch
+/// (`sw_endless`). The X-drop redo's result as it is.
 #[inline(always)]
 pub(super) fn match_outcome<R: MatchRedo, T>(
     result: Result<Option<T>>,
-    failed: &mut bool,
+    status: &mut SwBatchStatus,
     do_link_hsps: bool,
 ) -> Result<Option<T>> {
     if !R::SMITH_WATERMAN {
         return result;
     }
-    match result {
-        Ok(item) => {
-            *failed = false;
-            Ok(item)
-        }
-        Err(error) if error.is::<SwRedoFailed>() => {
-            *failed = true;
-            Ok(None)
-        }
-        Err(error) if error.is::<SwRedoEndless>() => Err(sw_endless(do_link_hsps)),
-        Err(error) => Err(error),
-    }
+    Ok(status
+        .redone(result, || sw_endless(do_link_hsps))?
+        .flatten())
 }
 
 /// The error of a query batch whose last redone match failed its Smith-Waterman redo: NCBI's

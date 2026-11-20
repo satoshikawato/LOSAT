@@ -361,20 +361,9 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
                 } else {
                     x_whole_subject_composition(&range)
                 };
-                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1439-1444
-                // ```c++
-                //     if (query_composition->numTrueAminoAcids == 0 ||
-                //         subject_composition->numTrueAminoAcids == 0) {
-                //         /* Either the query or subject contains only ambiguity
-                //            characters, most likely because the entire subject has been
-                //            SEGed.  Compositional adjustment is meaningless. */
-                //         return 1;
-                // ```
-                if query_info.composition.num_true_amino_acids == 0
-                    || subject_composition.num_true_amino_acids == 0
-                {
-                    continue;
-                }
+                // `Blast_AdjustScores` returns 1 (no adjustment, the window is skipped) where the
+                // query or the subject range has no true amino acid (`blast_adjust_scores`'s
+                // `None`, which owns the test).
                 let Some(adjusted) = blast_adjust_scores(
                     &params.matrix_info,
                     &query_info.composition,
@@ -548,6 +537,70 @@ pub(crate) fn unadjusted_square_matrix(
         }
     }
     AdjustedProteinMatrix { scores }
+}
+
+/// NCBI's status of the last match that the redo of a query batch reached, with
+/// `-num_threads 1` (`status_code_tld`): a match whose Smith-Waterman redo fails sets it
+/// (`SwRedoFailed`, `redone`), the next match that the redo reaches clears it, by its redo
+/// (`redone`) or by the fetch that excludes its subject (`excluded_at_fetch`,
+/// `algorithm::common::database::FetchMarks`), and a match that early termination stops leaves
+/// it. The status left at the end of the batch fails it (`failed`, `sw_batch_failed_error`). One
+/// owner of the rule for every program's redo loop (TBLASTN's `match_redo::match_outcome`;
+/// BLASTP's one-thread loop, `redo_run.rs`, keeps its own copy of the rule until it reads this
+/// one).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3644-3646
+/// ```c
+///                     if (*pStatusCode != 0) {
+///                         goto match_loop_cleanup;
+///                     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (quoted at
+/// `sw_batch_failed_error`); the reset at the excluded fetch, blast_kappa.c:3560-3575, is quoted
+/// at `FetchMarks`.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct SwBatchStatus {
+    failed: bool,
+}
+
+impl SwBatchStatus {
+    /// A match that the redo reached and redid, its result `result`: the match's items where its
+    /// redo ended (`Ok`, the status cleared), none where it failed (`SwRedoFailed`, the status
+    /// set; NCBI frees the match's alignments), `endless()` where it does not end in NCBI
+    /// (`SwRedoEndless`), any other error as it is.
+    #[inline(always)]
+    pub(crate) fn redone<T>(
+        &mut self,
+        result: Result<T>,
+        endless: impl FnOnce() -> anyhow::Error,
+    ) -> Result<Option<T>> {
+        match result {
+            Ok(item) => {
+                self.failed = false;
+                Ok(Some(item))
+            }
+            Err(error) if error.is::<SwRedoFailed>() => {
+                self.failed = true;
+                Ok(None)
+            }
+            Err(error) if error.is::<SwRedoEndless>() => Err(endless()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// A match that the redo reached (its early termination test let it go on) whose subject
+    /// NCBI's fetch excludes: the status is cleared, and the match is neither redone nor kept.
+    #[inline(always)]
+    pub(crate) fn excluded_at_fetch(&mut self) {
+        self.failed = false;
+    }
+
+    /// Whether the last match that the redo of the batch reached failed: the batch fails
+    /// (`sw_batch_failed_error`).
+    #[inline(always)]
+    pub(crate) fn failed(self) -> bool {
+        self.failed
+    }
 }
 
 /// The error of a query batch whose last redone match failed its Smith-Waterman redo

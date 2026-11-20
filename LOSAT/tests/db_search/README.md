@@ -2172,7 +2172,7 @@ makeblastdb -in nucl.fna -dbtype nucl -out tm5 -title "dust masks v5" -mask_data
 makeblastdb -in nucl.fna -dbtype nucl -out tb5 -title "dust level 10 only" -mask_data dust10.asnb
 makeblastdb -in nucl.fna -dbtype nucl -out tm4 -title "dust masks v4" -blastdb_version 4 -mask_data dust.asnb,dust10.asnb
 makeblastdb -in nucl.fna -dbtype nucl -out tp5 -title "dust masks, parsed ids" -parse_seqids -mask_data dust_p.asnb
-makeblastdb -in nucl.fna -dbtype nucl -out tmv -title "dust masks, volumes" -blastdb_version 4 -max_file_sz 2500B -mask_data dust.asnb
+makeblastdb -in nucl.fna -dbtype nucl -out tmv -title "dust masks, volumes" -blastdb_version 4 -max_file_sz 1600B -mask_data dust.asnb
 makeblastdb -in nuclf.fna -dbtype nucl -out tf4 -title "dust masks with t5" -blastdb_version 4 -mask_data dustf.asnb
 blastdb_aliastool -dblist "tm5 tb5" -dbtype nucl -out tal -title "tm5 and tb5"
 makeblastdb -in nucl.fna -dbtype nucl -out th1 -title "hand masks 1" -blastdb_version 4 \
@@ -2182,13 +2182,14 @@ makeblastdb -in nucl.fna -dbtype nucl -out th2 -title "hand masks 2" -blastdb_ve
 rm -f *.njs
 ```
 
-`tm5`, `tm4` and `tp5` have the algorithms 11 (dust, defaults) and 12 (dust `level=10`; `tp5` has 11 only); `tb5` has the
-second dust alone, as its 11, which the alias `tal` and the list `tm5 tb5` number 12 as `tm5` does; `tmv` (several
-volumes) and `tf4` have 11. `th1` has the hand masks `mid0`, `mid1`, `mid2`, `adjacent`, `overlap` and `mid` as 11 to 16,
-`th2` `unsorted`, `head`, `tail` and `near` as 11 to 14. A mask is mapped to the six reading frames by its positions
-divided by 3 (the minus frames from frame -1's length); with `-db_hard_mask` LOSAT refuses a sequence whose mask leaves a
-frame without letters after it (`tf4`'s `t5`, `head` for frame -1, `tail` for frame +1, `near` for frame +2: the Owner's
-questions Q1 and Q2 of M4b) and masks out of order (`unsorted`, `overlap`), as for the other programs.
+`tm5`, `tm4` and `tp5` have the algorithms 11 (dust, defaults) and 12 (dust `level=10`; `tp5` has 11 only); `tb5` has
+the second dust alone, as its 11, which the alias `tal` and the list `tm5 tb5` number 12 as `tm5` does; `tmv` (three
+volumes: `t1` and `t2`, `t3`, `t4`) and `tf4` have 11. `th1` has the hand masks `mid0`, `mid1`, `mid2`, `adjacent`,
+`overlap` and `mid` as 11 to 16, `th2` `unsorted`, `head`, `tail` and `near` as 11 to 14. A mask is mapped to the six
+reading frames by its positions divided by 3 (the minus frames from frame -1's length); with `-db_hard_mask` LOSAT
+refuses a sequence whose mask leaves a frame without letters after it (`tf4`'s `t5`, `head` for frame -1, `tail` for
+frame +1, `near` for frame +2: the Owner's questions Q1 and Q2 of M4b) and masks out of order (`unsorted`, `overlap`),
+as for the other programs.
 
 ## A database title outside the visible ASCII range (M4a-1b part 5, M4a-1b2)
 

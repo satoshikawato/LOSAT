@@ -5623,19 +5623,22 @@ mod tests {
         ];
         let words = [&["blastx", "-query", "q", "-subject", "s"][..], &options].concat();
         let warning = "Warning: [blastx] Query_1 qempty no residues: Sequence contains no data \n";
-        let exception = "Error: NCBI C++ Exception:";
         let written = streams(&[&words[..], &["-outfmt", "5"]].concat(), &query, &subject).unwrap();
         assert_eq!(discarded(&written), [6, 7, 0]);
-        let shown = diagnostics_of(&written);
-        assert_eq!(shown.matches(warning).count(), 1, "{shown}");
-        // The refusals of outfmt 6 and 7 are one text; outfmt 0's is another.
-        assert_eq!(shown.matches(exception).count(), 2, "{shown}");
-        assert!(
-            shown.find(warning) < shown.find(exception),
-            "the warning comes before the refusal of the format that wrote it: {shown}"
+        // The CLI's standard error for `-outfmt 5` (NCBI's post of the Iteration that its XML
+        // leaves out, in LOSAT's words), then what outfmt 6 adds (the warning and its refusal;
+        // outfmt 7 adds the same two lines, which stream 3 holds) and what outfmt 0 adds (its
+        // refusal).
+        let own = "Error: [blastx] Failed s_BlastXMLAddIteration Q(0/1: CreateDensegFromStdseg(): \
+                   Std-seg segment lengths not accurate!\n\n";
+        let tabular = "Error: CreateDensegFromStdseg(): Std-seg segment lengths not accurate!\n\n";
+        let pairwise = "Error: CSeq_align::GetSeqRange(): Row is empty\n\n";
+        assert_eq!(
+            diagnostics_of(&written),
+            format!("{own}{warning}{tabular}{pairwise}")
         );
         // The argv's own outfmt 6 fails the run after the warning, as the CLI fails.
         let error = run(&[&words[..], &["-outfmt", "6"]].concat(), &query, &subject).unwrap_err();
-        assert!(error.contains("NCBI C++ Exception"), "{error}");
+        assert!(error.contains(tabular.trim_end()), "{error}");
     }
 }

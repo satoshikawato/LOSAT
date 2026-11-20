@@ -87,6 +87,10 @@ pub(super) struct LocalStageDProfile<'a> {
     /// instead of the plain hit-list collector; the pipe after the traceback is run by the
     /// finish of the search (`tblastn_app.rs`).
     pub culling_limit: i32,
+    /// The `-max_intron_length` value (0: NCBI's default). With sum statistics it gives the
+    /// largest subject gap of the linking, or turns the linking off
+    /// (`core::link_hsps::translated_longest_intron`); without them nothing reads it.
+    pub max_intron_length: i32,
     /// `-in_pssm` (PSI-TBLASTN): the query's PSSM, the source of the scores of the batch's one
     /// query (`score::PssmScore`) and of its Karlin-Altschul blocks (`query_set_setup`); `None`
     /// for a FASTA query batch.
@@ -1668,8 +1672,9 @@ fn run_local_search_with_pool(
             words: Some(build_query_word_hashes(seq)),
         })
         .collect();
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:2439-2479:
-    // do_link_hsps and cutoff_s follow the actual sum-statistics option.
+    // NCBI c++/src/algo/blast/core/blast_kappa.c:2428,2450-2479:
+    // do_link_hsps and cutoff_s follow the sum statistics of the hit-saving parameters
+    // (`hitParams->do_sum_stats`: the search's linking parameters, `parameters.link`).
     let gumbel = gumbel.as_ref();
     let redo_params = local_kappa_redo_params(
         scoring.matrix,
@@ -1681,7 +1686,6 @@ fn run_local_search_with_pool(
         *query_lengths.iter().max().unwrap(),
         compo_adjust_mode,
         false,
-        do_sum_stats,
         scoring.final_xdrop_bits,
         local_extension_final_xdrop(
             scoring.gap_xdrop_bits,
@@ -1943,7 +1947,6 @@ fn run_local_search_with_pool(
                     *query_lengths.iter().max().unwrap(),
                     compo_adjust_mode,
                     false,
-                    do_sum_stats,
                     scoring.final_xdrop_bits,
                     local_extension_final_xdrop(
                         scoring.gap_xdrop_bits,
@@ -2949,7 +2952,7 @@ fn query_set_setup<'a>(
     let options = LocalParameterOptions {
         expect_value: inputs.profile.expect_value,
         do_sum_stats: inputs.do_sum_stats,
-        max_intron_length: 0,
+        max_intron_length: inputs.profile.max_intron_length,
         gap_trigger_bits: 22.0,
         // `-xdrop_ungap` or 7 bits (`LocalStageDScoring::word_xdrop_bits`).
         word_xdrop_bits: inputs.scoring.word_xdrop_bits,
@@ -4044,6 +4047,7 @@ mod tests {
             &queries[33..34],
             &subject_slices(&subjects),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: Some(&seg),
                 soft_masking: false,
                 mask_lowercase: false,
@@ -4096,6 +4100,7 @@ mod tests {
             &queries,
             &subject_slices(&subjects),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: Some(&seg),
                 soft_masking: false,
                 mask_lowercase: false,
@@ -4388,6 +4393,7 @@ mod tests {
             &queries,
             &subject_slices(&subjects),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: Some(&seg),
                 soft_masking: false,
                 mask_lowercase: false,
@@ -4478,6 +4484,7 @@ mod tests {
             &queries,
             &subject_slices(&subjects),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: Some(&seg),
                 soft_masking: false,
                 mask_lowercase: false,
@@ -4637,6 +4644,7 @@ mod tests {
             &queries,
             &subject_slices(&subjects),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: Some(&seg),
                 soft_masking: false,
                 mask_lowercase: false,
@@ -4732,6 +4740,7 @@ mod tests {
                 &query_sequences,
                 &subject_slices(&subject_sequences),
                 LocalStageDProfile {
+                    max_intron_length: 0,
                     seg: Some(&seg),
                     soft_masking: false,
                     mask_lowercase: false,
@@ -4918,6 +4927,7 @@ mod tests {
             for mode in [0, 2] {
                 let name = format!("{case}.mode{mode}");
                 let profile = LocalStageDProfile {
+                    max_intron_length: 0,
                     seg: None,
                     soft_masking: false,
                     mask_lowercase: case == "lowercase_20260923",
@@ -5151,6 +5161,7 @@ mod tests {
             for mode in [0, 2] {
                 let name = format!("{case}.mode{mode}");
                 let profile = LocalStageDProfile {
+                    max_intron_length: 0,
                     seg: None,
                     soft_masking: false,
                     mask_lowercase: case != "long_chunk_20260924",
@@ -5367,6 +5378,7 @@ mod tests {
             &queries,
             &[subject.as_slice()],
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: None,
                 soft_masking: false,
                 mask_lowercase: false,
@@ -5517,6 +5529,7 @@ mod tests {
             &query_sequences,
             &subject_slices(&subject_sequences),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: None,
                 soft_masking: false,
                 mask_lowercase: false,
@@ -5689,6 +5702,7 @@ mod tests {
         let seg = SegParams::default();
         for (name, mode) in [("mode0_sumtrue", 0), ("mode2_sumfalse", 2)] {
             let profile = LocalStageDProfile {
+                max_intron_length: 0,
                 seg: Some(&seg),
                 soft_masking: false,
                 mask_lowercase: false,
@@ -5892,6 +5906,7 @@ mod tests {
             let subjects = vec![read(&format!("{input}/subjects.fna"))];
             for mode in [0, 2] {
                 let profile = LocalStageDProfile {
+                    max_intron_length: 0,
                     seg: if use_seg { Some(&seg) } else { None },
                     soft_masking: soft,
                     mask_lowercase: lowercase,
@@ -6058,6 +6073,7 @@ mod tests {
                     &queries,
                     &subject_slices(&subjects),
                     LocalStageDProfile {
+                        max_intron_length: 0,
                         seg: Some(&seg),
                         soft_masking: false,
                         mask_lowercase: false,
@@ -6371,6 +6387,7 @@ mod tests {
             &queries,
             &subject_slices(&subjects),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: Some(&seg),
                 soft_masking: false,
                 mask_lowercase: false,
@@ -6563,6 +6580,7 @@ mod tests {
                 &query_sequences,
                 &subject_slices(&subject_sequences),
                 LocalStageDProfile {
+                    max_intron_length: 0,
                     seg: Some(&seg),
                     soft_masking: false,
                     mask_lowercase: false,
@@ -6680,6 +6698,7 @@ mod tests {
             &queries,
             &subject_slices(&subjects),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: None,
                 soft_masking: false,
                 mask_lowercase: false,
@@ -6779,6 +6798,7 @@ mod tests {
             &queries,
             &subject_slices(&subjects),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: None,
                 soft_masking: false,
                 mask_lowercase: false,
@@ -6895,6 +6915,7 @@ mod tests {
             &queries,
             &subject_slices(&subjects),
             LocalStageDProfile {
+                max_intron_length: 0,
                 seg: None,
                 soft_masking: false,
                 mask_lowercase: false,
@@ -7172,6 +7193,7 @@ mod tests {
             .collect();
         let seg = SegParams::default();
         let profile = |_: std::ops::Range<usize>| LocalStageDProfile {
+            max_intron_length: 0,
             seg: Some(&seg),
             soft_masking: false,
             mask_lowercase: false,
@@ -7267,6 +7289,7 @@ mod tests {
         );
         let seg = SegParams::default();
         let profile = |_: std::ops::Range<usize>| LocalStageDProfile {
+            max_intron_length: 0,
             seg: Some(&seg),
             soft_masking: false,
             mask_lowercase: false,

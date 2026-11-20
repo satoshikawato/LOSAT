@@ -1,0 +1,6 @@
+# BLASTP 2.17.0+
+# Query: qok1 BDT63546.1 with W first
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_subjects.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qok1	sok1	99.194	124	1	0	1	124	1	124	3.85e-73	250

@@ -33,8 +33,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
   (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
   2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject; exception 3: a one-hit gapped
   start whose window reads past the end of a database volume's last memory page, where NCBI faults). The row has no
-  frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row_id`). A `losat-rejection` row uses it too
-  (two queries of one ID, refused at a later query batch, line WQA D10): the frozen NCBI run of a near input is the expectation of its stdout.
+  frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row_id`).
 - a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
   memcheck, where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3: the window of a one-hit
   gapped start of negative length; natively NCBI may crash there or read bytes that differ from run to run, valgrind
@@ -57,11 +56,14 @@ LOSAT/tests/db_search (README.md there says how they were built).
   against `stdout_sha256`. Its `rc` and stderr are LOSAT's. Where NCBI crashes on such a row, the frozen
   stdout is the part of the report that LOSAT writes before it refuses; `freeze` keeps it when NCBI's
   stdout stops earlier or later but agrees up to that point (`frozen_stdout`). A rejection row whose
-  `covers` cell has `ncbi-near: ROW_ID` refuses at a later query batch, after the reports of the batches
-  before as an error of NCBI's in that batch writes them: its stdout must be the frozen stdout of the
-  `ncbi` row ROW_ID, NCBI's run of a near input that stops at that batch (the same records, the refused
-  one's letters a line that NCBI's reader refuses); `freeze` copies that row's stdout columns and runs
-  nothing (line WQA D10 round 4, 2026-11-20: LOSAT's refusal of two queries with one id).
+  `covers` cell has `ncbi-near: ROW_ID` takes its stdout from the `ncbi` row ROW_ID of the same outfmt,
+  NCBI's run of a near input that writes the bytes LOSAT writes before it refuses: an input that fails at
+  the same step where NCBI crashes on the row's own (line RG item X4: the failed batch of a
+  Smith-Waterman redo), or the query batches before the batch that LOSAT refuses and NCBI searches on
+  (X4: the negative CHUNK_SIZE pair whose chunks leave gaps; line WQA D10: two queries of one ID under
+  `-parse_deflines`, the refused one's letters in the near input a line that NCBI's reader refuses).
+  `freeze` runs nothing for such a row and copies ROW_ID's stdout columns, `check` reads ROW_ID's frozen
+  stdout (`frozen_id`), and the row keeps its own rc and stderr (LOSAT's).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;

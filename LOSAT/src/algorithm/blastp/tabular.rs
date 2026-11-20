@@ -914,7 +914,10 @@ fn write_tabular_rows<const RPS: bool>(
                     None => None,
                 };
                 row_index += 1;
-                let mut row = tabular_hsp(hsp, searched_length, rows);
+                let mut row = tabular_hsp(hsp, searched_length, rows.map(|(rows, _)| rows));
+                if let Some((_, stored_gaps)) = rows {
+                    row.stored_gaps = stored_gaps;
+                }
                 // Outside NCBI's alignment block `nident` is the 0 of `x_ResetFields`: with
                 // `nident` the block stays closed only on a Seq-align count of 0, which is that 0.
                 if !spec.opens_counts(&seqalign_num_ident) {
@@ -974,17 +977,24 @@ fn reported(hit_list: &BlastpHitList) -> impl Iterator<Item = &super::hsp::Blast
 }
 
 /// The rows of the HSP `hsp` (the `index`-th of its query's final list, whose rows are `rows`):
-/// its rendered alignment.
+/// its rendered alignment, and the columns of its rows whose `-` is a residue
+/// (`TabularHsp::stored_gaps`).
+#[allow(clippy::type_complexity)]
 fn hsp_rows<'r>(
     rows: &'r [PairwiseHit],
     index: HspIndex,
     hsp: &BlastpHsp,
-) -> Result<(&'r [u8], &'r [u8])> {
+) -> Result<((&'r [u8], &'r [u8]), [&'r [u32]; 2])> {
     let rendered = rows
         .get(index)
         .filter(|row| row.hit.q_idx == hsp.q_idx && row.hit.s_idx == hsp.s_idx);
-    match rendered.and_then(|row| Some((row.query_seq.as_deref()?, row.subject_seq.as_deref()?))) {
-        Some((query, subject)) => Ok((query.as_bytes(), subject.as_bytes())),
+    match rendered
+        .and_then(|row| Some((row.query_seq.as_deref()?, row.subject_seq.as_deref()?, row)))
+    {
+        Some((query, subject, row)) => Ok((
+            (query.as_bytes(), subject.as_bytes()),
+            [&row.query_stored_gaps, &row.subject_stored_gaps],
+        )),
         None => anyhow::bail!("unimplemented BLASTP tabular rows of a final HSP"),
     }
 }
@@ -1037,6 +1047,7 @@ fn tabular_hsp<'r>(
         rows,
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
         end_gaps: true,
+        stored_gaps: [&[], &[]],
         qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
     }
 }

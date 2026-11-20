@@ -127,7 +127,13 @@ These cases are about what the program prints around the search, not the search 
 ### Threads with `-subject`
 
 - **What you see.** With `-subject`, NCBI BLAST+ ignores `-num_threads` and writes `'num_threads' is currently ignored when 'subject' is specified.` on the standard error. LOSAT uses the threads you ask for and does not print the line. Above the CPU count NCBI also writes `Number of threads was reduced to N to match the number of available CPUs`; LOSAT does not.
-- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's.
+- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from `blastn`'s progress bar on a terminal (next section).
+
+### `blastn`'s progress bar on a terminal
+
+- **What you see.** While `blastn` searches with `-num_threads` 2 or more against two subjects or more (the records of `-subject` or the sequences of `-db`), it draws a progress bar on the standard error: the elapsed time, a bar and the number of subjects done (`19/33`). When the search of each batch of queries ends, the bar is erased, so nothing of it stays on the screen: the report and the shell's prompt appear where they would without it. NCBI BLAST+ writes nothing there during a search.
+- **When.** Only when the standard error is a terminal and, outside Windows, `TERM` is set and is not `dumb`. A standard error sent to a file or a pipe (`2> log.txt`, `2>&1 | less`) gets no byte of it. The library, pylosat and LOSAT Web never draw it.
+- **What does not change.** The bytes of the standard output, the `-out` file and the exit status.
 
 ### Argument errors and help
 

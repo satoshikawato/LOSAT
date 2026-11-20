@@ -359,7 +359,7 @@ impl<'a> Reader<'a> {
         match read_std_signed(usize::from(first), width, || self.byte()) {
             Ok(value) => Ok(value),
             Err(StdSignedError::ZeroLength) => Err(self.error("zero length of number")),
-            Err(StdSignedError::Overflow) => Err(self.error("overflow error")),
+            Err(StdSignedError::Overflow { .. }) => Err(self.error("overflow error")),
             Err(StdSignedError::Read(error)) => Err(error),
         }
     }
@@ -457,8 +457,10 @@ impl<'a> Reader<'a> {
 pub(crate) enum StdSignedError<E> {
     /// `fFormatError`, "zero length of number".
     ZeroLength,
-    /// `fOverflow`, "overflow error".
-    Overflow,
+    /// `fOverflow`, "overflow error", thrown at `line` of objistrasnb.cpp (488: the first byte
+    /// beyond the width is not a sign; 493: a later one differs from it; 499: the value's sign
+    /// differs from it).
+    Overflow { line: u32 },
     /// The byte source failed (the data ends inside the value).
     Read(E),
 }
@@ -524,18 +526,18 @@ pub(crate) fn read_std_signed<E>(
         length -= 1;
         let c = next()? as i8;
         if c != 0 && c != -1 {
-            return Err(StdSignedError::Overflow);
+            return Err(StdSignedError::Overflow { line: 488 });
         }
         while length > width {
             length -= 1;
             if next()? as i8 != c {
-                return Err(StdSignedError::Overflow);
+                return Err(StdSignedError::Overflow { line: 493 });
             }
         }
         length -= 1;
         n = i64::from(next()? as i8);
         if (n ^ i64::from(c)) & 0x80 != 0 {
-            return Err(StdSignedError::Overflow);
+            return Err(StdSignedError::Overflow { line: 499 });
         }
     } else {
         length -= 1;
@@ -1051,7 +1053,7 @@ mod tests {
             let result = match result {
                 Ok(value) => Ok(value),
                 Err(StdSignedError::ZeroLength) => Err("zero"),
-                Err(StdSignedError::Overflow) => Err("overflow"),
+                Err(StdSignedError::Overflow { .. }) => Err("overflow"),
                 Err(StdSignedError::Read(_)) => Err("end"),
             };
             (result, taken)

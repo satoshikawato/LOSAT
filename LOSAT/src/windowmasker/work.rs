@@ -155,9 +155,9 @@ pub(super) trait SequenceSource {
     ) -> Result<Option<Record>, Failure>;
 }
 
-/// The reader of `-infmt` (`CWinMaskConfig`'s `reader`): `CMaskFastaReader( *is, true,
-/// args["parse_seqids"] )` of the opened input, or `CMaskBDBReader( args[kInput].AsString() )`;
-/// none for `seqids` (`input` is `None` only for `blastdb`).
+/// The reader of `-infmt` (`CWinMaskConfig`'s `reader`): `CMaskFastaReader` of the opened input
+/// (nucleotide, with `-parse_seqids`), or `CMaskBDBReader` of the database `-in`; none for
+/// `seqids` (`input` is `None` only for `blastdb`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:384-397
 pub(super) fn reader<'a, R: Read + 'a>(
@@ -189,7 +189,7 @@ struct FastaSource<R: Read> {
 }
 
 impl<R: Read> SequenceSource for FastaSource<R> {
-    // windowmasker posts at the level Warning (`SetDiagPostLevel( eDiag_Warning )`,
+    // windowmasker posts at the level Warning (`SetDiagPostLevel` to `eDiag_Warning`,
     // win_mask_app.cpp:118): the reader's warnings are written, each on its line (the line
     // warnings, `LOG_POST`) or as `ERR_POST_X` of the Seq-id parser (error code 1306). The
     // output written so far comes out first, whatever its last byte (`cerr` is tied to `cout`);
@@ -436,6 +436,7 @@ fn mask_input(
         }
         let seq = MaskedBioseq {
             ids: &record.ids,
+            handle_seq_id: lists.handle_seq_id(&record.ids),
             title: record.title.as_deref(),
             taxname: record.taxname.as_ref(),
             has_source: record.has_source,

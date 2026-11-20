@@ -124,6 +124,31 @@ pub(crate) fn mask_handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeH
     Ok(Some(key))
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1161-1185
+/// The key of the info (`CSeq_id_Info`) of the handle that `CSeq_id_Handle::GetHandle(id)` gives:
+/// two Seq-ids whose keys are equal share one info, and `GetSeqId()` of either handle is made from
+/// the Seq-id that made it ([`handle_seq_id`]). It is [`mask_handle_key`] but for a Textseq-id that
+/// packs: its info is shared by every accession with the same prefix (without case), number of
+/// digits and version (the packed tree's `TKey`), whatever the number and, in the GenBank tree,
+/// whatever the alternative (GenBank, EMBL or DDBJ).
+pub(crate) fn mask_info_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeHandle> {
+    if let Some(text) = id.textseq().filter(|text| textseq_packs(text)) {
+        let accession = text
+            .accession
+            .as_deref()
+            .expect("a packed Textseq-id has an accession");
+        let (prefix_len, digits) =
+            textseq_packed_split(accession).expect("a packed Textseq-id splits");
+        let mut key = vec![handle_tree(id), b'I'];
+        push_bytes(&mut key, &accession[..prefix_len].to_ascii_lowercase());
+        key.extend((digits as u32).to_le_bytes());
+        push_opt_i32(&mut key, text.version);
+        return Ok(Some(key));
+    }
+    mask_handle_key(id)
+}
+
 /// The key of a Textseq-id (`key` holds its tree).
 fn textseq_key(id: &ParsedSeqId, text: &TextseqId, mut key: Vec<u8>) -> Option<Vec<u8>> {
     if text.accession.is_none() && text.name.is_none() {
@@ -273,8 +298,9 @@ pub(crate) fn mask_handle_order(packed: i64) -> u64 {
 //     s_RestoreCaseVariant(const_cast<CTextseq_id*>(ret->GetTextseq_Id())->SetAccession(), variant);
 // ```
 /// `CSeq_id_Handle::GetSeqId()` of the handle that `CSeq_id_Handle::GetHandle(id)` gives when the
-/// handle's info was made from `first` (the two are one handle: [`mask_handle_key`], or the `giim`
-/// tree's [`GiimTree::made_from`]): the Seq-id that `AsString()` writes. The info keeps `first`;
+/// handle's info was made from `first` (the two share the info: [`mask_info_key`], or the `giim`
+/// tree's [`GiimTree::made_from`]): the Seq-id that `AsString()` writes and the masking tools'
+/// `seqloc_*` and `maskinfo_*` writers print. The info keeps `first`;
 /// the handle's case variant gives back the case of `id`'s first 64 letters where the tree keeps
 /// one:
 /// - a local string id; a general id's database, then its string tag;

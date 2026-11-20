@@ -29,8 +29,8 @@ fn posts(annots: &[&str]) -> String {
 
 /// `CATCH_ALL`'s report of an exception at `file`:`line` (one line of the chain): NCBI's text in
 /// LOSAT's words (`crate::wording::losat_text`).
-fn report(file: &str, line: u32, kind: &str, text: &str) -> String {
-    crate::wording::losat_text(&format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/{file}\", line {line}: Error: ({kind}) {text}\n\n")).into_owned()
+fn report(file: &str, line: u32, kind: &str, text: &str) -> Vec<u8> {
+    crate::wording::losat_text(&format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/{file}\", line {line}: Error: ({kind}) {text}\n\n")).into_owned().into_bytes()
 }
 
 const TABLE: &str = "src/objmgr/seq_table_info.cpp";
@@ -232,7 +232,7 @@ fn exceptions_stop_the_run_with_their_report() {
         abort(&format!("{{ data align {{ {{ type global, dim 2, segs std {{ {{ dim -1, loc {{ int {{ from 0, to 5, id {Q1} }} }} }} }} }} }} }}")),
         Abort {
             exit: 255,
-            message: "Error: vector::_M_default_append\n".to_string()
+            message: b"Error: vector::_M_default_append\n".to_vec()
         }
     );
 }
@@ -286,7 +286,7 @@ fn the_failed_stream_keeps_the_headers() {
         outcome.abort,
         Some(Abort {
             exit: 255,
-            message: "\n".to_string()
+            message: b"\n".to_vec()
         })
     );
     // The null Seq-id handle of a row after the stream failed (k03).
@@ -298,7 +298,7 @@ fn the_failed_stream_keeps_the_headers() {
         ),
     ])
     .unwrap();
-    assert_eq!(outcome.abort.unwrap().message, "\n");
+    assert_eq!(outcome.abort.unwrap().message, b"\n");
 }
 
 // The values of a table's rows: a sparse bit set (t87), an int-delta column (t52), a sorted table
@@ -337,7 +337,7 @@ fn an_empty_region_after_the_failed_stream_writes_the_object() {
             outcome.abort,
             Some(Abort {
                 exit: 0,
-                message: String::new()
+                message: Vec::new()
             })
         );
         assert!(outcome.muted);

@@ -57,7 +57,7 @@ pub(crate) struct AnnotOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Abort {
     pub(crate) exit: i32,
-    pub(crate) message: String,
+    pub(crate) message: Vec<u8>,
 }
 
 impl Abort {
@@ -68,11 +68,7 @@ impl Abort {
     pub(crate) fn of(error: crate::cli::NativeError, muted: bool) -> Abort {
         Abort {
             exit: error.exit,
-            message: if muted {
-                "\n".to_string()
-            } else {
-                error.message
-            },
+            message: if muted { b"\n".to_vec() } else { error.message },
         }
     }
 }
@@ -210,7 +206,7 @@ pub(crate) fn index_entry(
         Err(Stop::Std(what)) => Some(crate::cli::NativeError::std_exception(what)),
         Err(Stop::NullPointer) if ix.muted => Some(crate::cli::NativeError {
             exit: 255,
-            message: String::new(),
+            message: String::new().into(),
         }),
         Err(Stop::NullPointer) => return Err(Refusal::NullPointer),
         // The failed write (`CIOException::eWrite`) ends the run with nothing more written and

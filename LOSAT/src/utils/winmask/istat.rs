@@ -1502,7 +1502,10 @@ impl UsetHash {
     ///         return 0;
     ///     }
     /// ```
-    #[inline]
+    // Always inlined: the masker reaches it through `at` for every unit of every window, and
+    // with `true_count` (`-convert`) as a second caller LLVM kept it out of line, which cost
+    // blastn `-window_masker_db` 0.2-0.5 % more instructions.
+    #[inline(always)]
     fn get_info(&self, unit: u32) -> Result<u32, WinMaskError> {
         let runit = reverse_complement(unit, self.unit_size);
         let unit = if runit < unit { runit } else { unit };
@@ -1567,7 +1570,8 @@ impl UsetArray {
     /// The units of a binary file are not checked for order (`add_info`), so in a file whose
     /// units are not increasing the entry found is the one NCBI's `lower_bound` finds
     /// (`utils::lower_bound`). No data (`unit_data` null) is an empty array here: 0 either way.
-    #[inline]
+    // Always inlined into `at`, as `UsetHash::get_info` is.
+    #[inline(always)]
     fn get_info(&self, unit: u32) -> u32 {
         let runit = reverse_complement(unit, self.unit_size);
         let unit = if runit < unit { runit } else { unit };

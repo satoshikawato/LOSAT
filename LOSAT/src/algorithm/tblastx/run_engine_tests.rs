@@ -56,6 +56,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         qcov_hsp_perc: None,
         seg: "no".to_string(),
         soft_masking: None,
+        sum_stats: None,
         lcase_masking: false,
         xdrop_ungap: None,
         window_size: None,

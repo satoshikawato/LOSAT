@@ -200,6 +200,42 @@ fn test_soft_masking_sets_mask_at_hash() {
     assert!(soft(&["-seg", "no", "-soft_masking", "true"]));
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244 and 321-323
+// (quoted at `TblastxArgs::sum_stats`); c++/src/algo/blast/api/tblastx_options.cpp:76-81 (the
+// default, true)
+// `-sum_stats` takes NCBI's boolean spellings (`NStr::StringToBool`); omitted, the search links
+// with sum statistics and the archive records nothing (`None`).
+#[test]
+fn test_sum_stats() {
+    let parse = |extra: &[&str]| {
+        let mut argv = vec![
+            "losat", "tblastx", "-query", "q.fa", "-subject", "s.fa", "-outfmt", "6",
+        ];
+        argv.extend_from_slice(extra);
+        crate::cli::try_parse_from(argv).map(|cli: crate::cli::Cli| match cli.command {
+            crate::cli::Commands::Tblastx(args) => args,
+            _ => panic!("wrong program"),
+        })
+    };
+    let omitted = parse(&[]).unwrap();
+    assert_eq!(omitted.sum_stats, None);
+    assert!(omitted.sum_stats());
+    for value in ["true", "TRUE", "t", "T", "1", "yes", "on"] {
+        let args = parse(&["-sum_stats", value]).unwrap();
+        assert_eq!(args.sum_stats, Some(true), "{value}");
+        assert!(args.sum_stats(), "{value}");
+    }
+    for value in ["false", "F", "f", "0", "no", "off"] {
+        let args = parse(&["-sum_stats", value]).unwrap();
+        assert_eq!(args.sum_stats, Some(false), "{value}");
+        assert!(!args.sum_stats(), "{value}");
+    }
+    for value in ["maybe", "2", ""] {
+        assert!(parse(&["-sum_stats", value]).is_err(), "{value}");
+    }
+    assert!(parse(&["-sum_stats"]).is_err());
+}
+
 #[test]
 fn test_output_path() {
     let args = parse_args(&[

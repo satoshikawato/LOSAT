@@ -570,7 +570,17 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: OTHER,
         placement: 'algorithm',
-        fields: [numDescriptions, numAlignments, lineLength, sortHits, sortHsps, threshold, windowSize, xdropUngap],
+        fields: [
+          numDescriptions,
+          numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
+          threshold,
+          windowSize,
+          xdropUngap,
+          { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' },
+        ],
       },
     ],
   },

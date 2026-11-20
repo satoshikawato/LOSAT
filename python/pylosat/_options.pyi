@@ -479,6 +479,8 @@ class TblastxOptions(TypedDict, total=False):
     """SEG: no, yes, or WINDOW LOCUT HICUT"""
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
+    sum_stats: bool
+    """Use sum statistics [default: true]"""
     lcase_masking: bool
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""

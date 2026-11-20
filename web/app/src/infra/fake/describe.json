@@ -2297,6 +2297,11 @@
     "takes_value": true
    },
    {
+    "flag": "-sum_stats",
+    "help": "Use sum statistics [default: true]",
+    "takes_value": true
+   },
+   {
     "flag": "-lcase_masking",
     "help": "",
     "takes_value": false,

@@ -1509,7 +1509,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "remote",
     "strand",
     "subject_besthit",
-    "sum_stats",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {

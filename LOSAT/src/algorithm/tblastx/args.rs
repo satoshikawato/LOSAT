@@ -265,6 +265,19 @@ pub struct TblastxArgs {
     // by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244
+    // ```c++
+    //     if (!m_SuppressSumStats) {
+    //         arg_desc.AddOptionalKey(kArgSumStats, "bool_value",
+    //                      	 	"Use sum statistics",
+    //                      	 	CArgDescriptions::eBoolean);
+    //     }
+    // ```
+    // (`CGenericSearchArgs( !kQueryIsProtein, false, false, true)`, tblastx_args.cpp:68, does not
+    // suppress it.) Option, not a value with a default: whether it was given is what a BLAST
+    // archive (outfmt 11) records (`SumStatistics`); the search reads `sum_stats()`.
+    #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics [default: true]")]
+    pub sum_stats: Option<bool>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
     // arg_desc.AddFlag(kArgUseLCaseMasking,
     //     "Use lower case filtering in query and subject sequence(s)?", true);
@@ -556,6 +569,27 @@ impl TblastxArgs {
     /// other handler of tblastx sets `mask_at_hash`.
     pub fn soft_masking(&self) -> bool {
         self.soft_masking.unwrap_or(false)
+    }
+
+    /// Whether the search links its HSPs with sum statistics (`do_sum_stats`): `-sum_stats`, else
+    /// TBLASTX's default, true.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:321-323
+    /// ```c++
+    ///     if (args.Exist(kArgSumStats) && args[kArgSumStats]) {
+    ///         opt.SetSumStatisticsMode(args[kArgSumStats].AsBoolean());
+    ///     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/tblastx_options.cpp:76-81
+    /// ```c++
+    /// CTBlastxOptionsHandle::SetHitSavingOptionsDefaults()
+    /// {
+    ///     CBlastProteinOptionsHandle::SetHitSavingOptionsDefaults();
+    ///     m_Opts->SetSumStatisticsMode();
+    /// }
+    /// ```
+    pub fn sum_stats(&self) -> bool {
+        self.sum_stats.unwrap_or(true)
     }
 
     /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a

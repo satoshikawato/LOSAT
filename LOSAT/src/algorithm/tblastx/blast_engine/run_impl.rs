@@ -2886,6 +2886,7 @@ fn write_tblastx_outputs(
                             Some(database) => database.reported.sources.clone(),
                             None => Vec::new(),
                         },
+                        sum_stats: args.sum_stats(),
                     };
                     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:166-168
                     // ```c++
@@ -5650,6 +5651,7 @@ fn search_query_batch<S: TbxScore>(
         // before scanning; both linking passes read the same state.
         let subject_len_nucl = s_len as i64;
         let linking_params = subject_link::subject_linking_params(
+            args.sum_stats(),
             avg_query_length,
             subject_len_nucl,
             link_db_length_nucl,
@@ -5797,7 +5799,7 @@ fn search_query_batch<S: TbxScore>(
         // (subject_link.rs).
         let link_args = subject_link::SubjectLinkArgs {
             linking_params_for_cutoff: &linking_params_for_cutoff,
-            linking_params: &linking_params,
+            linking_params: linking_params.as_ref(),
             contexts_ref,
             subject_frame_bases: &subject_frame_bases,
             length_adj_per_context: statistics.length_adj_per_context,
@@ -5832,22 +5834,18 @@ fn search_query_batch<S: TbxScore>(
         // reevaluates ambiguities and calls BLAST_LinkHsps again.
         //
         // A list of the one-hit word finder (`-window_size 0`) that holds an HSP of length 0 or
-        // less links with NCBI's `Int4` ends, and those HSPs are dropped after it
-        // (`subject_link::link_subject_hits_int4`).
+        // less links with NCBI's `Int4` ends, and those HSPs are dropped after it; without sum
+        // statistics the HSPs get their own E-values (`subject_link::first_link_subject_hits`).
         x_link_timer.arm(LinkCall::First);
-        let prelinked_ungapped_hits = if combined_ungapped_hits.is_empty() {
-            combined_ungapped_hits
-        } else if window == 0 && subject_link::holds_int4_inverted(&combined_ungapped_hits) {
-            subject_link::link_subject_hits_int4(&link_args, combined_ungapped_hits)
-        } else {
-            subject_link::link_subject_hits(&link_args, combined_ungapped_hits)
-        };
+        let prelinked_ungapped_hits =
+            subject_link::first_link_subject_hits(&link_args, combined_ungapped_hits, window);
         x_link_timer.disarm();
         x_lap.lap(XStage::Link1);
         // The sort after the first linking call and the reap by the preliminary E-value
         // (`subject_link::sort_and_reap_after_first_link`).
         let mut prelinked_ungapped_hits = subject_link::sort_and_reap_after_first_link(
             prelinked_ungapped_hits,
+            &link_args,
             &stage_args,
             &mut x_lap,
         );
@@ -5880,6 +5878,9 @@ fn search_query_batch<S: TbxScore>(
         } else {
             (&s_frames, s_frames_report)
         };
+        // Without sum statistics, the HSPs of length 0 or less, which NCBI's re-evaluation
+        // deletes without reading them (`subject_link::drop_unread_without_linking`).
+        subject_link::drop_unread_without_linking(&link_args, window, &mut prelinked_ungapped_hits);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2699-2705
         // ```c
         //       if (kTranslateSubject)

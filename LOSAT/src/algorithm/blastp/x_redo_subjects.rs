@@ -166,7 +166,7 @@ impl XDbSubjects<'_> {
     #[inline(never)]
     fn read(&self, rank: u32) -> Result<SequenceBlock> {
         let ordinal = self.ordinals[rank as usize];
-        let block = self.db.read_sequence(ordinal).map_err(|error| {
+        let mut block = self.db.read_sequence(ordinal).map_err(|error| {
             crate::algorithm::common::database::database_error(error, self.program)
         })?;
         if x_has_recounted_residue(block.protein(0)) {

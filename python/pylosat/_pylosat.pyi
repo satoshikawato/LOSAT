@@ -31,10 +31,11 @@ class Hsp:
         """psiblast's round that found the HSP (1-based); 1 in a search without rounds."""
     @property
     def query_id(self) -> str:
-        """`qaccver`."""
+        """`qaccver`, as text: each sequence of bytes that is not UTF-8 is U+FFFD, as
+        `bytes.decode("utf-8", "replace")` makes it; `Report.bytes` keeps the bytes."""
     @property
     def subject_id(self) -> str:
-        """`saccver`."""
+        """`saccver`, as text, as `query_id`."""
     @property
     def raw_score(self) -> int:
         """`score`."""

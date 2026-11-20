@@ -72,6 +72,9 @@ outcome = search.run(query, pylosat.Database("core_nt"), outfmt="6")
 `polars.DataFrame(hsps)`, `pyarrow.table(hsps)`, `pandas.DataFrame.from_arrow(hsps)`. No Arrow
 library is required to use pylosat. Its columns have the names of `-outfmt`, the default report's
 first: `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`.
+The ids (`qaccver`, `saccver`, `hsp.query_id`, `hsp.subject_id`) are text: a title's bytes that are
+not UTF-8 become U+FFFD there, as `bytes.decode("utf-8", "replace")` makes them, while the reports
+keep them (`report.bytes[report.spans[hsp.index]]` is the HSP's row as the command line writes it).
 
 `hsps[i]` is an `Hsp` with the field names of LOSAT's Rust API (`bit_score`, `e_value`, `q_start`).
 `outcome.queries()` and `QueryHits.subjects()` group the rows by query and by subject. Everything

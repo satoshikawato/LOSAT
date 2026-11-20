@@ -28,7 +28,7 @@ outcome.diagnostics                     # what the command line writes to its st
 pip install pylosat
 ```
 
-PyPI has wheels for CPython 3.10 and later on Linux (x86_64, aarch64), macOS (arm64, x86_64) and Windows (x64). On other platforms pip builds pylosat from its source distribution, which needs Rust 1.92 or later ([rustup](https://rustup.rs/)).
+PyPI has wheels for CPython 3.10 and later on Linux (x86_64, aarch64; glibc 2.17 or later), macOS (arm64, x86_64) and Windows (x64). On other platforms pip builds pylosat from its source distribution, which needs Rust 1.92 or later ([rustup](https://rustup.rs/)).
 
 To build a wheel from the repository instead, use [maturin](https://www.maturin.rs/):
 

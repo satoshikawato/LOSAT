@@ -12202,7 +12202,9 @@ fn run_call(
         }
         _ => Vec::new().into(),
     };
-    let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
+    // `-db_soft_mask` and `-db_hard_mask`: the `Masked using:` lines of each name.
+    let pairwise_database =
+        database.map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     // The reported database sequences with parsed Seq-ids by rank (empty without them).
     let listed_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
         .as_ref()

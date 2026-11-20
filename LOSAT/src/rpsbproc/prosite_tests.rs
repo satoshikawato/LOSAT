@@ -9,6 +9,23 @@
 
 use super::*;
 
+/// A string of NCBI's rpsbproc with this length and capacity (the model's observed values:
+/// `prosite_growth_tests.rs`).
+fn string(len: u64, capacity: u64) -> CxxString {
+    CxxString { len, capacity }
+}
+
+/// NCBI's live memory of a match: a `curr.flex` of this capacity, this many records of copies on
+/// the stack, and no text on the heap.
+fn held(capacity: u64, stacked: u64) -> Live {
+    Live {
+        capacity,
+        stacked,
+        text: 0,
+        skipped: 0,
+    }
+}
+
 impl ProSite {
     /// NCBI's `Match` where it reads no byte beyond the text's terminating 0: the end of the
     /// match (`Err(ReadPast)` otherwise).

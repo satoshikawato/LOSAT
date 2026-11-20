@@ -71,7 +71,7 @@ pub(crate) const USER_SPACE_BYTES: u64 = 1 << 47;
 mod growth;
 pub(crate) use growth::{CxxString, MapEnd};
 #[cfg(test)]
-pub(crate) use growth::{BAD_ALLOC, LENGTH_ERROR};
+pub(crate) use growth::{events as growth_events, BAD_ALLOC, LENGTH_ERROR};
 
 /// `CProSite::EParseError` without `eNoError`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

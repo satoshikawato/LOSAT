@@ -1938,6 +1938,7 @@ fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String
 // sorted list (the upper-case copy here).
 #[test]
 fn version_5_inputs_makeblastdb_aborts_on_are_refused() {
+    // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
     let seq = "MKTAYIAKQRQISFVKSHFSRQ";
     let (status, out, err) = parse_seqids_v5_run(
         "gap",

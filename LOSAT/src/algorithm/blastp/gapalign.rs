@@ -4983,6 +4983,7 @@ mod tests {
     fn huge_xdrop_keeps_ncbi_cell_count_and_touches_only_cells_up_to_n() {
         let encode =
             |text: &[u8]| -> Vec<u8> { text.iter().map(|&c| aa_char_to_ncbistdaa(c)).collect() };
+        // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
         let query = encode(b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ");
         let subject =
             encode(b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQGGAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQWW");

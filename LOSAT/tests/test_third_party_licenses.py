@@ -390,8 +390,11 @@ class RepositoryTests(unittest.TestCase):
                 f"// {tpn} (section 3 (Boost))\n",   # no such section
                 encoding="utf-8")
             (root / "b.bin").write_text(f"{tpn}, section 9\n", encoding="utf-8")
-            problems = tpl.pointer_problems(root, ["a.rs", "b.bin", "missing.rs"])
-        self.assertEqual([p.split(":")[1] for p in problems], ["2", "3", "4"])
+            # A Vue template's HTML comment (web/app/src/ui) is read too.
+            (root / "c.vue").write_text(f"<!-- {tpn}, section 2 (LMDB). -->\n<!-- {tpn}, section 1 (Boost). -->\n",
+                                        encoding="utf-8")
+            problems = tpl.pointer_problems(root, ["a.rs", "b.bin", "c.vue", "missing.rs"])
+        self.assertEqual([":".join(p.split(":")[:2]) for p in problems], ["a.rs:2", "a.rs:3", "a.rs:4", "c.vue:2"])
 
     def test_the_repository_pointers_name_their_section(self) -> None:
         self.assertEqual(tpl.pointer_problems(REPO_ROOT), [])

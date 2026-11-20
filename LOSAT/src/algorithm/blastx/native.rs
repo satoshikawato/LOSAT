@@ -65,7 +65,7 @@ use run_parts::{read_subjects, ArchiveBatch, RunSetup, SubjectRead};
 pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("BLAST engine error: {message}\n"),
+        message: format!("BLAST engine error: {message}\n").into(),
     }
     .into()
 }
@@ -95,7 +95,7 @@ pub(super) fn input_error(error: anyhow::Error) -> anyhow::Error {
     };
     NativeError {
         exit: 1,
-        message: format!("BLAST query error: {text}\n"),
+        message: format!("BLAST query error: {text}\n").into(),
     }
     .into()
 }
@@ -198,10 +198,10 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // of NCBI's engine or of its output stream.
         error
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
-        (e.exit == 1 && e.message.starts_with("Command line argument error"))
-            || (e.exit == 6 && e.message == "BLAST failed to write output\n")
-            || (e.exit == 3 && e.message.starts_with("BLAST engine error: "))
-            || (e.exit == 2 && e.message.starts_with("BLAST Database error: "))
+        (e.exit == 1 && e.message.starts_with(b"Command line argument error"))
+            || (e.exit == 6 && e.message == b"BLAST failed to write output\n")
+            || (e.exit == 3 && e.message.starts_with(b"BLAST engine error: "))
+            || (e.exit == 2 && e.message.starts_with(b"BLAST Database error: "))
             || e.exit == 255
     }) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185
@@ -1823,15 +1823,12 @@ pub(super) fn database_search_error(
 // ```
 /// NCBI's error of the options that `BlastxArgs::resolve` defers (`SemanticOptionsError`).
 /// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12): uses `USER_MANUAL_FOOTER`.
+/// The message of a `SemanticOptionsError` keeps its bytes (probe R9 of line LIB-B).
 pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
-    NativeError {
-        exit: 1,
-        message: format!(
-            "BLAST query/options error: {error}\n{}\n",
-            crate::wording::USER_MANUAL_FOOTER
-        ),
+    match error.downcast_ref::<super::args::SemanticOptionsError>() {
+        Some(semantic) => crate::blastinput::app::options_error_bytes(&semantic.0),
+        None => crate::blastinput::app::options_error(&error.to_string()),
     }
-    .into()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
@@ -3215,11 +3212,12 @@ mod archive_error_tests {
         let subject = subject_input_error(NoDeflineError(4).into());
         let native = subject.downcast_ref::<NativeError>().unwrap();
         assert_eq!(
-            (native.exit, native.message.as_str()),
+            (native.exit, native.message.as_slice()),
             (
                 1,
-                "BLAST query/options error: Query input doesn't start with a defline or comment, \
-                 line 4\0\nPlease refer to the LOSAT user manual.\n"
+                b"BLAST query/options error: Query input doesn't start with a defline or comment, \
+                  line 4\0\nPlease refer to the LOSAT user manual.\n"
+                    .as_slice()
             )
         );
         let texts = |error: &anyhow::Error| -> Vec<Vec<u8>> {
@@ -3239,18 +3237,19 @@ mod archive_error_tests {
         let query = input_error(NoDeflineError(4).into());
         let native = query.downcast_ref::<NativeError>().unwrap();
         assert_eq!(
-            (native.exit, native.message.as_str()),
+            (native.exit, native.message.as_slice()),
             (
                 1,
-                "BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
-                 around line 4\n"
+                b"BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+                  around line 4\n"
+                    .as_slice()
             )
         );
         // Every other reader error of the subjects is the reader's (`BLAST query error`).
         let other = subject_input_error(FastaParseError("CFastaReader: x".into()).into());
         assert_eq!(
             other.downcast_ref::<NativeError>().unwrap().message,
-            "BLAST query error: CFastaReader: x\n"
+            b"BLAST query error: CFastaReader: x\n"
         );
     }
 
@@ -3308,7 +3307,7 @@ mod archive_error_tests {
         };
         let report = BlastpPairwiseReport {
             version: String::new(),
-            database_name: String::new(),
+            database_name: Vec::new(),
             database_num_sequences: 1,
             database_total_letters: 50_000,
             matrix_name: Some("BLOSUM62".into()),
@@ -3382,7 +3381,8 @@ mod archive_error_tests {
     #[test]
     fn a_database_error_of_catch_all_is_no_engine_error() {
         let thrown = crate::ncbi_exception::NcbiException::new(
-            crate::seqdb::lookup_throw_site(crate::seqdb::tax_files::NO_ACCESSION_INFO).unwrap(),
+            crate::seqdb::lookup_throw_site(crate::seqdb::tax_files::NO_ACCESSION_INFO.as_bytes())
+                .unwrap(),
             crate::seqdb::tax_files::NO_ACCESSION_INFO,
         );
         let error = report_error(NativeError::exception(&thrown).into());
@@ -3390,7 +3390,7 @@ mod archive_error_tests {
         assert_eq!(error.exit, 2);
         assert_eq!(
             error.message,
-            "BLAST Database error: DB contains no accession info.\n"
+            b"BLAST Database error: DB contains no accession info.\n"
         );
     }
 }

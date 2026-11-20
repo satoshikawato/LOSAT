@@ -24,9 +24,20 @@ use crate::wording::USER_MANUAL_FOOTER;
 /// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12): directs users to
 /// `USER_MANUAL_FOOTER` ("Please refer to the LOSAT user manual.").
 pub fn options_error(message: &str) -> anyhow::Error {
+    options_error_bytes(message.as_bytes())
+}
+
+/// [`options_error`] of a message's bytes (a matrix name that NCBI's buffer cuts inside a
+/// character: `stats::protein_options::print_matrix_message`).
+pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
     NativeError {
         exit: 1,
-        message: format!("BLAST query/options error: {message}\n{USER_MANUAL_FOOTER}\n"),
+        message: [
+            b"BLAST query/options error: ".as_slice(),
+            message,
+            format!("\n{USER_MANUAL_FOOTER}\n").as_bytes(),
+        ]
+        .concat(),
     }
     .into()
 }
@@ -43,7 +54,7 @@ pub fn options_error(message: &str) -> anyhow::Error {
 pub fn engine_error(message: &str) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("BLAST engine error: {message}\n"),
+        message: format!("BLAST engine error: {message}\n").into(),
     }
     .into()
 }
@@ -563,7 +574,7 @@ pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
     if !(0..END_VALUE).contains(&number) {
         return Err(NativeError {
             exit: 255,
-            message: "Error: Formatting choice is out of range\n".to_string(),
+            message: "Error: Formatting choice is out of range\n".into(),
         }
         .into());
     }
@@ -1296,7 +1307,11 @@ mod tests {
 
     fn message(error: anyhow::Error) -> String {
         match error.downcast::<NativeError>() {
-            Ok(native) => format!("{} {}", native.exit, native.message),
+            Ok(native) => format!(
+                "{} {}",
+                native.exit,
+                String::from_utf8(native.message).unwrap()
+            ),
             Err(other) => format!("losat {other}"),
         }
     }
@@ -1640,7 +1655,8 @@ mod tests {
                 // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
                 crate::wording::losat_text(&format!(
                     "Error: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{text}' to {kind} (m_Pos = {pos})\n\n"
-                )),
+                ))
+                .as_bytes(),
                 "{text:?}"
             );
         }

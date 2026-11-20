@@ -1,8 +1,15 @@
 /* The LOSAT logo is black; the dark themes show the white one instead. */
-.logo-for-dark { display: none; }
+.logo-for-dark,
+.figure-for-dark { display: none; }
 html.coal .logo-for-light,
 html.navy .logo-for-light,
-html.ayu .logo-for-light { display: none; }
+html.ayu .logo-for-light,
+html.coal .figure-for-light,
+html.navy .figure-for-light,
+html.ayu .figure-for-light { display: none; }
 html.coal .logo-for-dark,
 html.navy .logo-for-dark,
-html.ayu .logo-for-dark { display: inline; }
+html.ayu .logo-for-dark,
+html.coal .figure-for-dark,
+html.navy .figure-for-dark,
+html.ayu .figure-for-dark { display: inline; }

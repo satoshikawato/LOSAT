@@ -48,7 +48,7 @@ The two WASI files are command modules for runtimes that implement WASI preview 
 | `wasm32-wasip1` (serial) | one | WASI preview 1 |
 | `wasm32-wasip1-threads` | several (`-num_threads`) | WASI preview 1, shared memory and the `wasi` thread-spawn call |
 
-The serial module gives the same bytes as the native Linux x86_64 binary, with one exception: on WASI, the last (15th) digit of a value in psiblast's ASN.1 PSSM (`-out_pssm` with `-out_ascii_pssm`) can differ by 1, because WebAssembly's `log()` has no fused multiply-add. NCBI BLAST+ on an x86-64 CPU without that instruction writes the same digit. See [the decision record on the last digit of full-precision values](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
+The serial module gives the same bytes as the native Linux x86_64 binary.
 
 ### What a WASI host must pass
 
@@ -57,7 +57,7 @@ A WASI module sees only what its host gives it.
 - **Files.** The host must open the directories the module reads and writes (a preopened directory). The release tests give the module `/`, so absolute and relative file names work as they do natively.
 - **Working directory.** Pass the directory you start in as the environment variable `PWD`. Relative file names, and the `New DB name:` that `makeblastdb` prints, start from `PWD`. Without `PWD` they start from `/`.
 - **Time zone.** Pass `TZ`, or give the module the zone files (`/etc/localtime` and `/usr/share/zoneinfo`). `makeblastdb` then writes local times. Without them it writes UTC.
-- **Temporary files.** A WASI command has no temporary directory. A search program normally decompresses a `.gz`, `.bz2` or `.zst` input into a temporary file first; on WASI it stops with an error instead. Decompress the file yourself, or pipe it to `-query -`.
+- **Temporary files.** A search program decompresses a `.gz`, `.bz2` or `.zst` input into a temporary file beside the input. A WASI command has no temporary directory to fall back on, so if the input's folder refuses the file, it stops with an error. Give the module a writable folder for the input, or pipe the data to `-query -`.
 - **Memory.** A module can grow past 2 GiB. A host must then pass pointers and lengths to WASI calls as unsigned 32-bit numbers. Node's `node:wasi` refuses the signed values that the plain WebAssembly interface gives for 2 GiB and above, so the repository's Node.js runner (below) converts them.
 
 ### Run with Node.js

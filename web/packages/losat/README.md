@@ -15,6 +15,11 @@ gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
 
+The package is not published on npm. Build it from the [LOSAT repository](https://github.com/satoshikawato/LOSAT):
+make the two modules with `web/adapter/tools/build_reactors.py`, then run
+`LOSAT_WEB_REACTORS=<modules directory> npm run build` in `web/packages/losat`; `npm pack` there makes a
+file to install ([web/AGENTS.md](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/web/AGENTS.md)).
+
 ## Versions
 
 The package's version is the engine's version. `losat/abi.json` names both, together with the

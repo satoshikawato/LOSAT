@@ -72,7 +72,6 @@ Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid
 
 ## Differences from NCBI BLAST+
 
-- On WebAssembly (WASI), the last digit of a value in the ASN.1 PSSM written by `-out_pssm` when `-out_ascii_pssm` is also given can differ by 1; the ASCII PSSM is not affected ([the decision record on the last digit of full-precision values](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md)).
 - Where NCBI's result depends on undefined behavior, LOSAT computes the value without it or refuses the input ([the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md)).
 
 ## What LOSAT refuses

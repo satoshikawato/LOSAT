@@ -1,0 +1,71 @@
+# BLASTX 2.17.0+
+# Query: m_fam_1k bases 1-1000 of m_fam
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 12 hits found
+m_fam_1k	BDT61961.1	71.014	207	56	4	985	377	1	207	4.11e-85	248
+m_fam_1k	BDT61961.1	83.333	12	2	0	324	289	196	207	0.45	22.7
+m_fam_1k	BDT61961.1	83.333	12	2	0	368	333	196	207	1.1	21.6
+m_fam_1k	BDT61960.1	50.794	63	30	1	258	73	1	63	1.40e-13	62.4
+m_fam_1k	BDT61867.1	46.154	26	14	0	751	674	106	131	1.0	21.9
+m_fam_1k	BDT61867.1	53.846	13	6	0	727	689	376	388	4.0	20.0
+m_fam_1k	BDT61867.1	36.842	19	12	0	104	48	755	773	4.8	19.6
+m_fam_1k	BDT61867.1	50.000	14	7	0	336	295	134	147	5.9	19.6
+m_fam_1k	BDT61889.1	37.931	29	18	0	673	587	374	402	1.9	21.2
+m_fam_1k	BDT61900.1	50.000	12	6	0	155	190	233	244	4.0	20.0
+m_fam_1k	BDT61900.1	33.333	18	12	0	255	202	540	557	5.4	19.6
+m_fam_1k	BDT61900.1	35.294	17	11	0	17	67	48	64	8.5	18.9
+# BLASTX 2.17.0+
+# Query: m_mix_1k bases 1001-2000 of m_mix
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+m_mix_1k	BDT61861.1	52.273	176	77	4	370	879	20	194	1.33e-60	186
+m_mix_1k	BDT61960.1	35.294	34	20	1	494	595	206	237	0.86	21.9
+m_mix_1k	BDT61900.1	36.842	19	12	0	433	489	388	406	2.4	20.8
+m_mix_1k	BDT61962.1	29.268	41	26	1	559	681	157	194	2.6	20.4
+m_mix_1k	BDT61956.1	33.333	27	18	0	364	444	16	42	3.1	20.4
+m_mix_1k	BDT61963.1	37.037	27	11	1	340	420	497	517	5.1	19.6
+m_mix_1k	BDT61894.1	53.846	13	6	0	295	257	109	121	7.6	18.9
+m_mix_1k	BDT61939.1	41.176	17	10	0	701	751	1	17	8.5	18.9
+# BLASTX 2.17.0+
+# Query: nohit02 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit03 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit04 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit05 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit06 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit07 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit08 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit09 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit10 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit11 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLAST processed 12 queries

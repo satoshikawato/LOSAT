@@ -1,0 +1,1345 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">pre20_nt the first 20 letters of qok1 in frame
+ +1"
+                  }
+                }
+              },
+              title "pre20_nt the first 20 letters of qok1 in frame +1"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 60,
+              seq-data ncbi2na 'EA71E75A79DE5BFAC09C39E79FBAC3'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit01 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit01 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit02 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit02 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit03 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit03 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_5"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit04 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit04 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_6"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit05 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit05 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_7"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit06 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit06 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_8"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit07 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit07 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_9"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit08 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit08 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_10"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit09 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit09 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_11"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit10 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit10 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_12"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nohit11 CCCCGGGGAACC repeated"
+                  }
+                }
+              },
+              title "nohit11 CCCCGGGGAACC repeated"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 144,
+              seq-data ncbi2na '55AA0555AA0555AA0555AA0555AA0555AA0555AA0555AA
+0555AA0555AA0555AA0555AA05'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sok1 BDT63546.1 of PajaWSV"
+                }
+              }
+            },
+            title "sok1 BDT63546.1 of PajaWSV"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 124,
+            seq-data ncbieaa "MATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIG
+LIVVAIMNLRMGMGNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYTTRLK"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sfail tks_M with D first, twice: two HSPs with
+ tks_W, W against D"
+                }
+              }
+            },
+            title "sfail tks_M with D first, twice: two HSPs with tks_W, W
+ against D"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 160,
+            seq-data ncbieaa "DQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVK
+HSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKDQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLF
+VKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIK"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 4 }
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 1000
+        },
+        {
+          name "SumStatistics",
+          value boolean FALSE
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean TRUE
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 93
+          },
+          {
+            id str "blast_score",
+            value int 93
+          },
+          {
+            id str "e_value",
+            value real { 702968394408486, 10, -24 }
+          },
+          {
+            id str "bit_score",
+            value real { 404317928403579, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 19
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 20
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 0,
+                to 59,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 19,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 55,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 6,
+              to 50,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 11,
+              to 49,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_11"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_11"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_11"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_11"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_11"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_11"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 141,
+              id local str "Query_12"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 139,
+              id local str "Query_12"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 140,
+              id local str "Query_12"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 143,
+              id local str "Query_12"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 142,
+              id local str "Query_12"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 141,
+              id local str "Query_12"
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 316561685057595, 10, -15 },
+        k { 124814684754487, 10, -15 },
+        h { 436855116853241, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 1000",
+      "Effective search space used: 1000",
+      "Length adjustment: 0"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST engine error: Traceback failed"
+    }
+  }
+}

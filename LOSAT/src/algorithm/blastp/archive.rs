@@ -169,6 +169,8 @@ pub(crate) struct CallBatches<'a> {
 /// whole search) and their results.
 pub(crate) struct ArchiveCall<'a> {
     pub handle: &'a ArchiveHandle,
+    /// `!args.ungapped`: the archive's Seq-aligns are those of outfmt 8 (`write_blastp_seqalign`).
+    pub gapped: bool,
     pub batches: CallBatches<'a>,
     pub query_lengths: &'a [usize],
     /// The subject names of the Seq-aligns.
@@ -333,10 +335,8 @@ pub(crate) fn write_blastp_archives(
     let run = RunRecord {
         program: Program::Blastp,
         db_title: call.subjects.db_title(),
-        // The value cannot differ: an `-ungapped` search refuses the archive formats (outfmt 11
-        // and 12 hold Dense-diag Seq-aligns that LOSAT does not write, `requested_reports`), so
-        // every BLASTP run that writes one is gapped, as in `seqalign.rs`.
-        gapped: true,
+        // An ungapped search's Seq-aligns are Dense-diags, as in outfmt 8 (`seqalign.rs`).
+        gapped: call.gapped,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
         for index in span.clone() {

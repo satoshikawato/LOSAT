@@ -160,6 +160,7 @@ pub(super) fn write_seqalign(
     warnings: &mut Option<QueryWarnings<'_>>,
 ) -> Result<()> {
     let ReportView {
+        args,
         ranges,
         query_records,
         query_lengths,
@@ -203,6 +204,7 @@ pub(super) fn write_seqalign(
     };
     seqalign::write_blastp_seqalign(
         serial,
+        !args.ungapped,
         hit_lists,
         &crate::report::record::QueryNames {
             records: query_records,
@@ -287,6 +289,7 @@ pub(super) fn write_archive(
     let spans = batch_spans();
     let call = archive::ArchiveCall {
         handle,
+        gapped: !args.ungapped,
         batches: archive::CallBatches {
             masks: &masks,
             spans: &spans,

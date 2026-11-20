@@ -112,15 +112,6 @@ pub(super) struct CallSetup<'s, 'a> {
     pub(super) reports: &'s BlastpReports<'a>,
 }
 
-/// The refusal of the Seq-align formats (outfmt 8, 9, 11, 12) of an ungapped search, whose
-/// Dense-diag Seq-align LOSAT's BLASTP does not write (`requested_reports`).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
-/// (`BLASTUngappedHspListToSeqAlign`)
-fn ungapped_format_refusal(number: i32) -> String {
-    format!("output format {number} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTP")
-}
-
 /// The reports that the call's output formats ask for, in the formats' order (`BlastpReport`:
 /// each `-outfmt` parsed as the single CLI `-outfmt` is; the query-anchored outfmt 1 to 4 are
 /// BLASTP's only), and what they need beyond outfmt 0, 6 and 7 (`ReportNeeds`).
@@ -182,24 +173,6 @@ pub(super) fn requested_reports(
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
-    // (`BLASTUngappedHspListToSeqAlign`: the Seq-align of an ungapped search is a Dense-diag per
-    // HSP, which outfmt 8, 9 and 12 write and outfmt 11 archives)
-    // The Seq-align formats of an ungapped search are not written yet (the Dense-diag writer of
-    // branch `feature/np-o4b-dendiag`): refused by name before the first byte, with BLASTN's
-    // wording (`blastn::blast_engine::run::process_options`).
-    if args.ungapped {
-        for (format, report) in outputs.formats.iter().zip(&requested_formats) {
-            if matches!(report, BlastpReport::Seqalign(_) | BlastpReport::Archive) {
-                bail!(
-                    "{}",
-                    ungapped_format_refusal(
-                        crate::blastinput::app::parse_formatting_string(format.outfmt)?.number
-                    )
-                );
-            }
-        }
-    }
     // What the requested formats need beyond outfmt 0, 6 and 7, decided once for the search
     // (`ReportNeeds`): the engine's positives of the composition-adjusted matches
     // (`engine_positives`). The engine's counts of the HSPs that the pyrrolysine recount
@@ -1792,20 +1765,4 @@ pub(super) fn scan_shape<'a>(
         total_query_span,
         x_soft_subjects,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440 (quoted at
-    // `ungapped_format_refusal`): the text of the refusal of the Seq-align formats of an ungapped
-    // search.
-    #[test]
-    fn the_seqalign_formats_of_an_ungapped_search_are_refused_by_name() {
-        assert_eq!(
-            ungapped_format_refusal(8),
-            "output format 8 with -ungapped (an ungapped search) is not supported by LOSAT's BLASTP"
-        );
-    }
 }

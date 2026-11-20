@@ -84,7 +84,8 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `blastp` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped`, and `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`).
+- `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`), and with `-ungapped`.
+- With `-ungapped`: a subject of more than 5,000,000 residues, and a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`.
 - `-subject_besthit`, `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).

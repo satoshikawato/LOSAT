@@ -25,7 +25,7 @@ error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTP
 A value or setting refused after the options are read (exit status 1):
 
 ```text
-Error: -ungapped (an ungapped search) is not supported by LOSAT's BLASTP
+Error: -use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's PSIBLAST
 ```
 
 An output format the program does not write (exit status 1):
@@ -34,11 +34,11 @@ An output format the program does not write (exit status 1):
 Error: output format 5 is not supported by LOSAT's PSIBLAST
 ```
 
-For example, NCBI BLAST+ runs an ungapped `blastp` search, and LOSAT stops with the second message above:
+For example, NCBI BLAST+ runs `psiblast` with the Smith-Waterman traceback, and LOSAT stops with the second message above:
 
 <!-- example: refusals-1 -->
 ```bash
-losat blastp -query proteins.faa -subject proteins.faa -ungapped -comp_based_stats 0
+losat psiblast -query query.faa -subject proteins.faa -use_sw_tback
 ```
 
 ## How this page is organised
@@ -193,8 +193,11 @@ Error: a reward of 0 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of 
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-ungapped` | Refused. |
 | `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`, and `-matrix IDENTITY`, which NCBI searches without them) | Refused. With `-comp_based_stats` 1 to 3 it works. |
+| `-ungapped` with `-use_sw_tback` | Refused. NCBI crashes. |
+| `-ungapped` with a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY` | Refused. NCBI aborts. |
+| `-ungapped` with a `-matrix` name that NCBI reads from a matrix file | Refused. NCBI aborts or fails. See [Environment](environment.md). |
+| `-ungapped` with a protein subject of more than 5,000,000 residues, from `-subject` or from a database | Refused. NCBI searches it in overlapping parts, which LOSAT does not do yet. |
 | `-subject_besthit` | Refused. |
 | `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`) | Refused. Modes 0 to 3 work. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7; 5 is the default of `-task blastp-fast`) | Refused. NCBI crashes. |
@@ -215,6 +218,8 @@ Error: a reward of 0 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of 
 - With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, or a small query and database) can reach it.
 - With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, as in LOSAT.
 - For both, LOSAT writes the results of the query batches before and then stops with the error.
+- With `-ungapped -window_size 0` and a low `-threshold`, a one-hit ungapped alignment of length 0 among the alignments that the reports show is refused before the first byte of the report. LOSAT does not write NCBI's report of such an alignment yet. With `-outfmt 1` to `4`, NCBI crashes on it.
+- With `-ungapped` and a database, the 5,000,000-residue limit is checked against the longest sequence of the database, also when a sequence list or an alias file leaves that sequence out of the search.
 
 </details>
 

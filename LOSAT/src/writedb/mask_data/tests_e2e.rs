@@ -1170,7 +1170,7 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
         },
         "line 3: \"masks\" expected",
     );
-    let text = format!("Error: {}", thrown.what());
+    let text = format!("Error: {}", String::from_utf8(thrown.what()).unwrap());
     // NCBI's `Error: NCBI C++ Exception:` report in LOSAT's words (`crate::wording`): its message.
     assert_eq!(
         text.lines().next(),

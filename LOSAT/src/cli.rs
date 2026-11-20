@@ -634,10 +634,7 @@ where
             // USAGE errors and `-help` come first, as for any value. The parser reads the
             // value with U+FFFD in place of the bytes. The file names keep their bytes and
             // have their own check where the files are opened (`check_utf8_file_name`).
-            let value = if value.to_str().is_none()
-                && !matches!(name, "query" | "subject" | "out")
-                && is_ncbi_search_program(scope)
-            {
+            let value = if value.to_str().is_none() && refuses_non_utf8_value(scope, name) {
                 non_utf8_value.get_or_insert_with(|| (scope, name.to_string()));
                 OsString::from(value.to_string_lossy().into_owned())
             } else {
@@ -719,6 +716,15 @@ fn is_ncbi_search_program(scope: &clap::Command) -> bool {
             | "rpsblast"
             | "rpstblastn"
     )
+}
+
+/// Whether an option's value that is not UTF-8 is rejected after the parser
+/// ([`non_utf8_value_error`]): each option of makeblastdb, whose values are all UTF-8 strings,
+/// and each option of the NCBI search programs but the file names that keep their bytes
+/// (`check_utf8_file_name`).
+fn refuses_non_utf8_value(scope: &clap::Command, name: &str) -> bool {
+    scope.get_name() == "makeblastdb"
+        || (is_ncbi_search_program(scope) && !matches!(name, "query" | "subject" | "out"))
 }
 
 /// The explicit rejection of an option's value that is not UTF-8 (`try_parse_from`).
@@ -917,7 +923,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "negative_gilist",
     "negative_ipglist",
     "remote",
-    "subject_besthit",
 ];
 
 fn is_unported_blastp_arg(name: &str) -> bool {
@@ -1474,7 +1479,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "subject_besthit",
     "use_sw_tback",
 ];
 
@@ -1505,7 +1509,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "subject_besthit",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {
@@ -1682,12 +1685,12 @@ impl NativeError {
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,
-                message: format!("BLAST Database error: {}\n", e.get_msg()).into(),
+                message: [b"BLAST Database error: ".as_slice(), e.get_msg(), b"\n"].concat(),
             };
         }
         NativeError {
             exit: 255,
-            message: format!("Error: {}\n", e.what()).into(),
+            message: [b"Error: ".as_slice(), &e.what(), b"\n"].concat(),
         }
     }
 
@@ -1760,7 +1763,7 @@ impl std::io::Write for ReportStream {
     }
 }
 
-// libstdc++ (GCC 13): include/c++/13/bits/basic_ios.tcc:39-49
+// C++ standard, [iostate.flags]: `setstate` calls `clear`, which throws `ios_base::failure` when the bit is in `exceptions()`.
 /// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
 /// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
 /// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream with
@@ -1977,7 +1980,11 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
         Ok(())
     }
 
-    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long.
+    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long. A
+    /// piece ends only if more than `NCBI_BUFSIZ` bytes follow it, which is at least a block (a
+    /// block never exceeds `NCBI_BUFSIZ`), so the last piece always takes the buffer's branch of
+    /// an insertion longer than the room, as the whole insertion does; a final piece that exactly
+    /// filled a block would differ from the whole.
     fn end_piece(&mut self) -> std::io::Result<()> {
         let n = self.piece.len() as u64;
         if n >= Self::PIECE as u64
@@ -2402,7 +2409,7 @@ mod tests {
         assert_eq!(error.exit, 255);
         assert_eq!(
             error.message,
-            format!("Error: {}\n", other.what()).as_bytes()
+            [b"Error: ".as_slice(), &other.what(), b"\n"].concat()
         );
     }
 
@@ -2442,9 +2449,10 @@ mod tests {
 
     #[test]
     fn the_organism_reports_standard_output_writes_where_glibc_writes() {
-        // glibc 2.39 `_IO_new_file_xsputn` on a file of `st_blksize` 4096
-        // (`T/t2/fix2/glibc_first_write.log`): the writes end at multiples of the block and the
-        // rest stays held; the first `fwrite` has no buffer yet; a flush empties the buffer.
+        // `std::cout` on a file of `st_blksize` 4096 (observed, glibc 2.35 and 2.39,
+        // `tests/fixtures/stdio_buffer/cout_file.tsv`): the writes end at multiples of the block
+        // and the rest stays held; the first insertion has no buffer yet; a flush empties the
+        // buffer.
         use std::io::Write;
         let run = |pieces: &[usize]| {
             let writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2503,8 +2511,9 @@ mod tests {
 
     #[test]
     fn a_terminals_standard_output_writes_at_its_newlines_as_glibc_does() {
-        // glibc 2.39 on a pty of `st_blksize` 1024 (`T/t2/fix3/glibc_tty_lines.log`): `N` is an
-        // `fwrite` of N bytes, `N:K` with a newline at K, `f` a flush.
+        // `std::cout` on a pty of `st_blksize` 1024 (observed, glibc 2.35 and 2.39,
+        // `tests/fixtures/stdio_buffer/cout_tty.tsv`): `N` is an insertion of N bytes, `N:K` with
+        // a newline at K, `f` a flush.
         let tty = NcbiStdio::Cout {
             block: 1024,
             lines: true,
@@ -2670,6 +2679,40 @@ mod tests {
                     "{message}"
                 );
             }
+        }
+    }
+
+    // makeblastdb keeps its values as UTF-8 strings: a value that is not UTF-8 (a file name of
+    // `-in`, `-out`, `-mask_data`, `-taxid_map`, `-logfile`, a `-title`) is LOSAT's explicit
+    // rejection, where the parser's own error named no option (line LIB-B, probe 2026-11-21).
+    #[test]
+    fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
+        for option in [
+            "-in",
+            "-out",
+            "-mask_data",
+            "-taxid_map",
+            "-logfile",
+            "-title",
+        ] {
+            let argv = vec![
+                OsString::from("losat"),
+                OsString::from("makeblastdb"),
+                OsString::from("-dbtype"),
+                OsString::from("nucl"),
+                // `-taxid_map` requires it: the parser's errors come before the rejection.
+                OsString::from("-parse_seqids"),
+                OsString::from(option),
+                OsString::from_vec(b"n\xe9.x".to_vec()),
+            ];
+            let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+            let message = render_message(&error);
+            assert_eq!(error.kind(), ErrorKind::InvalidUtf8, "{option}: {message}");
+            assert!(
+                message.contains(&format!("the value of {option} is not UTF-8"))
+                    && message.contains("not supported by LOSAT's MAKEBLASTDB"),
+                "{message}"
+            );
         }
     }
 

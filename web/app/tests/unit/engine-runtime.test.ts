@@ -583,7 +583,7 @@ describe.skipIf(reactors === undefined)('the serial reactor scans with the NCBI 
   })();
 
   // Kinds 1 (nucleotide flags) and 2 (protein flags) are real since S9 (abi_v2.md §4, §9); the scan takes the
-  // engine's reader of a program's input since ABI version 5 (line WQA's D13, 2026-11-20).
+  // engine's reader of a program's input since ABI version 8 (line WQA's D13, 2026-11-20).
   it.each([
     ['blastn', 'query'],
     ['blastp', 'subject'],

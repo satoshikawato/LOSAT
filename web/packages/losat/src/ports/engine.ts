@@ -31,7 +31,7 @@ export interface ProgramDescription {
 
 /**
  * The verdict of `validate`. A valid argv also says whether its run reads the inputs with NCBI's
- * data loaders on (`dataLoaders`, ABI v2 *validation*, version 5): off under `[BLAST]
+ * data loaders on (`dataLoaders`, ABI v2 *validation*, version 8): off under `[BLAST]
  * DATA_LOADERS=none` of its `-conffile`, where the reader reads a first line that may be a Seq-id as
  * data, as the CLI does (line WQA's D16, 2026-11-20). A refused argv says it too when the engine's
  * start read the registry before the option that it refuses (line WQA's D13 round 3, L1).

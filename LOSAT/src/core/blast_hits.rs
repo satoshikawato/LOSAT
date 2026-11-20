@@ -177,6 +177,106 @@ pub fn trim_by_max_hsps<T>(hsps: &mut Vec<T>, max_hsps: usize) {
     hsps.truncate(max_hsps);
 }
 
+/// The query range around a kept HSP within which `-subject_besthit` removes the later HSPs of
+/// its context, in the letters of the context: 3 for every program (NCBI's protein and
+/// nucleotide defaults are both 3).
+///
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:1211-1212
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1962-1974
+pub const SUBJECT_BESTHIT_MAX_RANGE_DIFF: i64 = 3;
+
+/// The fields of an HSP that `-subject_besthit` reads: its context (NCBI's context index: the
+/// query, its strand for BLASTN and its frame for BLASTX and TBLASTX), the query offset and end
+/// in the letters of that context (NCBI's `Int4`s, widened; an HSP can lie outside its context,
+/// `blastn::hsp::BlastnHsp::outside_query_context`, or end before its start, BLASTX's and
+/// TBLASTX's one-hit HSPs with `-window_size 0`), and, for BLASTN's pass over the other strand,
+/// the sign of the query frame and the length of the context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BestHitExtent {
+    pub context: i64,
+    pub query_frame: i32,
+    pub offset: i64,
+    pub end: i64,
+    pub query_length: i64,
+}
+
+/// `Blast_HSPListSubjectBestHit` over the HSPs of one subject's list, in their order (NCBI's
+/// list is sorted by score where it is called; the filter reads only the order). Each kept HSP,
+/// from the first on, removes every later HSP of its context whose query range lies within its
+/// own widened by `SUBJECT_BESTHIT_MAX_RANGE_DIFF` on both sides (the start not below 0; an end
+/// that would be negative is the HSP's own end). For BLASTN (`blastn`) a second pass over the
+/// kept HSPs then removes, from the other strand's context of the same query, the later HSPs
+/// whose query range lies within the kept HSP's range reflected onto that strand and widened the
+/// same way (no bound at 0 there). The kept HSPs keep their order. The list's best e-value is
+/// not set again (NCBI does not), and an empty list stays empty.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2537-2606
+pub fn subject_besthit<T>(hsps: &mut Vec<T>, blastn: bool, extent: impl Fn(&T) -> BestHitExtent) {
+    if hsps.len() <= 1 {
+        return;
+    }
+    let range_diff = SUBJECT_BESTHIT_MAX_RANGE_DIFF;
+    let mut extents: Vec<BestHitExtent> = hsps.iter().map(&extent).collect();
+    let mut removed = vec![false; extents.len()];
+    for i in 0..extents.len() {
+        if removed[i] {
+            continue;
+        }
+        let kept = extents[i];
+        let low = (kept.offset - range_diff).max(0);
+        let mut high = kept.end + range_diff;
+        if high < 0 {
+            high = kept.end;
+        }
+        for (j, later) in extents.iter().enumerate().skip(i + 1) {
+            if !removed[j]
+                && later.context == kept.context
+                && later.offset >= low
+                && later.end <= high
+            {
+                removed[j] = true;
+            }
+        }
+    }
+    retain_unremoved(hsps, &removed);
+    if !blastn || hsps.len() <= 1 {
+        return;
+    }
+    extents.clear();
+    extents.extend(hsps.iter().map(&extent));
+    removed.clear();
+    removed.resize(extents.len(), false);
+    for i in 0..extents.len() {
+        if removed[i] {
+            continue;
+        }
+        let kept = extents[i];
+        let other_strand = if kept.query_frame > 0 {
+            kept.context + 1
+        } else {
+            kept.context - 1
+        };
+        let high = kept.query_length - (kept.offset - range_diff);
+        let low = kept.query_length - (kept.end + range_diff);
+        for (j, later) in extents.iter().enumerate().skip(i + 1) {
+            if !removed[j]
+                && later.context == other_strand
+                && later.offset >= low
+                && later.end <= high
+            {
+                removed[j] = true;
+            }
+        }
+    }
+    retain_unremoved(hsps, &removed);
+}
+
+/// Keeps the items of `items` whose mark in `removed` is false, in their order.
+fn retain_unremoved<T>(items: &mut Vec<T>, removed: &[bool]) {
+    let mut marks = removed.iter();
+    items.retain(|_| !marks.next().copied().unwrap_or(false));
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1284;
 // c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235
 // ```c
@@ -216,6 +316,78 @@ pub(crate) fn x_untranslated_frame_refusal(program: &str, step: &str) -> anyhow:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn extent_of(&(context, frame, offset, end): &(i64, i32, i64, i64)) -> BestHitExtent {
+        BestHitExtent {
+            context,
+            query_frame: frame,
+            offset,
+            end,
+            query_length: 100,
+        }
+    }
+
+    #[test]
+    fn subject_besthit_removes_later_hsps_within_three_letters() {
+        // The second lies within 10-3..50+3 of the first; the third starts 4 before it; the
+        // fourth is of another context; the fifth lies within the first's range too.
+        let mut hsps = vec![
+            (0, 1, 10, 50),
+            (0, 1, 7, 53),
+            (0, 1, 6, 50),
+            (1, -1, 10, 50),
+            (0, 1, 8, 49),
+        ];
+        subject_besthit(&mut hsps, false, extent_of);
+        assert_eq!(hsps, vec![(0, 1, 10, 50), (0, 1, 6, 50), (1, -1, 10, 50)]);
+    }
+
+    #[test]
+    fn subject_besthit_bounds_the_start_at_zero_and_a_negative_end() {
+        // Start 1 - 3 is kept at 0: an HSP at -1 (outside its context) stays.
+        let mut hsps = vec![(0, 1, 1, 20), (0, 1, -1, 20), (0, 1, 0, 22)];
+        subject_besthit(&mut hsps, false, extent_of);
+        assert_eq!(hsps, vec![(0, 1, 1, 20), (0, 1, -1, 20)]);
+        // An end of -4 (below -3) keeps -4 as the bound: the later HSP ending at -3 stays.
+        let mut hsps = vec![(0, 1, 0, -4), (0, 1, 0, -3), (0, 1, 0, -5)];
+        subject_besthit(&mut hsps, false, extent_of);
+        assert_eq!(hsps, vec![(0, 1, 0, -4), (0, 1, 0, -3)]);
+    }
+
+    #[test]
+    fn subject_besthit_reflects_onto_the_other_strand_for_blastn_only() {
+        // On a context of 100 letters, 10..50 of the plus strand is 50..90 of the minus strand,
+        // widened to 47..93: the minus strand's 48..92 goes, its 30..92 stays.
+        let hsps = vec![(0, 1, 10, 50), (1, -1, 48, 92), (1, -1, 30, 92)];
+        let mut blastn = hsps.clone();
+        subject_besthit(&mut blastn, true, extent_of);
+        assert_eq!(blastn, vec![(0, 1, 10, 50), (1, -1, 30, 92)]);
+        let mut protein = hsps.clone();
+        subject_besthit(&mut protein, false, extent_of);
+        assert_eq!(protein, hsps);
+    }
+
+    /// NCBI's `testSubjectBestHit`: four HSPs of context 0 at query offset 0, ending at 12, 6, 4
+    /// and 3 (12 / (i + 1)) in score order, with the query frame and length NCBI's test gives
+    /// them (frame 0 of a new HSP, the 12-letter query): one HSP is left for tblastn and for
+    /// blastn. The HSP lists are NCBI's two fixtures:
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1386-1402
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1495-1512
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1514-1542 testSubjectBestHit
+    #[test]
+    fn subject_besthit_keeps_one_of_ncbi_four_nested_hsps() {
+        for blastn in [false, true] {
+            let mut ends: Vec<i64> = (1..=4).map(|factor| 12 / factor).collect();
+            subject_besthit(&mut ends, blastn, |&end| BestHitExtent {
+                context: 0,
+                query_frame: 0,
+                offset: 0,
+                end,
+                query_length: 12,
+            });
+            assert_eq!(ends, vec![12], "blastn {blastn}");
+        }
+    }
 
     #[test]
     fn query_coverage_adds_a_half_below_99() {

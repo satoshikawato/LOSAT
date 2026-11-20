@@ -933,6 +933,25 @@ fn merge_tblastx_subject_chunk_hits(
     result
 }
 
+/// `-subject_besthit` on a subject frame's list after the merge of a chunk that had HSPs, in every
+/// merge of the frame's chunks (the frame loop's `frame_chunks::add_chunk_result` and the unit
+/// path's merges, `x_pair_par` and `x_kmerge`): before the frame's list joins the subject's and
+/// before the linking. The contexts are the query frames; the end of an HSP of length 0 or less is
+/// NCBI's `Int4`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:564,586-591
+fn frame_subject_besthit(frame_hits: &mut Vec<UngappedHit>) {
+    crate::core::blast_hits::subject_besthit(frame_hits, false, |hit| {
+        crate::core::blast_hits::BestHitExtent {
+            context: i64::from(hit.ctx_idx),
+            query_frame: i32::from(hit.q_frame),
+            offset: i64::from(hit.q_aa_start),
+            end: i64::from(hit.q_end_int4()),
+            query_length: 0,
+        }
+    });
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3051 (`Blast_HSPListAdjustOffsets`)
 // ```c
 //    if (offset == 0) {
@@ -5434,6 +5453,20 @@ fn search_query_batch<S: TbxScore>(
             x_timing: Vec::new(),
         });
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // A count of 0 (of a positive total) is the division by 0 where NCBI's setup of this first
+    // batch with a valid context crashes, before it reads a sequence: LOSAT's refusal
+    // (`common::database::check_setup_count`, D1a-5 of line RG), after the reports of the batches
+    // before, also where the sequences could not be read (NCBI 2.17.0: `NSEQ 0` over a volume
+    // without its `.nsq`, SIGFPE; review A of D1a-5, F1). A run whose batches have no valid context
+    // does not reach it and is reported as NCBI's.
+    crate::algorithm::common::database::check_setup_count(
+        db_length_nucl,
+        i32::try_from(db_num_seqs).unwrap_or(i32::MAX),
+        false,
+        "TBLASTX",
+    )
+    .map_err(ErrorAfterBatchReports)?;
     // `-db` whose sequences could not be read: this first batch with a valid context fails
     // (`run_in_pool` raises the kept read error).
     if matches!(subjects, Subjects::Unreadable) {
@@ -5525,6 +5558,7 @@ fn search_query_batch<S: TbxScore>(
         scan_debug_range,
         x_read_failure: &x_read_failure,
         query_batch: QueryBatch::new(contexts_ref, &x_read_failure),
+        subject_besthit: args.subject_besthit,
     };
     // The batch's statistics (`SubjectStatistics`); `per_subject`: NCBI computes the statistics
     // of each subject (a database length of 0) with the preliminary stage's option spaces.
@@ -5726,6 +5760,7 @@ fn search_query_batch<S: TbxScore>(
                 x_seed_end,
                 x_pair_lut_is_stub,
                 x_read_failure: &x_read_failure,
+                subject_besthit: statistics.word_finder_cx.subject_besthit,
             },
             x_units_stage,
             &mut x_lap,

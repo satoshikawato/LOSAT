@@ -315,15 +315,35 @@ impl MakedbError {
     }
 }
 
+impl MakedbError {
+    /// The message makeblastdb prints for the error (without the line feed that ends it), as
+    /// bytes ([`WriteDbError::message`]).
+    pub fn message(&self) -> Vec<u8> {
+        match self {
+            MakedbError::Build(error) => error.message(),
+            MakedbError::Database(SeqDbError::NotFound(message)) => {
+                [b"BLAST Database error: ".as_slice(), message].concat()
+            }
+            MakedbError::Database(SeqDbError::Ncbi(exception)) => [
+                b"BLAST Database error: ".as_slice(),
+                exception.what().trim_ascii_end(),
+            ]
+            .concat(),
+            MakedbError::Database(error) => format!("BLAST Database error: {error}").into_bytes(),
+            MakedbError::Unsupported(message) => format!("losat makeblastdb: {message}").into(),
+            MakedbError::Output(message) => {
+                format!("BLAST failed to write output: {message}").into()
+            }
+            MakedbError::Argument(message) => {
+                format!("Command line argument error: {message}").into()
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for MakedbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MakedbError::Build(error) => error.fmt(f),
-            MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
-            MakedbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
-            MakedbError::Output(message) => write!(f, "BLAST failed to write output: {message}"),
-            MakedbError::Argument(message) => write!(f, "Command line argument error: {message}"),
-        }
+        f.write_str(&String::from_utf8_lossy(&self.message()))
     }
 }
 
@@ -1787,14 +1807,8 @@ fn log_of<'a>(
 fn finish(result: Result<(), MakedbError>, end_messages: &[String], err: &mut dyn Write) -> i32 {
     let status = match result {
         Ok(()) => 0,
-        Err(MakedbError::Build(WriteDbError::CreationBytes(message))) => {
-            let _ = err.write_all(b"BLAST Database creation error: ");
-            let _ = err.write_all(&message);
-            let _ = err.write_all(b"\n");
-            1
-        }
         Err(error) => {
-            let _ = writeln!(err, "{error}");
+            let _ = err.write_all(&[error.message().as_slice(), b"\n"].concat());
             error.exit_code()
         }
     };

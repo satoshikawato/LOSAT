@@ -142,7 +142,7 @@ impl<'a> BerIn<'a> {
     #[cold]
     #[inline(never)]
     fn throw(&self, site: ThrowSite, message: impl std::fmt::Display) -> Fail {
-        throw_error(site, &self.position(), message)
+        throw_error(site, &self.position(), message.to_string())
     }
 
     /// `m_Input.PeekChar(i)`: the end of the data throws `CEofException`.

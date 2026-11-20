@@ -10,7 +10,7 @@
   the [BLAST] section of .ncbirc)"), where the Web said "not supported in the browser".
 - LOSAT Web: with "Additional options" `-conffile NAME` and a file that sets `DATA_LOADERS=none` in
   its `[BLAST]` section, a first line that may be a sequence identifier is read as data, as on the
-  command line, where the Web refused the input. ABI v2 is version 5 (`losat_web2_scan_begin` and
+  command line, where the Web refused the input. ABI v2 is version 8 (`losat_web2_scan_begin` and
   `losat_web2_register` take the input's program, role and data loaders; `losat_web2_validate`
   gives the data loaders of the argv).
 - LOSAT Web: an input that is still being read when the program or the data loaders of `-conffile`

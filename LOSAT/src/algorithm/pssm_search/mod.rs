@@ -122,6 +122,9 @@ pub struct PsiSearch {
     /// (`blast_engine::psi_round::RoundQuery::split`). `None` otherwise: a query that NCBI does
     /// not split, and a PSSM query (`-in_pssm`), which NCBI never splits.
     pub(crate) split_setup: Option<crate::algorithm::tblastx::translation::QueryFrame>,
+    /// The PSSM was made from psiblast's `-in_msa` alignment, not read from `-in_pssm`: the
+    /// refusals that name the option name that one.
+    pub(crate) from_msa: bool,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -533,6 +536,7 @@ impl PsiSearch {
             defline_reads_annot: false,
             round_query: None,
             split_setup: None,
+            from_msa: false,
         }
     }
 

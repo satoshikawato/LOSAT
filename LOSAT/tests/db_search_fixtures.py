@@ -14,7 +14,8 @@ extra_args is that <tmp>, where any other file the run writes is reported; `pssm
 a larger one being compared by its SHA-256 in side_sha256). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
 (a psiblast or tblastn query cell `pssm-gz:PATH` or `pssm:PATH` is a PSSM query: `-in_pssm FILE` in place of
-`-query QUERY`, the gzipped file PATH inflated into a temporary directory, or PATH as it is;
+`-query QUERY`, the gzipped file PATH inflated into a temporary directory, or PATH as it is; a psiblast query
+cell `msa:PATH` is an alignment query, `-in_msa PATH`;
 xinclude_fixtures.py `query_argv`; a query cell `stdin:pipe:PATH`, `stdin:file:PATH` or `stdin:empty` is
 `-query -` with the file PATH's bytes through a pipe, the file PATH itself, or an empty pipe as the run's
 standard input, `query_stdin`)
@@ -84,7 +85,8 @@ row whose query has a reader error after the batch that the command line refuses
 (`-num_iterations` other than 1), its PSSM files (the PSSM kinds) and the PSSM queries of psiblast
 and tblastn (`-in_pssm`, the library's `Inputs::pssm`) run through the library as on the command line;
 the rows of rpsblast and rpstblastn (the library API has no such program), those that give both
-`-query` and `-in_pssm` (the library's query is one or the other) and those that read the query from
+`-query` and `-in_pssm` (the library's query is one or the other), those with an alignment query (`-in_msa`,
+a query cell `msa:PATH`) and those that read the query from
 standard input (the library's query is records) are `library-skip`.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
@@ -612,10 +614,12 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     pssm = xinclude.wants_pssm(row)
     # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
     # Its query is records or a PSSM file (`Inputs::new`, `Inputs::pssm`), never both: a row that gives
-    # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call.
+    # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call, nor has
+    # an alignment query (`-in_msa`, line PS item PS6; the library refuses it).
     argv = search_argv(row)
     if library and (row["program"] in ("rpsblast", "rpstblastn")
-                    or ("-query" in argv and "-in_pssm" in argv) or query_stdin(row)):
+                    or ("-query" in argv and "-in_pssm" in argv) or "-in_msa" in argv
+                    or query_stdin(row)):
         return "library-skip", ""
     if (files or pssm) and query_stdin(row):
         raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")

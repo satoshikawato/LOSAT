@@ -19,7 +19,7 @@ and the PSSM files it writes must be those of `side_sha256` byte for byte (none 
 the frozen ones, or in the kinds `pssm-asn` and `pssm-both` a file over 64 KB by its SHA-256 alone. With `--library` LOSAT is `examples/library_command_line`, the
 same search through the library API, which writes the PSSM files, runs psiblast's rounds and
 searches a PSSM query (`-in_pssm`, a query cell `pssm-gz:` or `pssm:`; the library's `Inputs::pssm`)
-as the command line.
+as the command line; a row whose query cell is `msa:PATH` (`-in_msa`, an alignment) is `library-skip` there.
 
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
@@ -107,6 +107,11 @@ def main() -> int:
     differing = []
     rows = selected_rows(read_manifest()[2], args.programs, args.only, args.outfmts)
     for row in rows:
+        if args.library and row["query"].startswith("msa:"):
+            # An alignment query (`-in_msa`, line PS item PS6) has no library call: the library's query
+            # is records or a PSSM (`api::Inputs`).
+            print(f"{row['fixture_id']}\tlibrary-skip\t")
+            continue
         threads = ["-num_threads", str(args.threads)] if args.threads else []
         command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]
         files = xinclude.wants_files(row)

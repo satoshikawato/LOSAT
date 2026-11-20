@@ -53,6 +53,17 @@ pub(crate) fn file_options(_program: Program) -> &'static [&'static str] {
     STRATEGY_FILES
 }
 
+/// The options of `program`'s command line that give the query as an alignment (psiblast's
+/// `-in_msa` with `-msa_master_idx` and `-ignore_msa_master`): the library API gives the query as
+/// records or `Inputs::pssm`, no `Inputs` holds an alignment yet, so `validate` refuses them and
+/// `describe` leaves them out.
+pub(crate) fn alignment_options(program: Program) -> &'static [&'static str] {
+    match program {
+        Program::Psiblast => &["in_msa", "msa_master_idx", "ignore_msa_master"],
+        _ => &[],
+    }
+}
+
 /// A program and an argv that the command line's parser accepted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Search {
@@ -277,6 +288,15 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
             }
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: a PSSM query is given as the inputs (Inputs::pssm)"
+            )));
+        }
+        // `-in_msa` is the command line's alternative to a query (psiblast's alignment, series PS
+        // item PS6): the library API gives the query as records or `Inputs::pssm`, and no
+        // `Inputs` holds an alignment yet, so the three options of the alignment are refused
+        // (`-msa_master_idx` and `-ignore_msa_master` need `-in_msa`).
+        if alignment_options(program).contains(&name) {
+            return Err(Error::Argv(format!(
+                "{key} is not accepted by the library API: the query is given as records or a PSSM (Inputs::pssm), and an alignment as the query is not supported"
             )));
         }
         if API_OWNED.contains(&name) {

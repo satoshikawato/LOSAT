@@ -230,6 +230,12 @@ impl Msa {
     //     }
     // ```
     fn update_position_counts(&mut self) {
+        // Reset the data in case this function is called again after the initial counts (the
+        // structure group's compatibility mode).
+        self.num_matching_seqs.fill(0);
+        for counts in &mut self.residue_counts {
+            *counts = [0; BLASTAA_SIZE];
+        }
         for row in &self.cell {
             for (p, pos) in row.iter().enumerate() {
                 if pos.is_aligned {
@@ -242,6 +248,30 @@ impl Msa {
                 }
             }
         }
+    }
+
+    /// `_PSIStructureGroupCustomization(msa)`: the query row is made of gaps that are not aligned
+    /// (`ignore_msa_master`), and the counts are made again.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:799-808
+    /// ```c
+    /// void
+    /// _PSIStructureGroupCustomization(_PSIMsa* msa)
+    /// {
+    ///     Uint4 i;
+    ///     for (i = 0; i < msa->dimensions->query_length; i++) {
+    ///         msa->cell[kQueryIndex][i].letter = 0;
+    ///         msa->cell[kQueryIndex][i].is_aligned = FALSE;
+    ///     }
+    ///     _PSIUpdatePositionCounts(msa);
+    /// }
+    /// ```
+    pub(super) fn structure_group_customization(&mut self) {
+        for cell in &mut self.cell[K_QUERY_INDEX] {
+            cell.letter = 0;
+            cell.is_aligned = false;
+        }
+        self.update_position_counts();
     }
 }
 
@@ -709,7 +739,22 @@ fn purge_aligned_region(msa: &mut PackedMsa, seq_index: usize, start: usize, sto
 //         }
 //     }
 // ```
-pub(super) fn validate_msa(msa: &Msa) -> Result<(), PsiError> {
+///
+/// `ignore_unaligned_positions` (`PSIBlastOptions`, set by `CPsiBlastInputClustalW`) skips the
+/// check of the aligned columns:
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:828-860
+/// ```c
+///     retval = s_PSIValidateNoFlankingGaps(msa);
+///     ...
+///     if ( !ignore_unaligned_positions ) {
+///         retval = s_PSIValidateAlignedColumns(msa);
+///         ...
+///     }
+///
+///     retval = s_PSIValidateNoGapsInQuery(msa);
+/// ```
+pub(super) fn validate_msa(msa: &Msa, ignore_unaligned_positions: bool) -> Result<(), PsiError> {
     for row in &msa.cell {
         if let Some(cell) = row.iter().find(|cell| cell.is_aligned) {
             if cell.letter == GAP {
@@ -724,7 +769,11 @@ pub(super) fn validate_msa(msa: &Msa) -> Result<(), PsiError> {
             }
         }
     }
-    for p in 0..msa.query_length {
+    for p in 0..(if ignore_unaligned_positions {
+        0
+    } else {
+        msa.query_length
+    }) {
         let mut found_aligned_sequence = false;
         let mut found_non_gap_residue = false;
         for row in &msa.cell {
@@ -748,6 +797,24 @@ pub(super) fn validate_msa(msa: &Msa) -> Result<(), PsiError> {
             return Err(PsiError::GapInQuery);
         }
     }
+    if msa.num_seqs == 0 {
+        return Err(PsiError::NoAlignedSeqs);
+    }
+    Ok(())
+}
+
+/// `_PSIValidateMSA_StructureGroup(msa)`: only the check that sequences take part
+/// (`s_PSIValidateParticipatingSequences`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:810-826
+/// ```c
+/// int
+/// _PSIValidateMSA_StructureGroup(const _PSIMsa* msa)
+/// {
+///     ...
+///     retval = s_PSIValidateParticipatingSequences(msa);
+/// ```
+pub(super) fn validate_msa_structure_group(msa: &Msa) -> Result<(), PsiError> {
     if msa.num_seqs == 0 {
         return Err(PsiError::NoAlignedSeqs);
     }
@@ -998,18 +1065,18 @@ fn compute_aligned_region_lengths(msa: &Msa, aligned_blocks: &mut AlignedBlock) 
 pub(super) fn compute_sequence_weights(
     msa: &Msa,
     aligned_blocks: &AlignedBlock,
+    nsg_compatibility_mode: bool,
     seq_weights: &mut SequenceWeights,
 ) -> Result<(), PsiError> {
-    const K_EXPECTED_NUM_MATCHING_SEQS: u32 = 1;
+    let expected_num_matching_seqs = expected_matching_seqs(nsg_compatibility_mode);
     let mut aligned_seqs: Vec<usize> = Vec::with_capacity(msa.num_seqs + 1);
     for pos in 0..msa.query_length {
-        if aligned_blocks.size[pos] == 0
-            || msa.num_matching_seqs[pos] <= K_EXPECTED_NUM_MATCHING_SEQS
+        if aligned_blocks.size[pos] == 0 || msa.num_matching_seqs[pos] <= expected_num_matching_seqs
         {
             continue;
         }
         get_aligned_sequences_for_position(msa, pos, &mut aligned_seqs);
-        if aligned_seqs.len() as u32 <= K_EXPECTED_NUM_MATCHING_SEQS {
+        if aligned_seqs.len() as u32 <= expected_num_matching_seqs {
             continue;
         }
         seq_weights.norm_seq_weights.fill(0.0);
@@ -1018,9 +1085,24 @@ pub(super) fn compute_sequence_weights(
         seq_weights.pos_num_participating[pos] = aligned_seqs.len() as i32;
         calculate_match_weights(msa, pos, &aligned_seqs, seq_weights);
     }
-    check_sequence_weights(msa, seq_weights)?;
-    spread_gap_weights(msa, seq_weights);
-    check_sequence_weights(msa, seq_weights)
+    check_sequence_weights(msa, seq_weights, nsg_compatibility_mode)?;
+    spread_gap_weights(msa, seq_weights, nsg_compatibility_mode);
+    check_sequence_weights(msa, seq_weights, nsg_compatibility_mode)
+}
+
+/// `kExpectedNumMatchingSeqs` of `_PSIComputeSequenceWeights`, `_PSISpreadGapWeights` and
+/// `_PSICheckSequenceWeights`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1566
+/// ```c
+///     const Uint4 kExpectedNumMatchingSeqs = nsg_compatibility_mode ? 0 : 1;
+/// ```
+fn expected_matching_seqs(nsg_compatibility_mode: bool) -> u32 {
+    if nsg_compatibility_mode {
+        0
+    } else {
+        1
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1915-1928
@@ -1224,9 +1306,12 @@ fn calculate_match_weights(
 //
 //     }
 // ```
-fn spread_gap_weights(msa: &Msa, seq_weights: &mut SequenceWeights) {
+fn spread_gap_weights(msa: &Msa, seq_weights: &mut SequenceWeights, nsg_compatibility_mode: bool) {
+    let expected_num_matching_seqs = expected_matching_seqs(nsg_compatibility_mode);
     for pos in 0..msa.query_length {
-        if msa.num_matching_seqs[pos] <= 1 || msa.cell[K_QUERY_INDEX][pos].letter == X {
+        if msa.num_matching_seqs[pos] <= expected_num_matching_seqs
+            || msa.cell[K_QUERY_INDEX][pos].letter == X
+        {
             continue;
         }
         for res in 0..BLASTAA_SIZE {
@@ -1264,9 +1349,16 @@ fn spread_gap_weights(msa: &Msa, seq_weights: &mut SequenceWeights) {
 // NCBI's lets through and this rejects. The weights are finite (sums of finite products,
 // normalised by a positive total in `_PSICalculateNormalizedSequenceWeights`), so no NaN
 // reaches this check.
-fn check_sequence_weights(msa: &Msa, seq_weights: &SequenceWeights) -> Result<(), PsiError> {
+fn check_sequence_weights(
+    msa: &Msa,
+    seq_weights: &SequenceWeights,
+    nsg_compatibility_mode: bool,
+) -> Result<(), PsiError> {
+    let expected_num_matching_seqs = expected_matching_seqs(nsg_compatibility_mode);
     for pos in 0..msa.query_length {
-        if msa.num_matching_seqs[pos] <= 1 || msa.cell[K_QUERY_INDEX][pos].letter == X {
+        if msa.num_matching_seqs[pos] <= expected_num_matching_seqs
+            || msa.cell[K_QUERY_INDEX][pos].letter == X
+        {
             continue;
         }
         let mut running_total = 0.0;
@@ -1355,8 +1447,9 @@ pub(super) fn compute_freq_ratios(
     sbp: &PsiScoreBlk,
     aligned_blocks: &AlignedBlock,
     pseudo_count: i32,
+    nsg_compatibility_mode: bool,
     internal: &mut InternalPssm,
-) {
+) -> Result<(), PsiError> {
     const K_ZERO_OBS_PSEUDO: f64 = 30.0;
     let expno = initialize_exp_num_observations(sbp.background);
     for p in 0..msa.query_length {
@@ -1400,10 +1493,22 @@ pub(super) fn compute_freq_ratios(
             let numerator =
                 observations * seq_weights.match_weights[p][r] / seq_weights.std_prob[r] + pseudo;
             let denominator = observations + beta;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2162-2166
+            // ```c
+            //                 if (nsg_compatibility_mode && denominator == 0.0) {
+            //                     return PSIERR_UNKNOWN;
+            //                 } else {
+            //                     ASSERT(denominator != 0.0);
+            //                 }
+            // ```
+            if nsg_compatibility_mode && denominator == 0.0 {
+                return Err(PsiError::Unknown);
+            }
             let q_over_p_estimate = numerator / denominator;
             internal.freq_ratios[p][r] = q_over_p_estimate * seq_weights.std_prob[r];
         }
     }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:3068-3084

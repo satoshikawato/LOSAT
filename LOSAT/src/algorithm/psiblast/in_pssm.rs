@@ -128,7 +128,8 @@ pub(crate) fn check_in_pssm_options(
     }
     // The outfmt 0, 6 and 7 reports (the others are item PS15b's).
     if let Some(number) = outfmts.iter().find(|number| !matches!(number, 0 | 6 | 7)) {
-        bail!("output format {number} with -in_pssm is not supported by LOSAT's PSIBLAST yet");
+        let option = if psi.from_msa { "-in_msa" } else { "-in_pssm" };
+        bail!("output format {number} with {option} is not supported by LOSAT's PSIBLAST yet");
     }
     Ok(())
 }

@@ -305,7 +305,8 @@ What: the local time zone of makeblastdb on Windows (the date written into a dat
 UCRT's _tzset and localtime compute it, ported from the UCRT sources that Microsoft
 publishes under the MIT License in the NuGet package Microsoft.Windows.SDK.CRTSource
 10.0.22621.3.
-Files: src/writedb/windows_zone.rs.
+Files: src/writedb/windows_zone.rs; outside the crate, the repository's
+scripts/ucrt_tz_vectors.py.
 License: MIT. The package's LICENSE:
 
 -------------------------------------------------------------------------------

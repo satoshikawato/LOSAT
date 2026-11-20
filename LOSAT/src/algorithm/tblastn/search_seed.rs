@@ -2338,34 +2338,19 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                TranslatedChunk {
-                    offset: 0,
-                    length: 5_000_000
-                },
-                TranslatedChunk {
-                    offset: 4_999_900,
-                    length: 420
-                },
+                TranslatedChunk::new(0, 5_000_000),
+                TranslatedChunk::new(4_999_900, 420),
             ]
         );
         assert_eq!(
             unmasked_translated_chunks(5_000_000),
-            vec![TranslatedChunk {
-                offset: 0,
-                length: 5_000_000
-            },]
+            vec![TranslatedChunk::new(0, 5_000_000),]
         );
         assert_eq!(
             unmasked_translated_chunks(5_000_001),
             vec![
-                TranslatedChunk {
-                    offset: 0,
-                    length: 5_000_000
-                },
-                TranslatedChunk {
-                    offset: 4_999_900,
-                    length: 101
-                },
+                TranslatedChunk::new(0, 5_000_000),
+                TranslatedChunk::new(4_999_900, 101),
             ]
         );
         let path = concat!(
@@ -3138,10 +3123,7 @@ mod tests {
         let frame = plan.subject.frames[0].clone();
         assert_eq!((frame.frame, frame.aa_len), (1, query.len()));
         let length = query.len() as i32;
-        let chunk = TranslatedChunk {
-            offset: 0,
-            length: query.len(),
-        };
+        let chunk = TranslatedChunk::new(0, query.len());
         plan.subject = std::sync::Arc::new(XSubjectPlan {
             frames: vec![frame],
             units: vec![
@@ -3229,10 +3211,7 @@ mod tests {
         .unwrap();
         let frame = plan.subject.frames[0].clone();
         let length = query.len() as i32;
-        let chunk = TranslatedChunk {
-            offset: 0,
-            length: query.len(),
-        };
+        let chunk = TranslatedChunk::new(0, query.len());
         plan.subject = std::sync::Arc::new(XSubjectPlan {
             frames: vec![frame],
             units: vec![

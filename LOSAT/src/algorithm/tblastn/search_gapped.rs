@@ -371,10 +371,7 @@ impl XOneHitBuffers {
                         store,
                         db_gencode,
                         next,
-                        TranslatedChunk {
-                            offset: 0,
-                            length: n,
-                        },
+                        TranslatedChunk::new(0, n),
                         &mut held,
                     )?;
                     after_frame.extend_from_slice(&held[range][..n]);
@@ -2103,7 +2100,9 @@ fn merge_adjusted_chunk(
             .checked_add(offset)
             .context("subject gapped start overflow")?;
     }
-    let overlap = if chunk.offset == 0 { 0 } else { 100 };
+    // The chunk's overlap (`TranslatedChunk::overlap`: 0 where it starts the hard range at
+    // `hm_index`, else DBSEQ_CHUNK_OVERLAP).
+    let overlap = i32::try_from(chunk.overlap)?;
     Ok(merge_subject_chunk_hsps(
         per_frame,
         incoming,
@@ -3502,10 +3501,7 @@ mod tests {
         let gapped = |pssm: &crate::algorithm::pssm_search::rows::QueryPssm,
                       frame: &QueryFrame,
                       buffers: &XOneHitBuffers| {
-            let chunk = TranslatedChunk {
-                offset: 0,
-                length: frame.aa_len,
-            };
+            let chunk = TranslatedChunk::new(0, frame.aa_len);
             score_gapped_chunk::<_, true>(
                 &[&[A; 30]],
                 &query_frames,
@@ -3604,10 +3600,7 @@ mod tests {
                 after_frame: Vec::new(),
                 frame_end: std::cell::OnceCell::new(),
             };
-            let chunk = TranslatedChunk {
-                offset: 0,
-                length: aa_len,
-            };
+            let chunk = TranslatedChunk::new(0, aa_len);
             score_gapped_chunk::<_, true>(
                 &[&[A; 30]],
                 &query_frames,
@@ -3685,10 +3678,7 @@ mod tests {
         letters[22..50].fill(W);
         let frame = one_hit_frame(1, &letters);
         let query_frame = one_hit_frame(0, &query);
-        let chunk = TranslatedChunk {
-            offset: 0,
-            length: 30,
-        };
+        let chunk = TranslatedChunk::new(0, 30);
         let hit = InitHsp {
             frame: 1,
             chunk_offset: 0,
@@ -3781,10 +3771,7 @@ mod tests {
             .enumerate()
             .map(|(index, (frame, length))| one_hit_frame(frame, &vec![10 + index as u8; length]))
             .collect();
-        let whole = |frame_index: usize| TranslatedChunk {
-            offset: 0,
-            length: frames[frame_index].aa_len,
-        };
+        let whole = |frame_index: usize| TranslatedChunk::new(0, frames[frame_index].aa_len);
         let buffers = |frame_index: usize| {
             XOneHitBuffers::new(
                 &frames,
@@ -3853,10 +3840,7 @@ mod tests {
             .enumerate()
             .map(|(index, (frame, length))| one_hit_frame(frame, &vec![10 + index as u8; length]))
             .collect();
-        let chunk = TranslatedChunk {
-            offset: 0,
-            length: 30,
-        };
+        let chunk = TranslatedChunk::new(0, 30);
         let buffers = XOneHitBuffers::new(
             &frames,
             0,
@@ -3873,10 +3857,7 @@ mod tests {
         assert_eq!(s, [10, 10, 10, 10, 10, 0, 11, 11, 11, 11, 11]);
         // A chunk that ends HSP_MAX_WINDOW letters or more before its frame's end holds nothing
         // after the frame.
-        let early = TranslatedChunk {
-            offset: 0,
-            length: 21,
-        };
+        let early = TranslatedChunk::new(0, 21);
         let buffers = XOneHitBuffers::new(
             &frames,
             0,
@@ -3915,10 +3896,7 @@ mod tests {
                     .flat_map(|frame| frame.aa_seq[1..].iter().copied())
                     .collect();
                 for tail in 0..(HSP_MAX_WINDOW - 1).min(aa_len) {
-                    let chunk = TranslatedChunk {
-                        offset: 0,
-                        length: aa_len - tail,
-                    };
+                    let chunk = TranslatedChunk::new(0, aa_len - tail);
                     let after = |frames: &[QueryFrame]| {
                         XOneHitBuffers::new(frames, frame_index, chunk, subject, 1)
                             .unwrap()
@@ -3965,10 +3943,7 @@ mod tests {
                     .map(|frame| one_hit_frame(frame, &[D; 60])),
             )
             .collect();
-        let chunk = TranslatedChunk {
-            offset: 0,
-            length: 30,
-        };
+        let chunk = TranslatedChunk::new(0, 30);
         let buffers = XOneHitBuffers::new(
             &frames,
             0,

@@ -3,7 +3,7 @@
 //! after each of them (`strace` of the program that made them; the header of each table says
 //! which program, binary and host).
 
-use super::{stdio_buffer_size, NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
+use super::{block_for, stdio_buffer_size, NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
 
 /// The operations of a row: `W<n>[:<k>...]` an insertion of `n` bytes (newlines at the offsets
 /// `k`), `C` the insertion of a character, `L` of a newline character, `F` a flush, `E` a write
@@ -282,11 +282,6 @@ fn rpsbprocs_terminal_writes_are_the_lines_and_blocks_of_a_line_buffered_stream(
     assert!(tty.iter().all(|&size| size <= 4096));
 }
 
-/// The buffer size that a standard output of `st_blksize` N gets (`stdio_buffer_size`).
-fn block_of(blksize: usize) -> usize {
-    blksize.min(NCBI_BUFSIZ)
-}
-
 fn check_blksize_table(table: &str, lines: bool) -> usize {
     let mut rows = 0;
     for line in table.lines().filter(|line| !line.starts_with('#')) {
@@ -300,7 +295,7 @@ fn check_blksize_table(table: &str, lines: bool) -> usize {
             .map(|n| n.parse().unwrap())
             .collect();
         let stream = NcbiStdio::Cout {
-            block: block_of(blksize),
+            block: block_for(blksize as u64),
             lines,
         };
         assert_eq!(
@@ -429,11 +424,11 @@ fn ncbis_blastn_and_rpsbproc_write_as_the_buffer_of_each_block_size_does() {
         let stream = match (case, destination) {
             ("blastn_out", _) => NcbiStdio::File,
             (_, "pty") => NcbiStdio::Cout {
-                block: block_of(blksize),
+                block: block_for(blksize as u64),
                 lines: true,
             },
             _ => NcbiStdio::Cout {
-                block: block_of(blksize),
+                block: block_for(blksize as u64),
                 lines: false,
             },
         };
@@ -472,4 +467,16 @@ fn ncbis_blastn_and_rpsbproc_write_as_the_buffer_of_each_block_size_does() {
         }] += 1;
     }
     assert_eq!(counts, [267, 89, 36]);
+}
+
+#[test]
+fn the_block_of_a_block_size_is_the_size_below_bufsiz_else_bufsiz() {
+    // Observed: 1 ... 8191 are their own block, 8192 and above (to 4,194,304) are 8192; 0 is not
+    // observed and gets 8192 (`block_for`).
+    for blksize in [1u64, 2, 127, 128, 511, 1024, 4096, 8191] {
+        assert_eq!(block_for(blksize), blksize as usize);
+    }
+    for blksize in [0u64, 8192, 8193, 16384, 4_194_304, u64::MAX] {
+        assert_eq!(block_for(blksize), NCBI_BUFSIZ);
+    }
 }

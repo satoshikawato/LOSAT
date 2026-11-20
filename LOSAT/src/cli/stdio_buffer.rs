@@ -20,24 +20,36 @@ const SMALL_BLOCK: usize = 128;
 /// The C library's `BUFSIZ` of NCBI's builds.
 pub const NCBI_BUFSIZ: usize = 8192;
 
-/// The size of the buffer that NCBI's BLAST+ (a Linux build) gives standard output, for the
-/// standard output of this process: the block size of what it writes to where that is below
-/// `NCBI_BUFSIZ`, else `NCBI_BUFSIZ` (4096 for a pipe and most files, 1024 for a terminal); 4096
-/// on a platform that is not Unix.
+/// The buffer size that a standard output whose `st_blksize` is `blksize` gets: the block size
+/// below `NCBI_BUFSIZ`, else `NCBI_BUFSIZ` (4096 for a pipe and most files, 1024 for a terminal;
+/// observed for 1 to 4,194,304, `tests/fixtures/stdio_buffer/cout_blksize_*.tsv`). A `blksize` of
+/// 0 is not observed (the tables start at 1; NCBI's build gets it only from a device that reports
+/// no block size): it gets `NCBI_BUFSIZ`, as does a standard output whose `fstat` fails
+/// (`stdio_buffer_size`), also not observed.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub fn block_for(blksize: u64) -> usize {
+    if blksize > 0 && blksize < NCBI_BUFSIZ as u64 {
+        blksize as usize
+    } else {
+        NCBI_BUFSIZ
+    }
+}
+
+/// The size of the buffer that NCBI's BLAST+ gives standard output, for the standard output of
+/// this process (`block_for` of its `st_blksize`). The rule is observed on NCBI's Linux builds
+/// (glibc 2.35 and 2.39). Other Unix systems (macOS, BSD) use the same rule, unobserved; Windows
+/// and WASI (the Web build) have no `st_blksize` here and get 4096, with `NcbiStdio::cout`'s
+/// `lines` from `is_terminal`, unobserved.
 pub fn stdio_buffer_size() -> usize {
     #[cfg(unix)]
     {
         use std::os::fd::AsFd;
         use std::os::unix::fs::MetadataExt;
-        let block = std::io::stdout()
+        std::io::stdout()
             .as_fd()
             .try_clone_to_owned()
             .and_then(|fd| std::fs::File::from(fd).metadata())
-            .map(|metadata| metadata.blksize());
-        match block {
-            Ok(block) if block > 0 && block < NCBI_BUFSIZ as u64 => block as usize,
-            _ => NCBI_BUFSIZ,
-        }
+            .map_or(NCBI_BUFSIZ, |metadata| block_for(metadata.blksize()))
     }
     #[cfg(not(unix))]
     {
@@ -66,6 +78,14 @@ impl NcbiStdio {
 fn stdout_is_terminal() -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal()
+}
+
+/// How many bytes follow the last newline among the last `scan` bytes of `stream`, if there is one.
+fn bytes_after_newline(stream: &[u8], scan: usize) -> Option<usize> {
+    let tail = &stream[stream.len().saturating_sub(scan)..];
+    tail.iter()
+        .rposition(|&byte| byte == b'\n')
+        .map(|at| tail.len() - at - 1)
 }
 
 /// What one buffer holds of the bytes inserted into it, and whether it exists yet.
@@ -118,11 +138,8 @@ impl NcbiBuffer {
                     0
                 };
                 self.made = true;
-                if lines && self.held > 0 {
-                    let inserted = &stream[stream.len().saturating_sub(n)..];
-                    if inserted.contains(&b'\n') {
-                        self.held = 0;
-                    }
+                if lines && self.held > 0 && bytes_after_newline(stream, n).is_some() {
+                    self.held = 0;
                 }
             }
             NcbiStdio::Cout { block, lines } => {
@@ -137,10 +154,11 @@ impl NcbiBuffer {
                     n % block
                 };
                 self.made = true;
+                // On a terminal what follows the last newline is held (the bytes held before
+                // this insertion have none).
                 if lines && self.held > 0 {
-                    let tail = &stream[stream.len().saturating_sub(self.held)..];
-                    if let Some(at) = tail.iter().rposition(|&byte| byte == b'\n') {
-                        self.held = tail.len() - at - 1;
+                    if let Some(after) = bytes_after_newline(stream, n.min(self.held)) {
+                        self.held = after;
                     }
                 }
             }
@@ -156,7 +174,6 @@ impl NcbiBuffer {
 
     /// An insertion of the one byte that ends `stream` (`put`).
     pub fn sputc(&mut self, stream: &[u8]) {
-        let _ = stream;
         match self.stream {
             NcbiStdio::Cout { block, lines } => {
                 self.held = if self.made && self.held >= block {

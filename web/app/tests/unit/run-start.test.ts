@@ -8,7 +8,7 @@
 // calls go to the built serial reactor.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { instantiateSerial, reactorControl, reopening, RunDirectory, WasmEngine } from 'losat';
 import { readStoredZip, type RegistryFile, type RunFile } from 'losat/domain';
 import { FileReadError, isFileReadError, runFilesOf, runOutputFailedOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
@@ -838,11 +838,15 @@ describe("the Engine worker's runtime and the files of a run", () => {
     delete (withoutSubject as { subject?: unknown }).subject;
     const files = [{ name: 'db/x.nal', file: new Blob(['TITLE x\n']) }];
     const database: WorkerRun = { ...withoutSubject, argv: ['tblastx', '-query', 'q.fa', '-db', 'db/x'], files };
+    const opened = vi.spyOn(RunDirectory.prototype, 'open');
     const result = await runtime.run(database, () => undefined);
     expect(calls).toEqual(['validate tblastx -query q.fa -db db/x -num_threads 1', 'register query', 'run without a subject', 'release 101']);
     expect(result.subjectRetained).toBe(false);
+    // The run's files are in its directory while it runs, and let go after it (review of D12a, low 6).
+    expect(opened.mock.calls.map(([list]) => list)).toEqual([files, []]);
+    opened.mockRestore();
     const loaded = (runtime as unknown as { loaded: { directory: RunDirectory } }).loaded;
-    expect(loaded.directory.list).toEqual(files);
+    expect(loaded.directory.list).toEqual([]);
     // -parse_deflines reads the query alone; the shown IDs of the subjects are the database's.
     calls.length = 0;
     const together = await runtime.run({ ...database, argv: [...database.argv, '-parse_deflines'] }, () => undefined);

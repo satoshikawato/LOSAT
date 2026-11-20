@@ -2648,22 +2648,33 @@ pub(crate) fn write_query_to(
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
-    if !writes(run) {
-        return Err(SeqAlignError::Unsupported(run.program).into());
+    match write_query(format, run, query, subjects, hsps, buf) {
+        Ok(true) => writer.write_all(buf)?,
+        Ok(false) => {}
+        Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte))) => {
+            let document = QueryDocument {
+                run,
+                query,
+                subjects,
+                hsps,
+            };
+            // The prefix of the posts: `options::RequestKind::application`, the one table of
+            // the applications' names.
+            let prefix =
+                crate::report::archive::options::RequestKind::from(run.program).application();
+            write_document_posting(
+                format,
+                byte,
+                &document,
+                Some(prefix),
+                buf,
+                writer,
+                diagnostics,
+            )?;
+        }
+        Err(error) => return Err(error.into()),
     }
-    if !has_alignments(run, hsps) {
-        return Ok(());
-    }
-    let document = QueryDocument {
-        run,
-        query,
-        subjects,
-        hsps,
-    };
-    // The prefix of the posts: `options::RequestKind::application`, the one table of the
-    // applications' names.
-    let prefix = crate::report::archive::options::RequestKind::from(run.program).application();
-    write_document_to(format, &document, Some(prefix), buf, writer, diagnostics)
+    Ok(())
 }
 
 /// Writes the Seq-annot of `document` (`write_document`) to `writer` through `buf`, which is

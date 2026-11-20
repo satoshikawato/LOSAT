@@ -37,6 +37,7 @@ pub(crate) struct MaskRange<'a> {
 /// The Karlin-Altschul parameters of the results: (lambda, K, H), ungapped and gapped, 0.0 where
 /// the reply has no block of the kind.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg(test)] // read by the formats of later pull requests (decision C3-3)
 pub(crate) struct KarlinBlocks {
     pub(crate) ungapped: (f64, f64, f64),
     pub(crate) gapped: (f64, f64, f64),
@@ -44,6 +45,7 @@ pub(crate) struct KarlinBlocks {
 
 /// What `GetResultSet` reads of the search statistics.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg(test)] // read by the formats of later pull requests (decision C3-3)
 pub(crate) struct SearchStats {
     pub(crate) effective_search_space: i64,
     pub(crate) length_adjustment: i64,
@@ -319,6 +321,7 @@ impl Results {
     //             }
     //         }
     // ```
+    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn karlin_blocks(&self) -> KarlinBlocks {
         let mut out = KarlinBlocks::default();
         let (mut gapped, mut ungapped) = (false, false);
@@ -382,6 +385,7 @@ impl Results {
     //         	 }
     //         }
     // ```
+    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn search_stats(&self, service: &[u8]) -> SearchStats {
         let mut out = SearchStats::default();
         let mut stats: Vec<Vec<u8>> = match self.reply().get("search-stats") {
@@ -439,6 +443,7 @@ impl Results {
 // ```
 // (`start_pos` 0 and `max_replace` 0 by default; the search was found, so the first test
 // does not return.)
+#[cfg(test)] // read by the formats of later pull requests (decision C3-3)
 fn replace_all(text: &mut Vec<u8>, search: &[u8]) -> bool {
     let mut from = 0;
     let mut found = false;

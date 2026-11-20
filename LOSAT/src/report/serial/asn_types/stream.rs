@@ -11,7 +11,9 @@
 //! a front end that reads them into the table's values would take the input from
 //! [`Guessed::into_parts`].
 
-use std::io::{Read as IoRead, Seek, SeekFrom};
+use std::io::Read as IoRead;
+#[cfg(test)]
+use std::io::{Seek, SeekFrom};
 
 use super::read::{read_object, Read};
 use super::Value;
@@ -118,6 +120,7 @@ impl<R: IoRead> Guessed<R> {
 
     /// The stream from where the guess left it: the bytes the guess took from there, and the
     /// input after them (the front end of another encoding reads from here).
+    #[cfg(test)] // read by the binary and XML archives and line F2's strategies (decision C3-3)
     pub(crate) fn into_parts(mut self) -> (Vec<u8>, R) {
         self.taken.drain(..self.start);
         (self.taken, self.input)
@@ -201,6 +204,7 @@ impl<R: IoRead> ObjectStream<R> {
 
     /// The text after what was read: the bytes the stream holds from there, then the input
     /// after them.
+    #[cfg(test)] // read by the binary and XML archives and line F2's strategies (decision C3-3)
     pub(crate) fn into_rest(self) -> (Vec<u8>, R) {
         let pos = self.r.pos;
         self.r.src.into_rest(pos)
@@ -213,6 +217,7 @@ impl<R: IoRead> ObjectStream<R> {
     }
 }
 
+#[cfg(test)] // read by line F2's strategies (decision C3-3)
 impl<R: IoRead + Seek> ObjectStream<R> {
     /// `in.seekg(0)` (remote_blast.cpp:2302, after a failed read of a strategy reply): the input
     /// from its start, for a new guess and read; the error of an input that cannot seek (a

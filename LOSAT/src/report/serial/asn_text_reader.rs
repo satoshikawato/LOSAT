@@ -366,6 +366,7 @@ impl<R: Read> StreamSource<R> {
     /// The text from `pos` on: the bytes the source holds from there, then what `input` gives
     /// after them (`Close` above: what a reader of one object did not use goes back to the
     /// stream).
+    #[cfg(test)] // read by the binary and XML archives and line F2's strategies (decision C3-3)
     pub(crate) fn into_rest(self, pos: usize) -> (Vec<u8>, R) {
         let mut buf = self.buf;
         buf.drain(..(pos - self.base).min(buf.len()));

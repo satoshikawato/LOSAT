@@ -411,14 +411,13 @@ fn the_alignments_are_grouped_by_query() {
     );
 }
 
-/// The request as stored: the program, service and creator, the queries (their Bioseqs, ids,
+/// The request as stored: the program and service, the queries (their Bioseqs, ids,
 /// titles, deflines, molecule, length and data), the subject sequences or database, and the
 /// parameters in the order of the file.
 #[test]
 fn the_request_is_read_as_stored() {
     let archives = read_fixture("blastn_subject_mixnh.asn");
     let request = &search_of(&archives[0]).request;
-    assert_eq!(request.ident, b"2.17.0+");
     assert_eq!(
         (request.program.as_slice(), request.service.as_slice()),
         (&b"blastn"[..], &b"megablast"[..])
@@ -654,7 +653,7 @@ fn the_queries_of_each_form_are_read() {
     assert_eq!(locs.queries.num_queries(), 2);
     assert_eq!(query_ids(&locs), Ok(vec![Some("lcl|q".to_string()), None]));
     assert_eq!(locs.queries.seq_locs().count(), 2);
-    assert!(matches!(&locs.subject, Subject::SeqLocList(list) if list.len() == 1));
+    assert!(matches!(&locs.subject, Subject::SeqLocList));
     assert!(locs.subject.bioseqs().is_empty());
     // A null query id is dereferenced only while a run of alignments is left.
     let align = "{ type partial, dim 2, segs denseg { numseg 1, ids { local str \"q\", \

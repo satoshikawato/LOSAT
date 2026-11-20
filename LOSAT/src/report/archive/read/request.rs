@@ -43,9 +43,6 @@ use crate::seqid::ParsedSeqId;
 /// The request of a search.
 #[derive(Debug)]
 pub(crate) struct Request {
-    /// `ident` (`GetCreatedBy`): the version of the program that wrote the archive (set: NCBI's
-    /// archive reader stops on a search request without it, [`Request::from_value`]).
-    pub(crate) ident: Vec<u8>,
     /// `program` and `service` (`GetProgram`, `GetService`), as stored.
     pub(crate) program: Vec<u8>,
     pub(crate) service: Vec<u8>,
@@ -77,7 +74,7 @@ pub(crate) enum Subject {
     /// `seq-loc-list`: the `Seq-loc`s. NCBI's archive reader does not read them: its
     /// `SetSequences()` makes the subject an empty list of sequences, in the request it keeps
     /// too, so blast_formatter has no subject.
-    SeqLocList(Vec<Value>),
+    SeqLocList,
 }
 
 /// The list of options a parameter comes from.
@@ -193,7 +190,9 @@ impl Request {
     // (`GetProgram` and `GetService` read mandatory members of the `queue-search`.)
     pub(crate) fn from_value(mut request: Value) -> Result<Option<Request>, Stop> {
         let ty = named::BLAST4_REQUEST;
-        let ident = take(&mut request, ty, "ident").map(|mut ident| take_str(&mut ident));
+        // `ident` (`GetCreatedBy`, the version of the program that wrote the archive) changes no
+        // output (probes P8.001-012); NCBI's archive reader stops on a search request without it.
+        let has_ident = take(&mut request, ty, "ident").is_some();
         let mut body = take(&mut request, ty, "body").expect("the mandatory body");
         let (variant, mut search) = take_variant(&mut body, named::BLAST4_REQUEST_BODY);
         if variant == "get-request-info" {
@@ -213,12 +212,12 @@ impl Request {
                 "No body in CBlast4_request",
             )));
         }
-        let Some(ident) = ident else {
+        if !has_ident {
             return Err(Stop::Unassigned {
                 type_name: "Blast4-request",
                 member: "ident",
             });
-        };
+        }
         let ty = named::BLAST4_QUEUE_SEARCH_REQUEST;
         let mut text = |name: &str| {
             let mut value = take(&mut search, ty, name).expect("a mandatory string");
@@ -235,7 +234,7 @@ impl Request {
         let subject = match take_variant(&mut subject, named::BLAST4_SUBJECT) {
             ("database", mut name) => Subject::Database(take_str(&mut name)),
             ("sequences", mut bioseqs) => Subject::Sequences(take_items(&mut bioseqs)),
-            (_, mut locs) => Subject::SeqLocList(take_items(&mut locs)),
+            _ => Subject::SeqLocList,
         };
         let mut params = Vec::new();
         for (set, name) in [
@@ -254,7 +253,6 @@ impl Request {
             }));
         }
         Ok(Some(Request {
-            ident,
             program,
             service,
             queries,
@@ -289,6 +287,7 @@ impl Request {
     // 	return blast4ParamFound;
     // }
     // ```
+    #[cfg(test)]
     pub(crate) fn param(&self, set: ParamSet, name: &[u8]) -> Option<&Param> {
         self.params
             .iter()
@@ -341,7 +340,9 @@ impl Request {
     // }
     // ```
     // (`HitlistSize` is an `e_Integer` field, names.cpp; `Which()` is the variant's position from
-    // 1. The archive reader builds without `ignore_unsupported_options`.)
+    // 1. The archive reader builds without `ignore_unsupported_options`. The tests' reader of
+    // the one option; the run reads `search_options`.)
+    #[cfg(test)]
     pub(crate) fn hitlist_size(&self) -> Result<i32, Stop> {
         self.search_options().map(|options| options.hitlist_size)
     }
@@ -832,7 +833,7 @@ impl Request {
                 )),
             };
         }
-        for param in &self.params {
+        for param in self.params() {
             if typed(param, b"MBTemplateLength", "integer") {
                 if param_choice(param).1.int() != 0 {
                     return Ok(EProgram::DiscMegablast);
@@ -903,7 +904,7 @@ impl Request {
             db_filtering_algorithm: None,
         };
         let mut filtering = None;
-        for param in &self.params {
+        for param in self.params() {
             if param.set == ParamSet::Format {
                 continue;
             }
@@ -1107,11 +1108,6 @@ fn entry_bioseqs<'a>(entry: V<'a>, out: &mut Vec<Bioseq<'a>>) {
 pub(crate) struct Bioseq<'a>(V<'a>);
 
 impl<'a> Bioseq<'a> {
-    /// The Bioseq value.
-    pub(crate) fn value(self) -> V<'a> {
-        self.0
-    }
-
     /// Its ids (`GetId()`), in order.
     pub(crate) fn ids(self) -> impl Iterator<Item = &'a ParsedSeqId> {
         self.0.field("id").items().map(|id| id.seq_id())
@@ -1124,6 +1120,7 @@ impl<'a> Bioseq<'a> {
     }
 
     /// The descriptors (`descr`) in order.
+    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     fn descriptors(self) -> impl Iterator<Item = (&'static str, V<'a>)> {
         self.0
             .get("descr")
@@ -1133,6 +1130,7 @@ impl<'a> Bioseq<'a> {
     }
 
     /// The first `title` descriptor, as stored.
+    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn title(self) -> Option<&'a [u8]> {
         self.descriptors()
             .find(|(variant, _)| *variant == "title")
@@ -1141,6 +1139,7 @@ impl<'a> Bioseq<'a> {
 
     /// The `DefLine` field of the first `CFastaReader` user object, as stored (the raw defline
     /// line of the FASTA reader, `NStr::PrintableString` of it).
+    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn fasta_defline(self) -> Option<&'a [u8]> {
         self.descriptors()
             .filter(|(variant, _)| *variant == "user")
@@ -1159,6 +1158,7 @@ impl<'a> Bioseq<'a> {
     }
 
     /// `inst.mol` (`Seq-inst.mol`, ENUMERATED: 0 not-set, 1 dna, 2 rna, 3 aa, 4 na, 255 other).
+    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn molecule(self) -> i64 {
         self.0.field("inst").field("mol").int()
     }
@@ -1172,6 +1172,7 @@ impl<'a> Bioseq<'a> {
     }
 
     /// `inst.seq-data` as read (a `Seq-data` CHOICE of any coding).
+    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn seq_data(self) -> Option<V<'a>> {
         self.0.field("inst").get("seq-data")
     }

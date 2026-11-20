@@ -228,7 +228,7 @@ impl<'r, 'o> Run<'r, 'o> {
             Ok(Encoding::Xml) => return Err(Refusal::XmlArchive.into()),
             Ok(Encoding::Other) => return Err(invalid_archive()),
             Err(GuessStop::Exception(exception)) => return Err(exception_error(exception)),
-            Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(*what).into()),
+            Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(what).into()),
         }
         let mut reader = ArchiveReader::new(guessed.into_text());
         while let Some((read, posts)) = reader.next_archive() {

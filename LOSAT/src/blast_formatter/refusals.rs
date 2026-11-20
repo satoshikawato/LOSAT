@@ -13,7 +13,9 @@ use crate::ncbi_app::Diag;
 /// (`Refusal::OutputFormat`).
 pub(crate) const WRITTEN_FORMATS: [i32; 3] = [8, 9, 12];
 
-/// The output formats of NCBI's blast_formatter (0 to 18 and 20; `-help`, probe P2.201).
+/// The output formats of NCBI's blast_formatter (0 to 18 and 20; `-help`, probe P2.201): the
+/// tests' list of the refusals (`documented`).
+#[cfg(test)]
 const NCBI_FORMATS: [i32; 20] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20,
 ];
@@ -124,7 +126,8 @@ impl Refusal {
     }
 
     /// The words of the manual's section on blast_formatter (`docs/manual/src/refusals.md`) that
-    /// name the refusal.
+    /// name the refusal (the tests' check of the manual).
+    #[cfg(test)]
     pub(crate) fn manual_words(&self) -> String {
         match self {
             Refusal::Rid => "`-rid`".to_string(),
@@ -168,6 +171,7 @@ pub(crate) fn output_format(number: i32) -> Option<Refusal> {
 
 /// One refusal of each kind, the output formats one by one: what the manual documents
 /// (`cli::manual_refusals_tests`).
+#[cfg(test)]
 pub(crate) fn documented() -> Vec<Refusal> {
     let mut refusals = vec![Refusal::Rid];
     refusals.extend(NCBI_FORMATS.into_iter().filter_map(output_format));

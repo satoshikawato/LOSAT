@@ -1385,6 +1385,31 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         ShownSubjects::Database { reported, .. } => reported.loads(),
         ShownSubjects::Fasta { .. } => &every_loaded,
     };
+    // RPSTBLASTN: an entry of the profile database whose Seq-align id is the generated id
+    // (`lcl|Query_N`) of a query of the batch that reports it is that query for NCBI's scope: its
+    // Seq-align conversion raises an exception after half a document. Refused before the reports
+    // (PS15a-1, followup `rps_lcl_query_title.md`), as rpsblast's XML is
+    // (`common::database::refuse_generated_query_id`).
+    let generated_scopes = match shown {
+        ShownSubjects::Database { .. } if options.program().lower == "rpstblastn" => {
+            let ids: Vec<(
+                &str,
+                Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+            )> = queries
+                .iter()
+                .map(|query| (query.internal_id.as_str(), query.believed()))
+                .collect();
+            let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
+                &ids,
+                batches
+                    .iter()
+                    .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
+                    .collect(),
+            );
+            scopes.generated().then_some(scopes)
+        }
+        _ => None,
+    };
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             if texts.len() == reports {
@@ -1392,6 +1417,25 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             }
             // Several volumes: the merged lists cut once per query (`TrimSeqAlign`).
             let lists = &lists[..lists.len().min(options.shown_lists())];
+            if let (
+                Some(scopes),
+                ShownSubjects::Database {
+                    reported: names, ..
+                },
+            ) = (&generated_scopes, shown)
+            {
+                for list in lists.iter().filter(|list| reported(list, options.gapped)) {
+                    if let Some(subject) = names.parsed_subject(list.oid) {
+                        crate::algorithm::common::database::refuse_generated_query_id(
+                            subject,
+                            names.oid(list.oid),
+                            scopes.of_query(batch.query_ordinal + qidx),
+                            options.program().upper,
+                            crate::algorithm::common::database::XML_EFFECT,
+                        )?;
+                    }
+                }
+            }
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
             texts.push(query_text(

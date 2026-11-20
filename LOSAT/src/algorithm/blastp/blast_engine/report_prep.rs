@@ -866,9 +866,20 @@ pub(super) fn refuse_unreportable(
     // search never takes a database with them (`database::x_titles_allow_blocks`). Were a block
     // search to reach it, it would refuse in the call of the query's block as the abort above,
     // after the reports of the blocks before (NCBI's bytes for their queries).
-    if let (Some(_), false, Some(titles)) =
-        (anchored_view, args.parse_deflines, listed_titles.as_ref())
-    {
+    // rpsblast's BLAST XML (outfmt 5): the same collision of an entry's generated id with a query
+    // of its batch, where NCBI's XML takes the query's title for the entry (the archive,
+    // outfmt 11, is NCBI's bytes with it): refused here before any byte, for the reported
+    // entries only (`ListedTitles::refuse_generated_ids`; PS15a-1, followup
+    // `rps_lcl_query_title.md`). Outfmt 0, 6 and 7 are line RG item X7's.
+    let rps_xml = args.rps_search.is_some()
+        && format_plans
+            .iter()
+            .any(|outfmt| matches!(outfmt, BlastpReport::Xml));
+    if let (true, false, Some(titles)) = (
+        anchored_view.is_some() || rps_xml,
+        args.parse_deflines,
+        listed_titles.as_ref(),
+    ) {
         let scopes: Vec<(usize, crate::blastinput::query_batch::QueryScope)> = query_batches
             .iter()
             .map(|batch| {
@@ -883,15 +894,22 @@ pub(super) fn refuse_unreportable(
             })
             .collect();
         let none = crate::blastinput::query_batch::QueryScope::default();
-        titles.refuse_generated_query_ids(
-            hit_lists,
-            |query| {
-                scopes
-                    .get(scopes.partition_point(|&(end, _)| end <= query))
-                    .map_or(&none, |(_, scope)| scope)
-            },
-            |q_idx| described(q_idx, true),
-        )?;
+        let scope_of = |query: usize| {
+            scopes
+                .get(scopes.partition_point(|&(end, _)| end <= query))
+                .map_or(&none, |(_, scope)| scope)
+        };
+        if rps_xml {
+            titles.refuse_generated_ids(
+                hit_lists,
+                &scope_of,
+                crate::algorithm::common::database::XML_EFFECT,
+            )?;
+        }
+        if anchored_view.is_some() {
+            titles
+                .refuse_generated_query_ids(hit_lists, scope_of, |q_idx| described(q_idx, true))?;
+        }
     }
     // Outfmt 0 to 4 of a database search with queries whose ids the reports show
     // (`-parse_deflines`, a PSSM query with its ids): a sequence whose description line shows a

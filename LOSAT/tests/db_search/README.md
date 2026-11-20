@@ -1493,6 +1493,13 @@ most 9 in BLOSUM62).
   `rps_pam30.aux` is `rps_mini.aux` with `PAM30` and gap costs 9/1 (row `db.rps.rej.matrix`). `empty.aux` is an empty
   file (0 bytes), put in place of `rps_mini.aux` for NCBI's engine error of a `.aux` without a matrix name (row
   `db.rpstbn.emptyaux.6`).
+- `rpscol` (PS15a-1): one profile (`makeprofiledb` of a PSSM whose query id is the local id `Query_1`, an entry that
+  NCBI's scope takes for the first query of a run read without `-parse_deflines`; the PSSM is the one of
+  `PR/followups/rps_lcl_query_title.md`'s fixture, `tests/fasta/rps/col_qp.faa` the protein of it, `col_qn.fna` its
+  back-translation). Rows `db.rps.of11.col` and `db.rpstbn.of11.col` are NCBI's archive; `db.rps.rej.of5col` and
+  `db.rpstbn.rej.of5col` are LOSAT's refusals of BLAST XML (NCBI's rpsblast shows the query's title for the entry,
+  NCBI's rpstblastn stops with an exception after half a document). The files keep their original names
+  (`rpscol`): the `.pin` and the `.aux` name them.
 - `rps_mini3v` (version 5, PS11b): the same three profiles as three volumes of one profile each (`rps_mini3v.00` to
   `.02`, each made by makeprofiledb from one profile, and the alias file `rps_mini3v.pal`, written by `build.sh`):
   the volumes' diagonal tables have 256 entries, so the hits of a long query differ from those of `rps_mini`'s one

@@ -150,7 +150,7 @@ impl Posts {
     }
 
     /// `posts`, the posts before each query's report, with the later lines of each query
-    /// (`later`; `lines` by query, none for a query beyond it).
+    /// (`later`, with NCBI's lines above it; `lines` by query, none for a query beyond it).
     pub fn with_later(mut posts: Vec<Posts>, lines: &[Vec<u8>]) -> Vec<Posts> {
         for (posts, lines) in posts.iter_mut().zip(lines) {
             posts.later(lines);
@@ -158,7 +158,7 @@ impl Posts {
         posts
     }
 
-    /// Writes the lines of `later` to `receiver`, a later format's
+    /// Writes the lines of `later` (with NCBI's lines above it) to `receiver`, a later format's
     /// (`ReportOutputs::later_warnings`).
     pub fn write_later(&self, receiver: &mut Vec<u8>) {
         for post in &self.0 {

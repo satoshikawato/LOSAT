@@ -993,7 +993,8 @@ impl<'a> QueryWarnings<'a> {
     }
 
     /// Writes the warnings of query `index`, after the report written so far (`report`)
-    /// is flushed; a failed flush returns before them.
+    /// is flushed; a failed flush returns before them. Then the query's later lines go to the
+    /// format's receiver (`with_later`), without a flush: they are no part of the diagnostics.
     pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
         let placed = before_report(
             self.reads.as_mut(),

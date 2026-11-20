@@ -2805,6 +2805,7 @@ fn search(
             prefetch_posts,
             |query| batches.warnings[query].len(),
         );
+        // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
         let query_posts = crate::report::diag_log::Posts::with_later(query_posts, &later_lines);
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
         // written after all batches are searched. No NCBI counterpart.

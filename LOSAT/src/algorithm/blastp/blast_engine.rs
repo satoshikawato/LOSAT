@@ -12169,7 +12169,7 @@ fn run_call(
     // know (`blastp_xml_matrix_failure`; `None` for a name it knows).
     let xml_matrix_failure = blastp_xml_matrix_failure(&args, outputs, database.is_some());
     // Whether the queries' result warnings are kept for the later formats (`Posts::with_later`
-    // below).
+    // below). NCBI (598d8ae6): blast_format.cpp:1450-1452 (`QueryWarnings::with_later`).
     let keeps_later = outputs.keeps_later_query_warnings();
     let observer = &mut outputs.observer;
     if let Some(observer) = observer.as_deref_mut() {
@@ -12367,6 +12367,7 @@ fn run_call(
         // The first format's writer also writes the texts of the subjects that the reports
         // read one by one (`ReportedPrefetch::subject_reads`).
         let first_lines = warning_lines.take();
+        // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (first_lines.is_some()
             || later.is_some()

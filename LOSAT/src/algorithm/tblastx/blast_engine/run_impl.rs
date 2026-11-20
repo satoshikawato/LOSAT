@@ -2728,6 +2728,7 @@ fn write_tblastx_outputs(
     // The queries' result warnings that a structured first format does not write are each later
     // format's that writes them, to the caller's receiver of that format's
     // (`ReportOutputs::later_warnings`).
+    // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
     let keeps_later = outputs.keeps_later_query_warnings();
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
@@ -2772,6 +2773,7 @@ fn write_tblastx_outputs(
         // name (`x_CheckTaxDB`, `tabular`), and NCBI's posts of the bytes that the archive's
         // and the Seq-annots' streams replace (`write_tblastx_archives`,
         // `seqalign::write_query_to`).
+        // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (warning_lines.is_some()
             || later.is_some()

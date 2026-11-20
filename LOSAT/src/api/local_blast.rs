@@ -398,6 +398,8 @@ impl FormatOutput<'_> {
     /// `ReportOutputs::keeps_later_query_warnings`) or this format's report writes none. The
     /// format's writer writes them there before each query's report
     /// (`QueryWarnings::with_later`).
+    ///
+    /// NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
     pub(crate) fn later_warnings<'s>(
         &self,
         keeps: bool,
@@ -740,7 +742,11 @@ pub struct ReportOutputs<'a> {
     /// outfmt 0, 6 and 7 besides the argv's `-outfmt`, and adds what their standard error adds;
     /// line WQA's sweep, D3 review r3, 2026-11-19). Nothing is written where the first format
     /// writes the warnings itself, nor to a place beyond the slice. `None` drops them, as the
-    /// command line, whose one format is the first.
+    /// command line, whose one format is the first. The lines that a later format's own writer
+    /// writes besides them (the taxonomy lookups of a tabular field list, outfmt 20's prolog
+    /// warning) go to the diagnostics, as at every format, not to its receiver: LOSAT Web's
+    /// later formats are the plain outfmt 0, 6 and 7, which write none (review r2 of
+    /// 2026-11-20, L1).
     pub later_warnings: Option<&'a mut [Vec<u8>]>,
     /// Receives the final, sorted hit list with rendered alignments, once per call. It may come
     /// before or after the reports are written (blastp's query blocks hand it over after the
@@ -768,6 +774,8 @@ impl ReportOutputs<'_> {
     /// (`Posts::later`), each of which writes them to its own receiver
     /// (`FormatOutput::later_warnings`): the first format writes none and the caller takes the
     /// later formats' (`later_warnings`).
+    ///
+    /// NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
     pub(crate) fn keeps_later_query_warnings(&self) -> bool {
         self.later_warnings.is_some() && !self.first_writes_query_warnings()
     }

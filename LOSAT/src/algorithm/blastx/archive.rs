@@ -165,7 +165,9 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
 /// `effective_lengths`; before the batch's first context, `-strand minus`, the option is
 /// `-searchsp` too: NCBI's `SplitQuery_SetEffectiveSearchSpace` leaves a set option as it is)
 /// and that context's query length (0 for an invalid one; `archive::RequestLength::space`), when
-/// NCBI searched the batch (a unit was searched).
+/// NCBI searched the batch (a unit was searched); for RPSTBLASTN the space its last search unit
+/// leaves in the options handle (`BatchResults::request_space`, which holds `-searchsp` as given
+/// and 0 for an invalid context 0).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:157-161
 pub(crate) fn batch_searched_space(
@@ -175,11 +177,13 @@ pub(crate) fn batch_searched_space(
     batches.iter().any(|batch| !batch.search_skipped).then(|| {
         let parameters = &batches[0].parameters[0];
         crate::report::archive::SearchedContext0 {
-            space: if batches[0].prepared.first_context > 0 {
-                options.effective_search_space
-            } else {
-                parameters.search_space
-            },
+            space: batches[0]
+                .request_space
+                .unwrap_or(if batches[0].prepared.first_context > 0 {
+                    options.effective_search_space
+                } else {
+                    parameters.search_space
+                }),
             query_length: if parameters.valid {
                 batches[0].prepared.contexts[0].length as i64
             } else {

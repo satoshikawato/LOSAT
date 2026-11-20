@@ -422,6 +422,8 @@ pub(super) fn write_blastx_tabular(
             (|| -> Result<()> {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1277-1278
                 // A query of a batch that NCBI did not search has no Seq-align set: no count.
+                // (RPSTBLASTN: also the HSPs of the profiles that left the merged lists past the
+                // formatter's cut, `BatchResults::unlisted_hsps`.)
                 let count: usize = lists
                     .iter()
                     .map(|list| {
@@ -430,7 +432,8 @@ pub(super) fn write_blastx_tabular(
                             .filter(|hsp| has_seqalign(hsp, options.gapped))
                             .count()
                     })
-                    .sum();
+                    .sum::<usize>()
+                    + batch.unlisted_hsps(qidx);
                 table.query_header(
                     &mut buf,
                     &query.query_line(),
@@ -452,8 +455,8 @@ pub(super) fn write_blastx_tabular(
                     .map_or(searched_length, |range| range.length());
                 let tabular_query =
                     TabularQuery::of_ids(query.believed(), query.shown_id(), query_length);
-                // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
-                let listed = &lists[..lists.len().min(options.shown_lists())];
+                // Several volumes: the merged lists cut once per query (`BatchResults::shown_lists`).
+                let listed = batch.shown_lists(qidx, options);
                 // The query's formatter (`TabularRows`).
                 let mut table_rows = TabularRows::default();
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
@@ -826,37 +829,44 @@ fn write_blastx_tax_report(
             })
         })
         .collect();
-    // The HSPs of each query that the tabular rows show (`write_blastx_tabular`).
-    let tax_queries: Vec<TaxQuery<'_>> =
-        batches
-            .iter()
-            .flat_map(|batch| {
-                batch.queries.iter().enumerate().map(move |(qidx, lists)| {
-                    (batch.query_ordinal + qidx, lists, batch.search_skipped)
-                })
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:893-899
+    // The HSPs of every list of each query: NCBI does not cut the organism report's Seq-aligns
+    // to the hit list size (no `PruneSeqalign` or `TrimSeqAlign`, as for the archive), so
+    // RPSTBLASTN's merged lists of several volumes are read whole (`BatchResults::shown_lists`
+    // is the cut of the other reports).
+    let tax_queries: Vec<TaxQuery<'_>> = batches
+        .iter()
+        .flat_map(|batch| {
+            batch.queries.iter().enumerate().map(move |(qidx, lists)| {
+                (
+                    batch.query_ordinal + qidx,
+                    lists.as_slice(),
+                    batch.search_skipped,
+                )
             })
-            .zip(&titles)
-            .map(|((ordinal, lists, skipped), title)| TaxQuery {
-                title,
-                length: queries[ordinal].placement().length,
-                // A query of a batch that NCBI did not search has no Seq-align-set.
-                hsps: (!skipped).then(|| {
-                    lists[..lists.len().min(options.shown_lists())]
-                        .iter()
-                        .flat_map(|list| {
-                            list.hsps
-                                .iter()
-                                .filter(|hsp| has_seqalign(hsp, options.gapped))
-                                .map(move |hsp| TaxHsp {
-                                    subject: list.oid,
-                                    evalue: hsp.evalue,
-                                    bit_score: hsp.bit_score,
-                                })
-                        })
-                        .collect()
-                }),
-            })
-            .collect();
+        })
+        .zip(&titles)
+        .map(|((ordinal, lists, skipped), title)| TaxQuery {
+            title,
+            length: queries[ordinal].placement().length,
+            // A query of a batch that NCBI did not search has no Seq-align-set.
+            hsps: (!skipped).then(|| {
+                lists
+                    .iter()
+                    .flat_map(|list| {
+                        list.hsps
+                            .iter()
+                            .filter(|hsp| has_seqalign(hsp, options.gapped))
+                            .map(move |hsp| TaxHsp {
+                                subject: list.oid,
+                                evalue: hsp.evalue,
+                                bit_score: hsp.bit_score,
+                            })
+                    })
+                    .collect()
+            }),
+        })
+        .collect();
     let parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
         ShownSubjects::Fasta { parsed, .. } => &parsed.subjects,
         ShownSubjects::Database { reported, .. } => reported.parsed(),

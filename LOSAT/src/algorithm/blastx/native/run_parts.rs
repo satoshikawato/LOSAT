@@ -288,6 +288,7 @@ impl ArchiveBatch<'_> {
                             false,
                             false,
                             false,
+                            usize::MAX,
                             None,
                         )
                         .map_err(reported_error)?,

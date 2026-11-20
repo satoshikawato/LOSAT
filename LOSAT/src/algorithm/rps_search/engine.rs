@@ -20,7 +20,7 @@ use super::traceback::{
     filter_results, formatter_identities, RpsTraceScratch, RpsTraceback, RpsTraced,
 };
 use super::wordfinder::{RpsWordParams, RpsWordScratch};
-use super::{RpsRows, RPS_K_MULT};
+use super::{RpsPastRows, RpsRows, RPS_K_MULT};
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::{RedoRun, SCALING_FACTOR};
@@ -195,6 +195,20 @@ pub(crate) struct RpsRun<'a> {
     pub(crate) hitlist_size: usize,
     pub(crate) prelim_hitlist_size: usize,
     pub(crate) window: i32,
+    /// The concatenated length `Lc` of the volume's search unit (`RpsUnit::concat_length`,
+    /// `concat_db.length`), NCBI's "query" length of the search: the length of its diagonal
+    /// table, the bound of the ungapped extensions to the right and the end of the gapped stage's
+    /// interval tree. The volume's rows, except where an alias file's `LENGTH` and `NSEQ` over
+    /// one volume move it (below the rows, also negative, or above them).
+    pub(crate) concat_length: i32,
+    /// Whether the traceback sorts each query's list again after its filters
+    /// (`RpsUnit::sorts_results`: the unit's total length above 0; `finish_volume_list`).
+    pub(crate) sorts_results: bool,
+    /// The search spaces of the preliminary stage's hit cutoff (without the Gumbel block), one for
+    /// each context of each query (query after query, `RpsQuery::frames` each), where they are not
+    /// the contexts' `RpsFrame::search_space`: `SplitQuery_SetEffectiveSearchSpace`'s spaces over
+    /// one volume whose total is negative (`RpsUnits::prelim_lengths`); `None` elsewhere.
+    pub(crate) prelim_spaces: Option<&'a [i64]>,
     /// The X-drops in bits (`word_options->x_dropoff`, `ext_options->gap_x_dropoff` and
     /// `gap_x_dropoff_final`: `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or NCBI's RPS
     /// defaults) and the gap trigger in bits (`kOptions->gap_trigger`).
@@ -275,7 +289,13 @@ struct RpsCutoffs {
 impl RpsRun<'_> {
     /// The query's cutoffs; the refusal where the ungapped X-drop (`-xdrop_ungap`) or a scaled
     /// cutoff leaves `i32`.
-    fn cutoffs(&self, query: &RpsFrame<'_>, frames: usize, scale: f64) -> Result<RpsCutoffs> {
+    fn cutoffs(
+        &self,
+        query: &RpsFrame<'_>,
+        prelim_space: i64,
+        frames: usize,
+        scale: f64,
+    ) -> Result<RpsCutoffs> {
         let int_scale = scale as i32;
         let x_dropoff = ungapped_x_dropoff(self.x_drop_ungapped_bits, query.kbp_std.lambda, scale)
             .ok_or_else(|| {
@@ -288,8 +308,9 @@ impl RpsRun<'_> {
                 )
             })?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-931
-        // (`frames` is 1 for rpsblast, `NUM_FRAMES` for rpstblastn.)
-        let hit_cutoff = EvalueStats::new(self.gumbel, query.search_space / frames as i64)
+        // (`frames` is 1 for rpsblast, `NUM_FRAMES` for rpstblastn; `prelim_space` the
+        // preliminary stage's space, `RpsRun::prelim_spaces`.)
+        let hit_cutoff = EvalueStats::new(self.gumbel, prelim_space / frames as i64)
             .hit_cutoff(
                 self.prelim_evalue,
                 &self.gapped,
@@ -434,22 +455,34 @@ impl RpsRun<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1372-1374
         let mut refused: Vec<Option<anyhow::Error>> = Vec::with_capacity(self.queries.len());
         let mut cutoffs: Vec<Vec<RpsCutoffs>> = Vec::with_capacity(self.queries.len());
-        for query in &self.queries {
-            let frames = query
-                .frames
-                .iter()
-                .map(|frame| {
-                    if frame.valid {
-                        self.cutoffs(frame, query.frames.len(), scale)
-                    } else {
-                        Ok(RpsCutoffs {
-                            x_dropoff: 0,
-                            word_cutoff: 0,
-                            hit_cutoff: 0,
-                        })
-                    }
-                })
-                .collect::<Result<Vec<_>>>();
+        for (q_idx, query) in self.queries.iter().enumerate() {
+            let frames = query.frames.len();
+            let frame_cutoffs = |frame: &RpsFrame<'_>, prelim_space: i64| {
+                if frame.valid {
+                    self.cutoffs(frame, prelim_space, frames, scale)
+                } else {
+                    Ok(RpsCutoffs {
+                        x_dropoff: 0,
+                        word_cutoff: 0,
+                        hit_cutoff: 0,
+                    })
+                }
+            };
+            // The preliminary stage's spaces are the contexts' own (`search_space`) unless the run
+            // has its own (`prelim_spaces`).
+            let frames = match self.prelim_spaces {
+                None => query
+                    .frames
+                    .iter()
+                    .map(|frame| frame_cutoffs(frame, frame.search_space))
+                    .collect::<Result<Vec<_>>>(),
+                Some(spaces) => query
+                    .frames
+                    .iter()
+                    .zip(&spaces[q_idx * frames..])
+                    .map(|(frame, &space)| frame_cutoffs(frame, space))
+                    .collect::<Result<Vec<_>>>(),
+            };
             match frames {
                 Ok(frames) => {
                     cutoffs.push(frames);
@@ -515,6 +548,29 @@ impl RpsRun<'_> {
         // list (`BlastHSPCBSStreamClose`, blast_traceback.c:1839-1846; `core::blast_hspstream`).
         let cbs_close =
             crate::core::blast_hspstream::adaptive_cbs_close(self.cbs > 0, self.hitlist_size);
+        // The concatenated length `Lc` of the volume's unit, NCBI's `query->length` of the
+        // search: the length of the diagonal table (`RpsWordScratch::prepare_for`), the bound of
+        // the extensions to the right (`RpsRows`, within 0 and the rows) and the end of the
+        // interval tree (`RpsPrelim::concat_length`). Where `Lc` is above the rows the extensions
+        // read NCBI's row after the rows (`RpsRows::past`, `RpsVolumeFiles::row_after_rows`), and
+        // one that reads what NCBI cannot is LOSAT's refusal (`RpsPastRows::overran`).
+        let concat_length = self.concat_length;
+        let extension_length = concat_length.clamp(0, rows.len() as i32) as usize;
+        let past_row =
+            (i64::from(concat_length) > rows.len() as i64).then(|| files.row_after_rows());
+        // One for each context of each query (query after query, the same number of contexts
+        // each), with its flag.
+        let past_rows: Option<Vec<RpsPastRows<'_>>> = past_row.as_ref().map(|row| {
+            self.queries
+                .iter()
+                .flat_map(|query| &query.frames)
+                .map(|_| RpsPastRows {
+                    row,
+                    concat_length,
+                    overran: std::sync::atomic::AtomicBool::new(false),
+                })
+                .collect()
+        });
         // The preliminary stage of one context of a query (NCBI's frame loop: each context
         // scanned as a subject with its own cutoffs).
         let prelim_of = |q_idx: usize, context: usize| -> RpsPrelim<'_> {
@@ -522,7 +578,13 @@ impl RpsRun<'_> {
             let cutoffs = &cutoffs[q_idx][context];
             RpsPrelim {
                 word: RpsWordParams {
-                    rows: RpsRows { rows },
+                    rows: RpsRows {
+                        rows,
+                        length: extension_length,
+                        past: past_rows
+                            .as_deref()
+                            .map(|past| &past[q_idx * self.queries[q_idx].frames.len() + context]),
+                    },
                     table,
                     window: self.window,
                     cutoff: cutoffs.word_cutoff,
@@ -530,6 +592,7 @@ impl RpsRun<'_> {
                 },
                 rows,
                 offsets,
+                concat_length,
                 gap_open,
                 gap_extend,
                 x_drop_gapped,
@@ -548,20 +611,21 @@ impl RpsRun<'_> {
         // another context writes: the diagonal table's entries of earlier contexts read as empty
         // (`wordfinder.rs`) and each context's scan starts its own runs of hits.
         let mut units: Vec<(usize, usize)> = Vec::new();
+        // The longest context searched, which bounds the diagonals of the workers' tables
+        // (`wordfinder::diag_table_length`).
+        let mut longest = 0usize;
         let mut first_unit = Vec::with_capacity(self.queries.len());
         let mut remaining = Vec::with_capacity(self.queries.len());
         for (q_idx, query) in self.queries.iter().enumerate() {
             first_unit.push(units.len());
             let searched = refused[q_idx].is_none();
             if searched {
-                units.extend(
-                    query
-                        .frames
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, frame)| frame.valid)
-                        .map(|(context, _)| (q_idx, context)),
-                );
+                for (context, frame) in query.frames.iter().enumerate() {
+                    if frame.valid {
+                        units.push((q_idx, context));
+                        longest = longest.max(frame.length());
+                    }
+                }
             }
             let count = units.len() - first_unit[q_idx];
             if searched && count == 0 {
@@ -640,6 +704,7 @@ impl RpsRun<'_> {
                     self.options.query_cov_hsp_perc,
                     query,
                     self.hitlist_size,
+                    self.sorts_results,
                 );
             }
             Ok(traced)
@@ -650,8 +715,12 @@ impl RpsRun<'_> {
         let run_unit = |scratch: &mut RpsScratch, unit: usize| {
             let (q_idx, context) = units[unit];
             let frame = &self.queries[q_idx].frames[context];
-            // The worker's table and buckets for this volume (what the worker kept stays).
-            scratch.prelim.word.prepare_for(rows.len(), self.window);
+            // The worker's table (of the unit's length) and buckets (of the volume's rows) for
+            // this volume (what the worker kept stays).
+            scratch
+                .prelim
+                .word
+                .prepare_for(rows.len(), concat_length, self.window, longest);
             let mut hsps = Vec::new();
             let searched = prelim_of(q_idx, context)
                 .search_frame(
@@ -885,7 +954,9 @@ pub(crate) fn batch_gapped_k(
 }
 
 /// A volume's final hit list of a query: the filters (`-max_hsps`, `-qcov_hsp_perc`), then the
-/// list sorted by E-value and cut to the hit list size, before the volumes are merged.
+/// list sorted by E-value where the unit's total length is above 0 (`sorts_results`; the
+/// traceback sorted it before the filters, `traceback::RpsTraceback::trace_query`,
+/// blast_traceback.c:1306) and cut to the hit list size, before the volumes are merged.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
 fn finish_volume_list(
@@ -894,11 +965,14 @@ fn finish_volume_list(
     query_cov_hsp_perc: f64,
     query: &RpsQuery<'_>,
     hitlist_size: usize,
+    sorts_results: bool,
 ) {
     filter_results(hit_list, max_hsps, query_cov_hsp_perc, |frame| {
         query.context(frame).first_query_length
     });
-    hit_list.sort_by_evalue();
+    if sorts_results {
+        hit_list.sort_by_evalue();
+    }
     hit_list.prune_by_size(hitlist_size);
 }
 
@@ -971,6 +1045,10 @@ mod tests {
             hitlist_size: 500,
             prelim_hitlist_size: 500,
             window: 40,
+            // rps_mini's rows: 190 + 180 + 190 letters and 3 sentinel rows.
+            concat_length: 563,
+            sorts_results: true,
+            prelim_spaces: None,
             x_drop_ungapped_bits: 7.0,
             x_drop_gapped_bits: gapped_bits,
             x_drop_final_bits: final_bits,
@@ -1017,19 +1095,25 @@ mod tests {
         let mut run = x_drop_run(&gumbel, &options, 15.0, 25.0);
         run.cutoff_subject_length = 250;
         let query = cutoff_query(&letters, 1_000_000);
-        let with_block = run.cutoffs(&query.frames[0], 1, 100.0).unwrap();
+        let with_block = run
+            .cutoffs(&query.frames[0], query.frames[0].search_space, 1, 100.0)
+            .unwrap();
         assert_eq!(
             with_block.hit_cutoff,
             crate::stats::blast_spouge_etos(10.0, &run.gapped, &gumbel, 300, 250) * 100
         );
         // Without the block: ceil(ln(K * searchsp / E) / Lambda) = ceil(ln(4100) / 0.267) = 32.
         run.gumbel = None;
-        let without = run.cutoffs(&query.frames[0], 1, 100.0).unwrap();
+        let without = run
+            .cutoffs(&query.frames[0], query.frames[0].search_space, 1, 100.0)
+            .unwrap();
         assert_eq!(without.hit_cutoff, 3_200);
         // The search space is the query's, not a constant.
         let other = cutoff_query(&letters, 1_000_000_000);
         assert_eq!(
-            run.cutoffs(&other.frames[0], 1, 100.0).unwrap().hit_cutoff,
+            run.cutoffs(&other.frames[0], other.frames[0].search_space, 1, 100.0)
+                .unwrap()
+                .hit_cutoff,
             5_800
         );
         // The word cutoff is the gap trigger, at most the hit cutoff (blast_parameters.c:370).
@@ -1037,7 +1121,9 @@ mod tests {
         // The preliminary e-value is `-evalue` as given (the stretch is the caller's).
         run.prelim_evalue = 1e300;
         assert_eq!(
-            run.cutoffs(&query.frames[0], 1, 100.0).unwrap().hit_cutoff,
+            run.cutoffs(&query.frames[0], query.frames[0].search_space, 1, 100.0)
+                .unwrap()
+                .hit_cutoff,
             100
         );
     }
@@ -1406,16 +1492,24 @@ mod tests {
         assert_eq!(oids(&hit_list), vec![1, 2]);
         // 50 % coverage drops subject 1's best HSP: its best E-value becomes 1e-3, after 2's.
         let mut hit_list = build();
-        finish_volume_list(&mut hit_list, 0, 50.0, &query, 10);
+        finish_volume_list(&mut hit_list, 0, 50.0, &query, 10, true);
         assert_eq!(oids(&hit_list), vec![2, 1]);
         // And the list is cut to the hit list size after the sort.
         let mut hit_list = build();
-        finish_volume_list(&mut hit_list, 0, 50.0, &query, 1);
+        finish_volume_list(&mut hit_list, 0, 50.0, &query, 1, true);
         assert_eq!(oids(&hit_list), vec![2]);
         // Without a filter the order is the list's own.
         let mut hit_list = build();
-        finish_volume_list(&mut hit_list, 0, 0.0, &query, 10);
+        finish_volume_list(&mut hit_list, 0, 0.0, &query, 10, true);
         assert_eq!(oids(&hit_list), vec![1, 2]);
+        // A unit whose total length is 0 or negative keeps the order of the filtered list
+        // (blast_traceback.c:1768-1771): subject 1 stays first, then the cut.
+        let mut hit_list = build();
+        finish_volume_list(&mut hit_list, 0, 50.0, &query, 10, false);
+        assert_eq!(oids(&hit_list), vec![1, 2]);
+        let mut hit_list = build();
+        finish_volume_list(&mut hit_list, 0, 50.0, &query, 1, false);
+        assert_eq!(oids(&hit_list), vec![1]);
     }
 
     /// The files of the fixture database `rps_mini` (tests/db_search/rps/, three profiles)
@@ -1489,7 +1583,7 @@ mod tests {
         let (dir, db) = rps_mini("units");
         let volumes = RpsVolumeSet::of(&db);
         let volume = &volumes.volumes[0];
-        let mut setup = RpsVolumeSetup::new("RPSTBLASTN", 40);
+        let mut setup = RpsVolumeSetup::new("RPSTBLASTN");
         assert!(setup.check(volume, false).unwrap().is_ok());
         let Ok(files) = setup.reopen(volume, false).unwrap() else {
             panic!("rps_mini opens");
@@ -1583,6 +1677,10 @@ mod tests {
             hitlist_size: 500,
             prelim_hitlist_size: 500,
             window: 40,
+            // rps_mini's rows: 190 + 180 + 190 letters and 3 sentinel rows.
+            concat_length: 563,
+            sorts_results: true,
+            prelim_spaces: None,
             x_drop_ungapped_bits: 7.0,
             x_drop_gapped_bits: 15.0,
             x_drop_final_bits: 25.0,
@@ -1692,7 +1790,7 @@ mod tests {
             let (dir, db) = rps_mini_without("cutoffs", left_out);
             let volumes = RpsVolumeSet::of(&db);
             let volume = &volumes.volumes[0];
-            let mut setup = RpsVolumeSetup::new("RPSBLAST", 40);
+            let mut setup = RpsVolumeSetup::new("RPSBLAST");
             assert!(setup.check(volume, false).unwrap().is_ok());
             let Ok(files) = setup.reopen(volume, false).unwrap() else {
                 panic!("rps_mini opens");

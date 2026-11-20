@@ -54,7 +54,6 @@ impl XmlRun<'_> {
     pub(crate) fn check_sums(&self, outfmt: i32) -> anyhow::Result<()> {
         crate::algorithm::common::database::check_sums_of(
             self.db_num,
-            self.db_len,
             self.db_len_overflow,
             outfmt,
             &self.program.to_ascii_uppercase(),

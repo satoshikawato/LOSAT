@@ -49,7 +49,10 @@ pub(super) enum SeqalignSubjects<'a> {
     },
 }
 
-/// Writes the documents of every query of `batches` to `writer`. A structured format writes
+/// Writes the documents of every query of `batches` to `writer`, each of the lists that the
+/// formatter's cut keeps (`PruneSeqalign` with `m_HitlistSize`, blast_format.cpp:690-704, quoted
+/// in `report::render_queries_with`: RPSTBLASTN's merged lists of several volumes,
+/// `BatchResults::shown_lists`, of `options`). A structured format writes
 /// none of a query's own warnings (`ReportFormat::writes_query_warnings`); what goes to
 /// `stderr` here are NCBI's posts of the bytes that its stream replaces in a query's document
 /// (`write_query_to`).
@@ -58,7 +61,7 @@ pub(super) fn write_blastx_seqalign(
     format: SerialFormat,
     writer: &mut impl Write,
     stderr: &mut dyn Write,
-    gapped: bool,
+    options: &super::args::ResolvedOptions,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
     names: &SeqalignSubjects<'_>,
@@ -70,16 +73,16 @@ pub(super) fn write_blastx_seqalign(
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
-        gapped,
+        gapped: options.gapped,
     };
     let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();
     let mut buf: Vec<u8> = Vec::new();
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
+        for qidx in 0..batch.queries.len() {
             let query = &queries[batch.query_ordinal + qidx];
             query_records(
-                lists,
+                batch.shown_lists(qidx, options),
                 subjects,
                 names,
                 &mut subject_records,

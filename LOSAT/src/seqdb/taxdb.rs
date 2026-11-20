@@ -60,7 +60,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use super::file::{DbFile, MAP_PAGE};
+use super::file::DbFile;
 use super::{SearchPath, SeqDbError};
 
 /// Header of `taxdb.bti`: magic, count, four reserved words (seqdbtax.cpp,
@@ -393,7 +393,7 @@ impl TaxDb {
             });
         }
         // NCBI maps the file; the last page is padded with zero bytes.
-        let mapped = len.div_ceil(MAP_PAGE) * MAP_PAGE;
+        let mapped = super::file::mapped_length(len);
         let mut record = files.data.read_range(begin.min(len), end.min(len))?;
         record.resize((end.min(mapped).saturating_sub(begin)) as usize, 0);
         if end <= mapped {
@@ -467,7 +467,7 @@ impl TaxDb {
         let Some(files) = &self.files else {
             return Ok(false);
         };
-        let mapped = files.data.len().div_ceil(MAP_PAGE) * MAP_PAGE;
+        let mapped = super::file::mapped_length(files.data.len());
         let count = files.count as u64;
         let mut previous: Option<u32> = None;
         let mut block: Vec<u8> = Vec::new();
@@ -779,6 +779,7 @@ mod tests {
     //! for them in `tests/seqdb/taxdb/expected.tsv`) and against files built
     //! here for the cases NCBI cannot be asked about.
 
+    use super::super::file::MAP_PAGE;
     use super::*;
     use std::path::Path;
 

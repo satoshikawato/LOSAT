@@ -9,6 +9,7 @@ use super::range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use super::view::V;
 use super::{Event, Indexer, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
+use crate::utils::lower_bound::lower_bound_by;
 
 /// A good feature table's `num-rows` above which NCBI's index depends on the machine's memory
 /// (`x_InitFeatTable` makes an annotation object of about 135 bytes per row: 10,000,000 rows take
@@ -1014,73 +1015,78 @@ impl Indexer<'_> {
         DeltaNext::Sum(value)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-581
-    // `x_GetBitSetCache(byte_index)` counts the set bits of the bytes before it (in blocks of
-    // 256, :180-224); `x_FindDeltaSum(row)` (`USE_DELTA_CACHE` not defined, :232, 292-426) finds
-    // the first `indexes-delta` element whose prefix sum reaches `row`: that element when the sum
-    // is `row`, else none (`kInvalidRow`, `kSkipped`). `lower_bound` is libstdc++'s halving search,
-    // also on indexes that are not sorted. A `bit-set-bvector` is BitMagic data (refused).
-    /// `GetIndexAt(row)`: the data index of `row`, `None` for `kSkipped`.
+    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-580
+    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:377-405
+    // (`CIndexDeltaSumCache::FindDeltaSum`), 306-360 (`x_FindDeltaSum2`; `USE_DELTA_CACHE` is not
+    // defined, line 232), 180-225 (`x_GetBitSetCache`); include/objects/seqtable/
+    // SeqTable_sparse_index.hpp:96-97 (`kSkipped` and `kInvalidRow` are both `size_t(0)-1`).
+    // `x_FindDeltaSum(row)` is the first index whose sum of the deltas up to it reaches `row`, when
+    // that sum is `row`, else `kInvalidRow`. The deltas are `unsigned` (`TIndexes_delta`), so the
+    // sums never decrease, and the blocks that NCBI's cache fills give that index whatever rows
+    // were asked before. `x_GetBitSetCache(b)` is the number of set bits in the bytes before byte
+    // `b`. The `indexes` are `unsigned` in the order of the data, which nothing checks: the index
+    // found is the one NCBI's `lower_bound` finds (`utils::lower_bound`).
+    /// `CSeqTable_sparse_index::GetIndexAt(row)`: the index in the column's data of the row's
+    /// value, `None` for a row without one (`kSkipped`).
     fn sparse_index_at(&mut self, sparse: V<'_>, row: u64) -> Result<Option<u64>, Stop> {
         let (variant, value) = sparse.choice();
-        match variant {
+        Ok(match variant {
             "indexes" => {
+                // The `unsigned` elements compared with the `size_t` row.
                 let len = value.len();
-                let (mut first, mut count) = (0usize, len);
-                while count > 0 {
-                    let half = count >> 1;
-                    let middle = first + half;
-                    if (value.int_in(middle) as u64) < row {
-                        first = middle + 1;
-                        count = count - half - 1;
-                    } else {
-                        count = half;
-                    }
-                }
-                Ok((first < len && value.int_in(first) as u64 == row).then_some(first as u64))
+                let at = lower_bound_by(0, len, |i| (value.int_in(i) as u64) < row);
+                (at < len && value.int_in(at) as u64 == row).then_some(at as u64)
             }
             "indexes-delta" => {
-                let key = address(value);
-                let sums = self.caches.index_delta.entry(key).or_insert_with(|| {
-                    let mut sum = 0u64;
-                    (0..value.len())
-                        .map(|i| {
-                            sum = sum.wrapping_add(value.int_in(i) as u64);
-                            sum
-                        })
-                        .collect()
-                });
-                let at = sums.partition_point(|&sum| sum < row);
-                Ok((sums.get(at) == Some(&row)).then_some(at as u64))
+                let sums = self
+                    .caches
+                    .index_delta
+                    .entry(address(value))
+                    .or_insert_with(|| {
+                        let mut sum = 0u64;
+                        value
+                            .ints()
+                            .map(|delta| {
+                                sum = sum.wrapping_add(delta as u64);
+                                sum
+                            })
+                            .collect()
+                    });
+                let at = lower_bound_by(0, sums.len(), |i| sums[i] < row);
+                (at < sums.len() && sums[at] == row).then_some(at as u64)
             }
             "bit-set" => {
                 let bytes = value.octets();
-                let Some((byte_index, &byte)) = usize::try_from(row / 8)
-                    .ok()
-                    .and_then(|i| bytes.get(i).map(|byte| (i, byte)))
+                let Some(byte_index) = usize::try_from(row / 8).ok().filter(|&i| i < bytes.len())
                 else {
                     return Ok(None);
                 };
-                let bit_index = (row % 8) as u32;
-                if (u32::from(byte) << bit_index) & 0x80 == 0 {
+                let byte = u32::from(bytes[byte_index]);
+                // The most significant bit is row 0 of the byte.
+                let bit = (row % 8) as u32;
+                if (byte << bit) & 0x80 == 0 {
                     return Ok(None);
                 }
-                let key = address(value);
-                let before = self.caches.bit_set.entry(key).or_insert_with(|| {
-                    let mut count = 0u64;
-                    std::iter::once(0)
-                        .chain(bytes.iter().map(|byte| {
-                            count += u64::from(byte.count_ones());
-                            count
-                        }))
-                        .collect()
-                });
-                let in_byte = (u32::from(byte) >> (8 - bit_index)).count_ones();
-                let before = before.get(byte_index).copied().unwrap_or_default();
-                Ok(Some(before + u64::from(in_byte)))
+                let before = self
+                    .caches
+                    .bit_set
+                    .entry(address(value))
+                    .or_insert_with(|| {
+                        let mut count = 0u64;
+                        bytes
+                            .iter()
+                            .map(|&b| {
+                                let before = count;
+                                count += u64::from(b.count_ones());
+                                before
+                            })
+                            .collect()
+                    });
+                Some(before[byte_index] + u64::from((byte >> (8 - bit)).count_ones()))
             }
-            _ => Err(Stop::Refuse(Refusal::BitVector)),
-        }
+            "bit-set-bvector" => return Err(Stop::Refuse(Refusal::BitVector)),
+            _ => None,
+        })
     }
 }
 

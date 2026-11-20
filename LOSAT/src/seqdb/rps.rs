@@ -803,6 +803,32 @@ impl RpsVolumeFiles {
         8 + 4 * (self.num_profiles + 1)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:184-190 (cited at
+    // `rps_search::RpsRows`)
+    /// NCBI's row after the concatenated rows (`rps_pssm[num_pssm_rows]`, a pointer to the bytes
+    /// that follow the last row in the mapped `.rps` file, at the row stride of the alphabet) as
+    /// each letter reads it: the file's own bytes there, then the zeros of its last memory page
+    /// (`file::mapped_length`), `None` for a letter whose four bytes lie past that page (NCBI's
+    /// read of them faults, SIGBUS: the file ends on a page boundary). The ungapped extensions
+    /// read it where the unit's concatenated length `Lc` is above the rows
+    /// (`rps_search::RpsPastRows`).
+    pub(crate) fn row_after_rows(&self) -> [Option<i32>; 28] {
+        let bytes = self.rps.bytes();
+        let mapped = super::file::mapped_length(bytes.len() as u64);
+        let num_rows = self.offsets()[self.num_profiles] as usize;
+        let start = (self.rows_start() + num_rows * self.alphabet * 4) as u64;
+        std::array::from_fn(|letter| {
+            let at = start + 4 * letter as u64;
+            (at + 4 <= mapped).then(|| {
+                let mut word = [0u8; 4];
+                for (k, byte) in word.iter_mut().enumerate() {
+                    *byte = bytes.get((at as usize) + k).copied().unwrap_or(0);
+                }
+                i32::from_ne_bytes(word)
+            })
+        })
+    }
+
     /// The `num_profiles + 1` row offsets of the profiles (`start_offsets`).
     pub(crate) fn offsets(&self) -> &[i32] {
         self.rps
@@ -927,6 +953,60 @@ mod tests {
         assert_eq!(files.cells().unwrap()[9], [4, 2, 4, 0]);
         assert_eq!(files.overflow().unwrap(), &[99, 3, 5, 6]);
         assert_eq!(files.pv()[0], (1 << 5) | (1 << 9));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Review C of line RG D1a-4 (SF2 c): NCBI's row after the rows (`rps_pssm[num_pssm_rows]`,
+    // `row_after_rows`) is the file's own bytes after the rows, then the zeros of its last memory
+    // page, and a letter whose bytes lie past that page is `None` (NCBI's read faults: SIGBUS).
+    #[test]
+    fn the_row_after_the_rows_reads_the_files_bytes_then_its_last_pages_zeros() {
+        let dir = scratch("past");
+        let base = write_volume(&dir, 28, AUX);
+        let path = base.with_extension("rps");
+        let rows = std::fs::read(&path).unwrap();
+        // The file ends with the rows (byte 804): the page's zeros.
+        let files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
+        assert_eq!(files.row_after_rows(), [Some(0); 28]);
+        drop(files);
+        // A row's 112 bytes after the rows are read as written; 8 bytes: two letters, then zeros.
+        let after = words(&(1000..1028).collect::<Vec<i32>>());
+        for (bytes, read) in [(112, 28), (8, 2)] {
+            std::fs::write(&path, [rows.as_slice(), &after[..bytes]].concat()).unwrap();
+            let files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
+            let expected: [Option<i32>; 28] = std::array::from_fn(|letter| {
+                Some(if letter < read {
+                    1000 + letter as i32
+                } else {
+                    0
+                })
+            });
+            assert_eq!(
+                files.row_after_rows(),
+                expected,
+                "{bytes} bytes after the rows"
+            );
+            drop(files);
+        }
+        // Three profiles of 36 rows, whose rows and file end 40 bytes before the end of the page
+        // (24 + 36 * 112 = 4056 bytes): letters 0 to 9 read its zeros, 10 to 27 lie past it.
+        let mut page = vec![RPS_MAGIC_NUM_28, 3, 0, 12, 24, 36];
+        page.extend((0..36 * 28).map(|value: i32| value + 1));
+        std::fs::write(&path, words(&page)).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 4056);
+        std::fs::write(
+            base.with_extension("aux"),
+            AUX.replace(
+                "3\n4.1e-02\n2\n3.9e-02\n",
+                "11\n4.1e-02\n11\n3.9e-02\n11\n4.0e-02\n",
+            ),
+        )
+        .unwrap();
+        let files = RpsVolumeFiles::open(&base, &[11, 11, 11]).unwrap();
+        let row = files.row_after_rows();
+        assert_eq!(row[..10], [Some(0); 10]);
+        assert_eq!(row[10..], [None; 18]);
+        drop(files);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

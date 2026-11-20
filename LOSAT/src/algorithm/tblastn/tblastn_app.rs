@@ -1505,7 +1505,7 @@ fn search(
                     )
                     .is_none()
                 {
-                    Err(PreliminaryReadError("The average subject length is too short").into())
+                    Err(PreliminaryReadError(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into())
                 } else if let Some(failure) = pssm_failure {
                     Err(failure.error("TBLASTN"))
                 } else {

@@ -245,6 +245,11 @@ impl SubjectSpaceOverflow {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:903-906,969-983
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+/// NCBI's error of a setup whose `min_subject_length` is 0 (`setup_subject_length`): the one
+/// text of blastp's, psiblast's, rpsblast's, rpstblastn's, blastx's, tblastn's, blastn's and
+/// tblastx's error (review C of line RG D1a-4, N1; reviews D and E, N1).
+pub(crate) const SUBJECT_LENGTH_TOO_SHORT: &str = "The average subject length is too short";
+
 // `min_subject_length` is a `Uint4`, so `<= 0` is `== 0`: a negative quotient (a negative
 // `NSEQ`) passes, as does one of 2^31, while one that is a multiple of 2^32 fails (an `NSEQ` of
 // 2^31 as NCBI's `int`, or a `LENGTH` of 2^32 times the count; probes p5_ns_*, p5_avg_* of line

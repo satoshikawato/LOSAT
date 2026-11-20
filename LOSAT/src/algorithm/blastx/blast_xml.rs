@@ -1100,7 +1100,6 @@ pub(super) fn documents_may_refuse(
                 || documents().any(|&outfmt| {
                     crate::algorithm::common::database::report_sum_refusal(
                         pairwise.num_sequences,
-                        pairwise.total_letters,
                         pairwise.total_letters_overflow,
                         outfmt,
                     )
@@ -1289,11 +1288,18 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         ShownSubjects::Database { reported, .. } => reported.loads(),
         ShownSubjects::Fasta { .. } => &every_loaded,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-711
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2358-2362
+    // Every document writes the lists of each query that the cut to the hit list size keeps
+    // (`TrimSeqAlign` counts following Seq-aligns of matching subject ids as one, as
+    // `PruneSeqalign`): RPSTBLASTN's merged lists of several volumes, cut once per query
+    // (`BatchResults::shown_lists`); every list otherwise.
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
+        for qidx in 0..batch.queries.len() {
             if texts.len() == reports {
                 break;
             }
+            let lists = batch.shown_lists(qidx, options);
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
             texts.push(query_text(
@@ -1328,7 +1334,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut texts = texts.iter();
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
+        for qidx in 0..batch.queries.len() {
+            // The lists that the cut keeps, as above.
+            let lists = batch.shown_lists(qidx, options);
             let query = &queries[batch.query_ordinal + qidx];
             let Some(text) = texts.next() else {
                 // The held report that is never written (`written_queries`); the one held before

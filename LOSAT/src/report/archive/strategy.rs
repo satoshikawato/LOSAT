@@ -384,6 +384,9 @@ impl StrategyExport {
             let mut made_one = false;
             let made = make(&mut |request| {
                 let sets = shared.options.request_sets(&state.carry);
+                // A big integer of -2^63 (RPS-BLAST's `DbLength` that a batch before set,
+                // `-dbsize`), which NCBI writes as `-0`, is written as its digits
+                // (PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits).
                 // A sink that cannot be cut gets the request where the run reaches its batch.
                 let mut held = Vec::new();
                 let mut counted = Counted {
@@ -823,6 +826,47 @@ mod tests {
         assert!(docs[0].contains("program-options {\n      {\n        name \"LCaseMask\","));
         assert!(!docs[1].contains("program-options"));
         assert!(!docs[0].contains("ident"));
+    }
+
+    /// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of
+    /// line RG D1a-4, SF1): a big integer of -2^63 in a request, which NCBI writes as `big-integer -0` (probes q1-q12 of
+    /// review C), is written as its digits: BLASTP's `-dbsize` in every request, RPS-BLAST's
+    /// `DbLength` (`x_AdjustDbSize`, `rps_search::volumes::search_sets`) in the requests after the
+    /// first.
+    #[test]
+    fn a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits() {
+        let digits = "name \"DbLength\",\n        value big-integer -9223372036854775808\n";
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        let sink = Sink::default();
+        let mut inputs = OptionInputs::new(Program::Blastp, "blastp");
+        inputs.dbsize = Some(i64::MIN);
+        let dbsize = StrategyExport::new(
+            Box::new(sink.clone()),
+            &inputs,
+            Some("in/db/bp"),
+            OptionsHandle::default(),
+        );
+        assert!(dbsize.write_request(0..1, &request(&queries, &[])).unwrap());
+        let text = sink.text();
+        assert!(text.contains(digits), "{text}");
+        let (rps, sink) = export(None);
+        rps.options()
+            .set_search_sets(
+                Vec::new(),
+                crate::algorithm::rps_search::volumes::search_sets(Some(i64::MIN), None),
+            )
+            .unwrap();
+        for at in 0..2 {
+            assert!(rps
+                .write_request(at..at + 1, &request(&queries, &[]))
+                .unwrap());
+            rps.note_searched(at..at + 1, searched(5)).unwrap();
+        }
+        let all = sink.text();
+        let docs: Vec<&str> = all.split("Blast4-request ::= ").skip(1).collect();
+        assert_eq!(docs.len(), 2);
+        assert!(!docs[0].contains("DbLength"), "{all}");
+        assert!(docs[1].contains(digits), "{all}");
     }
 
     /// A batch searched again (a later part of a batch, a call that searches the batches before

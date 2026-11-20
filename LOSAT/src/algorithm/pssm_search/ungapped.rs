@@ -37,6 +37,21 @@ fn pssm_extend_right<R: PssmRows>(
         }
         i += 1;
     }
+    // NCBI's bound past the rows of this PSSM (RPS-BLAST's concatenated length above its rows,
+    // `PssmRows::past_end`): the loop above it scores the next row for the next letter as well.
+    if i == n {
+        if let Some(past) = rows.past_end(q_off + i, subject.get((s_off + i) as usize).copied()) {
+            score += past;
+            if score > maxscore {
+                maxscore = score;
+                best_i = i;
+            }
+            if !(score <= 0 || (maxscore - score) >= dropoff) {
+                i += 1;
+                rows.past_end_continues(q_off + i, s_off + i < subject.len() as i32);
+            }
+        }
+    }
     (maxscore, best_i + 1, s_off + i)
 }
 

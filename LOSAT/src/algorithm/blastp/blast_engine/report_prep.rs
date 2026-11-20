@@ -885,6 +885,10 @@ pub(super) struct ReportSetup<'a> {
     pub(super) subject_source: BlastpSubjectSource<'a>,
     pub(super) subject_label: &'a str,
     pub(super) total_db_len: i64,
+    /// rpsblast: the HSPs of each query's profiles that left its merged list past the
+    /// formatter's cut (`rps_hooks::RpsSearched::unlisted`), which outfmt 7's count and the
+    /// prefetch's limit still count; empty otherwise.
+    pub(super) unlisted: &'a [usize],
 }
 
 /// The residues that the reports read of a database's listed subjects, read from the database
@@ -1167,7 +1171,13 @@ pub(super) fn report_values(
         hit_lists.len(),
         0,
         &batch_ranges,
-        |span| blastp_hit_list_hsp_count(&hit_lists[span]),
+        |span| {
+            blastp_hit_list_hsp_count(&hit_lists[span.clone()])
+                + setup
+                    .unlisted
+                    .get(span)
+                    .map_or(0, |counts| counts.iter().sum())
+        },
     );
     // `-out_pssm`'s PSSM, before it is made (a later query's PSSM error reruns the search without
     // the files, review 2 of line DBID weakbatch H2).
@@ -1258,7 +1268,8 @@ pub(super) fn report_values(
             .iter_mut()
             .enumerate()
             .map(|(query, hit_list_opt)| {
-                let found = blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt));
+                let found = blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt))
+                    + setup.unlisted.get(query).copied().unwrap_or(0);
                 if let Some(hit_list) = hit_list_opt {
                     hit_list.prune_by_size(
                         psiblast_kept

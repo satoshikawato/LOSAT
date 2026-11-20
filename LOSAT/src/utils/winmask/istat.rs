@@ -16,6 +16,7 @@ use std::path::Path;
 use super::{MaskerParams, WinMaskError};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str;
+use crate::utils::lower_bound::lower_bound_by;
 
 /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_istat_factory.hpp:56-62
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -872,30 +873,22 @@ impl UsetHash {
 }
 
 impl UsetArray {
+    /// `CSeqMaskerUsetArray::get_info(unit)`: the count of the unit or of its reverse complement,
+    /// whichever is smaller, 0 when the array has no entry for it.
+    ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_array.cpp:64-82
-    /// `lower_bound` is libstdc++'s halving loop (`stl_algobase.h`, `__lower_bound`), so a file
-    /// whose units are out of order is probed at the same entries as by NCBI's Linux builds.
+    /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_uset_array.hpp:151-153
+    /// The units of a binary file are not checked for order (`add_info`), so in a file whose
+    /// units are not increasing the entry found is the one NCBI's `lower_bound` finds
+    /// (`utils::lower_bound`). No data (`unit_data` null) is an empty array here: 0 either way.
     #[inline]
     fn get_info(&self, unit: u32) -> u32 {
-        if self.entries.is_empty() {
-            return 0;
-        }
         let runit = reverse_complement(unit, self.unit_size);
         let unit = if runit < unit { runit } else { unit };
-        let mut first = 0usize;
-        let mut len = self.entries.len();
-        while len > 0 {
-            let half = len >> 1;
-            let middle = first + half;
-            if self.entries[middle].0 < unit {
-                first = middle + 1;
-                len = len - half - 1;
-            } else {
-                len = half;
-            }
-        }
-        match self.entries.get(first) {
-            Some(&(u, c)) if u == unit => c,
+        let entries = &self.entries;
+        let at = lower_bound_by(0, entries.len(), |i| entries[i].0 < unit);
+        match entries.get(at) {
+            Some(&(u, count)) if u == unit => count,
             _ => 0,
         }
     }

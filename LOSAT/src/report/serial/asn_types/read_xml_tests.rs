@@ -278,7 +278,7 @@ fn control_characters_are_replaced_and_posted_with_their_line() {
             trace: "Dbtag.db".into(),
             byte,
             position: StreamPosition::Line(line as u64),
-            string: Vec::new(),
+            string: Vec::new().into(),
         })
     };
     assert_eq!(posts, vec![replaced(0x01), replaced(0x07)]);

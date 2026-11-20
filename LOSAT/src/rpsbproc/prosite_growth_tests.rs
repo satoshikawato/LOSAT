@@ -7,7 +7,8 @@
 use super::*;
 
 const STRING_TABLE: &str = include_str!("../../tests/fixtures/rpsbproc_growth/string_ops.tsv");
-const STRING_LARGE: &str = include_str!("../../tests/fixtures/rpsbproc_growth/string_ops_large.tsv");
+const STRING_LARGE: &str =
+    include_str!("../../tests/fixtures/rpsbproc_growth/string_ops_large.tsv");
 const STRING_HOST: &str = include_str!("../../tests/fixtures/rpsbproc_growth/string_ops_host.tsv");
 const VECTOR_TABLE: &str = include_str!("../../tests/fixtures/rpsbproc_growth/vector_ops.tsv");
 
@@ -119,32 +120,33 @@ fn check_vector_row(ops: &str, observed: &str) -> usize {
         let number: u64 = op[1..].parse().unwrap_or(0);
         let before = live;
         // The text on the heap that makes the allocations with the peak fail by one byte.
-        let run = |live: &mut Live, size: &mut u64, stack: &mut Vec<u64>| -> Result<(), MatchError> {
-            match &op[..1] {
-                "G" => {
-                    live.grow(number)?;
-                    *size = number;
+        let run =
+            |live: &mut Live, size: &mut u64, stack: &mut Vec<u64>| -> Result<(), MatchError> {
+                match &op[..1] {
+                    "G" => {
+                        live.grow(number)?;
+                        *size = number;
+                    }
+                    "K" => *size = 0,
+                    "Z" => *size -= 1,
+                    "S" => {
+                        live.push(*size)?;
+                        stack.push(*size);
+                    }
+                    "O" => {
+                        let top = *stack.last().unwrap();
+                        live.pop(top)?;
+                        stack.pop();
+                        *size = top;
+                    }
+                    "N" => {
+                        live.capacity = number;
+                        *size = number;
+                    }
+                    other => panic!("{other}"),
                 }
-                "K" => *size = 0,
-                "Z" => *size -= 1,
-                "S" => {
-                    live.push(*size)?;
-                    stack.push(*size);
-                }
-                "O" => {
-                    let top = *stack.last().unwrap();
-                    live.pop(top)?;
-                    stack.pop();
-                    *size = top;
-                }
-                "N" => {
-                    live.capacity = number;
-                    *size = number;
-                }
-                other => panic!("{other}"),
-            }
-            Ok(())
-        };
+                Ok(())
+            };
         let numbers: Vec<u64> = token.split('/').map(|n| n.parse().unwrap()).collect();
         let [capacity, observed_size, entries, records, peak] = numbers[..] else {
             panic!("{token}");
@@ -168,28 +170,27 @@ fn check_vector_row(ops: &str, observed: &str) -> usize {
                 "{context}"
             );
             return count;
-        }
-        else {
-        let allocates = peak > before.capacity + before.stacked;
-        if allocates {
+        } else {
+            let allocates = peak > before.capacity + before.stacked;
+            if allocates {
+                let mut trial = before;
+                trial.text = limit - peak * RECORD_BYTES;
+                let (mut trial_size, mut trial_stack) = (size, stack.clone());
+                assert_eq!(
+                    run(&mut trial, &mut trial_size, &mut trial_stack),
+                    Err(MatchError::Exhausted),
+                    "{context}: fails at the peak"
+                );
+            }
             let mut trial = before;
-            trial.text = limit - peak * RECORD_BYTES;
+            trial.text = limit - peak * RECORD_BYTES - 1;
             let (mut trial_size, mut trial_stack) = (size, stack.clone());
             assert_eq!(
                 run(&mut trial, &mut trial_size, &mut trial_stack),
-                Err(MatchError::Exhausted),
-                "{context}: fails at the peak"
+                Ok(()),
+                "{context}: fits below the peak"
             );
-        }
-        let mut trial = before;
-        trial.text = limit - peak * RECORD_BYTES - 1;
-        let (mut trial_size, mut trial_stack) = (size, stack.clone());
-        assert_eq!(
-            run(&mut trial, &mut trial_size, &mut trial_stack),
-            Ok(()),
-            "{context}: fits below the peak"
-        );
-        run(&mut live, &mut size, &mut stack).unwrap();
+            run(&mut live, &mut size, &mut stack).unwrap();
         }
         assert_eq!(
             (live.capacity, size, stack.len() as u64, live.stacked),

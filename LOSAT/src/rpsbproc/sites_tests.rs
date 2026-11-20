@@ -237,7 +237,10 @@ fn the_motif_checks_of_the_binary_allocate_as_the_model_does() {
         } else {
             let pairs: Vec<(i64, i64)> = (0..24).map(|i| (20 + i, 100 + i)).collect();
             (
-                (100..124).map(|p| p.to_string()).collect::<Vec<_>>().join(","),
+                (100..124)
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
                 mapped(&pairs),
                 vec![b'A'; 185],
             )
@@ -247,7 +250,9 @@ fn the_motif_checks_of_the_binary_allocate_as_the_model_does() {
         let _ = MotifState::default().motif_check(&data, site_of(&data), &mapped, &residues);
         let mut counts = BTreeMap::new();
         for event in events::take() {
-            *counts.entry(event[1..].parse::<u64>().unwrap()).or_insert(0i64) += 1;
+            *counts
+                .entry(event[1..].parse::<u64>().unwrap())
+                .or_insert(0i64) += 1;
         }
         counts
     };
@@ -262,8 +267,8 @@ fn the_motif_checks_of_the_binary_allocate_as_the_model_does() {
         let (target, baseline) = (allocations(site, motif), allocations(site, base));
         let mut difference = BTreeMap::new();
         for size in target.keys().chain(baseline.keys()) {
-            let d = target.get(size).copied().unwrap_or(0)
-                - baseline.get(size).copied().unwrap_or(0);
+            let d =
+                target.get(size).copied().unwrap_or(0) - baseline.get(size).copied().unwrap_or(0);
             if d != 0 {
                 difference.insert(*size, d);
             }
@@ -274,7 +279,9 @@ fn the_motif_checks_of_the_binary_allocate_as_the_model_does() {
             .collect::<Vec<_>>()
             .join(" ");
         if text != delta {
-            wrong.push(format!("{site} {motif} (baseline {base}): model {text:?}, binary {delta:?}"));
+            wrong.push(format!(
+                "{site} {motif} (baseline {base}): model {text:?}, binary {delta:?}"
+            ));
         }
         checked += 1;
     }

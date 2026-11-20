@@ -1,0 +1,404 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/db_search/of18/ns_ids.fna).
+           11 sequences; 4,830 total letters
+
+
+
+<b>Query=</b> nq1 query nucleotide one
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XM_000101.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000101.1?report=genbank&log$=nucltop&blast_rank=1&RID=" >XM_000101.1 </a>subject one two HSPs                                      <a href=#XM_000101.1>832</a>     0.0   
+<a title="Show report for XM_000111.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000111.1?report=genbank&log$=nucltop&blast_rank=2&RID=" >XM_000111.1 </a>subject eleven strong then planted weak HSP               <a href=#XM_000111.1>555</a>     3e-161
+s3_local_identifier subject three with a title that is longer tha...  <a href=#s3_local_identifier>521</a>     3e-151
+<a title="Show report for XM_000109.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000109.1?report=genbank&log$=nucltop&blast_rank=4&RID=" >XM_000109.1 </a>subject nine                                              <a href=#XM_000109.1>350</a>     2e-99 
+testdb:tag_s8 subject eight                                           <a href=#testdb:tag_s8>291</a>     1e-81 
+<a title="Show report for AB000106.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000106.1?report=genbank&log$=nucltop&blast_rank=6&RID=" >AB000106.1 </a>subject six                                                <a href=#AB000106.1>291</a>     1e-81 
+<a title="Show report for XM_000105.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000105.1?report=genbank&log$=nucltop&blast_rank=7&RID=" >XM_000105.1 </a>subject five &lt;@score@&gt; s &lt;@evalue@&gt; e &lt;@acc_hd@&gt; a &lt;@...  <a href=#123457>261</a>     8e-73 
+<a title="Show report for CAA00102.2" href="https://www.ncbi.nlm.nih.gov/nucleotide/CAA00102.2?report=genbank&log$=nucltop&blast_rank=8&RID=" >CAA00102.2 </a>subject two                                                <a href=#CAA00102.2>202</a>     5e-55 
+<a title="Show report for AB000110.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000110.1?report=genbank&log$=nucltop&blast_rank=9&RID=" >AB000110.1 </a>subject ten                                                <a href=#AB000110.1>183</a>     2e-49 
+
+
+><a title="Show report for XM_000101.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000101.1?report=genbank&log$=nuclalign&blast_rank=1&RID=0" >XM_000101.1</a><a name=XM_000101></a> subject one two HSPs
+Length=1350
+
+ Score = 832 bits (450),  Expect = 0.0
+ Identities = 450/450 (100%), Gaps = 0/450 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTTTGACATCGAAC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTTTGACATCGAAC  60
+
+Query  61   CCATTCCCAGAGATATTTAGTAGAGTAGAAAGACCAATGAGGGGGCGACTGGCATTGATA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   CCATTCCCAGAGATATTTAGTAGAGTAGAAAGACCAATGAGGGGGCGACTGGCATTGATA  120
+
+Query  121  GACGTGCGTCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCACATCGTGGCAGGACGT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  GACGTGCGTCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCACATCGTGGCAGGACGT  180
+
+Query  181  CCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTTTCTTT  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  CCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTTTCTTT  240
+
+Query  241  GTATGTAGGTGTAGAAGAGACTATTCTATCCAATACATGCTTCAGCCGAGACTACTTCGC  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  GTATGTAGGTGTAGAAGAGACTATTCTATCCAATACATGCTTCAGCCGAGACTACTTCGC  300
+
+Query  301  CCGTCCGAAAATGTGGAATCCGGGACTTGTGCGAACCTAGTTATGCGAGCGGTTGTTAAA  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  CCGTCCGAAAATGTGGAATCCGGGACTTGTGCGAACCTAGTTATGCGAGCGGTTGTTAAA  360
+
+Query  361  GTATCTGCATATGACTTCGCCGTTAAAACAAGTAACGATTTTGATGGAGGTGTGTGCGAG  420
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  GTATCTGCATATGACTTCGCCGTTAAAACAAGTAACGATTTTGATGGAGGTGTGTGCGAG  420
+
+Query  421  CGCGACAAAAGCTATGTGACTCTTATACCA  450
+            ||||||||||||||||||||||||||||||
+Sbjct  421  CGCGACAAAAGCTATGTGACTCTTATACCA  450
+
+
+ Score = 416 bits (225),  Expect = 2e-119
+ Identities = 384/459 (84%), Gaps = 17/459 (4%)
+ Strand=Plus/Plus
+
+Query  451   AGT-GGTTTGAGTACCCCATTTGTTAATCTTGTACGTCACGCCATGCAATTGAAAGTGCC  509
+             ||| ||| |||||||||||||||||||||||||||||||||||   ||||||||||| | 
+Sbjct  900   AGTGGGTCTGAGTACCCCATTTGTTAATCTTGTACGTCACGCCGCCCAATTGAAAGT-CT  958
+
+Query  510   AT-CACGCCTCGCT-GCTTGTTATA-CTCACCTAGCGGCTTTAAAAGGT-CTTGGATCTC  565
+             || ||||||||||| ||  |  ||  | ||||  ||||||||||||||| |  || ||||
+Sbjct  959   ATTCACGCCTCGCTTGC--GACATTGCCCACCCCGCGGCTTTAAAAGGTACCCGG-TCTC  1015
+
+Query  566   CGAGGCTTACAGAATATAACCGCTGTAGTACTCATTCTGGACGTGGCCTATTCGAGCCTG  625
+             ||||||||||||| |||   ||||||||||  ||||||||||||||||||||||| ||||
+Sbjct  1016  CGAGGCTTACAGACTATCCGCGCTGTAGTATCCATTCTGGACGTGGCCTATTCGACCCTG  1075
+
+Query  626   AATCTACGCTTGGGGATCCCAGTAGAGTGCAAATACCACTCACCGAGACTAGG-TGCAAC  684
+             |||||||||||||||| |||||||||||||||||||||||||||||||  ||  ||||||
+Sbjct  1076  AATCTACGCTTGGGGACCCCAGTAGAGTGCAAATACCACTCACCGAGAG-AGCCTGCAAC  1134
+
+Query  685   AGTCGTTTGGTAACACCGA-T-CACGAATTATTGTACATCAAAGTCTAGAGAGCCACGAC  742
+                ||| |  || ||| |  | |||| | ||||||||||||||| | |||||||||   |
+Sbjct  1135  CTGCGTCT--TATCACAGTCTCCACGGACTATTGTACATCAAAGACCAGAGAGCCAGCTC  1192
+
+Query  743   ACTCGTGTAACTTAGTTCGGGTTAACGTTATATTGATATGTAACTCC-GCTAGGGGGTAC  801
+             ||||||||  |||||||   ||||||||||||||||||||||||||| || |||||||  
+Sbjct  1193  ACTCGTGTGTCTTAGTTGACGTTAACGTTATATTGATATGTAACTCCAGC-AGGGGGTCG  1251
+
+Query  802   CTGTGCAAGCGCTCGCGAGGGACAGAGTACCATAAATTCACATCCTCAGAATTTTCCAGC  861
+             ||||||||||||||||||||||||||||||  |||||||||||||||||  |||||||||
+Sbjct  1252  CTGTGCAAGCGCTCGCGAGGGACAGAGTACAGTAAATTCACATCCTCAGGGTTTTCCAGC  1311
+
+Query  862   CCCCCATGGATGAACCTCACTCTTGTAAATTATCAGAAT  900
+             |||||||  |||      ||| | |||||||||||||||
+Sbjct  1312  CCCCCATCCATGGTGACAACTTTAGTAAATTATCAGAAT  1350
+
+
+><a title="Show report for XM_000111.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000111.1?report=genbank&log$=nuclalign&blast_rank=2&RID=0" >XM_000111.1</a><a name=XM_000111></a> subject eleven strong then planted weak HSP
+Length=750
+
+ Score = 555 bits (300),  Expect = 3e-161
+ Identities = 300/300 (100%), Gaps = 0/300 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTTTGACATCGAAC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTTTGACATCGAAC  60
+
+Query  61   CCATTCCCAGAGATATTTAGTAGAGTAGAAAGACCAATGAGGGGGCGACTGGCATTGATA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   CCATTCCCAGAGATATTTAGTAGAGTAGAAAGACCAATGAGGGGGCGACTGGCATTGATA  120
+
+Query  121  GACGTGCGTCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCACATCGTGGCAGGACGT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  GACGTGCGTCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCACATCGTGGCAGGACGT  180
+
+Query  181  CCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTTTCTTT  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  CCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTTTCTTT  240
+
+Query  241  GTATGTAGGTGTAGAAGAGACTATTCTATCCAATACATGCTTCAGCCGAGACTACTTCGC  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  GTATGTAGGTGTAGAAGAGACTATTCTATCCAATACATGCTTCAGCCGAGACTACTTCGC  300
+
+
+ Score = 56.5 bits (30),  Expect = 4e-11
+ Identities = 30/30 (100%), Gaps = 0/30 (0%)
+ Strand=Plus/Plus
+
+Query  601  TCTGGACGTGGCCTATTCGAGCCTGAATCT  630
+            ||||||||||||||||||||||||||||||
+Sbjct  601  TCTGGACGTGGCCTATTCGAGCCTGAATCT  630
+
+
+>s3_local_identifier<a name=s3_local_identifier></a> subject three with a title that is longer than the description 
+column of the organism report table so that NCBI cuts it and 
+appends three dots
+Length=450
+
+ Score = 521 bits (282),  Expect = 3e-151
+ Identities = 398/454 (88%), Gaps = 8/454 (2%)
+ Strand=Plus/Plus
+
+Query  151  GGTGACGAGTCTCACATCGTGGCAGGACGTCCTGCCCGTCCGACTTTGACTCGGAGCGTA  210
+            |||||||||||||||||||||||||  |  ||||||   |||||||||||||||||||||
+Sbjct  1    GGTGACGAGTCTCACATCGTGGCAGATCTACCTGCCGCCCCGACTTTGACTCGGAGCGTA  60
+
+Query  211  CGCCACACCATTTCACCCGATCCTTTCTTTGTATGTAGGTGTAGAAGAGACTATTCTATC  270
+            |||   ||||||||||| ||||||||||||  ||||||||||||||||||||  ||||||
+Sbjct  61   CGCGTTACCATTTCACCTGATCCTTTCTTTCCATGTAGGTGTAGAAGAGACTCATCTATC  120
+
+Query  271  CAATACATGCTTCAGCCGAGACTACTTCGCCCGTCCGAAAATGTGGAATCCGGGACTTGT  330
+            |||||||||||||||||||||||||||||||||||||||||||||||||||   ||||||
+Sbjct  121  CAATACATGCTTCAGCCGAGACTACTTCGCCCGTCCGAAAATGTGGAATCCATCACTTGT  180
+
+Query  331  GCGAAC-CTAGTTATGCGAGCGGTTGTTAAAGTATCTGCATATGACTTCGCCGTTAAAAC  389
+            |||||| || |||||||||||||||   ||||  ||||||||||||||||||||||||||
+Sbjct  181  GCGAACTCT-GTTATGCGAGCGGTTAGCAAAGCTTCTGCATATGACTTCGCCGTTAAAAC  239
+
+Query  390  AAGTAACGATTTTGATGGAGGTGTGTGCGAGCGCGACAAAAGCTATGTGACTCTTATACC  449
+            |||||||||||||||||||   ||||||||||||||||||||| | ||||||||||||| 
+Sbjct  240  AAGTAACGATTTTGATGGAAAGGTGTGCGAGCGCGACAAAAGCCAAGTGACTCTTATACA  299
+
+Query  450  AAGTGGTTTGAGTACCCCATTTGTTAATCTTGTACGTCACGCCATGCAATTGAAAGTGCC  509
+             ||||||||||||||||||      ||||||||||||||||||||||||||| | |||||
+Sbjct  300  CAGTGGTTTGAGTACCCCAAGGAGGAATCTTGTACGTCACGCCATGCAATTGCAGGTGCC  359
+
+Query  510  ATCACGCCTCGCTGCT-TGTTATACTCACCTAGCGGCTTTAAAAGGTCTTGGAT-CTC-C  566
+            ||||||||||||| || ||||||||||||   |||||||  ||||||||||||  ||| |
+Sbjct  360  ATCACGCCTCGCT-CTGTGTTATACTCACGGGGCGGCTTCGAAAGGTCTTGGAAGCTCAC  418
+
+Query  567  GAGGCTTACAGAATATAACCGCTGTAGTACTCAT  600
+             |  ||| |||||  |||||||||||||||||||
+Sbjct  419  CA--CTTCCAGAAAGTAACCGCTGTAGTACTCAT  450
+
+
+><a title="Show report for XM_000109.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000109.1?report=genbank&log$=nuclalign&blast_rank=4&RID=0" >XM_000109.1</a><a name=XM_000109></a> subject nine
+Length=300
+
+ Score = 350 bits (189),  Expect = 2e-99
+ Identities = 254/286 (89%), Gaps = 2/286 (1%)
+ Strand=Plus/Plus
+
+Query  91   AGACCAATGAGGGGGCGACTGGCATTGATAGACGTGCGTCATAGAGTCCCCTATGCATGT  150
+            ||||||||||||||||||||| | |||||||||   ||||||||||||||||||||||||
+Sbjct  1    AGACCAATGAGGGGGCGACTGACTTTGATAGACCCACGTCATAGAGTCCCCTATGCATGT  60
+
+Query  151  GGTGACGAGTCTCACATCGTGGCAGGACGTCCTGCCCGTCCGACTTTGACTCGGAGCGTA  210
+            ||||||   |||||||||||||| ||||||||||||||||||||| | ||||||||||||
+Sbjct  61   GGTGACCCATCTCACATCGTGGCCGGACGTCCTGCCCGTCCGACTGTAACTCGGAGCGTA  120
+
+Query  211  CGCCAC-ACCATTTCACCCGATCCTTTCTTTGTATGTAGGTGTAGAAGAGACTATTCTAT  269
+             | | | |||||||||  |||||||||||||   ||||||||||||||||||||||||||
+Sbjct  121  -GACGCTACCATTTCAAACGATCCTTTCTTTAACTGTAGGTGTAGAAGAGACTATTCTAT  179
+
+Query  270  CCAATACATGCTTCAGCCGAGACTACTTCGCCCGTCCGAAAATGTGGAATCCGGGACTTG  329
+            |   |||||||||||||||||||||  |||||||  ||  ||||||||||||||||||||
+Sbjct  180  CACGTACATGCTTCAGCCGAGACTATGTCGCCCGAACGGTAATGTGGAATCCGGGACTTG  239
+
+Query  330  TGCGAACCTAGTTATGCGAGCGGTTGTTAAAGTATCTGCATATGAC  375
+            ||||||||||||||||   |||||||||||||||||||||||||||
+Sbjct  240  TGCGAACCTAGTTATGGTTGCGGTTGTTAAAGTATCTGCATATGAC  285
+
+
+>testdb:tag_s8<a name=testdb:tag_s8></a> subject eight
+Length=300
+
+ Score = 291 bits (157),  Expect = 1e-81
+ Identities = 252/298 (85%), Gaps = 6/298 (2%)
+ Strand=Plus/Plus
+
+Query  1    TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTTTGACATCGAAC  60
+            |||||||||||| | ||||||||||||   ||| ||||||||||||||||||||  ||||
+Sbjct  1    TGCTTCGATTATAATGGCAAGGGCTTTGACTCTGTGTATTCATTGCGTTTGACACTGAAC  60
+
+Query  61   CCAT-TCCCAGAGATATTTAGTAGAGTAGAAAGACCAATGAGGGGGCGACTGGCATTGAT  119
+            |||| |  | ||||||   ||||||||||||||||||   |||||||||||||||   ||
+Sbjct  61   CCATATTGC-GAGATAAGGAGTAGAGTAGAAAGACCACCTAGGGGGCGACTGGCAGAAAT  119
+
+Query  120  AGACG-TGCGTCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCACATCGTGGCAGGAC  178
+            | |||  ||  |||||||||||||||||||||   ||||||| ||||||| | |||||| 
+Sbjct  120  A-ACGCAGCTACATAGAGTCCCCTATGCATGTCAAGACGAGTTTCACATCTTCGCAGGAG  178
+
+Query  179  GTCCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTTTCT  238
+            | |||||||||||||||||||||  |||||||   ||||||||||||||||||||| |||
+Sbjct  179  GCCCTGCCCGTCCGACTTTGACTTTGAGCGTATTACACACCATTTCACCCGATCCTGTCT  238
+
+Query  239  TTGTATGTAGGTGT-AGAAGAGACTATTCTATCCAATACATGCTTCAGCCGAGACTAC  295
+            ||||||||| |||  | ||  |||||||||||||||||||||||||||||||||||||
+Sbjct  239  TTGTATGTACGTGGGATAAT-GACTATTCTATCCAATACATGCTTCAGCCGAGACTAC  295
+
+
+><a title="Show report for AB000106.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000106.1?report=genbank&log$=nuclalign&blast_rank=6&RID=0" >AB000106.1</a><a name=AB000106></a> subject six
+Length=300
+
+ Score = 291 bits (157),  Expect = 1e-81
+ Identities = 233/270 (86%), Gaps = 4/270 (1%)
+ Strand=Plus/Plus
+
+Query  301  CCGTCCGAAAATGTGGAATCCGGGACTTGTGCGAACCTAGTTATGCGAGCGGTTGTTAAA  360
+            |||||||||||||||||||||   |||| ||||||||||||||| ||| | |||||||||
+Sbjct  1    CCGTCCGAAAATGTGGAATCCCATACTTCTGCGAACCTAGTTATTCGACCAGTTGTTAAA  60
+
+Query  361  GTATCTGCA-TATGACTTCGCCGTTAAAACAAGTAACGATTTTGATGGAGGTGTGTGCGA  419
+            |||   |||   ||  |||||||||   |||||||||||||  |||||||  ||||||  
+Sbjct  61   GTAAGAGCAGCCTG-TTTCGCCGTTTGTACAAGTAACGATTCCGATGGAGACGTGTGCAT  119
+
+Query  420  GCGCGACAAAAGCTATGTGACTCTTATACCAAGTGGTTTGAGTACCCCATTTGTTAATCT  479
+             ||||||||||||||||||||||||||||||||||||||||||||||  |||||||||||
+Sbjct  120  ACGCGACAAAAGCTATGTGACTCTTATACCAAGTGGTTTGAGTACCCGTTTTGTTAATCT  179
+
+Query  480  TGTACGTCACGCCATGCAATTGAAAGTGCCATCACGCCTCGCT-GCTTGTTATACTCACC  538
+            ||||||||  ||||||||||||||||||||||||||| ||||  ||||||||||||||||
+Sbjct  180  TGTACGTCCTGCCATGCAATTGAAAGTGCCATCACGC-TCGCCCGCTTGTTATACTCACC  238
+
+Query  539  TAGCGGCTTTAAAAGGTCTTGGATCTCCGA  568
+            |||||||||||  |||||||   |||||||
+Sbjct  239  TAGCGGCTTTACTAGGTCTTCCGTCTCCGA  268
+
+
+><a title="Show report for XM_000105.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000105.1?report=genbank&log$=nuclalign&blast_rank=7&RID=0" >XM_000105.1</a><a name=123457></a> subject five &lt;@score@&gt; s &lt;@evalue@&gt; e &lt;@acc_hd@&gt; 
+a &lt;@descr_text@&gt; d &lt;@table_rows@&gt; end
+Length=240
+
+ Score = 261 bits (141),  Expect = 8e-73
+ Identities = 211/244 (86%), Gaps = 8/244 (3%)
+ Strand=Plus/Plus
+
+Query  1    TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTTT-GACATCGAA  59
+            ||||||||||||||||||||||||||||||||||||||||||||||||   |||||  ||
+Sbjct  1    TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTGGCGACATA-AA  59
+
+Query  60   CCCATTCCCAGAGATATTTAGTAGAGTAGAAAGA-CCAATGAGGGGGCGACTGGCATTGA  118
+            ||||   |||||||||   |||||||||||| || |||  |||||||   ||||||||||
+Sbjct  60   CCCAGAGCCAGAGATAGCGAGTAGAGTAGAA-GATCCAGCGAGGGGGGTTCTGGCATTGA  118
+
+Query  119  TAGACGTGCGTCATAGAGTCCCCTATGCATGTG--GTGACGAGTCTCACATCGTGGCAGG  176
+            ||  ||||||||||||||||   |||||||||   || | ||||||||||||||||||||
+Sbjct  119  TAACCGTGCGTCATAGAGTCTATTATGCATGTCCAGT-A-GAGTCTCACATCGTGGCAGG  176
+
+Query  177  ACGTCCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTTT  236
+            |||||||||||||||||||||||||   |||||||||||| | |||||||||||||||||
+Sbjct  177  ACGTCCTGCCCGTCCGACTTTGACTAAAAGCGTACGCCACGCAATTTCACCCGATCCTTT  236
+
+Query  237  CTTT  240
+            ||||
+Sbjct  237  CTTT  240
+
+
+><a title="Show report for CAA00102.2" href="https://www.ncbi.nlm.nih.gov/nucleotide/CAA00102.2?report=genbank&log$=nuclalign&blast_rank=8&RID=0" >CAA00102.2</a><a name=CAA00102></a> subject two
+Length=360
+
+ Score = 202 bits (109),  Expect = 5e-55
+ Identities = 272/350 (78%), Gaps = 14/350 (4%)
+ Strand=Plus/Plus
+
+Query  1    TGCTTCGATTATCAAGGCAAGGGCTTTATT--TCTATGTATTCATTGCGTTTGACATCGA  58
+            ||||||  ||||||||||   |||||||||    || | | |||   ||| | |||||||
+Sbjct  1    TGCTTCACTTATCAAGGCGTTGGCTTTATTGGGATACG-A-TCAGCTCGTGTCACATCGA  58
+
+Query  59   ACCCATTCCCA--GAGATATTTAGTAGAGTAGAA-AGACCAATGAGGGGGCGACTGGCAT  115
+            |||||||||||   || | || || ||||||||| |   | ||||||||||||   ||| 
+Sbjct  59   ACCCATTCCCATTTAG-TTTTCAG-AGAGTAGAATATTGC-ATGAGGGGGCGAGGCGCAA  115
+
+Query  116  TGATAGACGTGCGTCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCACATCGTGGCAG  175
+              ||| |  | || ||||||||||||||||||||||||||||||||||    ||  ||||
+Sbjct  116  CCATAAATTTACGCCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCTTGCCGCTGCAG  175
+
+Query  176  GACGTCCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTT  235
+            ||||||||||||||||||||| |||||||   ||||||||||||||||  ||| |   ||
+Sbjct  176  GACGTCCTGCCCGTCCGACTTCGACTCGGGTGGTACGCCACACCATTTGTCCCAAGTATT  235
+
+Query  236  TCTTTGTATGTAGGTGTAGAAGAG-ACTATTCTATCCAATACATGCTTCAGCCGAGACTA  294
+            ||||| | ||| | |||||||||| | | |   ||||||||||||||||||   ||||||
+Sbjct  236  TCTTTCTGTGTCGATGTAGAAGAGTAGTGTGG-ATCCAATACATGCTTCAGAGTAGACTA  294
+
+Query  295  CTTCGCCC-GTCCGAAAATGTGGAATCCGGGACTTGTGCGAACCTAGTTA  343
+            |||||| | | | | ||||||||||||||||  ||||| || ||||||||
+Sbjct  295  CTTCGCGCTGACAG-AAATGTGGAATCCGGGTATTGTGTGACCCTAGTTA  343
+
+
+><a title="Show report for AB000110.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000110.1?report=genbank&log$=nuclalign&blast_rank=9&RID=0" >AB000110.1</a><a name=AB000110></a> subject ten
+Length=180
+
+ Score = 183 bits (99),  Expect = 2e-49
+ Identities = 153/180 (85%), Gaps = 0/180 (0%)
+ Strand=Plus/Plus
+
+Query  601  TCTGGACGTGGCCTATTCGAGCCTGAATCTACGCTTGGGGATCCCAGTAGAGTGCAAATA  660
+            ||||||   ||| | || |||||||||||||||||||||||||||||| | ||||||   
+Sbjct  1    TCTGGAATCGGCTTTTTAGAGCCTGAATCTACGCTTGGGGATCCCAGTGGTGTGCAACCG  60
+
+Query  661  CCACTCACCGAGACTAGGTGCAACAGTCGTTTGGTAACACCGATCACGAATTATTGTACA  720
+            |||||||||||||||||||||||||||   ||||| ||||||||||||   |||||||||
+Sbjct  61   CCACTCACCGAGACTAGGTGCAACAGTGCATTGGTTACACCGATCACGTCATATTGTACA  120
+
+Query  721  TCAAAGTCTAGAGAGCCACGACACTCGTGTAACTTAGTTCGGGTTAACGTTATATTGATA  780
+            ||||||||| | ||||||    |||||   ||||||||||||||||||||||||||||||
+Sbjct  121  TCAAAGTCTTGCGAGCCAGTTGACTCGCCCAACTTAGTTCGGGTTAACGTTATATTGATA  180
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 4142936
+
+
+<b>Query=</b> nq2 unrelated query (no hits)
+
+Length=120
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 507384
+
+
+  Database: User specified sequence set (Input:
+tests/db_search/of18/ns_ids.fna).
+    Posted date:  Unknown
+  Number of letters in database: 4,830
+  Number of sequences in database:  11
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

@@ -1,0 +1,94 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ns_seg.fna).
+           1 sequences; 780 total letters
+
+
+
+<b>Query=</b> pq_seg query 70 Q then random
+
+Length=260
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ns_seg back-translation of ps_seg                                     <a href=#Subject_1>502</a>     0.0  
+
+
+><a name=Subject_1></a> ns_seg back-translation of ps_seg
+Length=780
+
+ Score = 502 bits (1292),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 257/260 (99%), Positives = 259/260 (99%), Gaps = 0/260 (0%)
+ Frame = +1
+
+Query  1    qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  60
+            QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+Sbjct  1    QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ  180
+
+Query  61   <font color="#000000">qqqqqqqqqq</font>VPLQWYRGPKAEVCLNSHCYPLCPDTSPYSITYRIVVIAWPQTAFFYFIE  120
+            QQQQQQQQQQVPLQWYRGPKAEVCLNSHCYPLCPDTSPYS+TYRIVVIAWPQTAFFYFIE
+Sbjct  181  QQQQQQQQQQVPLQWYRGPKAEVCLNSHCYPLCPDTSPYSVTYRIVVIAWPQTAFFYFIE  360
+
+Query  121  ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHAVEQREHIFTPVCFLNKNDCG  180
+            ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHA EQREHIFTPVCFLNKNDCG
+Sbjct  361  ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHAFEQREHIFTPVCFLNKNDCG  540
+
+Query  181  YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRVLEFSWCHLCDGGRVYYETAC  240
+            YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRV+EFSWCHLCDGGRVYYETAC
+Sbjct  541  YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRVVEFSWCHLCDGGRVYYETAC  720
+
+Query  241  DPPCGRPATYTNNETYPWRV  260
+            DPPCGRPATYTNNETYPWRV
+Sbjct  721  DPPCGRPATYTNNETYPWRV  780
+
+
+ Score = 18.9 bits (37),  Expect = 0.098, Method: Compositional matrix adjust.
+ Identities = 7/22 (32%), Positives = 12/22 (55%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  100  SITYRIVVIAWPQTAFFYFIEE  121
+            SI   + +++WP+T      EE
+Sbjct  593  SIAASMTLLSWPRTGVGSMQEE  658
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.130    0.427    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 55696
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ns_seg.fna).
+    Posted date:  Unknown
+  Number of letters in database: 780
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

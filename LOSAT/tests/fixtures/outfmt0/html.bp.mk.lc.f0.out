@@ -1,0 +1,97 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ps_mask.faa).
+           1 sequences; 268 total letters
+
+
+
+<b>Query=</b> pq_mask query masks 0-69 105-119 145-156(gap 150-151) 180-186
+230-240
+
+Length=268
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ps_mask subject masks 0-64 112-119 195-206(gap 200-201) 236-240 2...  <a href=#Subject_1>541</a>     0.0  
+
+
+><a name=Subject_1></a> ps_mask subject masks 0-64 112-119 195-206(gap 200-201) 236-240 
+245-250
+Length=268
+
+ Score = 541 bits (1393),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 260/270 (96%), Positives = 261/270 (97%), Gaps = 4/270 (1%)
+
+Query  1    dasedngwcwyilldmkdapagagvsmvqpaermgllweteecneprrpcwhvtripqfa  60
+            DASEDNGWCWYILLDMKDAPAGAGVSMVQPAERMGLLWET+ECNEPRRPCWHVTRIPQFA
+Sbjct  1    dasedngwcwyilldmkdapagagvsmvqpaermgllwetkecneprrpcwhvtripqfa  60
+
+Query  61   <font color="#000000">kfymmdclqq</font>IELNACHTNSMWPSSLGYLFADLSGEWVWAKLFSW<font color="#000000">yiwrinltdphihye</font>  120
+            KFYMMDCLQQIELNACHTNSMWPSSLGYLFADLSG WVWAKLFSWYIWRINLTDPHIHYE
+Sbjct  61   <font color="#000000">kfymm</font>DCLQQIELNACHTNSMWPSSLGYLFADLSGTWVWAKLFSWYIWRINL<font color="#000000">tdphihye</font>  120
+
+Query  121  QMAVGAHFSQAKWKYCMVETAKKDS<font color="#000000">gkewk--ktfrg</font>CDCETWKQKYFCLLWRQERTTNV  178
+            QMAVGAHFSQ KWKYCMVETAKKDSGKEWK  KTFRGCDCETWKQKYFCLLWRQE TTNV
+Sbjct  121  QMAVGAHFSQQKWKYCMVETAKKDSGKEWKDAKTFRGCDCETWKQKYFCLLWRQEATTNV  180
+
+Query  179  <font color="#000000">fmhwphc</font>WEIKQIHFSYVMLIMVLNFQNINRRVIVYVNMVCPEDPHQHDV<font color="#000000">mlsnadfire</font>  238
+            FMHWPHCWEIKQIHFSYVML  VLNFQNINRRVIVYVNMV PEDPHQHDVMLSNADFIRE
+Sbjct  181  FMHWPHCWEIKQIHF<font color="#000000">syvml--vlnfq</font>NINRRVIVYVNMVAPEDPHQHDVMLSNAD<font color="#000000">fire</font>  238
+
+Query  239  <font color="#000000">cAHFITLQGRFCNVNKHAYYPPYKRMGVHI</font>  268
+            CAHFITLQGR CNVNKHAYYPPYKRMGVHI
+Sbjct  239  <font color="#000000">cAHFItlqgrc</font>CNVNKHAYYPPYKRMGVHI  268
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.137    0.497    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 59049
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ps_mask.faa).
+    Posted date:  Unknown
+  Number of letters in database: 268
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

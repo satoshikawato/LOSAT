@@ -1,0 +1,113 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ns_mask.fna).
+           1 sequences; 353 total letters
+
+
+
+<b>Query=</b> nq_mask query masks 0-74 100-119 170-180 240-250 255-270(gap
+262-264) 310-319(gap 320-321)
+
+Length=355
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ns_mask subject masks 0 135-146(gap 140-141) 190-199(gap 200-202)...  <a href=#Subject_1>562</a>     7e-165
+
+
+><a name=Subject_1></a> ns_mask subject masks 0 135-146(gap 140-141) 190-199(gap 200-202) 
+280-285 287-292 338-344(gap 336-337) 350-359
+Length=353
+
+ Score = 562 bits (622),  Expect = 7e-165
+ Identities = 343/360 (95%), Gaps = 12/360 (3%)
+ Strand=Plus/Plus
+
+Query  1    ttgcctatccgctggcgagaagtggtggac  30
+            ||||||||||||||||||||||||||||||
+Sbjct  1    tTGCCTATCCGCTGGCGAGAAGTGGTGGAC  30
+
+Query  31   <font color="#000000">gttatgagttttgtgatagaccacgggtca</font>  60
+             |||||||||||||||||||||||||||||
+Sbjct  31   ATTATGAGTTTTGTGATAGACCACGGGTCA  60
+
+Query  61   <font color="#000000">atgagacaaagtcga</font>GACAAGACCATTGTG  90
+            ||||||||||||||||||||||||||||||
+Sbjct  61   ATGAGACAAAGTCGAGACAAGACCATTGTG  90
+
+Query  91   GTAAAAGTTC<font color="#000000">gcagttgggtattgtccgag</font>  120
+             |||||||||||||||||||||||||||||
+Sbjct  91   TTAAAAGTTCGCAGTTGGGTATTGTCCGAG  120
+
+Query  121  CAATCCGCTATCCTTAAGTAGCCACGGTCT  150
+            ||||||||||||||||||||  ||||||||
+Sbjct  121  CAATCCGCTATCCTT<font color="#000000">aagta--cacgg</font>TCT  148
+
+Query  151  CGTGCCACCATATACTGTTA<font color="#000000">tgagacattg</font>  180
+            ||||| ||||||||||||||||||||||||
+Sbjct  149  CGTGCAACCATATACTGTTATGAGACATTG  178
+
+Query  181  <font color="#000000">gATTTGCCAGCAATGTTAAGACACGCCATT</font>  210
+            ||||||||||||||||||||   |||||||
+Sbjct  179  GATTTGCCAG<font color="#000000">caatgttaag</font>---CGCCATT  205
+
+Query  211  TCTAGAGATTTAGGTTGGAGGTGGTGGTCG  240
+            ||||||||||||||| ||||||||||||||
+Sbjct  206  TCTAGAGATTTAGGTGGGAGGTGGTGGTCG  235
+
+Query  241  <font color="#000000">acgactgtggt</font>TAGT<font color="#000000">cgtggcg---gcacc</font>  267
+            ||||||||||||||||||||||   |||||
+Sbjct  236  ACGACTGTGGTTAGTCGTGGCGACCGCACC  265
+
+Query  268  <font color="#000000">cAATTGGCGTTGTTCACTCCCTAAACCGGA</font>  297
+            ||||||||||||||||||||||||| ||||
+Sbjct  266  CAATTGGCGT<font color="#000000">tgttca</font>C<font color="#000000">tcccta</font>AAGCGGA  295
+
+Query  298  AACAGATCTC<font color="#000000">ctcacacccc</font>--ACCAAAAT  325
+            ||||||||||||||||||||  ||||||||
+Sbjct  296  AACAGATCTCCTCACACCCCGTACCAAAAT  325
+
+Query  326  CATGACAAGTTCACGTCGACGTCGTCCCGT  355
+            ||||||  ||||||||||||||||||||||
+Sbjct  326  CATGAC--<font color="#000000">gttcacg</font>TCGAC<font color="#000000">gtcgtcccgt</font>  353
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 117648
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ns_mask.fna).
+    Posted date:  Unknown
+  Number of letters in database: 353
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2
+</PRE>
+</BODY>
+</HTML>

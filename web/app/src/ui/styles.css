@@ -2246,6 +2246,37 @@ pre.range-text {
   overflow-wrap: anywhere;
 }
 
+/* Below 480 px each label of the results' lists of labels and values (the header block, Run details) is above its
+   value, which then has the whole width: beside a column of labels such as "Threads requested", the values of a
+   320 px window had 114 to 134 px, and option names such as -min_raw_gapped_score broke inside (line WQA's sweep 2,
+   S2-1 round 2, 2026-11-20). OptionName's break at the line's end stays for a name longer than the whole line. */
+@media (max-width: 479px) {
+  .results-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .results-summary dt {
+    padding: 5px 0 0;
+    border-bottom: none;
+  }
+
+  .results-summary dd {
+    padding-top: 1px;
+  }
+
+  .details-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .details-list {
+    row-gap: 0;
+  }
+
+  .details-list dd {
+    margin-bottom: 6px;
+  }
+}
+
 /* Narrow screens: the notes one under the other (design §3.4). */
 @media (max-width: 800px) {
   .notes {

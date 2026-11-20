@@ -2157,7 +2157,9 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
 // Long option names (line WQA's sweep 2, S2-1, 2026-11-20): a name was one box that could not break, so that at 320 and
 // 360 px -min_raw_gapped_score made Run details' Arguments and the results' Options line wider than the window (in the
 // three engines; -max_target_seqs in Chromium). A name stays whole where its line holds it, goes whole to the next line
-// where that one does, and breaks at its line's end only where it is longer than a line, never after its hyphen.
+// where that one does, and breaks at its line's end only where it is longer than a line, never after its hyphen. Below
+// 480 px each label of Run details and of the header block is above its value, so that at 320 and 390 px these names
+// are whole there (S2-1 round 2: beside the labels, "-min_raw_gap" "ped_score" read as wrong).
 test('long option names: from 320 to 1280 px the results are no wider than the window, and a name is whole where its line holds it', async ({
   page,
 }) => {
@@ -2219,7 +2221,8 @@ test('long option names: from 320 to 1280 px the results are no wider than the w
             range.setEnd(...at(2));
             const hyphen = linesOf(range);
             const box = name.getBoundingClientRect();
-            return { text: name.textContent ?? '', line, own, lines, hyphen, right: box.right };
+            const listed = name.closest('[data-testid="run-details"], [data-testid="results-run-options"]') !== null;
+            return { text: name.textContent ?? '', line, own, lines, hyphen, right: box.right, listed };
           }),
       );
       const inner = await page.evaluate(() => window.innerWidth);
@@ -2228,6 +2231,8 @@ test('long option names: from 320 to 1280 px the results are no wider than the w
         expect(name.right, `${which} reaches beyond the window`).toBeLessThanOrEqual(inner + 0.5);
         expect(name.hyphen, `${which} is broken after its hyphen`).toBe(1);
         if (name.own <= name.line) expect(name.lines, `${which} is broken although its line holds it`).toBe(1);
+        // On a phone, Run details and the Options line give each value the whole width: no name breaks there.
+        if (width <= 390 && name.listed) expect(name.lines, `${which} is broken in Run details or the Options line`).toBe(1);
       }
       expect(names.map((name) => name.text)).toEqual(expect.arrayContaining(longNames));
     }

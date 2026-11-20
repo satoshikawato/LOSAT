@@ -52,6 +52,14 @@
 // with that WINDOW_MASKER_PATH, and the host registers the directory's counts files under LOSAT
 // Web's directory (`registerTaxidCounts`).
 //
+// A search with `"database"` (`-db`) has no subject: the run takes subject handle 0 and the engine opens
+// the database and the lists of its filters by the argv's names in the run's working directory, which
+// the host preopens as `.` (abi_v2.md §3): the search's directory, as the CLI runs there (line WQA D12a,
+// 2026-11-20). The serial engine runs it on an instance whose `.` is that directory. The threaded engine
+// does not run it here: the Node thread host of LOSAT/tests (wasi_thread_host.js) gives a reactor's
+// threads no shared table of open files, so a descriptor of one thread is unknown on another; the
+// browser host's threads run these searches (web/app/tests/e2e/database.spec.ts).
+//
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
 //          [--out DIR]
@@ -323,8 +331,9 @@ function registerTaxidCounts(reactor, counts, search) {
   return { name: WEB_WINDOW_MASKER_PATH, held: registered ? "registered" : "kept" };
 }
 
-async function openSerial(wasmPath) {
-  const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {} });
+// The serial reactor; `directory`, the run's working directory that it preopens as `.` (a search of -db).
+async function openSerial(wasmPath, directory) {
+  const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {}, ...(directory === undefined ? {} : { preopens: { ".": directory } }) });
   let reactor;
   const imports = {
     wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
@@ -529,7 +538,7 @@ function checkFailure(run, expected, search, label) {
   }
 }
 
-function checkHits(streams, program, label, queryIds, shownIds) {
+function checkHits(streams, program, label, queryIds, shownIds, database = false) {
   const records = (streams.get(1) || Buffer.alloc(0)).toString().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   // A stream without bytes (a search without hits) is never emitted.
   const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
@@ -575,8 +584,9 @@ function checkHits(streams, program, label, queryIds, shownIds) {
     assert.ok(section.includes(`bits (${record.raw_score}),`), `${label}: raw score in out0 of HSP ${index}`);
     const heading = out0.subarray(record.out0_subject[0], record.out0_subject[1]).toString();
     // A local id that is not shown leaves "> " before the title; under -parse_deflines the
-    // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19).
-    assert.ok(heading.startsWith(shownIds ? ">" : "> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
+    // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19),
+    // as it does for a subject of a database, whose ids the database holds (line WQA D12a, 2026-11-20).
+    assert.ok(heading.startsWith(shownIds || database ? ">" : "> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
   });
   return records.length;
 }
@@ -607,7 +617,7 @@ function checkSurface(reactor, native) {
   // file of -conffile as a registry file (kind 2), and -dryrun.
   const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
   assert.equal(started.status, 0, started.error);
-  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true, register_inputs: false });
+  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true, register_inputs: false, database: false });
   const parsed = reactor.call("losat_web2_start", ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"].join("\0"));
   assert.equal(JSON.parse(parsed.streams.get(2).toString()).register_inputs, true, "-parse_deflines reads the inputs together");
   const conffile = ["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"].join("\0");
@@ -797,21 +807,28 @@ async function main() {
   ].filter((engine) => selected.includes(engine.name));
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
-    const { reactor, close, waitForWorkers } = await engine.open();
-    assert.equal(reactor.exports.losat_web2_abi_version(), 4);
-    checkSurface(reactor, options.native);
+    const { reactor: own, close, waitForWorkers } = await engine.open();
+    assert.equal(own.exports.losat_web2_abi_version(), 6);
+    checkSurface(own, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const subjects = new Map(); // "program subject" -> handle, kept across runs
     const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
     let countsRegistered = 0, countsKept = 0;
+    const databases = new Map(); // a -db search's directory -> the serial instance whose "." it is
     for (const search of all) {
       const program = search.program;
-      const query = inputPath(search, "-query"), subject = inputPath(search, "-subject");
+      if (search.database && engine.name !== "serial") {
+        console.log(`skip ${engine.name} ${search.cases.join(",")}: -db on the Node thread host (see the head of this file)`);
+        continue;
+      }
+      if (search.database && !databases.has(search.cwd)) databases.set(search.cwd, await openSerial(options.serial, search.cwd));
+      const reactor = search.database ? databases.get(search.cwd).reactor : own;
+      const query = inputPath(search, "-query"), subject = search.database ? undefined : inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
       const subjectKey = `${program} ${subject}`;
       const started = reactor.call("losat_web2_start", search.argv.join("\0"));
       const together = started.status === 0 && JSON.parse(started.streams.get(2).toString()).register_inputs === true;
-      if (!together && !subjects.has(subjectKey)) {
+      if (!together && !search.database && !subjects.has(subjectKey)) {
         const registered = reactor.call("losat_web2_register", program, 1, fs.readFileSync(subject));
         assert.ok(registered.status > 0, `register subject: ${registered.error}`);
         subjects.set(subjectKey, registered.status);
@@ -837,9 +854,9 @@ async function main() {
           }
         }
         const label = `${engine.name} n${threads} ${search.cases.join(",")}`;
-        let handles = [q?.status, subjects.get(subjectKey)], shownIds;
+        let handles = [q?.status, search.database ? 0 : subjects.get(subjectKey)], shownIds;
         if (together) {
-          const inputs = reactor.call("losat_web2_register_inputs", argv, fs.readFileSync(query), fs.readFileSync(subject));
+          const inputs = reactor.call("losat_web2_register_inputs", argv, fs.readFileSync(query), subject === undefined ? Buffer.alloc(0) : fs.readFileSync(subject));
           if (inputs.status < 0) {
             // The CLI fails reading the inputs, before any output.
             assert.equal(search.expect, "failure", `${label}: register_inputs: ${inputs.error}`);
@@ -850,13 +867,13 @@ async function main() {
             continue;
           }
           const response = JSON.parse(inputs.streams.get(2).toString());
-          handles = [response.query.handle, response.subject.handle];
+          handles = [response.query.handle, response.subject === null ? 0 : response.subject.handle];
           queryIds = response.query.records.map((record) => record.id);
-          shownIds = { query: response.query.records.map((record) => record.shown_id), subject: response.subject.records.map((record) => record.shown_id) };
+          shownIds = { query: response.query.records.map((record) => record.shown_id), subject: (response.subject?.records ?? []).map((record) => record.shown_id) };
         }
         const run = reactor.call("losat_web2_run", argv, ...handles);
         if (waitForWorkers) await waitForWorkers();
-        if (together) for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
+        if (together) for (const handle of handles.filter((handle) => handle !== 0)) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
         if (search.expect === "failure") {
           checkFailure(run, expected, search, label);
           results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
@@ -933,15 +950,16 @@ async function main() {
         }
         if (messagesPlace === 8) assert.ok(run.streams.has(8), `${label}: the run's messages are in the file of -logfile, which the run did not give`);
         if (search.fails_alone) row.fails_alone = search.fails_alone;
-        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds) : null;
+        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds, search.database) : null;
         if (together) row.inputs = "register_inputs";
         results.push(row);
         console.log(`ok ${label}`);
       }
       if (q) assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
     }
-    for (const handle of subjects.values()) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
-    for (const { handle } of counts.values()) assert.equal(reactor.call("losat_web2_file_release", handle).status, 0);
+    for (const handle of subjects.values()) assert.equal(own.call("losat_web2_release", handle).status, 0);
+    for (const { handle } of counts.values()) assert.equal(own.call("losat_web2_file_release", handle).status, 0);
+    for (const instance of databases.values()) await instance.close();
     if (countsRegistered + countsKept) console.log(`ok ${engine.name} -window_masker_db and -window_masker_taxid: ${countsRegistered} searches that registered counts, ${countsKept} searches with counts kept or unregistered`);
     await close();
   }

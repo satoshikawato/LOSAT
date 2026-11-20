@@ -11977,7 +11977,7 @@ fn blastn_intro(args: &BlastnArgs) -> BlastnIntro {
     let (reward, penalty, _, _) = super::super::coordination::determine_scoring_params(args);
     BlastnIntro {
         megablast: args.task == "megablast",
-        matrix_only: reward == 0 && penalty == 0,
+        matrix_only: super::super::coordination::matrix_only_scoring(reward, penalty),
     }
 }
 

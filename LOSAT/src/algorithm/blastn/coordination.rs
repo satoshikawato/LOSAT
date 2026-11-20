@@ -600,11 +600,25 @@ pub fn determine_window_size(args: &BlastnArgs) -> usize {
 /// (`BLAST_REWARD`/`BLAST_PENALTY`: constants.rs.) The Karlin-Altschul blocks (blast_setup.c:90-96) and alpha/beta (blast_setup.c:796-799)
 /// take the same 1/-3 under matrix-only scoring.
 pub fn engine_scoring_pair(reward: i32, penalty: i32) -> (bool, i32, i32) {
-    if penalty == 0 && reward == 0 {
+    if matrix_only_scoring(reward, penalty) {
         (true, BLAST_REWARD, BLAST_PENALTY)
     } else {
         (false, reward, penalty)
     }
+}
+
+/// Whether an option pair (reward, penalty), as NCBI holds them (16-bit), is matrix-only scoring:
+/// the one test of the concept, for the search (`engine_scoring_pair`), the option checks and the
+/// report's introduction, which NCBI's formatter decides from the same two option values.
+///
+/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:168-170
+/// ```c++
+///     if ( m_Program == "blastn" &&
+///          options.GetMatchReward() == 0 &&
+///          options.GetMismatchPenalty() == 0 )
+/// ```
+pub fn matrix_only_scoring(reward: i32, penalty: i32) -> bool {
+    penalty == 0 && reward == 0
 }
 
 /// Configure task-specific parameters

@@ -147,7 +147,7 @@ fn check_scoring_options_with(
     let greedy = args.task == "megablast" && !args.no_greedy;
     let mb_lookup_options = matches!(args.task.as_str(), "megablast" | "dc-megablast");
     let (_, template_length) = super::coordination::determine_template(args);
-    let matrix_only = spec.reward == 0 && spec.penalty == 0;
+    let matrix_only = super::coordination::matrix_only_scoring(spec.reward, spec.penalty);
     let message = if !matrix_only && spec.penalty >= 0 {
         "BLASTN penalty must be negative".to_string()
     } else if !ungapped && spec.gap_open > 0 && spec.gap_extend == 0 {
@@ -271,7 +271,7 @@ fn check_losat_limits_with(
     // Reward 0 with penalty 0 is matrix-only scoring (`coordination::engine_scoring_pair`).
     // Another reward of 0 or less leaves every query without Karlin-Altschul values (NCBI:
     // warnings and no hits), an explicit rejection of PD-LOSAT-NCBI-DEFECTS (version 1.1).
-    if spec.reward <= 0 && !(spec.reward == 0 && spec.penalty == 0) {
+    if spec.reward <= 0 && !super::coordination::matrix_only_scoring(spec.reward, spec.penalty) {
         anyhow::bail!(
             "a reward of {} with a penalty of {} (NCBI BLAST+'s 16-bit values), for which no query has Karlin-Altschul values, is not supported by LOSAT's BLASTN; reward 0 needs penalty 0 (matrix-only scoring, as -task rmblastn)",
             spec.reward,
@@ -366,7 +366,7 @@ pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
 pub fn check_greedy_matrix_only(args: &BlastnArgs, ungapped: bool) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let greedy = args.task == "megablast" && !args.no_greedy;
-    let matrix_only = spec.reward == 0 && spec.penalty == 0;
+    let matrix_only = super::coordination::matrix_only_scoring(spec.reward, spec.penalty);
     let zero_gap_costs = spec.gap_open == 0 && spec.gap_extend == 0;
     if greedy && matrix_only && (zero_gap_costs || !ungapped) {
         anyhow::bail!(
@@ -754,9 +754,11 @@ pub(crate) fn gap_x_dropoffs(
 /// ```
 ///
 /// Under matrix-only scoring (`matrix_only`) the X-drops are the options' values as raw scores
-/// (`matrix_only_gap_x_dropoffs`; the final one is not raised to the preliminary one), and the
-/// search extends by dynamic programming (`check_greedy_matrix_only` refuses the greedy
-/// extension before).
+/// (`subject_env`, from blast_parameters.c:208-217 and 472-482; the final one is not raised to
+/// the preliminary one), and the search extends by dynamic programming
+/// (`check_greedy_matrix_only` refuses the greedy extension before). Only the final X-drop is
+/// checked, as in the other DP searches: the preliminary DP caps its X-drop at the HSP's ungapped
+/// score (blast_gapalign.c:2959-2963).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check_gapped_x_dropoffs(
     use_dp: bool,
@@ -776,9 +778,11 @@ pub(crate) fn check_gapped_x_dropoffs(
     if use_dp || matrix_only {
         if !crate::core::x_drop::kernel_x_drop_fits(finale, gap_open, gap_extend) {
             if matrix_only {
-                anyhow::bail!(
-                    "an {final_option} of {final_bits:?} (a raw score with reward 0 and penalty 0), whose X-drop makes the sizes of NCBI BLAST+'s gapped alignment kernels leave 32-bit integers (undefined behaviour), is not supported by LOSAT's BLASTN"
-                );
+                return Err(crate::core::x_drop::kernel_x_drop_value_error(
+                    "BLASTN",
+                    final_option,
+                    &format!("{final_bits:?} (a raw score with reward 0 and penalty 0)"),
+                ));
             }
             return Err(crate::core::x_drop::kernel_x_drop_error(
                 "BLASTN",
@@ -1322,7 +1326,7 @@ mod tests {
         assert!(matrix_only((-100.0, 2_147_483_441.0), (5, 2)).is_ok());
         assert_eq!(
             refusal(matrix_only((-100.0, 2_147_483_442.0), (5, 2))),
-            "an -xdrop_gap_final of 2147483442.0 (a raw score with reward 0 and penalty 0), whose X-drop makes the sizes of NCBI BLAST+'s gapped alignment kernels leave 32-bit integers (undefined behaviour), is not supported by LOSAT's BLASTN"
+            "an -xdrop_gap_final of 2147483442.0 (a raw score with reward 0 and penalty 0), whose raw X-drop makes the sizes of NCBI BLAST+'s gapped alignment kernels leave 32-bit integers (undefined behaviour), is not supported by LOSAT's BLASTN"
         );
         assert!(
             refusal(matrix_only((2_147_483_442.0, 2_147_483_442.0), (5, 2)))

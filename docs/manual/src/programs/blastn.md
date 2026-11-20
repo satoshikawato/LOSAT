@@ -1,6 +1,6 @@
 # blastn
 
-`blastn` compares nucleotide queries with nucleotide subjects. Use it to find where a genome, contig or read set matches another, from near-identical copies (the default `megablast` task) to more distant relatives (`blastn`, `dc-megablast`) and very short queries (`blastn-short`). `rmblastn` scores with the nucleotide matrix alone, without Karlin-Altschul statistics.
+`blastn` compares nucleotide queries with nucleotide subjects. Use it to find where a genome, contig or read set matches another, from near-identical copies (the default `megablast` task) to more distant relatives (`blastn`, `dc-megablast`) and very short queries (`blastn-short`). `rmblastn` scores alignments with the nucleotide matrix alone, and its format 0 report shows raw scores.
 
 ## Synopsis
 

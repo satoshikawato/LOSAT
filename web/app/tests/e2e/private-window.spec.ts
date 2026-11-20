@@ -29,11 +29,17 @@
 // A storage that fails in a normal window (review storage-r2, M1): a profile on disk whose folder
 // for the sites' storage is a file, so the browser cannot make the site's. Each browser fails as
 // when that folder cannot be written (a probe, 2026-11-19), and as root too (CI's container).
+//
+// A search where the site's data is blocked (line WQA's sweep, D8, 2026-11-20): in Firefox every search failed with
+// "Run 1 failed: The operation is insecure. A failed run keeps no results." The engine's host opened BroadcastChannels
+// on the page and in its workers to link its thread workers and the keeper of their memory to the page, and Firefox
+// refuses them there; they are MessageChannels now (packages/losat/src/infra/engine-worker/link.ts).
 import { rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { test } from './support/test';
-import { openApp } from './support/browser';
+import { BUILD_HAS_ENGINE, openApp } from './support/browser';
+import { chooseRun, described, fasta, openFiles, paste, pickRun, program, submit, waitStatus } from './support/search';
 
 /** The note when the browser refuses the site's storage (SecurityError). */
 const REFUSED_NOTE =
@@ -156,6 +162,102 @@ test('a normal window whose storage fails keeps results in memory, and is not to
     await expectMemoryNote(await openApp(window), UNOPENED_NOTE, errorName);
   } finally {
     await window.close();
+  }
+});
+
+/**
+ * What Firefox refuses where the site's data is blocked, on the page and in every worker, in its words (a probe,
+ * 2026-11-20: losat-baselines/web-qa-20261119/fix-d8/probe/probe.log): BroadcastChannel, the Web Locks and the storage.
+ * Chromium with cookies blocked refuses the last two and opens BroadcastChannels, but Playwright's Chromium (the headless
+ * shell) ignores a profile's cookie setting, and Playwright's WebKit has no such setting: both get Firefox's refusals.
+ */
+const REFUSE_SITE_DATA = [
+  "globalThis.BroadcastChannel = class { constructor() { throw new DOMException('The operation is insecure.', 'SecurityError'); } };",
+  "if (typeof LockManager === 'function') LockManager.prototype.request = () => Promise.reject(new DOMException('LockManager.request: request() is not allowed in this context', 'SecurityError'));",
+  "if (typeof StorageManager === 'function') StorageManager.prototype.getDirectory = () => Promise.reject(new DOMException('Security error when calling GetDirectory', 'SecurityError'));",
+  '',
+].join('\n');
+
+/** Gives the page and the scripts of its workers Firefox's refusals of a site whose data is blocked. */
+async function refuseSiteData(context: BrowserContext): Promise<void> {
+  await context.addInitScript(REFUSE_SITE_DATA);
+  await context.route(/\/assets\/[^/]*worker[^/]*\.js$/, async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: REFUSE_SITE_DATA + (await response.text()) });
+  });
+}
+
+/** Counts the Engine workers that the page ends itself (`endedEngines.count`). */
+async function countEndedEngines(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    const Native = window.Worker;
+    const ended = { count: 0 };
+    Object.assign(window, { endedEngines: ended });
+    window.Worker = class extends Native {
+      private readonly engine: boolean;
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        this.engine = options?.name === 'losat-engine';
+      }
+      override terminate(): void {
+        if (this.engine) ended.count++;
+        super.terminate();
+      }
+    };
+  });
+}
+
+const PROTEIN = 'MKLVVLAAGGHHKLMKLVVLAAGGHHKLMSTNPKPQRKTKRNTNRRPQDVKFPGG';
+
+test('a site whose data the browser blocks runs a threaded search to its results, and a cancelled one ends', async ({
+  context,
+  browserName,
+  playwright,
+}) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine build has no Engine worker: the engine build runs this test');
+  test.setTimeout(240_000);
+  let blockingBrowser: Browser | undefined;
+  let blocked: BrowserContext = context;
+  if (browserName === 'firefox') {
+    blockingBrowser = await playwright.firefox.launch({ firefoxUserPrefs: { 'network.cookie.cookieBehavior': 2 } });
+    blocked = await blockingBrowser.newContext({ baseURL: test.info().project.use.baseURL! });
+  } else {
+    await refuseSiteData(context);
+  }
+  try {
+    await countEndedEngines(blocked);
+    const page = await openApp(blocked);
+    await expectMemoryNote(page, REFUSED_NOTE, 'SecurityError');
+    await described(page);
+    // Two threads: the Engine worker links a thread worker and the keeper of their memory to the page.
+    await program(page, 'blastp');
+    await paste(page, 'query', `>q1\n${PROTEIN}\n`);
+    await paste(page, 'subject', `>s1\n${PROTEIN}\n`);
+    await page.getByTestId('threads').selectOption('2');
+    await submit(page);
+    await waitStatus(page, 1, 'completed');
+    await chooseRun(page, 1);
+    await expect(page.getByTestId('results-hits')).toContainText('s1');
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-record').locator('[data-detail="path"]')).toHaveText(/^\s*threaded, 2 threads\s*$/);
+
+    // A threaded search cancelled while the Engine worker runs it: the page asks the keeper on its link to grow the
+    // memory, and ends the worker on the keeper's answer.
+    await page.getByTestId('tab-search').click();
+    await program(page, 'tblastx');
+    await openFiles(page, 'query', [{ name: 'AP027078.fasta', text: fasta('AP027078.fasta') }]);
+    await openFiles(page, 'subject', [{ name: 'NZ_CP006932.fasta', text: fasta('NZ_CP006932.fasta') }]);
+    await page.getByTestId('threads').selectOption('2');
+    await submit(page);
+    await expect(page.getByTestId('run-2-option')).toHaveAttribute('data-status', 'running', { timeout: 60_000 });
+    const ended = () => page.evaluate(() => (window as unknown as { endedEngines: { count: number } }).endedEngines.count);
+    const before = await ended();
+    await pickRun(page, 2);
+    await page.getByTestId('run-status-cancel').click();
+    await waitStatus(page, 2, 'cancelled', 15_000);
+    await expect.poll(ended, { timeout: 15_000 }).toBe(before + 1);
+  } finally {
+    await blockingBrowser?.close();
   }
 });
 

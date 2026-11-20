@@ -151,7 +151,7 @@
 mod batches;
 mod describe;
 mod error;
-mod input;
+pub(crate) mod input;
 mod parts;
 // The shared local search entry of the command line and the web ABIs: each program's `run_local`
 // and the routing of its outputs. It speaks the engine's types, so it stays outside the API.

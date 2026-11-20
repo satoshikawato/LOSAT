@@ -1,94 +1,139 @@
-# losat (npm / WebAssembly)
+# losat
 
-Local NCBI BLAST+ compatible sequence search (`blastn`, `blastp`, `blastx`, `tblastn`, and `tblastx`) compiled to WebAssembly for browsers and Node.js.
+LOSAT's local sequence search (BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX) for the browser.
+Searches run on the user's machine, so sequences never leave it. The package holds two
+WebAssembly builds of the [LOSAT](https://github.com/satoshikawato/LOSAT) engine, the same
+engine as the `losat` command line, together with the TypeScript host that runs them. LOSAT Web
+runs its searches through this package.
 
-Searches execute locally on the user's machine so input sequences never leave the client. This package bundles two WebAssembly builds of the [LOSAT](https://github.com/satoshikawato/LOSAT) engine along with the TypeScript host (`WasmEngine`) that powers [LOSAT Web](https://satoshikawato.github.io/LOSAT/platforms.html#losat-web):
+- `losat-web-serial.wasm` runs one thread and works in any browser and in Node.
+- `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
+  between threads, which a browser allows only on a cross-origin isolated page (below).
 
-- `losat-web-serial.wasm`: Single-threaded build that works in any modern browser or Node.js.
-- `losat-web-threads.wasm`: Multi-threaded build using `SharedArrayBuffer` on cross-origin isolated pages.
-
-Both reactors speak ABI v2 (version 3, documented in the [ABI specification](https://github.com/satoshikawato/LOSAT/blob/main/docs/web/abi_v2.md)). Searches accept CLI `argv` tokens and FASTA bytes, emitting `-outfmt 0`, `6`, and `7` byte-identically to the native CLI (when discarding any aborted stream chunks signaled on `DISCARD_STREAM`), alongside structured HSP records.
+The two builds speak the same ABI (ABI v2 at version 4, `docs/web/abi_v2.md` in the repository). A search
+gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
+as the command line does, and it also writes an HSP record for each hit. This holds for a host that
+drops the output that the engine tells it to discard (stream 9, in "Use").
 
 ## Versions
 
+The package's version is the engine's version. `losat/abi.json` names both, together with the
+ABI version that the reactors report (`losat_web2_abi_version`):
+
 | package | engine | ABI |
-| :--- | :--- | :--- |
-| `0.2.0` | `0.2.0` | `3` |
+|---|---|---|
+| 0.2.0 | 0.2.0 | 4 |
 
-`losat/abi.json` records package and ABI versions, and `losat/reactors/artifacts.json` records the SHA-256 digests and build provenance for both `.wasm` reactors.
+`losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
+and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
+added around its shared-memory operations, so its own SHA-256 is the one in `ENGINE_ASSETS` (below).
 
-## Serving the Reactors and Cross-Origin Isolation
+## Serving the reactors
 
-`import { ENGINE_ASSETS } from 'losat/reactors'` returns `new URL('./losat-web-<serial|threads>.wasm', import.meta.url)` URLs, sizes, and SHA-256 digests (`WasmEngine` checks each reactor's digest before instantiation). Modern bundlers (such as Vite) copy both `.wasm` modules and worker scripts automatically when served as `application/wasm`.
+`import { ENGINE_ASSETS } from 'losat/reactors'` gives the URL, size and SHA-256 of each module
+(`artifactSha256` is the record's, and `transform` names the guard of the threaded one). The URLs are
+`new URL('./losat-web-<serial|threads>.wasm', import.meta.url)`, a form that bundlers follow: Vite's
+production build, for one, copies both modules and the three worker modules of the host into its
+output. Serve the modules as `application/wasm`. The host checks their SHA-256 before it runs them.
 
-To enable multi-threaded execution in browsers via `SharedArrayBuffer`, serve the HTML document and scripts with:
+The threaded module needs `SharedArrayBuffer`, and the browser provides it only on a page that is
+cross-origin isolated. Serve the page and its scripts with:
 
-```text
+```
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-If a page is not cross-origin isolated (or cannot allocate shared linear memory of at least 16,384 pages / 1 GiB), multi-thread requests fall back automatically to `losat-web-serial.wasm` and report the reason in `RuntimeInfo.fallbackReason`.
+On a page that is not isolated, a search that asks for more than one thread runs on the serial
+module with one thread, and `RuntimeInfo.fallbackReason` says why.
 
-## Memory Limits
+## Memory
 
-The threaded reactor imports shared memory configured up to 65,535 pages (4 GiB minus 64 KiB). Because browser address-space limits vary, the host probes `65,535`, `49,152`, `32,768`, `24,576`, and `16,384` pages and selects the largest shared memory it can allocate and grow. Both serial and threaded builds support up to 4 GiB total linear memory.
+The threaded module imports one shared memory. The module declares a maximum of 65,535 pages
+(4 GiB less 64 KiB). Some browsers cannot reserve that much address space, so the host tries
+65,535, 49,152, 32,768, 24,576 and 16,384 pages and takes the first one that it can create and
+grow. Below 16,384 pages (1 GiB), searches run on the serial module. The serial module defines
+its own memory, which can also grow to 4 GiB.
 
-## Usage
+## Use
 
-### Browser (`WasmEngine` in Dedicated Workers)
+In a page, `WasmEngine` runs each search in a worker of its own. It uses the threaded module
+when the page is isolated and the search asks for more than one thread:
 
 ```ts
 import { WasmEngine, instantiateSerial, loadReactor, reactorControl } from 'losat';
 import { ENGINE_ASSETS } from 'losat/reactors';
 
-const open = async () =>
-  (await instantiateSerial((await loadReactor(ENGINE_ASSETS.serial)).module)).abi;
-
+// describe and validate run on a serial instance in the page (here a new one for each call).
+const open = async () => (await instantiateSerial((await loadReactor(ENGINE_ASSETS.serial)).module)).abi;
 const control = reactorControl(open, open);
 const engine = new WasmEngine({ assets: ENGINE_ASSETS, control });
 ```
 
-- `engine.describe(program)`: inspects option schemas and defaults.
-- `engine.validate(argv, registry)`: checks options using the engine's CLI parser.
-- `engine.run(request, port, onPhase)`: executes searches in a worker and streams outputs over `MessagePort` to a `RunOutputReceiver` (pass `onDiscard` so `DISCARD_STREAM` stream 9 drops partially emitted output if a secondary `-outfmt` stream fails).
-- `ReactorScanner`: parses FASTA records and sizes (`EngineInput.records`) prior to execution.
-- `engine.start(argv)`: resolves `-conffile`, `-logfile`, and `-dryrun`; `-conffile` contents pass via `EngineRunRequest.conffile`, and `-logfile` outputs return on `RuntimeInfo.runFiles` (or `runFilesOf(error)` on failure).
+`engine.describe(program)` lists a program's options with their defaults, and
+`engine.validate(argv)` checks an argv the way the command line checks it. `engine.run(request,
+port, onPhase)` runs one search. The outputs arrive on the `MessagePort` as chunks of each
+stream; `RunOutputReceiver` reads them on the other end of a `MessageChannel`. `EngineInput.records`
+holds the ID and length of every record of the input. `ReactorScanner` produces them, and the
+engine checks them before it searches.
 
-### Direct Serial Call (Node.js >= 22.18 or Worker)
+The engine tells the host which outputs a run could not write, and where their errors are: for
+each, it sends stream 9 (`DISCARD_STREAM`), whose 8 bytes are that output's stream number and then
+the place of its error, each a little-endian unsigned integer (`discardSignal` reads them), and the
+host drops everything that arrived of that stream, which then stays empty. The place is where the
+run wrote the error, as the command line writes the error of that output. A BLAST+ error goes where
+the run's messages go: stream 3, or the file of `-logfile` (stream 8) in TBLASTX with
+`-logfile NAME`, or nowhere (`PLACE_NOWHERE`: TBLASTX's `-logfile ""` or `-logfile /dev/null`).
+LOSAT's own refusal goes to stream 3 whatever `-logfile` is, as the command line writes it to its
+standard error. The signal comes for each output that fails on its own,
+whether or not some of its chunks were sent, and for each output of a search that fails in a run of
+two searches, and the run goes on with the other outputs. These signals are the only sign of an
+output that could not be written: an empty stream is not one (outfmt 6 of a search without hits is
+empty). `RunOutputReceiver` reports each signal through `onDiscard`, its required third argument
+(`new RunOutputReceiver(port, onChunk, onDiscard)`; `onDiscard(stream, error)` drops what arrived
+of that output, whose error is at `error`: `'diagnostics'`, `'logfile'` or `'nowhere'`), and
+`RunOutputMessage` has a `discard` variant for it.
+
+A host that keeps every chunk would keep output that the command line does not write.
+
+`engine.start(argv)` reads what the command line reads before its arguments: the file that
+`-conffile` names, the file that `-logfile` names, and whether the argv has `-dryrun`. Give the
+file of `-conffile` under that name to `engine.validate(argv, registry)` and as
+`EngineRunRequest.conffile`; `reactorControl` validates it on an instance of its own, opened with its
+second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
+run fails, `runFilesOf(error)` returns it.
+
+`RuntimeInfo.messages` says where the run's messages went (the warnings that the command line writes
+to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile'` (the file of
+`-logfile`, where TBLASTX with `-logfile NAME` writes them) or `'nowhere'` (TBLASTX's `-logfile ""`
+or `-logfile /dev/null`). The engine sends it once per run, before the outputs, on stream 10
+(`MESSAGES_STREAM`): 4 bytes, the place as a little-endian unsigned integer (`messagesSignal` reads
+it). An empty stream 3 means no warnings only where it is `'diagnostics'`; where it is `'logfile'`,
+an empty file means none.
+
+In a worker or in Node, the serial module can also be called directly:
 
 ```ts
-import {
-  compileReactor,
-  discardedStream,
-  DISCARD_STREAM,
-  instantiateSerial,
-  ROLE_QUERY,
-  ROLE_SUBJECT,
-} from 'losat';
+import { compileReactor, discardedStream, DISCARD_STREAM, instantiateSerial, ROLE_QUERY, ROLE_SUBJECT } from 'losat';
 
 const { module } = await compileReactor(serialBytes);
 const { abi } = await instantiateSerial(module);
 const query = abi.register('blastp', ROLE_QUERY, queryFasta);
 const subject = abi.register('blastp', ROLE_SUBJECT, subjectFasta);
-
 let outfmt6: Uint8Array[] = [];
-abi.run(
-  ['blastp', '-query', 'query.faa', '-subject', 'subject.faa', '-num_threads', '1'],
-  query.handle,
-  subject.handle,
-  (stream, bytes) => {
-    if (stream === 6) outfmt6.push(bytes.slice());
-    else if (stream === DISCARD_STREAM && discardedStream(bytes) === 6) outfmt6 = [];
-  },
-);
-
+// -query and -subject name the inputs in the outputs; the sequences come from the handles.
+abi.run(['blastp', '-query', 'query.faa', '-subject', 'subject.faa', '-num_threads', '1'], query.handle, subject.handle, (stream, bytes) => {
+  if (stream === 6) outfmt6.push(bytes.slice());
+  // Stream 9: the engine could not write the output that it names; if it is outfmt 6, drop what arrived.
+  else if (stream === DISCARD_STREAM && discardedStream(bytes) === 6) outfmt6 = [];
+});
 abi.release(query.handle);
 abi.release(subject.handle);
 ```
 
-See the [WebAssembly documentation](https://satoshikawato.github.io/LOSAT/platforms.html) in the LOSAT user manual for performance notes and browser limits.
+The package's tests run this example on one of the repository's fixtures (`tests/package.test.ts`):
+its outfmt 6 is byte for byte what NCBI BLAST+ 2.17.0 writes for the same search.
 
 ## License
 
-Released under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/main/LICENSE).
+MIT

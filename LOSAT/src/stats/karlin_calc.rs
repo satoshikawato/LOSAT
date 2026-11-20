@@ -9,6 +9,7 @@
 use crate::config::ScoringMatrix;
 use crate::stats::sum_statistics::{blast_expm1, blast_powi};
 use crate::stats::KarlinParams;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::{ncbistdaa, protein_score, BLASTAA_SIZE};
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
@@ -481,7 +482,7 @@ fn nlm_karlin_lambda_nr(
         return Err("GCD must be positive".to_string());
     }
 
-    let x0 = (-lambda0).exp();
+    let x0 = (-lambda0).glibc_exp();
     let mut x = if x0 > 0.0 && x0 < 1.0 { x0 } else { 0.5 };
     let mut a = 0.0;
     let mut b = 1.0;
@@ -543,7 +544,7 @@ fn nlm_karlin_lambda_nr(
         k += 1;
     }
 
-    Ok(-x.ln() / d as f64)
+    Ok(-x.glibc_ln() / d as f64)
 }
 
 /// Compute Lambda using Newton-Raphson method
@@ -647,7 +648,7 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
 
     blast_score_chk(low, high)?;
 
-    let etonlam = (-lambda).exp();
+    let etonlam = (-lambda).glibc_exp();
 
     let mut sum = (low as f64) * sfp.get_prob(low);
     for score in (low + 1)..=high {
@@ -659,7 +660,7 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
         lambda * sum / scale
     } else {
         // Underflow: use log form
-        lambda * (lambda * high as f64 + sum.ln()).exp()
+        lambda * (lambda * high as f64 + sum.glibc_ln()).glibc_exp()
     };
 
     Ok(h)
@@ -718,7 +719,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     range = high - low;
 
     let mut first_term_closed_form = h / lambda;
-    let exp_minus_lambda = (-lambda).exp();
+    let exp_minus_lambda = (-lambda).glibc_exp();
 
     if low == -1 && high == 1 {
         let low_prob = sfp.get_prob(low * divisor);
@@ -841,7 +842,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
         outer_sum += inner_sum;
     }
 
-    let k = -(-2.0 * outer_sum).exp() / (first_term_closed_form * blast_expm1(-lambda));
+    let k = -(-2.0 * outer_sum).glibc_exp() / (first_term_closed_form * blast_expm1(-lambda));
 
     if k <= 0.0 {
         return Err("Computed K is non-positive".to_string());

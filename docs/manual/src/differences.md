@@ -47,10 +47,12 @@ All cases below stem from memory-safety errors, integer overflows, or uninitiali
 
 ## Platforms
 
-### Last digit of a full-precision value on macOS and WASI
+### Last digit of a full-precision value on macOS
 
-- **What you see.** The 15th decimal digit of full-precision values in `-outfmt 11` / `-outfmt 8` on macOS, or ASN.1 PSSM matrices written by `psiblast -out_pssm -out_ascii_pssm` on WASI (`wasm32-wasip1*`), can differ by `1` ULP due to platform math libraries (`fma`/`log`). Tabular (`-outfmt 6`/`7`/`10`), XML, and JSON formats are unaffected.
-- **Record.** [PD-LOSAT-PLATFORM-LIBM](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
+- **What you see.** The last (15th) digit of a value printed with all its digits can differ by 1 from the Linux and Windows value.
+- **When.** macOS: the E value in `-outfmt 11` and `-outfmt 8` (tabular output is not affected). Values rounded to 6 digits (XML, JSON) or printed with 2 or 3 digits (tabular) are not affected in practice.
+- **Why.** The platform's maths library differs by 1 ULP. NCBI BLAST+ on macOS is expected to show the same (not tested).
+- **Record.** [The decision record on the last digit of full-precision values](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
 
 ### NCBI's own builds differ across platforms
 

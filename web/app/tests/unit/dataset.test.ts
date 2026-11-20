@@ -41,6 +41,14 @@ describe('record names in the results', () => {
     expect(recordName('', 'query', 0)).toBe('Query_1');
     expect(recordName('', 'subject', 1)).toBe('Subject_2');
   });
+
+  // line WQA's sweep, D7, 2026-11-19: a run of -parse_deflines names its records as its outputs do.
+  it('names a record by the ID that the outputs show, where the engine read the ids of the deflines', () => {
+    const shown = { query: ['AB000001.1'], subject: ['s1', 'NP_000006.1'] };
+    expect(recordName('gb|AB000001.1|', 'query', 0, shown)).toBe('AB000001.1');
+    expect(recordName('gi|6|ref|NP_000006.1|', 'subject', 1, shown)).toBe('NP_000006.1');
+    expect(recordName('gb|AB000001.1|', 'query', 0)).toBe('gb|AB000001.1|');
+  });
 });
 
 describe('record tables at register', () => {

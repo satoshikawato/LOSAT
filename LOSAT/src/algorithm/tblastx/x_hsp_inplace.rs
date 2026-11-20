@@ -154,6 +154,7 @@
 //! sub-slices of the one sorted list (its header has the argument).
 
 use super::*;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 // Diagnostic (LOSAT_TIMING): the clock of a linking call (tblastx/x_link_timing.rs). It reads
 // the clock only in a call the batch function armed, and the linking reads nothing from it.
 use crate::algorithm::tblastx::x_link_timing::{LinkLap, LinkStage};
@@ -704,7 +705,7 @@ where
     // Per-context logK, as in the reference.
     let log_k_by_ctx: Vec<f64> = query_contexts
         .iter()
-        .map(|ctx| ctx.karlin_params.k.ln())
+        .map(|ctx| ctx.karlin_params.k.glibc_ln())
         .collect();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486

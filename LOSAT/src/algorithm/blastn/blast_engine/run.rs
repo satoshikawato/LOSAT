@@ -5,6 +5,7 @@
 
 use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutputs};
 use crate::common::GapEditOp;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
@@ -473,7 +474,7 @@ fn calculate_blastn_context_statistics(
     eff_searchsp: i64,
     round_down_evalue_score: bool,
 ) -> (f64, f64) {
-    let log_k = params.k.ln();
+    let log_k = params.k.glibc_ln();
     let bit_score = (params.lambda * (raw_score as f64) - log_k) / NCBIMATH_LN2;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1864-1870
     // ```c
@@ -492,7 +493,7 @@ fn calculate_blastn_context_statistics(
     let e_value = if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
         -1.0
     } else {
-        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).exp()
+        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).glibc_exp()
     };
     (bit_score, e_value)
 }
@@ -12112,14 +12113,21 @@ fn write_reports_untimed(
     mut written: x_rpt_stream::Written<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
-    // Outfmt 0 only: the query-anchored sections (outfmt 1 to 4) draw these masks as NCBI does
-    // (`query_anchored::fill_loc_list`).
-    if args.parse_deflines
-        && output_formats.contains(&BlastnOutputFormat::Pairwise(
-            crate::report::pairwise::PairwiseView::Pairwise,
-        ))
-    {
-        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+    // Outfmt 0 only, each such output's refusal (`refuse_shared_masks_in`): the query-anchored
+    // sections (outfmt 1 to 4) draw these masks as NCBI does (`query_anchored::fill_loc_list`).
+    if args.parse_deflines {
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
+            outputs
+                .formats
+                .iter_mut()
+                .zip(output_formats)
+                .filter(|(_, output_format)| {
+                    **output_format
+                        == BlastnOutputFormat::Pairwise(
+                            crate::report::pairwise::PairwiseView::Pairwise,
+                        )
+                })
+                .map(|(format, _)| &mut format.refusal),
             query_records,
             |query| {
                 results
@@ -14740,9 +14748,10 @@ mod tests {
         let (bit_score, evalue) =
             calculate_blastn_context_statistics(raw_score, &params, eff_searchsp, false);
 
-        let expected_bit_score = (params.lambda * raw_score as f64 - params.k.ln()) / NCBIMATH_LN2;
-        let expected_evalue =
-            (eff_searchsp as f64) * (-(params.lambda) * raw_score as f64 + params.k.ln()).exp();
+        let expected_bit_score =
+            (params.lambda * raw_score as f64 - params.k.glibc_ln()) / NCBIMATH_LN2;
+        let expected_evalue = (eff_searchsp as f64)
+            * (-(params.lambda) * raw_score as f64 + params.k.glibc_ln()).glibc_exp();
 
         assert_eq!(bit_score, expected_bit_score);
         assert_eq!(evalue, expected_evalue);
@@ -14777,10 +14786,11 @@ mod tests {
         let (bit_score, evalue) =
             calculate_blastn_context_statistics(raw_score, &params, eff_searchsp, true);
 
-        let expected_bit_score = (params.lambda * raw_score as f64 - params.k.ln()) / NCBIMATH_LN2;
+        let expected_bit_score =
+            (params.lambda * raw_score as f64 - params.k.glibc_ln()) / NCBIMATH_LN2;
         let expected_evalue_score = raw_score & !1;
         let expected_evalue = (eff_searchsp as f64)
-            * (-(params.lambda) * expected_evalue_score as f64 + params.k.ln()).exp();
+            * (-(params.lambda) * expected_evalue_score as f64 + params.k.glibc_ln()).glibc_exp();
 
         assert_eq!(bit_score, expected_bit_score);
         assert_eq!(evalue, expected_evalue);

@@ -86,6 +86,7 @@ Not yet supported:
 Also refused:
 
 - `-remote`, `-entrez_query`, `-html`, `-import_search_strategy`, `-gilist` and `-ipglist`.
+- `-use_sw_tback`.
 - With `-in_pssm`: any matrix or gap cost other than BLOSUM62 with 11/1, and a PSSM in binary or XML form.
 - A `-subject` file whose sequences all have no letters.
 

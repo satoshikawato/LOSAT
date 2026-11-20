@@ -48,6 +48,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-threshold` | 11 (by word size and task) | Minimum score of a neighbouring word |
 | `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3 |
 | `-use_sw_tback` | off | Align the final results again with Smith-Waterman (with `-comp_based_stats` 1 to 3) |
+| `-ungapped` | off | Search without gapped extension: report the ungapped alignments (with `-comp_based_stats 0`) |
 | `-seg` | `no` | Low-complexity filter |
 | `-window_size` | 40 (15 for `blastp-short`) | Two-hit window; 0 selects the one-hit method |
 | `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |

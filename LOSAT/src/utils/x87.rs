@@ -13,10 +13,7 @@
 //! ```c++
 //! #  define NCBI_CONST_LONGDOUBLE(v)   v##L
 //! ```
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-//! ```c
-//!             result *= expl(-z * z) / z;
-//! ```
+//! Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
 //!
 //! The oracle (NCBI BLAST+ 2.17.0 for x86-64 Linux, built with gcc) evaluates every `long double`
 //! expression of `NStr::DoubleToString_Ecvt` and of `ErfImpl` on the x87 unit: a sign, a 15-bit
@@ -293,10 +290,7 @@ impl X87 {
         (sum.exponent <= 16383).then_some(sum)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-    // ```c
-    //             result *= expl(-z * z) / z;
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
     // No NCBI counterpart: the x87 `fdiv` of `expl(...) / z`.
     /// `fdiv` with precision control 64 bits and round to nearest, ties to even: the exact
     /// quotient of the significands rounded once to 64 bits. `rhs` is nonzero. (A quotient of
@@ -331,10 +325,7 @@ impl X87 {
         X87::round_up_if(negative, exponent, significand, up)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-    // ```c
-    //             result *= expl(-z * z) / z;
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
     // No NCBI counterpart: the 64-bit result of `expl` from LOSAT's double-double stand-in.
     /// The value nearest the exact sum `hi + lo` (round to nearest, ties to even) of a
     /// normalized double-double: `hi` finite and nonnegative, and `hi + lo == hi` (the sum of
@@ -385,10 +376,7 @@ impl X87 {
         X87::round_up_if(false, base + drop + 63, significand, up)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-    // ```c
-    //             result *= expl(-z * z) / z;
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
     // No NCBI counterpart: the x87 `fstpl` of `result *= ...` to the double `result`.
     /// `fstpl` (the store to a double) with round to nearest, ties to even: the nearest double,
     /// subnormal results and the underflow to zero included. Values from 2^1024 up give
@@ -428,10 +416,7 @@ impl X87 {
         f64::from_bits(sign | (magnitude + up as u64))
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-    // ```c
-    //             result *= expl(-z * z) / z;
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
     // No NCBI counterpart: the rounding step of `fdiv`, `fmul`'s result and `expl`'s result.
     /// `significand` (bit 63 set) plus one unit in the last place when `up`; the carry out of
     /// 0xFFFF_FFFF_FFFF_FFFF gives 2^63 and increments the exponent.
@@ -534,10 +519,7 @@ impl X87 {
 
 #[cfg(test)]
 mod tests {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-    // ```c
-    //             result *= expl(-z * z) / z;
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
     // The expected values are the results of the x87 unit itself (gcc `long double` on x86-64
     // Linux, control word 0x037F): `fmul`, `fdiv`, `fadd` of two doubles and `fstpl`.
     use super::X87;

@@ -197,19 +197,7 @@ pub struct Db {
 }
 
 impl Db {
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:1005-1014
-    // ```c++
-    // typedef struct MDB_db {
-    //     uint32_t    md_pad;        /**< also ksize for LEAF2 pages */
-    //     uint16_t    md_flags;    /**< @ref mdb_dbi_open */
-    //     uint16_t    md_depth;    /**< depth of this tree */
-    //     pgno_t        md_branch_pages;    /**< number of internal pages */
-    //     pgno_t        md_leaf_pages;        /**< number of leaf pages */
-    //     pgno_t        md_overflow_pages;    /**< number of overflow pages */
-    //     size_t        md_entries;        /**< number of data items */
-    //     pgno_t        md_root;        /**< the root page of this tree */
-    // } MDB_db;
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1005-1014
     fn parse(raw: &[u8]) -> Result<Db, String> {
         if raw.len() < DB_RECORD_SZ {
             return Err(format!(
@@ -243,28 +231,7 @@ struct Meta {
     txnid: u64,
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:1036-1054
-// ```c++
-// typedef struct MDB_meta {
-//         /** Stamp identifying this as an LMDB file. It must be set
-//          *    to #MDB_MAGIC. */
-//     uint32_t    mm_magic;
-//         /** Version number of this file. Must be set to #MDB_DATA_VERSION. */
-//     uint32_t    mm_version;
-//     void        *mm_address;        /**< address for fixed mapping */
-//     size_t        mm_mapsize;            /**< size of mmap region */
-//     MDB_db        mm_dbs[CORE_DBS];    /**< first is free space, 2nd is main db */
-//     /** The size of pages used in this DB */
-// #define    mm_psize    mm_dbs[FREE_DBI].md_pad
-//     /** Any persistent environment flags. @ref mdb_env */
-// #define    mm_flags    mm_dbs[FREE_DBI].md_flags
-//     /** Last used page in the datafile.
-//      *    Actually the file may be shorter if the freeDB lists the final pages.
-//      */
-//     pgno_t        mm_last_pg;
-//     volatile txnid_t    mm_txnid;    /**< txnid that committed this page */
-// } MDB_meta;
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1036-1054
 /// Read and validate the meta page that starts at `off` (header 16 bytes, then the meta).
 fn read_meta<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<Meta, String> {
     let end = off
@@ -320,16 +287,7 @@ struct Node {
 }
 
 impl Page {
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:846-852
-    // ```c++
-    // #define METADATA(p)     ((void *)((char *)(p) + PAGEHDRSZ))
-    //
-    //     /** ITS#7713, change PAGEBASE to handle 65536 byte pages */
-    // #define    PAGEBASE    ((MDB_DEVEL) ? PAGEHDRSZ : 0)
-    //
-    //     /** Number of nodes on a page */
-    // #define NUMKEYS(p)     (((p)->mp_lower - (PAGEHDRSZ-PAGEBASE)) >> 1)
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:846-852
     fn new(buf: Rc<Vec<u8>>) -> Result<Page, String> {
         let pad = rd_u16(&buf, 8)?;
         let flags = rd_u16(&buf, 10)?;
@@ -348,72 +306,7 @@ impl Page {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:898-960
-    // ```c++
-    // typedef struct MDB_node {
-    //     /** part of data size or pgno
-    //      *    @{ */
-    // #if BYTE_ORDER == LITTLE_ENDIAN
-    //     unsigned short    mn_lo, mn_hi;
-    // #else
-    //     unsigned short    mn_hi, mn_lo;
-    // #endif
-    //     /** @} */
-    // /** @defgroup mdb_node Node Flags
-    //  *    @ingroup internal
-    //  *    Flags for node headers.
-    //  *    @{
-    //  */
-    // #define F_BIGDATA     0x01            /**< data put on overflow page */
-    // #define F_SUBDATA     0x02            /**< data is a sub-database */
-    // #define F_DUPDATA     0x04            /**< data has duplicates */
-    //
-    // /** valid flags for #mdb_node_add() */
-    // #define    NODE_ADD_FLAGS    (F_DUPDATA|F_SUBDATA|MDB_RESERVE|MDB_APPEND)
-    //
-    // /** @} */
-    //     unsigned short    mn_flags;        /**< @ref mdb_node */
-    //     unsigned short    mn_ksize;        /**< key size */
-    //     char        mn_data[1];            /**< key and data are appended here */
-    // } MDB_node;
-    //
-    //     /** Size of the node header, excluding dynamic data at the end */
-    // #define NODESIZE     offsetof(MDB_node, mn_data)
-    //
-    //     /** Bit position of top word in page number, for shifting mn_flags */
-    // #define PGNO_TOPWORD ((pgno_t)-1 > 0xffffffffu ? 32 : 0)
-    //
-    //     /** Size of a node in a branch page with a given key.
-    //      *    This is just the node header plus the key, there is no data.
-    //      */
-    // #define INDXSIZE(k)     (NODESIZE + ((k) == NULL ? 0 : (k)->mv_size))
-    //
-    //     /** Size of a node in a leaf page with a given key and data.
-    //      *    This is node header plus key plus data size.
-    //      */
-    // #define LEAFSIZE(k, d)     (NODESIZE + (k)->mv_size + (d)->mv_size)
-    //
-    //     /** Address of node \b i in page \b p */
-    // #define NODEPTR(p, i)     ((MDB_node *)((char *)(p) + (p)->mp_ptrs[i] + PAGEBASE))
-    //
-    //     /** Address of the key for the node */
-    // #define NODEKEY(node)     (void *)((node)->mn_data)
-    //
-    //     /** Address of the data for a node */
-    // #define NODEDATA(node)     (void *)((char *)(node)->mn_data + (node)->mn_ksize)
-    //
-    //     /** Get the page number pointed to by a branch node */
-    // #define NODEPGNO(node) \
-    //     ((node)->mn_lo | ((pgno_t) (node)->mn_hi << 16) | \
-    //      (PGNO_TOPWORD ? ((pgno_t) (node)->mn_flags << PGNO_TOPWORD) : 0))
-    //     /** Set the page number in a branch node */
-    // #define SETPGNO(node,pgno)    do { \
-    //     (node)->mn_lo = (pgno) & 0xffff; (node)->mn_hi = (pgno) >> 16; \
-    //     if (PGNO_TOPWORD) (node)->mn_flags = (pgno) >> PGNO_TOPWORD; } while(0)
-    //
-    //     /** Get the size of the data in a leaf node */
-    // #define NODEDSZ(node)     ((node)->mn_lo | ((unsigned)(node)->mn_hi << 16))
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:898-960
     fn node(&self, i: usize) -> Result<Node, String> {
         if self.flags & P_LEAF2 != 0 || self.flags & (P_BRANCH | P_LEAF) == 0 {
             return Err(format!(
@@ -473,10 +366,7 @@ impl Page {
         self.buf.get(n.doff..n.doff + len).unwrap_or(&[])
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:995-995
-    // ```c++
-    // #define LEAF2KEY(p, i, ks)    ((char *)(p) + PAGEHDRSZ + ((i)*(ks)))
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:995-995
     fn leaf2_key(&self, i: usize) -> Result<&[u8], String> {
         let ks = self.pad as usize;
         if ks == 0 {
@@ -502,99 +392,7 @@ impl Page {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5276-5365
-    // ```c++
-    // static MDB_node *
-    // mdb_node_search(MDB_cursor *mc, MDB_val *key, int *exactp)
-    // {
-    //     unsigned int     i = 0, nkeys;
-    //     int         low, high;
-    //     int         rc = 0;
-    //     MDB_page *mp = mc->mc_pg[mc->mc_top];
-    //     MDB_node    *node = NULL;
-    //     MDB_val     nodekey;
-    //     MDB_cmp_func *cmp;
-    //     DKBUF;
-    //
-    //     nkeys = NUMKEYS(mp);
-    //
-    //     DPRINTF(("searching %u keys in %s %spage %"Z"u",
-    //         nkeys, IS_LEAF(mp) ? "leaf" : "branch", IS_SUBP(mp) ? "sub-" : "",
-    //         mdb_dbg_pgno(mp)));
-    //
-    //     low = IS_LEAF(mp) ? 0 : 1;
-    //     high = nkeys - 1;
-    //     cmp = mc->mc_dbx->md_cmp;
-    //
-    //     /* Branch pages have no data, so if using integer keys,
-    //      * alignment is guaranteed. Use faster mdb_cmp_int.
-    //      */
-    //     if (cmp == mdb_cmp_cint && IS_BRANCH(mp)) {
-    //         if (NODEPTR(mp, 1)->mn_ksize == sizeof(size_t))
-    //             cmp = mdb_cmp_long;
-    //         else
-    //             cmp = mdb_cmp_int;
-    //     }
-    //
-    //     if (IS_LEAF2(mp)) {
-    //         nodekey.mv_size = mc->mc_db->md_pad;
-    //         node = NODEPTR(mp, 0);    /* fake */
-    //         while (low <= high) {
-    //             i = (low + high) >> 1;
-    //             nodekey.mv_data = LEAF2KEY(mp, i, nodekey.mv_size);
-    //             rc = cmp(key, &nodekey);
-    //             DPRINTF(("found leaf index %u [%s], rc = %i",
-    //                 i, DKEY(&nodekey), rc));
-    //             if (rc == 0)
-    //                 break;
-    //             if (rc > 0)
-    //                 low = i + 1;
-    //             else
-    //                 high = i - 1;
-    //         }
-    //     } else {
-    //         while (low <= high) {
-    //             i = (low + high) >> 1;
-    //
-    //             node = NODEPTR(mp, i);
-    //             nodekey.mv_size = NODEKSZ(node);
-    //             nodekey.mv_data = NODEKEY(node);
-    //
-    //             rc = cmp(key, &nodekey);
-    // #if MDB_DEBUG
-    //             if (IS_LEAF(mp))
-    //                 DPRINTF(("found leaf index %u [%s], rc = %i",
-    //                     i, DKEY(&nodekey), rc));
-    //             else
-    //                 DPRINTF(("found branch index %u [%s -> %"Z"u], rc = %i",
-    //                     i, DKEY(&nodekey), NODEPGNO(node), rc));
-    // #endif
-    //             if (rc == 0)
-    //                 break;
-    //             if (rc > 0)
-    //                 low = i + 1;
-    //             else
-    //                 high = i - 1;
-    //         }
-    //     }
-    //
-    //     if (rc > 0) {    /* Found entry is less than the key. */
-    //         i++;    /* Skip to get the smallest entry larger than key. */
-    //         if (!IS_LEAF2(mp))
-    //             node = NODEPTR(mp, i);
-    //     }
-    //     if (exactp)
-    //         *exactp = (rc == 0 && nkeys > 0);
-    //     /* store the key index */
-    //     mc->mc_ki[mc->mc_top] = i;
-    //     if (i >= nkeys)
-    //         /* There is no entry larger or equal to the key. */
-    //         return NULL;
-    //
-    //     /* nodeptr is fake for LEAF2 */
-    //     return node;
-    // }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5276-5365
     /// `mdb_node_search`: index of the first entry >= `key` and whether it is equal.
     fn node_search(&self, key: &[u8], db_flags: u16) -> Result<(usize, bool), String> {
         let leaf2 = self.flags & P_LEAF2 != 0;
@@ -635,30 +433,7 @@ fn cmp_keys(db_flags: u16, a: &[u8], b: &[u8]) -> Ordering {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5197-5217
-// ```c++
-// static int
-// mdb_cmp_cint(const MDB_val *a, const MDB_val *b)
-// {
-// #if BYTE_ORDER == LITTLE_ENDIAN
-//     unsigned short *u, *c;
-//     int x;
-//
-//     u = (unsigned short *) ((char *) a->mv_data + a->mv_size);
-//     c = (unsigned short *) ((char *) b->mv_data + a->mv_size);
-//     do {
-//         x = *--u - *--c;
-//     } while(!x && u > (unsigned short *)a->mv_data);
-//     return x;
-// #else
-//     unsigned short *u, *c, *end;
-//     int x;
-//
-//     end = (unsigned short *) ((char *) a->mv_data + a->mv_size);
-//     u = (unsigned short *)a->mv_data;
-//     c = (unsigned short *)b->mv_data;
-//     do {
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5197-5217
 fn cmp_cint(a: &[u8], b: &[u8]) -> Ordering {
     // Keys of one database have one size (4 bytes here); NCBI reads `a->mv_size` bytes of both.
     if a.len() != b.len() {
@@ -667,26 +442,7 @@ fn cmp_cint(a: &[u8], b: &[u8]) -> Ordering {
     a.iter().rev().cmp(b.iter().rev())
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5225-5241
-// ```c++
-// static int
-// mdb_cmp_memn(const MDB_val *a, const MDB_val *b)
-// {
-//     int diff;
-//     ssize_t len_diff;
-//     unsigned int len;
-//
-//     len = a->mv_size;
-//     len_diff = (ssize_t) a->mv_size - (ssize_t) b->mv_size;
-//     if (len_diff > 0) {
-//         len = b->mv_size;
-//         len_diff = 1;
-//     }
-//
-//     diff = memcmp(a->mv_data, b->mv_data, len);
-//     return diff ? diff : len_diff<0 ? -1 : len_diff;
-// }
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5225-5241
 fn cmp_memn(a: &[u8], b: &[u8]) -> Ordering {
     a.cmp(b)
 }
@@ -723,76 +479,8 @@ impl<R: ReadAt + ?Sized> std::fmt::Debug for Env<'_, R> {
 }
 
 impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:3682-3738
-    // ```c++
-    // static int ESECT
-    // mdb_env_read_header(MDB_env *env, MDB_meta *meta)
-    // {
-    //     MDB_metabuf    pbuf;
-    //     MDB_page    *p;
-    //     MDB_meta    *m;
-    //     int            i, rc, off;
-    //     enum { Size = sizeof(pbuf) };
-    //
-    //     /* We don't know the page size yet, so use a minimum value.
-    //      * Read both meta pages so we can use the latest one.
-    //      */
-    //
-    //     for (i=off=0; i<NUM_METAS; i++, off += meta->mm_psize) {
-    // #ifdef _WIN32
-    //         DWORD len;
-    //         OVERLAPPED ov;
-    //         memset(&ov, 0, sizeof(ov));
-    //         ov.Offset = off;
-    //         rc = ReadFile(env->me_fd, &pbuf, Size, &len, &ov) ? (int)len : -1;
-    //         if (rc == -1 && ErrCode() == ERROR_HANDLE_EOF)
-    //             rc = 0;
-    // #else
-    //         rc = pread(env->me_fd, &pbuf, Size, off);
-    // #endif
-    //         if (rc != Size) {
-    //             if (rc == 0 && off == 0)
-    //                 return ENOENT;
-    //             rc = rc < 0 ? (int) ErrCode() : MDB_INVALID;
-    //             DPRINTF(("read: %s", mdb_strerror(rc)));
-    //             return rc;
-    //         }
-    //
-    //         p = (MDB_page *)&pbuf;
-    //
-    //         if (!F_ISSET(p->mp_flags, P_META)) {
-    //             DPRINTF(("page %"Z"u not a meta page", p->mp_pgno));
-    //             return MDB_INVALID;
-    //         }
-    //
-    //         m = METADATA(p);
-    //         if (m->mm_magic != MDB_MAGIC) {
-    //             DPUTS("meta has invalid magic");
-    //             return MDB_INVALID;
-    //         }
-    //
-    //         if (m->mm_version != MDB_DATA_VERSION) {
-    //             DPRINTF(("database is version %u, expected version %u",
-    //                 m->mm_version, MDB_DATA_VERSION));
-    //             return MDB_VERSION_MISMATCH;
-    //         }
-    //
-    //         if (off == 0 || m->mm_txnid > meta->mm_txnid)
-    //             *meta = *m;
-    //     }
-    //     return 0;
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:3943-3949
-    // ```c++
-    // static MDB_meta *
-    // mdb_env_pick_meta(const MDB_env *env)
-    // {
-    //     MDB_meta *const *metas = env->me_metas;
-    //     return metas[ metas[0]->mm_txnid < metas[1]->mm_txnid ];
-    // }
-    //
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3682-3738
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3943-3949
     /// Open an environment: validate both meta pages (magic, version), take the page size from
     /// `FREE_DBI.md_pad`, use the meta page with the larger transaction id (tie: meta 0).
     pub fn open(src: &'r R) -> Result<Self, String> {
@@ -833,24 +521,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         self.txnid
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5465-5479
-    // ```c++
-    //     if (pgno < txn->mt_next_pgno) {
-    //         level = 0;
-    //         p = (MDB_page *)(env->me_map + env->me_psize * pgno);
-    //     } else {
-    //         DPRINTF(("page %"Z"u not found", pgno));
-    //         txn->mt_flags |= MDB_TXN_ERROR;
-    //         return MDB_PAGE_NOTFOUND;
-    //     }
-    //
-    // done:
-    //     *ret = p;
-    //     if (lvl)
-    //         *lvl = level;
-    //     return MDB_SUCCESS;
-    // }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5465-5479
     fn page(&self, pgno: u64) -> Result<Page, String> {
         if pgno >= self.npages {
             return Err(format!(
@@ -872,88 +543,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         Page::new(buf)
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5484-5562
-    // ```c++
-    // static int
-    // mdb_page_search_root(MDB_cursor *mc, MDB_val *key, int flags)
-    // {
-    //     MDB_page    *mp = mc->mc_pg[mc->mc_top];
-    //     int rc;
-    //     DKBUF;
-    //
-    //     while (IS_BRANCH(mp)) {
-    //         MDB_node    *node;
-    //         indx_t        i;
-    //
-    //         DPRINTF(("branch page %"Z"u has %u keys", mp->mp_pgno, NUMKEYS(mp)));
-    //         /* Don't assert on branch pages in the FreeDB. We can get here
-    //          * while in the process of rebalancing a FreeDB branch page; we must
-    //          * let that proceed. ITS#8336
-    //          */
-    //         mdb_cassert(mc, !mc->mc_dbi || NUMKEYS(mp) > 1);
-    //         DPRINTF(("found index 0 to page %"Z"u", NODEPGNO(NODEPTR(mp, 0))));
-    //
-    //         if (flags & (MDB_PS_FIRST|MDB_PS_LAST)) {
-    //             i = 0;
-    //             if (flags & MDB_PS_LAST) {
-    //                 i = NUMKEYS(mp) - 1;
-    //                 /* if already init'd, see if we're already in right place */
-    //                 if (mc->mc_flags & C_INITIALIZED) {
-    //                     if (mc->mc_ki[mc->mc_top] == i) {
-    //                         mc->mc_top = mc->mc_snum++;
-    //                         mp = mc->mc_pg[mc->mc_top];
-    //                         goto ready;
-    //                     }
-    //                 }
-    //             }
-    //         } else {
-    //             int     exact;
-    //             node = mdb_node_search(mc, key, &exact);
-    //             if (node == NULL)
-    //                 i = NUMKEYS(mp) - 1;
-    //             else {
-    //                 i = mc->mc_ki[mc->mc_top];
-    //                 if (!exact) {
-    //                     mdb_cassert(mc, i > 0);
-    //                     i--;
-    //                 }
-    //             }
-    //             DPRINTF(("following index %u for key [%s]", i, DKEY(key)));
-    //         }
-    //
-    //         mdb_cassert(mc, i < NUMKEYS(mp));
-    //         node = NODEPTR(mp, i);
-    //
-    //         if ((rc = mdb_page_get(mc, NODEPGNO(node), &mp, NULL)) != 0)
-    //             return rc;
-    //
-    //         mc->mc_ki[mc->mc_top] = i;
-    //         if ((rc = mdb_cursor_push(mc, mp)))
-    //             return rc;
-    //
-    // ready:
-    //         if (flags & MDB_PS_MODIFY) {
-    //             if ((rc = mdb_page_touch(mc)) != 0)
-    //                 return rc;
-    //             mp = mc->mc_pg[mc->mc_top];
-    //         }
-    //     }
-    //
-    //     if (!IS_LEAF(mp)) {
-    //         DPRINTF(("internal error, index points to a %02X page!?",
-    //             mp->mp_flags));
-    //         mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
-    //         return MDB_CORRUPTED;
-    //     }
-    //
-    //     DPRINTF(("found leaf page %"Z"u for key [%s]", mp->mp_pgno,
-    //         key ? DKEY(key) : "null"));
-    //     mc->mc_flags |= C_INITIALIZED;
-    //     mc->mc_flags &= ~C_EOF;
-    //
-    //     return MDB_SUCCESS;
-    // }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5484-5562
     /// Leaf page whose key range covers `key` (`None` for an empty tree).
     fn leaf_for(&self, db: &Db, key: &[u8]) -> Result<Option<Page>, String> {
         self.descend(db, key, |_, _| {})
@@ -1003,34 +593,8 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         Err("LMDB: tree is deeper than 32 levels (MDB_CORRUPTED)".to_string())
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:6032-6047
-    // ```c++
-    // static int
-    // mdb_cursor_set(MDB_cursor *mc, MDB_val *key, MDB_val *data,
-    //     MDB_cursor_op op, int *exactp)
-    // {
-    //     int         rc;
-    //     MDB_page    *mp;
-    //     MDB_node    *leaf = NULL;
-    //     DKBUF;
-    //
-    //     if (key->mv_size == 0)
-    //         return MDB_BAD_VALSIZE;
-    //
-    //     if (mc->mc_xcursor)
-    //         mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
-    //
-    //     /* See if we're already on the right page */
-    // ```
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:6148-6153
-    // ```c++
-    // set2:
-    //     leaf = mdb_node_search(mc, key, exactp);
-    //     if (exactp != NULL && !*exactp) {
-    //         /* MDB_SET specified and not an exact match. */
-    //         return MDB_NOTFOUND;
-    //     }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6032-6047
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6148-6153
     /// `mdb_cursor_set(MDB_SET)`: leaf page and node of an exact key match.
     fn find(&self, db: &Db, key: &[u8]) -> Result<Option<(Page, Node)>, String> {
         if key.is_empty() {
@@ -1047,38 +611,8 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         Ok(Some((leaf, node)))
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:6148-6160
-    // ```c++
-    // set2:
-    //     leaf = mdb_node_search(mc, key, exactp);
-    //     if (exactp != NULL && !*exactp) {
-    //         /* MDB_SET specified and not an exact match. */
-    //         return MDB_NOTFOUND;
-    //     }
-    //
-    //     if (leaf == NULL) {
-    //         DPUTS("===> inexact leaf not found, goto sibling");
-    //         if ((rc = mdb_cursor_sibling(mc, 1)) != MDB_SUCCESS) {
-    //             mc->mc_flags |= C_EOF;
-    //             return rc;		/* no entries matched */
-    //         }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5821-5845
-    // ```c++
-    //     mdb_cursor_pop(mc);
-    //     ...
-    //     if (move_right ? (mc->mc_ki[mc->mc_top] + 1u >= NUMKEYS(mc->mc_pg[mc->mc_top]))
-    //                : (mc->mc_ki[mc->mc_top] == 0)) {
-    //         ...
-    //         if ((rc = mdb_cursor_sibling(mc, move_right)) != MDB_SUCCESS) {
-    //     ...
-    //     } else {
-    //         if (move_right)
-    //             mc->mc_ki[mc->mc_top]++;
-    //     ...
-    //     indx = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
-    //     if ((rc = mdb_page_get(mc, NODEPGNO(indx), &mp, NULL)) != 0) {
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6148-6160
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5821-5845
     /// `mdb_cursor_set(MDB_SET_RANGE)`: the first key of `db` that is not before `key` in its
     /// order (`None`: every key is before it). Past the last node of the leaf that covers `key`,
     /// the first key of the next leaf (`mdb_cursor_sibling`: the deepest branch with a node to the
@@ -1132,25 +666,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
             .is_some_and(|key| key.starts_with(prefix)))
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:9784-9799
-    // ```c++
-    //     /* Cannot mix named databases with some mainDB flags */
-    //     if (txn->mt_dbs[MAIN_DBI].md_flags & (MDB_DUPSORT|MDB_INTEGERKEY))
-    //         return (flags & MDB_CREATE) ? MDB_INCOMPATIBLE : MDB_NOTFOUND;
-    //
-    //     /* Find the DB info */
-    //     dbflag = DB_NEW|DB_VALID|DB_USRVALID;
-    //     exact = 0;
-    //     key.mv_size = len;
-    //     key.mv_data = (void *)name;
-    //     mdb_cursor_init(&mc, txn, MAIN_DBI, NULL);
-    //     rc = mdb_cursor_set(&mc, &key, &data, MDB_SET, &exact);
-    //     if (rc == MDB_SUCCESS) {
-    //         /* make sure this is actually a DB */
-    //         MDB_node *node = NODEPTR(mc.mc_pg[mc.mc_top], mc.mc_ki[mc.mc_top]);
-    //         if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) != F_SUBDATA)
-    //             return MDB_INCOMPATIBLE;
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:9784-9799
     /// Look a named database up in the main database (`mdb_dbi_open` of an existing database).
     /// `Ok(None)` when there is no such name (NCBI: `MDB_NOTFOUND`).
     pub fn open_db(&self, name: &[u8]) -> Result<Option<Db>, String> {
@@ -1170,34 +686,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         Ok(Some(Db::parse(page.data(&node))?))
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5755-5779
-    // ```c++
-    // static int
-    // mdb_node_read(MDB_cursor *mc, MDB_node *leaf, MDB_val *data)
-    // {
-    //     MDB_page    *omp;        /* overflow page */
-    //     pgno_t         pgno;
-    //     int rc;
-    //
-    //     if (!F_ISSET(leaf->mn_flags, F_BIGDATA)) {
-    //         data->mv_size = NODEDSZ(leaf);
-    //         data->mv_data = NODEDATA(leaf);
-    //         return MDB_SUCCESS;
-    //     }
-    //
-    //     /* Read overflow data.
-    //      */
-    //     data->mv_size = NODEDSZ(leaf);
-    //     memcpy(&pgno, NODEDATA(leaf), sizeof(pgno));
-    //     if ((rc = mdb_page_get(mc, pgno, &omp, NULL)) != 0) {
-    //         DPRINTF(("read overflow page %"Z"u failed", pgno));
-    //         return rc;
-    //     }
-    //     data->mv_data = METADATA(omp);
-    //
-    //     return MDB_SUCCESS;
-    // }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5755-5779
     /// Data of a node: inline, or read from the overflow pages for `F_BIGDATA`.
     fn node_value(&self, page: &Page, node: &Node) -> Result<Vec<u8>, String> {
         if node.flags & F_BIGDATA == 0 {
@@ -1233,50 +722,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         Ok(v)
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:7531-7571
-    // ```c++
-    // static void
-    // mdb_xcursor_init1(MDB_cursor *mc, MDB_node *node)
-    // {
-    //     MDB_xcursor *mx = mc->mc_xcursor;
-    //
-    //     if (node->mn_flags & F_SUBDATA) {
-    //         memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
-    //         mx->mx_cursor.mc_pg[0] = 0;
-    //         mx->mx_cursor.mc_snum = 0;
-    //         mx->mx_cursor.mc_top = 0;
-    //         mx->mx_cursor.mc_flags = C_SUB;
-    //     } else {
-    //         MDB_page *fp = NODEDATA(node);
-    //         mx->mx_db.md_pad = 0;
-    //         mx->mx_db.md_flags = 0;
-    //         mx->mx_db.md_depth = 1;
-    //         mx->mx_db.md_branch_pages = 0;
-    //         mx->mx_db.md_leaf_pages = 1;
-    //         mx->mx_db.md_overflow_pages = 0;
-    //         mx->mx_db.md_entries = NUMKEYS(fp);
-    //         COPY_PGNO(mx->mx_db.md_root, fp->mp_pgno);
-    //         mx->mx_cursor.mc_snum = 1;
-    //         mx->mx_cursor.mc_top = 0;
-    //         mx->mx_cursor.mc_flags = C_INITIALIZED|C_SUB;
-    //         mx->mx_cursor.mc_pg[0] = fp;
-    //         mx->mx_cursor.mc_ki[0] = 0;
-    //         if (mc->mc_db->md_flags & MDB_DUPFIXED) {
-    //             mx->mx_db.md_flags = MDB_DUPFIXED;
-    //             mx->mx_db.md_pad = fp->mp_pad;
-    //             if (mc->mc_db->md_flags & MDB_INTEGERDUP)
-    //                 mx->mx_db.md_flags |= MDB_INTEGERKEY;
-    //         }
-    //     }
-    //     DPRINTF(("Sub-db -%u root page %"Z"u", mx->mx_cursor.mc_dbi,
-    //         mx->mx_db.md_root));
-    //     mx->mx_dbflag = DB_VALID|DB_USRVALID|DB_DUPDATA;
-    // #if UINT_MAX < SIZE_MAX
-    //     if (mx->mx_dbx.md_cmp == mdb_cmp_int && mx->mx_db.md_pad == sizeof(size_t))
-    //         mx->mx_dbx.md_cmp = mdb_cmp_clong;
-    // #endif
-    // }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:7531-7571
     /// Shape of the values of one leaf node of `db`.
     fn node_dups(&self, db: &Db, page: &Page, node: &Node) -> Result<Dups, String> {
         if node.flags & F_DUPDATA == 0 {
@@ -1295,19 +741,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         Ok(Dups::SubPage(sub))
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:6260-6269
-    // ```c++
-    //     if (data) {
-    //         if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-    //             mdb_xcursor_init1(mc, leaf);
-    //             rc = mdb_cursor_first(&mc->mc_xcursor->mx_cursor, data, NULL);
-    //             if (rc)
-    //                 return rc;
-    //         } else {
-    //             if ((rc = mdb_node_read(mc, leaf, data)) != MDB_SUCCESS)
-    //                 return rc;
-    //         }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6260-6269
     /// First value in the order of the duplicates (`mdb_cursor_first` of the sub-cursor).
     fn first_dup(&self, dups: &Dups) -> Result<Vec<u8>, String> {
         match dups {
@@ -1376,57 +810,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5810-5857
-    // ```c++
-    // static int
-    // mdb_cursor_sibling(MDB_cursor *mc, int move_right)
-    // {
-    //     int         rc;
-    //     MDB_node    *indx;
-    //     MDB_page    *mp;
-    //
-    //     if (mc->mc_snum < 2) {
-    //         return MDB_NOTFOUND;        /* root has no siblings */
-    //     }
-    //
-    //     mdb_cursor_pop(mc);
-    //     DPRINTF(("parent page is page %"Z"u, index %u",
-    //         mc->mc_pg[mc->mc_top]->mp_pgno, mc->mc_ki[mc->mc_top]));
-    //
-    //     if (move_right ? (mc->mc_ki[mc->mc_top] + 1u >= NUMKEYS(mc->mc_pg[mc->mc_top]))
-    //                : (mc->mc_ki[mc->mc_top] == 0)) {
-    //         DPRINTF(("no more keys left, moving to %s sibling",
-    //             move_right ? "right" : "left"));
-    //         if ((rc = mdb_cursor_sibling(mc, move_right)) != MDB_SUCCESS) {
-    //             /* undo cursor_pop before returning */
-    //             mc->mc_top++;
-    //             mc->mc_snum++;
-    //             return rc;
-    //         }
-    //     } else {
-    //         if (move_right)
-    //             mc->mc_ki[mc->mc_top]++;
-    //         else
-    //             mc->mc_ki[mc->mc_top]--;
-    //         DPRINTF(("just moving to %s index key %u",
-    //             move_right ? "right" : "left", mc->mc_ki[mc->mc_top]));
-    //     }
-    //     mdb_cassert(mc, IS_BRANCH(mc->mc_pg[mc->mc_top]));
-    //
-    //     indx = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
-    //     if ((rc = mdb_page_get(mc, NODEPGNO(indx), &mp, NULL)) != 0) {
-    //         /* mc will be inconsistent if caller does mc_snum++ as above */
-    //         mc->mc_flags &= ~(C_INITIALIZED|C_EOF);
-    //         return rc;
-    //     }
-    //
-    //     mdb_cursor_push(mc, mp);
-    //     if (!move_right)
-    //         mc->mc_ki[mc->mc_top] = NUMKEYS(mp)-1;
-    //
-    //     return MDB_SUCCESS;
-    // }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5810-5857
     /// Leaf pages of the tree under `root` in key order (the page sequence of
     /// `mdb_cursor_first` + `mdb_cursor_sibling`). A tree that visits more pages than the
     /// database has is a cycle.
@@ -1472,36 +856,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:6333-6359
-    // ```c++
-    //     case MDB_GET_CURRENT:
-    //         if (!(mc->mc_flags & C_INITIALIZED)) {
-    //             rc = EINVAL;
-    //         } else {
-    //             MDB_page *mp = mc->mc_pg[mc->mc_top];
-    //             int nkeys = NUMKEYS(mp);
-    //             if (!nkeys || mc->mc_ki[mc->mc_top] >= nkeys) {
-    //                 mc->mc_ki[mc->mc_top] = nkeys;
-    //                 rc = MDB_NOTFOUND;
-    //                 break;
-    //             }
-    //             rc = MDB_SUCCESS;
-    //             if (IS_LEAF2(mp)) {
-    //                 key->mv_size = mc->mc_db->md_pad;
-    //                 key->mv_data = LEAF2KEY(mp, mc->mc_ki[mc->mc_top], key->mv_size);
-    //             } else {
-    //                 MDB_node *leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
-    //                 MDB_GET_KEY(leaf, key);
-    //                 if (data) {
-    //                     if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-    //                         rc = mdb_cursor_get(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_GET_CURRENT);
-    //                     } else {
-    //                         rc = mdb_node_read(mc, leaf, data);
-    //                     }
-    //                 }
-    //             }
-    //         }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6333-6359
     /// `MDB_SET` + `MDB_GET_CURRENT`: the first duplicate of `key` (the only value of a plain
     /// key). Works for sub-page and sub-database keys. `Ok(None)`: no such key.
     pub fn first_value(&self, db: &Db, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
@@ -1512,46 +867,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         Ok(Some(self.first_dup(&dups)?))
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:5860-5896
-    // ```c++
-    // static int
-    // mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
-    // {
-    //     MDB_page    *mp;
-    //     MDB_node    *leaf;
-    //     int rc;
-    //
-    //     if ((mc->mc_flags & C_DEL && op == MDB_NEXT_DUP))
-    //         return MDB_NOTFOUND;
-    //
-    //     if (!(mc->mc_flags & C_INITIALIZED))
-    //         return mdb_cursor_first(mc, key, data);
-    //
-    //     mp = mc->mc_pg[mc->mc_top];
-    //
-    //     if (mc->mc_flags & C_EOF) {
-    //         if (mc->mc_ki[mc->mc_top] >= NUMKEYS(mp)-1)
-    //             return MDB_NOTFOUND;
-    //         mc->mc_flags ^= C_EOF;
-    //     }
-    //
-    //     if (mc->mc_db->md_flags & MDB_DUPSORT) {
-    //         leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
-    //         if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-    //             if (op == MDB_NEXT || op == MDB_NEXT_DUP) {
-    //                 rc = mdb_cursor_next(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_NEXT);
-    //                 if (op != MDB_NEXT || rc != MDB_NOTFOUND) {
-    //                     if (rc == MDB_SUCCESS)
-    //                         MDB_GET_KEY(leaf, key);
-    //                     return rc;
-    //                 }
-    //             }
-    //         } else {
-    //             mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
-    //             if (op == MDB_NEXT_DUP)
-    //                 return MDB_NOTFOUND;
-    //         }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5860-5896
     /// `MDB_SET` + `MDB_GET_CURRENT` + `MDB_NEXT_DUP` until the end: every value of `key` in
     /// LMDB order (for `MDB_DUPFIXED` without `MDB_INTEGERDUP`: `memcmp` of the value bytes).
     /// Empty when the key is absent.
@@ -1568,51 +884,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         Ok(out)
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:6232-6273
-    // ```c++
-    // static int
-    // mdb_cursor_first(MDB_cursor *mc, MDB_val *key, MDB_val *data)
-    // {
-    //     int         rc;
-    //     MDB_node    *leaf;
-    //
-    //     if (mc->mc_xcursor)
-    //         mc->mc_xcursor->mx_cursor.mc_flags &= ~(C_INITIALIZED|C_EOF);
-    //
-    //     if (!(mc->mc_flags & C_INITIALIZED) || mc->mc_top) {
-    //         rc = mdb_page_search(mc, NULL, MDB_PS_FIRST);
-    //         if (rc != MDB_SUCCESS)
-    //             return rc;
-    //     }
-    //     mdb_cassert(mc, IS_LEAF(mc->mc_pg[mc->mc_top]));
-    //
-    //     leaf = NODEPTR(mc->mc_pg[mc->mc_top], 0);
-    //     mc->mc_flags |= C_INITIALIZED;
-    //     mc->mc_flags &= ~C_EOF;
-    //
-    //     mc->mc_ki[mc->mc_top] = 0;
-    //
-    //     if (IS_LEAF2(mc->mc_pg[mc->mc_top])) {
-    //         key->mv_size = mc->mc_db->md_pad;
-    //         key->mv_data = LEAF2KEY(mc->mc_pg[mc->mc_top], 0, key->mv_size);
-    //         return MDB_SUCCESS;
-    //     }
-    //
-    //     if (data) {
-    //         if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {
-    //             mdb_xcursor_init1(mc, leaf);
-    //             rc = mdb_cursor_first(&mc->mc_xcursor->mx_cursor, data, NULL);
-    //             if (rc)
-    //                 return rc;
-    //         } else {
-    //             if ((rc = mdb_node_read(mc, leaf, data)) != MDB_SUCCESS)
-    //                 return rc;
-    //         }
-    //     }
-    //     MDB_GET_KEY(leaf, key);
-    //     return MDB_SUCCESS;
-    // }
-    // ```
+    // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6232-6273
     /// `MDB_FIRST` then `MDB_NEXT` until the end: every `(key, value)` pair in tree order (a key
     /// with several duplicates appears once per duplicate). Used for `GetDBTaxIds`.
     pub fn for_each(

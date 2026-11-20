@@ -642,11 +642,13 @@ fn a_bit_bvector_decodes_only_for_a_value() {
     );
 }
 
-/// `CATCH_ALL`'s report of BitMagic's `std::logic_error`.
+/// `CATCH_ALL`'s report of BitMagic's `std::logic_error`: NCBI's text in LOSAT's words
+/// (`crate::wording::losat_text`).
 fn bm_invalid() -> Abort {
     Abort {
         exit: 255,
-        message: "Error: BM::Invalid serialization format\n".to_string(),
+        message: crate::wording::losat_text("Error: BM::Invalid serialization format\n")
+            .into_owned(),
     }
 }
 
@@ -691,13 +693,14 @@ fn bitmagic_exceptions_and_refusals() {
         );
     }
     let id = format!("{{ header {{ field-id location-id }}, default id {Q1} }}");
+    // `STD_CATCH`'s posts (NCBI's text in LOSAT's words, `crate::wording::losat_text`).
     assert_eq!(
         posts(&[&table(1, &format!("{id}, {{ header {{ field-name \"Sorted, max length\" }}, data bit-bvector {{ size 4, data {unknown} }} }}"))]),
-        "Error: [psiblast] [Bad 'Sorted, max length' column] Exception: BM::Invalid serialization format\n"
+        crate::wording::losat_text("Error: [psiblast] [Bad 'Sorted, max length' column] Exception: BM::Invalid serialization format\n")
     );
     assert_eq!(
         posts(&[&table(1, &format!("{id}, {{ header {{ field-name \"Seq-table location\" }}, data loc {{ int {{ from 1, to 2, id {Q1} }} }}, sparse bit-set-bvector {{ size 4, data {unknown} }} }}"))]),
-        "Error: [psiblast] [Bad 'Seq-table location' column] Exception: BM::Invalid serialization format\n"
+        crate::wording::losat_text("Error: [psiblast] [Bad 'Seq-table location' column] Exception: BM::Invalid serialization format\n")
     );
     assert_eq!(
         posts(&[&table(1, &format!("{id}, {{ header {{ field-name \"Sorted, max length\" }}, data bit-bvector {{ size 1, data '020180000001000200050100000013000009'H }} }}"))]),

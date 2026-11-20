@@ -99,30 +99,29 @@ pub(crate) struct RpsPastRows<'a> {
 }
 
 impl<'a> RpsRows<'a> {
-    /// The rows without NCBI's step past them (`RpsRowsWithin`) where there is none (`past` is
-    /// `None`: `Lc` at or below the rows), else `None`.
+    /// The rows as `RpsRowsWhole` where `Lc` is their count (`length` is the rows' count and
+    /// `past` is `None`), else `None`.
     #[inline(always)]
-    pub(crate) fn within(&self) -> Option<RpsRowsWithin<'a>> {
-        self.past.is_none().then_some(RpsRowsWithin {
-            rows: self.rows,
-            length: self.length,
-        })
+    pub(crate) fn whole(&self) -> Option<RpsRowsWhole<'a>> {
+        (self.past.is_none() && self.length == self.rows.len())
+            .then_some(RpsRowsWhole { rows: self.rows })
     }
 }
 
-/// `RpsRows` whose `past` is `None` (`RpsRows::within`), as a type: the extensions read the rows
-/// up to `length` and have no step past it (`PssmRows::past_end` is `None`), so the word finders'
-/// loops instantiated with it carry no code of that step. `wordfinder::word_finder` scans with
-/// it wherever `Lc` is at or below the rows (every search but an alias file's `Lc` above them),
-/// and with `RpsRows` (the step) out of line otherwise (`wordfinder::word_finder_past`): one
+/// `RpsRows` whose `Lc` is the rows' count (`RpsRows::whole`), as a type: the rows alone bound
+/// the extensions (`len` is the slice's length, no second value) and there is no step past them
+/// (`PssmRows::past_end` is `None`), so the word finders' loops instantiated with it are those
+/// of a search without `Lc`: no code of the step, and one value fewer to keep in the loops.
+/// `wordfinder::word_finder` scans with it in every search whose `Lc` is the rows' count (every
+/// database but one whose alias file's `LENGTH` and `NSEQ` give another `Lc`), and with `RpsRows`
+/// (the bound and the step) out of line otherwise (`wordfinder::word_finder_other_length`): one
 /// generic scan, the same function wherever both are valid.
 #[derive(Clone, Copy)]
-pub(crate) struct RpsRowsWithin<'a> {
+pub(crate) struct RpsRowsWhole<'a> {
     rows: &'a [[i32; BLASTAA_SIZE]],
-    length: usize,
 }
 
-impl PssmRows for RpsRowsWithin<'_> {
+impl PssmRows for RpsRowsWhole<'_> {
     #[inline(always)]
     fn row(&self, pos: usize) -> &[i32; BLASTAA_SIZE] {
         &self.rows[pos]
@@ -130,7 +129,7 @@ impl PssmRows for RpsRowsWithin<'_> {
 
     #[inline(always)]
     fn len(&self) -> usize {
-        self.length
+        self.rows.len()
     }
 }
 
@@ -227,6 +226,7 @@ pub(crate) fn blast_nint(x: f64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::{RpsPastRows, RpsRows};
+    use crate::algorithm::pssm_search::rows::PssmRows;
     use crate::algorithm::pssm_search::ungapped::pssm_extend_one_hit;
     use crate::core::blast_util::BLASTAA_SIZE;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -301,5 +301,31 @@ mod tests {
         let (scored, flagged) = extend(10, Some((&high, 11)), &query, 1_000_000);
         assert_eq!(scored.ungapped_data.length, 11);
         assert!(!flagged);
+    }
+
+    // `RpsRows::whole` gives the rows as one slice only where the slice's own length is every
+    // bound of the scan: `Lc` is the rows' count and there is no row after the rows. An `Lc`
+    // below the rows (an alias file's `LENGTH`) and an `Lc` past them keep `RpsRows`.
+    #[test]
+    fn the_rows_are_one_slice_only_where_the_concatenated_length_is_their_count() {
+        let rows = vec![[0i32; BLASTAA_SIZE]; 10];
+        let zeros = [Some(0i32); BLASTAA_SIZE];
+        let past = RpsPastRows {
+            row: &zeros,
+            concat_length: 11,
+            overran: AtomicBool::new(false),
+        };
+        let whole = |length: usize, past: Option<&RpsPastRows<'_>>| {
+            let rows = RpsRows {
+                rows: &rows,
+                length,
+                past,
+            };
+            rows.whole().map(|whole| PssmRows::len(&whole))
+        };
+        assert_eq!(whole(10, None), Some(10));
+        assert_eq!(whole(9, None), None);
+        assert_eq!(whole(0, None), None);
+        assert_eq!(whole(10, Some(&past)), None);
     }
 }

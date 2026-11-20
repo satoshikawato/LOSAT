@@ -272,27 +272,29 @@ impl RpsWordScratch {
 ///     }
 /// ```
 ///
-/// The extensions read the rows as `RpsRowsWithin` where NCBI has no step past them (`past` is
-/// `None`, every search whose `Lc` is not above the rows), else as `RpsRows` with the step, out
-/// of line (`word_finder_past`): the same scan, whose common instantiation carries no code of the
-/// step (fix round 6 of line RG D1a-4).
+/// The extensions read the rows as `RpsRowsWhole` where `Lc` is the rows' count (every search
+/// but one over an alias file whose `LENGTH` and `NSEQ` give another `Lc`), else as `RpsRows`
+/// with `Lc` and NCBI's step past the rows, out of line (`word_finder_other_length`): the same
+/// scan, whose common instantiation carries neither the bound nor the step (fix rounds 6 and 8
+/// of line RG D1a-4).
 pub(crate) fn word_finder(
     params: &RpsWordParams<'_>,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
-    match params.rows.within() {
+    match params.rows.whole() {
         Some(rows) => scan(params, &rows, scratch, subject, init_hsps),
-        None => word_finder_past(params, scratch, subject, init_hsps),
+        None => word_finder_other_length(params, scratch, subject, init_hsps),
     }
     scratch.diag.exit(subject.len() as i32);
 }
 
-/// `word_finder`'s scan with NCBI's step past the rows (`RpsRows::past`, an `Lc` above them).
+/// `word_finder`'s scan with an `Lc` that is not the rows' count: the extensions' bound below
+/// the rows (`RpsRows::length`) or NCBI's step past them (`RpsRows::past`, an `Lc` above them).
 #[cold]
 #[inline(never)]
-fn word_finder_past(
+fn word_finder_other_length(
     params: &RpsWordParams<'_>,
     scratch: &mut RpsWordScratch,
     subject: &[u8],

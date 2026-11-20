@@ -967,7 +967,7 @@ impl BlastCompoHeap {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:229-243
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:230-247
     /// The answer of `would_insert` on the heap as it is, without its one side effect: an array
     /// that has reached the threshold is not turned into its heap form (`convert_to_heap`). In
     /// that form the root is the record of `array[1..=n]` that `compo_heap_record_compare` puts

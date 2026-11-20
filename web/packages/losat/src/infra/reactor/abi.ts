@@ -36,8 +36,8 @@ export const DISCARD_STREAM = 9;
  */
 export const MESSAGES_STREAM = 10;
 /**
- * Stream 11: the text that the command line prints to its standard output in place of a run (its help, the XML of
- * `-xmlhelp`, or a version), for an argv whose start `prints` (ABI v2 §5, version 5; line WQA's D14, 2026-11-20).
+ * Stream 11: the text that the command line prints to its standard output in place of a run (its help or a version;
+ * the engine refuses `-xmlhelp`), for an argv whose start `prints` (ABI v2 §5, version 5; line WQA's D14, 2026-11-20).
  */
 export const PRINTED_STREAM = 11;
 /** The place "nowhere" in the signals of streams 9 and 10 (ABI v2 §5): TBLASTX's `-logfile ""` or `-logfile /dev/null`. */

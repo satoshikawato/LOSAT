@@ -319,10 +319,13 @@ where
     try_parse_from_command(T::command(), argv)
 }
 
-/// `try_parse_from` for a caller whose calls run an NCBI application start of their own and return
-/// reports: the library API (`api::start`). `-logfile`, `-conffile` and `-dryrun` are taken; the
-/// versions and `-xmlhelp`, whose texts the library has no place for, are refused
-/// (`version_word_error`, `xml_help_refusal`).
+/// `try_parse_from` for a caller whose calls run an NCBI application start of their own: the
+/// library API (`api::start`) and LOSAT Web's ABI v2 (`web_adapter::start_run`). `-logfile`,
+/// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused
+/// (`version_word_error`, `xml_help_refusal`). ABI v2's start prints the versions before the
+/// arguments are read (`api::start::CallerStart::version`; line WQA's D14, 2026-11-20), so they
+/// never reach its reader; `-xmlhelp` stays refused there (line RG E2x-1, the Owner's choice of
+/// 2026-11-13).
 pub(crate) fn try_parse_with_own_start<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -330,22 +333,6 @@ where
     S: Into<OsString>,
 {
     parse_command(T::command(), argv, Reader::OwnStart)
-}
-
-/// `try_parse_from` for LOSAT Web's ABI v2, whose runs make their own NCBI application start
-/// (`web_adapter::start_run`) and give the host the text that the command line prints in place of
-/// a run (stream 11; line WQA's D14, 2026-11-20): `-logfile`, `-conffile` and `-dryrun` are taken,
-/// and `-xmlhelp` stops the reader with the request whose XML the run prints (`printed_text`), as
-/// on the command line. The versions are printed before the arguments are read
-/// (`ncbi_version_request`, `api::start::CallerStart::version`), so a version word that reaches
-/// this reader is refused (`version_word_error`).
-pub(crate) fn try_parse_with_printing_start<T, I, S>(argv: I) -> Result<T, clap::Error>
-where
-    T: Parser + CommandFactory,
-    I: IntoIterator<Item = S>,
-    S: Into<OsString>,
-{
-    parse_command(T::command(), argv, Reader::PrintingStart)
 }
 
 /// `try_parse_from` after the command line's application start `start` of the program that
@@ -385,20 +372,17 @@ enum Reader<'a> {
     /// A caller that runs no NCBI application start (LOSAT Web's ABI v1): the toolkit's words,
     /// the versions and `-xmlhelp` are refused.
     NoStart,
-    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
-    /// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused.
+    /// The library API and LOSAT Web's ABI v2, whose calls run a start of their own
+    /// (`api::start`, `web_adapter::start_run`): `-logfile`, `-conffile` and `-dryrun` are taken;
+    /// the versions and `-xmlhelp` are refused.
     OwnStart,
-    /// LOSAT Web's ABI v2, whose runs make a start of their own (`web_adapter::start_run`) and
-    /// print the command line's texts: the toolkit's words are taken, and `-xmlhelp` is the
-    /// request whose XML the run prints, as on the command line.
-    PrintingStart,
     /// The command line's entry with its application start: `-xmlhelp` is the request whose XML
     /// the entry prints.
     CommandLine(&'a crate::blastinput::ncbi_environment::ApplicationStart),
 }
 
-/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_with_printing_start`,
-/// `try_parse_from_start` and `try_parse_from_command`.
+/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_from_start` and
+/// `try_parse_from_command`.
 fn parse_command<T, I, S>(
     command: clap::Command,
     argv: I,
@@ -536,10 +520,9 @@ where
         // `ncbi_xmlhelp`)
         // `-xmlhelp` (`s_AutoHelpXml`) stops the reader as `-help` does, the words before it
         // read: the command line's entry prints the program's arguments in NCBI's XML
-        // (`xml_help_program`, `ncbi_xmlhelp::print`; line RG item E2x), and so does a run of
-        // LOSAT Web's ABI v2 (`printed_text`; line WQA's D14, 2026-11-20). The library API and the
-        // Web engine's ABI v1, which write no help of NCBI's, refuse it there, after the words
-        // before it (`xml_help_refusal`).
+        // (`xml_help_program`, `ncbi_xmlhelp::print`; line RG item E2x). The library API and the
+        // Web engine, which write no help of NCBI's, refuse it there, after the words before it
+        // (`xml_help_refusal`).
         if stops_at_help && text == "-xmlhelp" {
             translated.push("--help".into());
             xml_help = Some(scope.get_name().to_string());
@@ -677,7 +660,7 @@ where
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
             let program = xml_help.unwrap_or_default();
             return Err(match reader {
-                Reader::CommandLine(_) | Reader::PrintingStart => xml_help_request(program),
+                Reader::CommandLine(_) => xml_help_request(program),
                 Reader::NoStart | Reader::OwnStart => clap::Error::raw(
                     ErrorKind::InvalidValue,
                     xml_help_refusal(&refusal_program_name(&program)),
@@ -1364,25 +1347,16 @@ fn refusal_program_name(program: &str) -> String {
 }
 
 // No NCBI counterpart: NCBI has no library API. NCBI's application prints the XML of `-xmlhelp`
-// (ncbiapp.cpp:685-690, quoted at `ncbi_xmlhelp`); LOSAT's library refuses it (line RG DECISIONS
-// E2x-1, the Owner's choice of 2026-11-13). The command line's entries reach the XML
-// (`xml_help_text`, `ncbi_app::run`), and so does a run of the Web engine's ABI v2, which prints it
-// on its stream of the command line's standard output (`printed_text`; line WQA's D14,
-// 2026-11-20); the library and the Web engine's ABI v1 refuse it.
+// (ncbiapp.cpp:685-690, quoted at `ncbi_xmlhelp`); LOSAT's library and the Web engine refuse it
+// (line RG DECISIONS E2x-1, the Owner's choice of 2026-11-13). Only the command line's entries
+// reach the XML (`xml_help_text`, `ncbi_app::run`), so the library and the Web engine do not carry
+// it (E2x-2).
 /// LOSAT's refusal of `-xmlhelp` where no command line's entry prints it: the library API and the
-/// Web engine's ABI v1 of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
+/// Web engine of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
 pub(crate) fn xml_help_refusal(shown: &str) -> String {
-    let web = WEB_V2_PROGRAMS
-        .iter()
-        .any(|program| program.eq_ignore_ascii_case(shown));
-    match web {
-        true => format!(
-            "the NCBI C++ Toolkit option -xmlhelp runs on the command line and in the Web engine's ABI v2 of LOSAT's {shown} only: the library API and the Web engine's ABI v1 do not write NCBI's XML description of the arguments"
-        ),
-        false => format!(
-            "the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"
-        ),
-    }
+    format!(
+        "the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"
+    )
 }
 
 /// The help request that `try_parse_from_start` returns where `-xmlhelp` stopped the reader of
@@ -1410,14 +1384,21 @@ pub(crate) fn xml_help_program(error: &clap::Error) -> Option<&str> {
 // help and the XML of `-xmlhelp` are written to `cout`, exit status 0)
 /// What the command line prints to its standard output, exit status 0, where its argument reader
 /// stopped with `error` (`cli::main_entry`): the XML of `-xmlhelp` (`xml_help_program`,
-/// `xml_help_text`), or the help that stopped the reader (`-h`, `-help`, `-help-full`, `--help`;
-/// `command_line_message`, `rpsbproc` as there). `None` for an error, which the command line writes
-/// to its standard error. LOSAT Web's ABI v2 prints the same text (stream 11; line WQA's D14,
-/// 2026-11-20): one producer of the text for both.
-pub fn printed_text(error: &clap::Error, rpsbproc: bool) -> Option<String> {
+/// `xml_help_text`), or the help that stopped the reader (`help_text`). `None` for an error, which
+/// the command line writes to its standard error.
+pub(crate) fn printed_text(error: &clap::Error, rpsbproc: bool) -> Option<String> {
     xml_help_program(error)
         .and_then(xml_help_text)
-        .or_else(|| (!error.use_stderr()).then(|| command_line_message(error, rpsbproc)))
+        .or_else(|| help_text(error, rpsbproc))
+}
+
+/// The help that stopped the argument reader with `error` (`-h`, `-help`, `-help-full`, `--help`;
+/// `command_line_message`, `rpsbproc` as there), which the command line prints to its standard
+/// output with exit status 0 (`printed_text`); `None` for an error. LOSAT Web's ABI v2 prints the
+/// same text (stream 11; line WQA's D14, 2026-11-20): one producer of the help for both. The XML of
+/// `-xmlhelp` is not here: the Web engine refuses it and does not carry it (E2x-1, E2x-2).
+pub fn help_text(error: &clap::Error, rpsbproc: bool) -> Option<String> {
+    (!error.use_stderr()).then(|| command_line_message(error, rpsbproc))
 }
 
 /// What `losat <program> -xmlhelp` prints: NCBI's XML of `program` without the arguments that its

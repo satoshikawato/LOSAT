@@ -20,19 +20,20 @@
 use std::ffi::OsString;
 
 // The command line's arguments (`cli.rs`): the clap types of every program, the parser's
-// messages, the text that the command line prints where its reader stopped at a help word, and
+// messages, the help that the command line prints where its reader stopped at a help word, and
 // the command line's own errors.
 pub use crate::cli::{
-    command_line_message, printed_text, Cli, Commands, NativeError, WEB_V2_PROGRAMS,
+    command_line_message, help_text, Cli, Commands, NativeError, WEB_V2_PROGRAMS,
 };
 
-/// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
-/// as the command line reads it after its application start, NCBI's single-dash options included.
+/// `cli::try_parse_with_own_start` for the command line's own arguments (`Cli`): the argv read as
+/// the command line reads it after its application start, NCBI's single-dash options included.
 /// A run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
-/// (`-logfile`, `-conffile`, `-dryrun`) are taken, as the library API takes them, and the help
-/// words stop the reader as on the command line, `-xmlhelp` included: the run prints their text
-/// (`printed_text`; line WQA's D14, 2026-11-20). The versions are printed by the start
-/// (`CallerStart::version`) and never reach the reader.
+/// (`-logfile`, `-conffile`, `-dryrun`) are taken, as the library API takes them. The help words
+/// stop the reader as on the command line and the run prints their text (`help_text`; line WQA's
+/// D14, 2026-11-20); the versions are printed by the start (`CallerStart::version`) and never reach
+/// the reader; `-xmlhelp` is refused (`xml_help_refusal`; line RG E2x-1, the Owner's choice of
+/// 2026-11-13).
 ///
 /// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
 /// other clap type.
@@ -41,7 +42,7 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    crate::cli::try_parse_with_printing_start(argv)
+    crate::cli::try_parse_with_own_start(argv)
 }
 
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads

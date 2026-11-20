@@ -9,6 +9,12 @@ import { FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption } from './output-fo
  */
 export const RESERVED_FLAGS: readonly string[] = Object.freeze(['-query', '-subject', '-out', '-num_threads']);
 
+/**
+ * The help word that the browser refuses: `-xmlhelp`, whose XML the CLI prints and the engine does
+ * not carry (line RG E2x-1, the Owner's choice of 2026-11-13; WA-FM-05).
+ */
+const REFUSED_HELP_WORDS: readonly string[] = Object.freeze(['-xmlhelp']);
+
 /** The CLI's database options: `-db` and the filters of a database search. */
 export const DATABASE_FLAGS: readonly string[] = Object.freeze([
   '-db',
@@ -34,16 +40,17 @@ const MT_MODE_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp'
  * Why a word of "Additional options" is refused before the engine reads it: options that the
  * application manages, and the CLI's options that a search in the browser cannot have, whose
  * CLI message would name what the user cannot change here (`-subject`, `-num_threads`; WA-FM-04);
- * undefined for the other words. The words of the CLI's help and version (`-h`, `-help`,
- * `-help-full`, `--help`, `-xmlhelp`, `-version` and its full forms) are not refused: the engine
- * prints the command line's text for them and searches nothing (*start*'s `prints`; line WQA's D14,
- * 2026-11-20, in place of WA-FM-05's refusal).
+ * undefined for the other words. `-xmlhelp` is refused (`REFUSED_HELP_WORDS`); the other words of
+ * the CLI's help and version (`-h`, `-help`, `-help-full`, `--help`, `-version` and its full forms)
+ * are not: the engine prints the command line's text for them and searches nothing (*start*'s
+ * `prints`; line WQA's D14, 2026-11-20, in place of WA-FM-05's refusal).
  */
 function refusedWord(program: ProgramId, word: string): string | undefined {
   // -flag=value is the command line's form of -flag value too.
   const flag = word.split('=', 1)[0]!;
   if (flag === '-num_threads') return '-num_threads is set in the form: Threads';
   if (RESERVED_FLAGS.includes(flag) || (flag === '-mt_mode' && MT_MODE_PROGRAMS.includes(program))) return `${flag} is managed by LOSAT`;
+  if (REFUSED_HELP_WORDS.includes(word)) return `${word} is not available in the browser`;
   if (flag === '-db') return '-db (a database search) is not supported in the browser yet';
   if (DATABASE_FLAGS.includes(flag) || (program === 'blastn' && BLASTN_DATABASE_MASK_FLAGS.includes(flag))) {
     return `${flag} (a database search filter) is not supported in the browser yet`;

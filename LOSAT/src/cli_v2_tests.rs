@@ -2445,23 +2445,15 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
             .map(|error| error.exit_code()),
         Some(0)
     );
-    // `-xmlhelp` prints NCBI's XML on the command line (line RG item E2x, `ncbi_xmlhelp_tests`)
-    // and, for the programs it runs, in the Web engine's ABI v2 (line WQA's D14, 2026-11-20); the
-    // library API, which these tests are (no application start), refuses it by name.
-    for (program, place) in [
-        (
-            "blastn",
-            "the command line and in the Web engine's ABI v2 of LOSAT's BLASTN",
-        ),
-        ("makeblastdb", "the command line of LOSAT's"),
-        ("rpsbproc", "the command line of LOSAT's"),
-    ] {
+    // `-xmlhelp` prints NCBI's XML on the command line (line RG item E2x, `ncbi_xmlhelp_tests`);
+    // the library API, which these tests are (no application start), refuses it by name.
+    for program in ["blastn", "makeblastdb", "rpsbproc"] {
         let error = try_parse_from::<Cli, _, _>(["losat", program, "-xmlhelp"]).unwrap_err();
         let text = crate::cli::render_message(&error);
         assert!(
-            text.contains(&format!(
-                "the NCBI C++ Toolkit option -xmlhelp runs on {place}"
-            )),
+            text.contains(
+                "the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's"
+            ),
             "{program}: {text}"
         );
     }

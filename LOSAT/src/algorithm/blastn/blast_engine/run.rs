@@ -15748,7 +15748,7 @@ mod tests {
         let mut state = SubjectSplitState::new(length as usize, soft_ranges);
         let mut hard_state = HardSplitState::default();
         if let Some(hard) = hard {
-            hard_state.start(length as usize, hard.to_vec());
+            hard_state.start(length as usize, hard.to_vec(), true);
         }
         let mut scratch = Vec::new();
         let mut chunks = Vec::new();

@@ -90,7 +90,7 @@ LOSAT stops with an error for these `blastn` settings instead of running somethi
 
 - `-task rmblastn` and `-reward 0`.
 - `-ungapped` together with `-outfmt` 8, 9, 11, 12 or 17.
-- `-html`, `-remote`, `-entrez_query`, `-gilist`, `-import_search_strategy`, `-best_hit_overhang` and `-best_hit_score_edge`.
+- `-html`, `-remote`, `-entrez_query`, `-gilist`, `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-filtering_db` and `-index_name`. `-use_index true` on a database that has a MegaBLAST index (`makembindex`).
 - `-db_hard_mask` with `-task blastn-short` on a database whose sequences are masked to their end, and on a database whose masks overlap or are stored out of order.
 - Extreme `-xdrop_gap`, `-xdrop_gap_final` or `-xdrop_ungap` values for which NCBI BLAST+ overflows its 32-bit arithmetic.

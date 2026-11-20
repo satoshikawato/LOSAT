@@ -89,7 +89,7 @@ LOSAT stops with an error for these `blastx` settings instead of running somethi
 - An `-evalue` that is not a finite number.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastx-fast`), and matrix names that only begin with `IDENTITY`.
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
-- `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
+- `-html`, `-remote`, `-entrez_query`, `-gilist` and `-ipglist`.
 - A hit list size (`-max_target_seqs`, `-num_descriptions`, `-num_alignments`) of 2^31 - 50 or more.
 - `-db_soft_mask` and `-db_hard_mask`.
 - A protein subject of more than 5,000,000 residues, from `-subject` or from a database.

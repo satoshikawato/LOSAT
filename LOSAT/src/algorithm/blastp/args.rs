@@ -1265,10 +1265,7 @@ impl BlastpArgs {
         // An imported strategy's warnings for the options it replaces
         // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
         if let Some(import) = &self.import {
-            diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
-                &import.option_warnings,
-                self.app.ncbi_name(),
-            ))?;
+            diagnostics.write_all(&import.option_warning_lines())?;
         }
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)

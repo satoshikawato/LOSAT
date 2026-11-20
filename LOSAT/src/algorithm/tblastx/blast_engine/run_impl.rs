@@ -1108,10 +1108,7 @@ pub fn run(
     };
     // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
     if let Some(import) = &args.import {
-        diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
-            &import.warnings,
-            "tblastx",
-        ))?;
+        diagnostics.write_all(&import.warning_lines())?;
     }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
@@ -1513,10 +1510,7 @@ fn check_ncbi_options(
     // An imported strategy's warnings for the options it replaces
     // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
     if let Some(import) = &args.import {
-        diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
-            &import.option_warnings,
-            "tblastx",
-        ))?;
+        diagnostics.write_all(&import.option_warning_lines())?;
     }
     // (`threshold <= 0` is false for NaN, as in C.)
     if args.word_threshold() <= 0.0 {

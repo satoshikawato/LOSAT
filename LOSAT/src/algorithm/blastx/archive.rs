@@ -735,6 +735,69 @@ mod tests {
     }
 }
 
+/// The arguments a blastx run keeps for another program's strategy (`import::RunAs`).
+fn carried(args: BlastxArgs) -> crate::report::archive::read::import::Carried {
+    crate::report::archive::read::import::Carried {
+        app: "blastx",
+        path: args.import_search_strategy.expect("an import"),
+        query: args.query,
+        query_loc: args.query_loc,
+        strand: args.strand,
+        lcase_masking: args.lcase_masking,
+        parse_deflines: args.parse_deflines,
+        id_scope: None,
+        out: args.out,
+        outfmt: args.outfmt,
+        show_gis: args.show_gis,
+        num_descriptions: args.num_descriptions,
+        num_alignments: args.num_alignments,
+        max_target_seqs: args.max_target_seqs.map(i64::from),
+        formatting: args.formatting,
+        num_threads: usize::try_from(args.num_threads).unwrap_or(1),
+        mt_mode: args.mt_mode,
+        db: args.db,
+        subject: args.subject,
+        subject_loc: args.subject_loc,
+        db_filter: args.db_filter,
+        dbsize: args.dbsize,
+    }
+}
+
+/// blastx's arguments for a BLASTX strategy that another program runs (`import::RunAs`): its
+/// defaults with the arguments the running program keeps.
+pub(crate) fn from_carried(
+    carried: crate::report::archive::read::import::Carried,
+) -> Result<BlastxArgs> {
+    let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "blastx"])?;
+    let crate::cli::Commands::Blastx(mut out) = cli.command else {
+        unreachable!("the arguments of blastx")
+    };
+    out.import = carried.import_app();
+    out.max_target_seqs = carried
+        .max_target_seqs
+        .map(|n| i32::try_from(n).unwrap_or(i32::MAX));
+    out.num_threads = i32::try_from(carried.num_threads).unwrap_or(i32::MAX);
+    out.import_search_strategy = Some(carried.path);
+    out.query = carried.query;
+    out.query_loc = carried.query_loc;
+    out.strand = carried.strand;
+    out.lcase_masking = carried.lcase_masking;
+    out.parse_deflines = carried.parse_deflines;
+    out.out = carried.out;
+    out.outfmt = carried.outfmt;
+    out.show_gis = carried.show_gis;
+    out.num_descriptions = carried.num_descriptions;
+    out.num_alignments = carried.num_alignments;
+    out.formatting = carried.formatting;
+    out.mt_mode = carried.mt_mode;
+    out.db = carried.db;
+    out.subject = carried.subject;
+    out.subject_loc = carried.subject_loc;
+    out.db_filter = carried.db_filter;
+    out.dbsize = carried.dbsize;
+    Ok(out)
+}
+
 /// `-import_search_strategy` of BLASTX (`RecoverSearchStrategy`, `SetOptionsForSavedStrategy`,
 /// blast_args.cpp:3800-3836, quoted at `blastp::archive::apply_strategy`): the arguments of a
 /// command line that gives nothing (the strategy task's defaults) with the strategy's options set
@@ -754,10 +817,10 @@ pub(crate) fn apply_strategy(args: BlastxArgs) -> Result<BlastxArgs> {
             override_subject: args.db.is_some() || args.subject.is_some(),
             use_index_set: false,
         },
-        "blastx",
+        args.import.as_ref().map_or("blastx", |run| run.app),
     )?;
     if start.imported.program() != EProgram::Blastx {
-        return Err(start.unported_program(program));
+        return Err(start.run_as(program, || carried(args)));
     }
     let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "blastx"])?;
     let crate::cli::Commands::Blastx(mut out) = cli.command else {

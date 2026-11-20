@@ -12,6 +12,7 @@ use anyhow::Result;
 // ```
 use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
 use crate::cli::{Cli, Commands};
+use crate::report::archive::read::import::RunAs;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:407-410
 // ```c++
@@ -374,6 +375,10 @@ fn run_main_entry() -> Result<()> {
                 .map_err(anyhow::Error::msg)
                 .and_then(|settings| blastx::BlastxArgs::run(args, settings));
             if let Err(error) = run {
+                let error = match error.downcast::<RunAs>() {
+                    Ok(run_as) => return run_as_program(run_as, &start),
+                    Err(error) => error,
+                };
                 blastx::native::exit_on_native_error(&error);
                 return Err(error);
             }
@@ -403,6 +408,10 @@ fn run_main_entry() -> Result<()> {
             // blastn's own code runs; LOSAT rejects the settings that change the output.
             let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = blastn::run(args, settings) {
+                let error = match error.downcast::<RunAs>() {
+                    Ok(run_as) => return run_as_program(run_as, &start),
+                    Err(error) => error,
+                };
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);
             }
@@ -439,6 +448,10 @@ fn run_main_entry() -> Result<()> {
             // the output.
             let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = tblastx::run(args, settings) {
+                let error = match error.downcast::<RunAs>() {
+                    Ok(run_as) => return run_as_program(run_as, &start),
+                    Err(error) => error,
+                };
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);
             }
@@ -632,6 +645,32 @@ fn run_main_entry() -> Result<()> {
 /// LOSAT's refusal, an error (exit 1) written as `main` writes an error, through
 /// `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the message may quote data
 /// bytes).
+/// The run of another program's strategy that blastn, blastx or tblastx imported
+/// (`import::RunAs`): the strategy's program runs with the arguments the command line keeps,
+/// and ends as that program's own run ends. Nothing was written before it.
+fn run_as_program(
+    run_as: RunAs,
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> Result<()> {
+    let settings = start.settings().map_err(anyhow::Error::msg)?;
+    let run = match *run_as.0 {
+        Commands::Blastn(args) => blastn::run(args, settings),
+        Commands::Tblastx(args) => tblastx::run(args, settings),
+        Commands::Blastx(args) => {
+            let run = blastx::BlastxArgs::run(args, settings);
+            if let Err(error) = &run {
+                blastx::native::exit_on_native_error(error);
+            }
+            return run;
+        }
+        _ => unreachable!("a strategy runs as blastn, blastx or tblastx"),
+    };
+    if let Err(error) = &run {
+        crate::cli::exit_on_native_error(error);
+    }
+    run
+}
+
 fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
     match outcome {
         crate::rpsbproc::Outcome::Exit(0) => {}

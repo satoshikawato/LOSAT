@@ -175,10 +175,7 @@ impl TblastnArgs {
         };
         // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
         if let Some(import) = &args.import {
-            diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
-                &import.warnings,
-                "tblastn",
-            ))?;
+            diagnostics.write_all(&import.warning_lines())?;
         }
         // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
         // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers

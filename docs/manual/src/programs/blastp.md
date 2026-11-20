@@ -89,7 +89,7 @@ LOSAT stops with an error for these `blastp` settings instead of running somethi
 - `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
-- `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
+- `-html`, `-remote`, `-entrez_query`, `-gilist` and `-ipglist`.
 - A hit list size (`-max_target_seqs`, `-num_descriptions`, `-num_alignments`) of 2^31 - 50 or more.
 - `-db_soft_mask` and `-db_hard_mask`.
 

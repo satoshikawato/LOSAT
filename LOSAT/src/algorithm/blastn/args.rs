@@ -844,6 +844,13 @@ pub struct BlastnArgs {
 }
 
 impl BlastnArgs {
+    /// Whether the report cites the megablast paper: task megablast run by blastn. The program
+    /// of the command line chooses its formatter's reference, so tblastx running a megablast
+    /// strategy cites Gapped BLAST (`import::RunAs`, probe `C.tblastx.from.blastn.db`).
+    pub(crate) fn megablast_reference(&self) -> bool {
+        self.task == "megablast" && self.import.as_ref().is_none_or(|run| run.app == "blastn")
+    }
+
     /// The `-subject` path (empty before NCBI's check that it is given).
     pub fn subject_path(&self) -> &std::path::Path {
         self.subject.as_deref().unwrap_or(std::path::Path::new(""))

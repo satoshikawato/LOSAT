@@ -48,7 +48,7 @@ use anyhow::Result;
 use super::options::{import_request, EProgram, ImportedOptions, SeqRange, Setter};
 use super::queries::{render_queries, RenderError};
 use super::request::{Queries, Request, Subject};
-use crate::cli::NativeError;
+use crate::cli::{Commands, NativeError};
 use crate::ncbi_exception::NcbiException;
 use crate::report::archive::options::{Param, ParamValue};
 use crate::report::serial::asn_types::read::ReadError;
@@ -721,6 +721,8 @@ pub(crate) struct ImportRun {
     pub(crate) warnings: Vec<String>,
     /// `x_IssueWarningsForIgnoredOptions`' warnings, posted after the formatting handler's.
     pub(crate) option_warnings: Vec<String>,
+    /// The running program's NCBI name (`Start::app`), the prefix of the warnings.
+    pub(crate) app: &'static str,
     /// The effective search space is the strategy's `EffectiveSearchSpace`, which does not set
     /// `OLD_FSC` as `-searchsp` does (blast_args.cpp:303-307).
     pub(crate) searchsp_from_strategy: bool,
@@ -733,6 +735,16 @@ pub(crate) struct ImportRun {
 }
 
 impl ImportRun {
+    /// `RecoverSearchStrategy`'s warnings as the running program posts them.
+    pub(crate) fn warning_lines(&self) -> Vec<u8> {
+        Self::lines(&self.warnings, self.app)
+    }
+
+    /// `x_IssueWarningsForIgnoredOptions`' warnings as the running program posts them.
+    pub(crate) fn option_warning_lines(&self) -> Vec<u8> {
+        Self::lines(&self.option_warnings, self.app)
+    }
+
     /// The lines of `warnings` as the program `program` (NCBI's name) posts them.
     pub(crate) fn lines(warnings: &[String], program: &str) -> Vec<u8> {
         let mut text = Vec::new();
@@ -766,17 +778,21 @@ pub(crate) struct Start {
     pub(crate) imported: Imported,
     /// The arguments of the command line as NCBI's `CArgs` holds them.
     pub(crate) arguments: NcbiArguments,
+    /// The running program's NCBI name, the prefix of its warnings (`blastn`, ...): the program
+    /// of the command line, also when it runs another program's strategy ([`RunAs`]).
+    pub(crate) app: &'static str,
 }
 
 /// `RecoverSearchStrategy` for the running program `ncbi_name` (`blastp` ...): the strategy, or
 /// the error after the warnings posted before it (written to the standard error here, as NCBI
 /// posts them before its `CATCH_ALL` reports the error).
-pub(crate) fn start(command: &Command<'_>, ncbi_name: &str) -> Result<Start> {
+pub(crate) fn start(command: &Command<'_>, ncbi_name: &'static str) -> Result<Start> {
     let arguments = NcbiArguments::new(ncbi_name, &crate::cli::given_arguments());
     match recover(command) {
         Ok(imported) => Ok(Start {
             imported,
             arguments,
+            app: ncbi_name,
         }),
         Err(failure) => {
             use std::io::Write;
@@ -823,6 +839,7 @@ impl Start {
                 self.imported.program(),
                 task,
             ),
+            app: self.app,
             searchsp_from_strategy: false,
             query_range: None,
             recorded: self
@@ -846,10 +863,10 @@ impl Start {
     }
 
     /// Posts the import's warnings for an error that `SetOptionsForSavedStrategy` raises before
-    /// the run's diagnostics exist (`ncbi_name`: the program's NCBI name).
-    pub(crate) fn post_warnings(&self, ncbi_name: &str) {
+    /// the run's diagnostics exist.
+    pub(crate) fn post_warnings(&self) {
         use std::io::Write;
-        let _ = std::io::stderr().write_all(&ImportRun::lines(&self.imported.warnings, ncbi_name));
+        let _ = std::io::stderr().write_all(&ImportRun::lines(&self.imported.warnings, self.app));
     }
 
     /// The strategy's taxid lists over its database (`s_ImportDatabase`, blast_app_util.cpp:468-495):
@@ -967,6 +984,30 @@ impl Start {
     }
 
     /// LOSAT's refusal of a strategy of another program.
+    /// A strategy of another program than the running one (`program`, LOSAT's name): the run of
+    /// the strategy's program with the arguments the command line keeps (`carried`), where
+    /// NCBI's output is that program's import ([`RunAs`]), else the refusal.
+    pub(crate) fn run_as(&self, program: &str, carried: impl FnOnce() -> Carried) -> anyhow::Error {
+        use EProgram::{Blastn, Blastx, DiscMegablast, Megablast, Tblastx};
+        let target = self.imported.program();
+        let command = match (self.app, target) {
+            ("blastn" | "blastx", Tblastx) => {
+                crate::algorithm::tblastx::archive::from_carried(carried()).map(Commands::Tblastx)
+            }
+            ("tblastx", Blastx) => {
+                crate::algorithm::blastx::archive::from_carried(carried()).map(Commands::Blastx)
+            }
+            ("tblastx", Blastn | Megablast | DiscMegablast) => {
+                crate::algorithm::blastn::archive::from_carried(carried()).map(Commands::Blastn)
+            }
+            _ => return self.unported_program(program),
+        };
+        match command {
+            Ok(command) => anyhow::Error::new(RunAs(Box::new(command))),
+            Err(error) => error,
+        }
+    }
+
     pub(crate) fn unported_program(&self, program: &str) -> anyhow::Error {
         unported(
             &format!(
@@ -1200,5 +1241,67 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
             Param::new(f::FORCE_MB_INDEX, Boolean(false)),
             Param::new(f::MB_INDEX_NAME, Str(index_name.clone())),
         ],
+    }
+}
+
+/// One program running another program's strategy (survey F2 2.6): the strategy decides the
+/// engine, its options and the subjects; the command line's program its warnings (their prefix
+/// and NCBI's argument table, [`Start::app`]). NCBI's output of blastn and blastx running a
+/// TBLASTX strategy, and of tblastx running a BLASTX or BLASTN one, is that program's import
+/// with the running program's warnings, and tblastx's report of a BLASTN strategy cites the
+/// Gapped BLAST paper (probes `C.blastn.from.tblastx.db`, `C.blastx.from.tblastx.db`,
+/// `C.tblastx.from.blastx.db`, `C.tblastx.from.blastn.db`). The error that carries the
+/// strategy's program's arguments up to the dispatch (`cli::main_entry`), which runs them; no
+/// byte is written before it.
+#[derive(Debug)]
+pub(crate) struct RunAs(pub(crate) Box<Commands>);
+
+impl std::fmt::Display for RunAs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a search strategy of another program")
+    }
+}
+
+impl std::error::Error for RunAs {}
+
+/// The arguments that a run of an imported strategy keeps from the command line (the classes
+/// `SetOptionsForSavedStrategy` extracts again: query, formatting, threads, database or
+/// subjects), as one program hands them to the program whose strategy it runs ([`RunAs`]).
+pub(crate) struct Carried {
+    /// The running program's NCBI name ([`Start::app`]).
+    pub(crate) app: &'static str,
+    pub(crate) path: std::path::PathBuf,
+    pub(crate) query: std::path::PathBuf,
+    pub(crate) query_loc: Option<String>,
+    /// `-strand` (`both` when not given).
+    pub(crate) strand: String,
+    pub(crate) lcase_masking: bool,
+    pub(crate) parse_deflines: bool,
+    pub(crate) id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    pub(crate) out: Option<std::path::PathBuf>,
+    pub(crate) outfmt: String,
+    pub(crate) show_gis: bool,
+    pub(crate) num_descriptions: Option<usize>,
+    pub(crate) num_alignments: Option<usize>,
+    /// `-max_target_seqs` as given (blastx keeps values below 1 for its own error).
+    pub(crate) max_target_seqs: Option<i64>,
+    pub(crate) formatting: crate::blastinput::report_counts::FormattingArgs,
+    pub(crate) num_threads: usize,
+    pub(crate) mt_mode: Option<u8>,
+    pub(crate) db: Option<String>,
+    pub(crate) subject: Option<std::path::PathBuf>,
+    pub(crate) subject_loc: Option<String>,
+    pub(crate) db_filter: crate::blastinput::db_filter::DbFilterArgs,
+    pub(crate) dbsize: Option<i64>,
+}
+
+impl Carried {
+    /// The import run state that names the running program for the strategy's program
+    /// (`ImportRun::app`, read by its `apply_strategy`).
+    pub(crate) fn import_app(&self) -> Option<ImportRun> {
+        Some(ImportRun {
+            app: self.app,
+            ..ImportRun::default()
+        })
     }
 }

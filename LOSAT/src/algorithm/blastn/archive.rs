@@ -714,6 +714,71 @@ mod tests {
     }
 }
 
+/// The arguments a blastn run keeps for another program's strategy (`import::RunAs`).
+fn carried(args: BlastnArgs) -> crate::report::archive::read::import::Carried {
+    crate::report::archive::read::import::Carried {
+        app: "blastn",
+        path: args.import_search_strategy.expect("an import"),
+        query: args.query,
+        query_loc: args.query_loc,
+        strand: args.strand,
+        lcase_masking: args.lcase_masking,
+        parse_deflines: args.parse_deflines,
+        id_scope: args.id_scope,
+        out: args.out,
+        outfmt: args.outfmt,
+        show_gis: args.show_gis,
+        num_descriptions: args.num_descriptions,
+        num_alignments: args.num_alignments,
+        max_target_seqs: args.max_target_seqs.map(|n| n as i64),
+        formatting: args.formatting,
+        num_threads: args.num_threads,
+        mt_mode: args.mt_mode,
+        db: args.db,
+        subject: args.subject,
+        subject_loc: args.subject_loc,
+        db_filter: args.db_filter,
+        dbsize: args.dbsize,
+    }
+}
+
+/// blastn's arguments for a BLASTN strategy that another program runs (`import::RunAs`): its
+/// defaults with the arguments the running program keeps.
+pub(crate) fn from_carried(
+    carried: crate::report::archive::read::import::Carried,
+) -> Result<BlastnArgs> {
+    let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "blastn"])?;
+    let crate::cli::Commands::Blastn(mut out) = cli.command else {
+        unreachable!("the arguments of blastn")
+    };
+    out.import = carried.import_app();
+    out.max_target_seqs = carried
+        .max_target_seqs
+        .map(|n| usize::try_from(n).unwrap_or(0));
+    out.import_search_strategy = Some(carried.path);
+    out.query = carried.query;
+    out.query_loc = carried.query_loc;
+    out.strand = carried.strand;
+    out.lcase_masking = carried.lcase_masking;
+    out.parse_deflines = carried.parse_deflines;
+    out.id_scope = carried.id_scope;
+    out.out = carried.out;
+    out.outfmt = carried.outfmt;
+    out.show_gis = carried.show_gis;
+    out.num_descriptions = carried.num_descriptions;
+    out.num_alignments = carried.num_alignments;
+    out.formatting = carried.formatting;
+    out.num_threads = carried.num_threads;
+    out.mt_mode = carried.mt_mode;
+    out.db = carried.db;
+    out.subject = carried.subject;
+    out.subject_loc = carried.subject_loc;
+    out.db_filter = carried.db_filter;
+    out.dbsize = carried.dbsize;
+    out.command_line = Some(crate::cli::command_line_bytes());
+    Ok(out)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3810-3830
 // ```c++
 //     m_QueryOptsArgs->ExtractAlgorithmOptions(args, opts);
@@ -746,13 +811,13 @@ pub(crate) fn apply_strategy(args: BlastnArgs) -> Result<BlastnArgs> {
             override_subject: args.db.is_some() || args.subject.is_some(),
             use_index_set: args.use_index == Some(true),
         },
-        "blastn",
+        args.import.as_ref().map_or("blastn", |run| run.app),
     )?;
     if !matches!(
         start.imported.program(),
         EProgram::Blastn | EProgram::Megablast | EProgram::DiscMegablast
     ) {
-        return Err(start.unported_program(program));
+        return Err(start.run_as(program, || carried(args)));
     }
     let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "blastn"])?;
     let crate::cli::Commands::Blastn(mut out) = cli.command else {
@@ -762,7 +827,7 @@ pub(crate) fn apply_strategy(args: BlastnArgs) -> Result<BlastnArgs> {
     // task megablast (the command line's `-task`) names its index by `-db`, which the strategy's
     // database is not (probe `I.blastn.db.useidx`).
     if args.use_index == Some(true) && args.task == "megablast" && args.db.is_none() {
-        start.post_warnings("blastn");
+        start.post_warnings();
         return Err(crate::blastinput::app::options_error(
             "Can not deduce database index name",
         ));

@@ -8154,10 +8154,7 @@ pub fn run(
     };
     // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
     if let Some(import) = &args.import {
-        diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
-            &import.warnings,
-            "blastn",
-        ))?;
+        diagnostics.write_all(&import.warning_lines())?;
     }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
@@ -8987,10 +8984,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     if let Some(import) = &args.import {
         outputs
             .diagnostics
-            .write_all(&crate::report::archive::read::import::ImportRun::lines(
-                &import.option_warnings,
-                "blastn",
-            ))?;
+            .write_all(&import.option_warning_lines())?;
     }
     check_scoring_options(args)
 }
@@ -10470,7 +10464,7 @@ fn run_in_pool(
         }
         _ => scopes,
     });
-    let megablast = args.task == "megablast";
+    let megablast = args.megablast_reference();
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:258-261
     // ```c
     //         formatter.PrintProlog();
@@ -12198,7 +12192,7 @@ fn write_reports_untimed(
             "BLASTN",
         )?;
     }
-    let megablast = args.task == "megablast";
+    let megablast = args.megablast_reference();
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;
     // The SAM documents (outfmt 17), one per SAM format: the stream's, which only its last call
@@ -13039,7 +13033,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     };
     let diag_mask = diag_array_length - 1;
 
-    let megablast = args.task == "megablast";
+    let megablast = args.megablast_reference();
     // Whether NCBI searches the batch chunk by chunk when it has a valid context (a gapped
     // search, `search_query_chunks`): each chunk's set-up then checks the subjects
     // (`ContextInputs::split`).

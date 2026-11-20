@@ -423,10 +423,7 @@ fn run_inner(
     };
     // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
     if let Some(import) = &args.import {
-        stderr.write_all(&crate::report::archive::read::import::ImportRun::lines(
-            &import.warnings,
-            "blastx",
-        ))?;
+        stderr.write_all(&import.warning_lines())?;
     }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
@@ -600,10 +597,7 @@ fn run_inner(
     // An imported strategy's warnings for the options it replaces
     // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
     if let Some(import) = &args.import {
-        stderr.write_all(&crate::report::archive::read::import::ImportRun::lines(
-            &import.option_warnings,
-            "blastx",
-        ))?;
+        stderr.write_all(&import.option_warning_lines())?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     // ```c++

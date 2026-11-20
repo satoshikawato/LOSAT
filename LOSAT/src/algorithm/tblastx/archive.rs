@@ -629,6 +629,76 @@ mod tests {
     }
 }
 
+/// The arguments a tblastx run keeps for another program's strategy (`import::RunAs`).
+fn carried(args: TblastxArgs) -> crate::report::archive::read::import::Carried {
+    crate::report::archive::read::import::Carried {
+        app: "tblastx",
+        path: args.import_search_strategy.expect("an import"),
+        query: args.query,
+        query_loc: args.query_loc,
+        strand: "both".to_string(),
+        lcase_masking: args.lcase_masking,
+        parse_deflines: args.parse_deflines,
+        id_scope: args.id_scope,
+        out: args.out,
+        outfmt: args.outfmt,
+        show_gis: args.show_gis,
+        num_descriptions: args.num_descriptions,
+        num_alignments: args.num_alignments,
+        max_target_seqs: args.max_target_seqs.map(|n| n as i64),
+        formatting: args.formatting,
+        num_threads: args.num_threads,
+        mt_mode: None,
+        db: args.db,
+        subject: args.subject,
+        subject_loc: args.subject_loc,
+        db_filter: args.db_filter,
+        dbsize: args.dbsize,
+    }
+}
+
+/// tblastx's arguments for a TBLASTX strategy that another program runs (`import::RunAs`): its
+/// defaults with the arguments the running program keeps. tblastx has no `-strand` (LOSAT
+/// refuses it) and no `-mt_mode` (whose output is that of one thread).
+pub(crate) fn from_carried(
+    carried: crate::report::archive::read::import::Carried,
+) -> Result<TblastxArgs> {
+    use crate::report::archive::read::import::Start;
+    if carried.strand != "both" {
+        return Err(Start::unported(
+            "-strand with a search strategy of tblastx",
+            Program::Tblastx.name(),
+        ));
+    }
+    let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "tblastx"])?;
+    let crate::cli::Commands::Tblastx(mut out) = cli.command else {
+        unreachable!("the arguments of tblastx")
+    };
+    out.import = carried.import_app();
+    out.max_target_seqs = carried
+        .max_target_seqs
+        .map(|n| usize::try_from(n).unwrap_or(0));
+    out.import_search_strategy = Some(carried.path);
+    out.query = carried.query;
+    out.query_loc = carried.query_loc;
+    out.lcase_masking = carried.lcase_masking;
+    out.parse_deflines = carried.parse_deflines;
+    out.id_scope = carried.id_scope;
+    out.out = carried.out;
+    out.outfmt = carried.outfmt;
+    out.show_gis = carried.show_gis;
+    out.num_descriptions = carried.num_descriptions;
+    out.num_alignments = carried.num_alignments;
+    out.formatting = carried.formatting;
+    out.num_threads = carried.num_threads;
+    out.db = carried.db;
+    out.subject = carried.subject;
+    out.subject_loc = carried.subject_loc;
+    out.db_filter = carried.db_filter;
+    out.dbsize = carried.dbsize;
+    Ok(out)
+}
+
 /// `-import_search_strategy` of TBLASTX (`RecoverSearchStrategy`, `SetOptionsForSavedStrategy`,
 /// blast_args.cpp:3800-3836, quoted at `blastp::archive::apply_strategy`): the arguments of a
 /// command line that gives nothing (the strategy task's defaults) with the strategy's options set
@@ -649,10 +719,10 @@ pub(crate) fn apply_strategy(args: TblastxArgs) -> Result<TblastxArgs> {
             override_subject: args.db.is_some() || args.subject.is_some(),
             use_index_set: false,
         },
-        "tblastx",
+        args.import.as_ref().map_or("tblastx", |run| run.app),
     )?;
     if start.imported.program() != EProgram::Tblastx {
-        return Err(start.unported_program(program));
+        return Err(start.run_as(program, || carried(args)));
     }
     let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "tblastx"])?;
     let crate::cli::Commands::Tblastx(mut out) = cli.command else {

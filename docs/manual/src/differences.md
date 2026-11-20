@@ -103,7 +103,7 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 ### `-db` output does not depend on `-num_threads`
 
 - **What you see.** LOSAT's `-db` output is NCBI's output for `-num_threads 1`, at every `-num_threads`. NCBI's own `-db` output can depend on the thread count (with composition-based statistics, `blastp` ends the redo of a query early by the hit lists of its batch, and with more threads NCBI keeps one set per thread: 42 rows differed in one test).
-- **`-mt_mode`.** `-mt_mode 0`, `1` and `2` are accepted by `blastn`, `blastp`, `blastx` and `tblastn` and do not change the output, which is always that of `-num_threads 1`. NCBI's `-mt_mode 1` writes the end of an outfmt 0 report, or each XML document, once per batch of queries; LOSAT does not.
+- **`-mt_mode`.** `-mt_mode 0`, `1` and `2` are accepted by `blastn`, `blastp`, `blastx` and `tblastn` and do not change the output, which is always that of `-num_threads 1`. NCBI's `-mt_mode 1` writes the end of an outfmt 0 report, or each XML document, once per batch of queries; LOSAT does not. With `-import_search_strategy`, NCBI's `-mt_mode 1` also writes the strategy's warnings again for each batch, after `[Query 1-2]`; LOSAT writes them once.
 - **Record.** [The decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
 
 ## Platforms
@@ -126,7 +126,7 @@ These cases are about what the program prints around the search, not the search 
 
 ### Threads with `-subject`
 
-- **What you see.** With `-subject`, NCBI BLAST+ ignores `-num_threads` and writes `'num_threads' is currently ignored when 'subject' is specified.` on the standard error. LOSAT uses the threads you ask for and does not print the line. Above the CPU count NCBI also writes `Number of threads was reduced to N to match the number of available CPUs`; LOSAT does not.
+- **What you see.** With `-subject`, NCBI BLAST+ ignores `-num_threads` and writes `'num_threads' is currently ignored when 'subject' is specified.` on the standard error. LOSAT uses the threads you ask for and does not print the line. A strategy's subjects (`-import_search_strategy`) are searched once whatever `-num_threads` says; NCBI prints every alignment once per thread, or stops with an error. Above the CPU count NCBI also writes `Number of threads was reduced to N to match the number of available CPUs`; LOSAT does not.
 - **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from `blastn`'s progress bar on a terminal (next section).
 
 ### `blastn`'s progress bar on a terminal

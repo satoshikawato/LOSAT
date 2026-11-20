@@ -53,7 +53,10 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | :--- | :--- |
 | `-html` | Refused: not yet supported. |
 | `-best_hit_overhang`, `-best_hit_score_edge` | Refused. |
-| `-import_search_strategy` | Refused. `psiblast`, `rpsblast` and `rpstblastn` refuse it too. |
+| `-import_search_strategy` with a strategy file in binary or XML form | Refused: not yet supported. Strategy files in text form, the form that `-export_search_strategy` writes, work. |
+| `-import_search_strategy` with queries given as a list of locations, a GI list, a PHI-BLAST pattern, or a PSI-BLAST, RPS-BLAST or PSSM search | Refused: not yet supported. |
+| `-import_search_strategy` with an option that the program refuses on its command line | Refused, as on the command line (for example `-best_hit_overhang` in `blastn`, `-ungapped` in `blastp`). |
+| `-import_search_strategy` with the strategy of another program | Refused, except `blastn` and `blastx` running a `tblastx` strategy and `tblastx` running a `blastn` or `blastx` one, which run as NCBI runs them. Between the other programs NCBI stops with an error or reads the query as the wrong molecule. |
 | `-export_search_strategy -` (standard output) | Refused. A file name works. |
 | `-export_search_strategy` into the file of `-out`, or into standard output | Refused. NCBI writes each batch's request into the report or over it. |
 | `-export_search_strategy` with a file that cannot be written to the end | Refused. NCBI writes a message and exits with status 0. |
@@ -134,6 +137,7 @@ Databases with parsed ids (the error names the sequence). No comparison with NCB
 Strategy files:
 
 - `-export_search_strategy` is written as NCBI writes it for the five programs, `psiblast` (with a FASTA query or `-in_pssm`), `rpsblast`, `rpstblastn` and `tblastn -in_pssm`. For `tblastn -in_pssm` NCBI's request is a PSI-BLAST request that holds the PSSM as read, with `-db`. With `-subject` NCBI gives its error after the prolog.
+- `-import_search_strategy` runs the text strategy files that NCBI BLAST+ and LOSAT write, in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`. A strategy's subjects are searched once whatever `-num_threads` says; NCBI prints every alignment once per thread, or stops with an error.
 - `rpsblast` and `rpstblastn` write the file of NCBI's `-num_threads 1` at every `-num_threads` and `-mt_mode`. With `-mt_mode 1` and more than one thread, NCBI's threads write their requests into the file at the same time, and for a database of several volumes they leave out the search space of the batch before.
 
 </details>
@@ -610,13 +614,13 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
 - The `rpsblast` output formats other than `0`, `6`, `7` and `10`, and the `rpstblastn` ones other than `0` to `4`, `6`, `7` and `10`. Until then, `rpsbproc` reads the `-outfmt 11` archives that NCBI's `rpsblast` and `rpstblastn` write.
 - `-html`.
+- `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases
 
 - `-remote` and `-entrez_query`: all programs.
 - `-gilist` and `-negative_gilist`: all five search programs and `psiblast`.
 - `-ipglist` and `-negative_ipglist`: `blastp`, `blastx`, `psiblast`.
-- `-import_search_strategy`: all programs that take it.
 
 ## See also
 

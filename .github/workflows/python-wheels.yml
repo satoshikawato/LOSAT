@@ -86,7 +86,7 @@ jobs:
         # macOS x64.
         runner: >-
           ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]'
-          || '["ubuntu-24.04", "ubuntu-24.04-arm", "windows-2025", "macos-15", "macos-15-intel"]') }}
+          || '["ubuntu-24.04-arm"]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     defaults:
@@ -141,6 +141,9 @@ jobs:
           fi
           "$PYTHON" -m maturin build --release --locked "${compatibility[@]}" --auditwheel check \
             --interpreter "$PYTHON" --out dist
+          # PROBE (not for merge): the wheel as dev links it, for the A/B below.
+          "$PYTHON" -m maturin build --release --locked --compatibility pypi --auditwheel check \
+            --interpreter "$PYTHON" --out "$RUNNER_TEMP/dist-gnu"
 
       - name: Install it in fresh environments and search
         working-directory: python
@@ -199,6 +202,21 @@ jobs:
             /tmp/venv/bin/python -m pip install --disable-pip-version-check --quiet --no-index --no-deps "/w/python/$0"
             /tmp/venv/bin/python -I /w/python/tools/wheel_smoke.py --repo /w --wheel "/w/python/$0"
           ' "$wheel" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: PROBE A/B of the two links
+        env:
+          NEWEST: ${{ steps.newest.outputs.python-path }}
+        run: |
+          set -euo pipefail
+          for arm in gnu zig; do "$NEWEST" -m venv "$RUNNER_TEMP/ab-$arm"; done
+          "$RUNNER_TEMP/ab-gnu/bin/python" -m pip install --quiet --no-index --no-deps "$RUNNER_TEMP"/dist-gnu/*.whl
+          "$RUNNER_TEMP/ab-zig/bin/python" -m pip install --quiet --no-index --no-deps python/dist/*.whl
+          ls -l "$RUNNER_TEMP"/dist-gnu/*.whl python/dist/*.whl
+          nproc; lscpu | head -20
+          python3 python/tools/ab_probe.py "$RUNNER_TEMP/ab-gnu/bin/python" "$RUNNER_TEMP/ab-zig/bin/python" \
+            LOSAT/tests/fasta "$RUNNER_TEMP/ab.tsv" | tee "$RUNNER_TEMP/ab.log"
+          tail -5 "$RUNNER_TEMP/ab.log" >> "$GITHUB_STEP_SUMMARY"
+          cp "$RUNNER_TEMP/ab.tsv" "$RUNNER_TEMP/ab.log" "$RUNNER_TEMP"/dist-gnu/*.whl python/dist/
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

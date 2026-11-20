@@ -1983,7 +1983,7 @@ mod held_side_files_tests {
         let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
         assert_eq!(
             native.message,
-            "Command line argument error: Cannot open output file\n"
+            b"Command line argument error: Cannot open output file\n"
         );
         let mut master = held.clone();
         master.write_all(b"master").unwrap();
@@ -2049,7 +2049,7 @@ mod held_side_files_tests {
         let error = held.release().unwrap_err();
         let native = error.downcast_ref::<NativeError>().expect("a NativeError");
         assert_eq!(native.exit, 6);
-        assert_eq!(native.message, "BLAST failed to write output\n");
+        assert_eq!(native.message, b"BLAST failed to write output\n");
         drop((held, side, master));
         assert_eq!(std::fs::read(dir.join("o.out")).unwrap(), b"");
         std::fs::remove_dir_all(dir).ok();
@@ -2069,7 +2069,7 @@ mod held_side_files_tests {
         assert_eq!(native.exit, 1);
         assert_eq!(
             native.message,
-            "Command line argument error: Cannot open output file\n"
+            b"Command line argument error: Cannot open output file\n"
         );
         drop((held, side));
         std::fs::remove_dir_all(dir).ok();
@@ -2253,7 +2253,7 @@ mod held_formats_tests {
         let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
         assert_eq!(
             native.message,
-            "Command line argument error: Cannot open output file\n"
+            b"Command line argument error: Cannot open output file\n"
         );
         drop((first, blocked, last, stream, hold));
         assert_eq!([a.text(), files.text()], ["", "1:one;"].map(String::from));
@@ -2332,8 +2332,8 @@ mod held_formats_tests {
             .unwrap_err();
         let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
         assert_eq!(
-            (native.exit, native.message.as_str()),
-            (6, "BLAST failed to write output\n")
+            (native.exit, native.message.as_slice()),
+            (6, b"BLAST failed to write output\n".as_slice())
         );
         other.write_all(b"text 2 ").unwrap();
         assert_eq!(log.text(), "text 0 ");

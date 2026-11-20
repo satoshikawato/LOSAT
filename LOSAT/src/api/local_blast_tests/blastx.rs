@@ -677,7 +677,10 @@ fn errors_of_the_ranges_follow_the_command_line() {
             let native = error
                 .downcast_ref::<crate::cli::NativeError>()
                 .unwrap_or_else(|| panic!("{context}: {error:#}"));
-            assert!(native.message.contains(message), "{context}: {error:#}");
+            assert!(
+                String::from_utf8_lossy(&native.message).contains(message),
+                "{context}: {error:#}"
+            );
         }
     }
     let _ = std::fs::remove_file(&short_subject);

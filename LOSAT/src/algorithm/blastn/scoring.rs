@@ -112,7 +112,7 @@ fn check_scoring_options_with(
     let footer = crate::wording::USER_MANUAL_FOOTER;
     Err(NativeError {
         exit: 1,
-        message: format!("BLAST query/options error: {message}\n{footer}\n"),
+        message: format!("BLAST query/options error: {message}\n{footer}\n").into(),
     }
     .into())
 }
@@ -227,7 +227,7 @@ pub(crate) fn karlin_error(
     text.push('\n');
     NativeError {
         exit: 3,
-        message: text,
+        message: text.into(),
     }
     .into()
 }
@@ -470,11 +470,14 @@ mod tests {
     }
 
     fn message(result: anyhow::Result<()>) -> String {
-        result
-            .expect_err("rejected")
-            .downcast::<NativeError>()
-            .expect("an NCBI error")
-            .message
+        String::from_utf8(
+            result
+                .expect_err("rejected")
+                .downcast::<NativeError>()
+                .expect("an NCBI error")
+                .message,
+        )
+        .unwrap()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
@@ -723,7 +726,7 @@ mod tests {
         let error = karlin_error("Substitution scores 1 and -6 are not supported", [false; 2]);
         assert_eq!(
             error.downcast::<NativeError>().unwrap().message,
-            "BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported \n"
+            b"BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported \n"
         );
         // A query without letters keeps its warning after the error (NCBI 2.17.0).
         let error = karlin_error(
@@ -732,7 +735,7 @@ mod tests {
         );
         assert_eq!(
             error.downcast::<NativeError>().unwrap().message,
-            "BLAST engine error: Error: Substitution scores 1 and -6 are not supported Warning: Sequence contains no data Error: Substitution scores 1 and -6 are not supported \n"
+            b"BLAST engine error: Error: Substitution scores 1 and -6 are not supported Warning: Sequence contains no data Error: Substitution scores 1 and -6 are not supported \n"
         );
     }
 

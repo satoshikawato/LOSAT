@@ -2544,7 +2544,10 @@ mod tests {
             let native = error
                 .downcast_ref::<NativeError>()
                 .unwrap_or_else(|| panic!("not a native error: {error:#}"));
-            (native.exit, native.message.clone())
+            (
+                native.exit,
+                String::from_utf8(native.message.clone()).unwrap(),
+            )
         };
         let settings = ApplicationSettings::default();
         let Err(error) = BlastnDatabase::open("", &settings) else {
@@ -2928,7 +2931,7 @@ mod tests {
         // The volume is recorded under its directory normalised with symbolic links
         // followed (seqdbalias.cpp:851-862), as in BLASTP's test.
         assert_eq!(
-            native.message,
+            String::from_utf8(native.message.clone()).unwrap(),
             format!(
                 "BLAST Database error: Error: File ({}) not found.\n",
                 dir.canonicalize().unwrap().join(&missing[1]).display()

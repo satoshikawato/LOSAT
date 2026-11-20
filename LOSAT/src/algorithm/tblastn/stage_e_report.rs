@@ -1401,7 +1401,7 @@ fn write_pairwise(
     }
     let report = BlastpPairwiseReport {
         version: crate::NCBI_BLAST_VERSION.into(),
-        database_name: shown.name(),
+        database_name: shown.name().into(),
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267: options.GetMatrixName(), as typed.

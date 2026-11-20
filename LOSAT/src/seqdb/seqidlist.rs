@@ -205,9 +205,11 @@ pub struct InvalidSeqId {
 }
 
 impl InvalidSeqId {
-    /// The `CSeqDBException` text (`BLAST Database error: Invalid seq id: <token>`).
-    pub fn message(&self) -> String {
-        format!("Invalid seq id: {}", String::from_utf8_lossy(&self.token))
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:165-167
+    /// The `CSeqDBException` text (`BLAST Database error: Invalid seq id: <token>`), with the
+    /// token's bytes (probe R3 of line LIB-B: a word that is not UTF-8).
+    pub fn message(&self) -> Vec<u8> {
+        [b"Invalid seq id: ".as_slice(), &self.token].concat()
     }
 }
 
@@ -430,13 +432,13 @@ mod tests {
         // dropin-survey-20261029/DI8: no error, the id is looked up as it is).
         assert_eq!(processed(&["xyz|ABC|DEF"]), ["xyz|ABC|DEF"]);
         let bad = process_for_v5(&[b"gi|abc".to_vec()], &mut |_| {}).unwrap_err();
-        assert_eq!(bad.message(), "Invalid seq id: gi|abc");
+        assert_eq!(bad.message(), b"Invalid seq id: gi|abc");
         // A FASTA-style id of several parts: NCBI's warning for each non-empty part after the
         // first id (rows db.gisl.bp.full.6, db.gisl.bn.full.6), the gi dropped.
         let warning = SeqIdWarning {
             subcode: 10,
-            message: "Ignoring extra parts (synonyms?) in FASTA-style ID gi|1111|ref|NP_1.1|"
-                .to_string(),
+            message: b"Ignoring extra parts (synonyms?) in FASTA-style ID gi|1111|ref|NP_1.1|"
+                .to_vec(),
         };
         assert_eq!(
             processed_warned(&["gi|1111|ref|NP_1.1|", "NP_2.1"]),

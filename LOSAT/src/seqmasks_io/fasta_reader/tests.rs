@@ -45,7 +45,8 @@ fn run(input: &[u8], protein: bool, parse_seqids: bool) -> Run {
         ReaderWarning::SeqId(warning) => {
             warnings.push_str(&format!(
                 "Warning: (1306.{}) {}\n",
-                warning.subcode, warning.message
+                warning.subcode,
+                String::from_utf8_lossy(&warning.message)
             ));
         }
     };

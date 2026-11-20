@@ -227,7 +227,7 @@ pub enum Prefetched {
 /// side), else LOSAT's text of an error NCBI does not have.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LookupFailure {
-    message: String,
+    message: Vec<u8>,
     ncbi: NcbiFailure,
 }
 
@@ -256,7 +256,7 @@ impl LookupFailure {
         "NCBI BLAST+ 2.17.0 crashes where its lookup reads that file";
 
     /// NCBI's own message.
-    pub fn ncbi(message: impl Into<String>) -> Self {
+    pub fn ncbi(message: impl Into<Vec<u8>>) -> Self {
         Self {
             message: message.into(),
             ncbi: NcbiFailure::Message,
@@ -266,7 +266,7 @@ impl LookupFailure {
     /// LOSAT's text of an error that NCBI does not have.
     pub fn losat(message: impl Into<String>) -> Self {
         Self {
-            message: message.into(),
+            message: message.into().into_bytes(),
             ncbi: NcbiFailure::Other,
         }
     }
@@ -278,7 +278,7 @@ impl LookupFailure {
         match error.ncbi_message() {
             Some(message) => Self::ncbi(message),
             None if error.ncbi_crashes() => Self {
-                message: error.to_string(),
+                message: error.to_string().into_bytes(),
                 ncbi: NcbiFailure::Crashes,
             },
             None => Self::losat(error.to_string()),
@@ -286,8 +286,8 @@ impl LookupFailure {
     }
 
     /// The text NCBI writes after `BLAST Database error: `, where the message is NCBI's own.
-    pub fn ncbi_message(&self) -> Option<&str> {
-        (self.ncbi == NcbiFailure::Message).then_some(self.message.as_str())
+    pub fn ncbi_message(&self) -> Option<&[u8]> {
+        (self.ncbi == NcbiFailure::Message).then_some(self.message.as_slice())
     }
 
     /// The `CSeqDBException` that NCBI's lookup throws, where the message is NCBI's own
@@ -301,7 +301,11 @@ impl LookupFailure {
     pub fn exception(&self) -> Option<crate::ncbi_exception::NcbiException> {
         let message = self.ncbi_message()?;
         let site = crate::seqdb::lookup_throw_site(message)?;
-        Some(crate::ncbi_exception::NcbiException::new(site, message))
+        // Only the ASCII text of `lookup_throw_site` gets here: the conversion loses nothing.
+        Some(crate::ncbi_exception::NcbiException::new(
+            site,
+            String::from_utf8_lossy(message),
+        ))
     }
 
     /// What NCBI does where it reads the subject ([`LookupFailure::NCBI_READS`],
@@ -316,7 +320,7 @@ impl LookupFailure {
 
 impl std::fmt::Display for LookupFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&String::from_utf8_lossy(&self.message))
     }
 }
 
@@ -847,7 +851,7 @@ impl ParsedSubject {
     /// a batch that reports the subject rethrows it, which stops the run with `BLAST Database
     /// error: <message>` (exit status 2) before the batch's reports
     /// (`common::database::batch_prefetch`).
-    pub fn prefetch_stops(&self) -> Option<&str> {
+    pub fn prefetch_stops(&self) -> Option<&[u8]> {
         match &self.found_instead {
             Some(FoundInstead::Failed(failure)) => failure.ncbi_message(),
             _ => None,

@@ -106,7 +106,8 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             crate::cli::NativeError {
                 exit: 3,
                 message: "BLAST engine error: The average subject length is too short\n"
-                    .to_string(),
+                    .to_string()
+                    .into(),
             }
             .into(),
         )

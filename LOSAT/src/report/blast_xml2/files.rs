@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use super::framing::{SideFiles, Xml2Kind};
 use crate::report::run_files::FileReceiver;
+use crate::utils::os_bytes::{path_bytes, path_from_bytes};
 
 /// The characters `CDirEntry::SplitPath` takes as the end of the directory part: `/` on Unix;
 /// `:`, `/` and `\` on Windows.
@@ -22,30 +23,6 @@ use crate::report::run_files::FileReceiver;
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-375, :358-377
 fn is_separator(byte: u8, windows: bool) -> bool {
     byte == b'/' || (windows && (byte == b'\\' || byte == b':'))
-}
-
-#[cfg(unix)]
-fn path_bytes(path: &Path) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt;
-    path.as_os_str().as_bytes().to_vec()
-}
-
-/// Off Unix a path is Unicode text to the program: a `-out` name that is not valid Unicode is
-/// changed by `to_string_lossy` (and `path_from_bytes`), which no NCBI run on Windows tells apart.
-#[cfg(not(unix))]
-fn path_bytes(path: &Path) -> Vec<u8> {
-    path.to_string_lossy().into_owned().into_bytes()
-}
-
-#[cfg(unix)]
-fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
-    use std::os::unix::ffi::OsStringExt;
-    PathBuf::from(std::ffi::OsString::from_vec(bytes))
-}
-
-#[cfg(not(unix))]
-fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
-    PathBuf::from(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// `s_GetBaseName`: the `-out` value without its extension when that is `.xml` (`xml`) or

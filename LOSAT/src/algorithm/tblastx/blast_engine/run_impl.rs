@@ -915,7 +915,7 @@ pub fn run(
     if stream.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
-            message: "BLAST failed to write output\n".to_string(),
+            message: "BLAST failed to write output\n".into(),
         }
         .into());
     }
@@ -1049,7 +1049,7 @@ fn check_subjects_not_empty(subjects: &[FastaRecord]) -> Result<()> {
     if subjects.is_empty() {
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
         }
         .into());
     }
@@ -1838,7 +1838,7 @@ fn write_pairwise_prologs(
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
                         crate::NCBI_BLAST_VERSION,
-                        &tblastx_database_name(args),
+                        tblastx_database_name(args).as_bytes(),
                         records.len() as i64,
                         // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
                         // (Int8) (*iter)->length`).
@@ -1855,7 +1855,7 @@ fn write_pairwise_prologs(
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
                         crate::NCBI_BLAST_VERSION,
-                        "",
+                        b"",
                         0,
                         0,
                         Some(pairwise),
@@ -2263,7 +2263,7 @@ fn write_tblastx_outputs(
                     );
                     let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
                         version: crate::NCBI_BLAST_VERSION.to_string(),
-                        database_name: database.clone(),
+                        database_name: database.clone().into(),
                         // `-db`: the `Database:` lines are the database's (`database` below).
                         // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
                         // held in memory.
@@ -3241,7 +3241,7 @@ fn run_batch_loop(
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+                message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
             }
             .into());
         }
@@ -3300,7 +3300,11 @@ fn run_batch_loop(
                 message.push(' ');
             }
             message.push('\n');
-            return Err(crate::cli::NativeError { exit: 3, message }.into());
+            return Err(crate::cli::NativeError {
+                exit: 3,
+                message: message.into(),
+            }
+            .into());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 (the score block of
         // the batch: a name that the matrix loader does not know fails with -1,
@@ -3325,7 +3329,11 @@ fn run_batch_loop(
                 }
             }
             message.push('\n');
-            return Err(crate::cli::NativeError { exit: 3, message }.into());
+            return Err(crate::cli::NativeError {
+                exit: 3,
+                message: message.into(),
+            }
+            .into());
         }
         warnings[start].append(&batch_warnings);
         let mut batch = match take(start..end) {

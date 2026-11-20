@@ -1088,20 +1088,20 @@ fn invalid_databases_give_ncbis_errors() {
     let error = open_error("alias_missing", SeqType::Protein);
     assert!(
         matches!(&error, SeqDbError::NotFound(message)
-            if message.starts_with("Could not find volume or alias file (no_such_volume) referenced in alias file (")),
+            if message.starts_with(b"Could not find volume or alias file (no_such_volume) referenced in alias file (")),
         "{error}"
     );
     let error = open_error("no_such_database", SeqType::Protein);
     assert!(
         matches!(&error, SeqDbError::NotFound(message)
-            if message.starts_with("No alias or index file found for protein database [")),
+            if message.starts_with(b"No alias or index file found for protein database [")),
         "{error}"
     );
     // A protein database asked for as nucleotide has no .nin file.
     let error = open_error("prot_v4", SeqType::Nucleotide);
     assert!(
         matches!(&error, SeqDbError::NotFound(message)
-            if message.starts_with("No alias or index file found for nucleotide database [")),
+            if message.starts_with(b"No alias or index file found for nucleotide database [")),
         "{error}"
     );
 }
@@ -1196,7 +1196,7 @@ fn column_files_and_missing_files() {
         let error = db.read_sequence(0).unwrap_err();
         assert!(
             matches!(&error, SeqDbError::NotFound(message)
-                if message.starts_with("Error: File (") && message.ends_with("prot_v4.psq) not found.")),
+                if message.starts_with(b"Error: File (") && message.ends_with(b"prot_v4.psq) not found.")),
             "{error}"
         );
     }
@@ -1567,7 +1567,7 @@ fn a_name_is_a_list_as_for_ncbi() {
     let error = SeqDb::open("  ", SeqType::Protein).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::NotFound(message)
-            if message == "No database names were passed to CSeqDB::CSeqDB()."),
+            if message == b"No database names were passed to CSeqDB::CSeqDB()."),
         "{error}"
     );
 }
@@ -1640,7 +1640,7 @@ fn volumes_to_remove_are_those_beside_the_alias_file() {
     let error = super::alias::find_volume_paths(&name, SeqType::Protein).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::NotFound(message) if message
-            == &format!("Could not find volume or alias file (db.00) referenced in alias file ({name}).")),
+            == format!("Could not find volume or alias file (db.00) referenced in alias file ({name}).").as_bytes()),
         "{error}"
     );
     std::fs::remove_dir_all(&root).unwrap();
@@ -1654,7 +1654,10 @@ fn a_version_5_database_needs_its_lmdb_file() {
     let error = SeqDb::open(&name, SeqType::Nucleotide).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::NotFound(message)
-            if message.starts_with("File ") && message.contains("nucl_v5.ndb not found. If you renamed")),
+            if message.starts_with(b"File ")
+                && message
+                    .windows(b"nucl_v5.ndb not found. If you renamed".len())
+                    .any(|window| window == b"nucl_v5.ndb not found. If you renamed")),
         "{error}"
     );
     copy_database("nucl_v5", &["ndb"], &dir);
@@ -2133,7 +2136,11 @@ fn check_search_path_row(
         db.read_sequence(0)
             .unwrap_or_else(|e| panic!("{id}: the sequence file: {e:?}"));
         let read = db.deflines(0).expect_err("the first header read fails");
-        assert_eq!(read.ncbi_message(), Some(place(error)), "{id}: {read:?}");
+        assert_eq!(
+            read.ncbi_message(),
+            Some(place(error).into_bytes()),
+            "{id}: {read:?}"
+        );
         assert_eq!(status, "2", "{id}: exit status of a database error");
         return;
     }
@@ -2175,7 +2182,7 @@ fn check_search_path_row(
                     .ncbi_message()
                     .unwrap_or_else(|| panic!("{id}: not an NCBI error: {e:?}")),
             };
-            assert_eq!(error_text, place(error), "{id}: error text");
+            assert_eq!(error_text, place(error).into_bytes(), "{id}: error text");
         }
         other => panic!("{id}: outcome {other} needs a `losat` column"),
     }
@@ -2280,7 +2287,7 @@ fn files_that_cannot_be_opened_give_ncbis_errors() {
                 .err()
                 .and_then(|error| error.ncbi_message())
                 .unwrap_or_else(|| panic!("{id}: no NCBI error"));
-            assert_eq!(message, place(blastp_error), "{id}");
+            assert_eq!(message, place(blastp_error).into_bytes(), "{id}");
             assert_eq!(row[7], "2", "{id}: exit status of a database error");
         }
         compared += 1;
@@ -2326,10 +2333,13 @@ fn the_search_path_string_and_its_errors() {
             .unwrap_err()
             .ncbi_message()
     };
-    assert_eq!(message("").as_deref(), Some("Database name is required."));
+    assert_eq!(
+        message("").as_deref(),
+        Some(b"Database name is required.".as_slice())
+    );
     assert_eq!(
         message("  ").as_deref(),
-        Some("No database names were passed to CSeqDB::CSeqDB().")
+        Some(b"No database names were passed to CSeqDB::CSeqDB().".as_slice())
     );
     // A program trims the value of `-db` before it opens the database
     // (blast_args.cpp:2472-2476).
@@ -2339,11 +2349,15 @@ fn the_search_path_string_and_its_errors() {
     let error = SeqDb::open_in("no_such_database", SeqType::Nucleotide, &search).unwrap_err();
     assert_eq!(
         error.ncbi_message(),
-        Some(format!(
-            "No alias or index file found for nucleotide database [no_such_database] in search \
-             path [{}]. Please verify the spelling of the BLAST database and its molecule type.",
-            search.as_str()
-        ))
+        Some(
+            format!(
+                "No alias or index file found for nucleotide database [no_such_database] in \
+                 search path [{}]. Please verify the spelling of the BLAST database and its \
+                 molecule type.",
+                search.as_str()
+            )
+            .into_bytes()
+        )
     );
 }
 
@@ -2365,15 +2379,19 @@ fn ncbis_errors_are_told_from_losats() {
         "Illegal configuration: DB alias files are mutually recursive.",
         "No database names were found in alias file [/data/alias].",
     ] {
-        assert_eq!(format(message).ncbi_message().as_deref(), Some(message));
+        assert_eq!(
+            format(message).ncbi_message().as_deref(),
+            Some(message.as_bytes())
+        );
     }
     assert_eq!(
         format("index file ends inside a field").ncbi_message(),
         None
     );
     assert_eq!(
-        SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string()).ncbi_message(),
-        Some("Error: File (/data/db.psq) not found.".to_string())
+        SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string().into())
+            .ncbi_message(),
+        Some(b"Error: File (/data/db.psq) not found.".to_vec())
     );
     let unsupported = SeqDbError::Unsupported {
         path: path.clone(),
@@ -2384,7 +2402,7 @@ fn ncbis_errors_are_told_from_losats() {
     assert_eq!(SeqDbError::Range("x".to_string()).ncbi_message(), None);
     // Inside the search NCBI replaces the reader's text (local_blast.cpp:240-252).
     assert_eq!(
-        SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string())
+        SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string().into())
             .ncbi_search_message(),
         Some("Database memory map file error")
     );
@@ -2417,8 +2435,9 @@ fn ncbis_errors_are_told_from_losats() {
             .ncbi_message()
             .as_deref(),
             Some(
-                "Database memory map file error - CMemoryFile: Cannot memory map file \
-                 '/data/db.pin':Permission denied"
+                b"Database memory map file error - CMemoryFile: Cannot memory map file \
+                  '/data/db.pin':Permission denied"
+                    .as_slice()
             )
         );
         assert_eq!(
@@ -2435,7 +2454,7 @@ fn ncbis_errors_are_told_from_losats() {
                 source: io(code),
             };
             let text = "Too many open files, please raise the open file limit";
-            assert_eq!(error.ncbi_message().as_deref(), Some(text));
+            assert_eq!(error.ncbi_message().as_deref(), Some(text.as_bytes()));
             assert_eq!(error.ncbi_search_message(), Some(text));
         }
     }
@@ -2476,7 +2495,10 @@ fn open_probe() {
             String::from_utf8_lossy(db.title())
         ),
         Err(error) => match error.ncbi_message() {
-            Some(text) => println!("probe: BLAST Database error: {text}"),
+            Some(text) => println!(
+                "probe: BLAST Database error: {}",
+                String::from_utf8_lossy(&text)
+            ),
             None => println!("probe: LOSAT: {error}"),
         },
     }
@@ -2568,11 +2590,11 @@ fn a_directory_in_place_of_an_isam_file_is_no_isam() {
 #[test]
 fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
     let place = |text: &str| {
-        let site = throw_site(text).unwrap_or_else(|| panic!("{text}"));
+        let site = throw_site(text.as_bytes()).unwrap_or_else(|| panic!("{text}"));
         assert_eq!(site.kind, "CSeqDBException::eInvalid", "{text}");
         (site.file, site.line, site.function.unwrap())
     };
-    let get_dbi = super::lookup_throw_site("DB contains no accession info.").unwrap();
+    let get_dbi = super::lookup_throw_site(b"DB contains no accession info.").unwrap();
     assert_eq!(get_dbi.kind, "CSeqDBException::eInvalid");
     assert_eq!(
         (get_dbi.file, get_dbi.line, get_dbi.function.unwrap()),
@@ -2587,7 +2609,7 @@ fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
         "DB contains no vol info.",
         "DB contains no tax id info",
     ] {
-        assert_eq!(throw_site(text), None, "{text}");
+        assert_eq!(throw_site(text.as_bytes()), None, "{text}");
     }
     for text in [
         "DB contains no vol info.",
@@ -2595,7 +2617,7 @@ fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
         "Database name is required.",
         "Error: File (x.pos) not found.",
     ] {
-        assert_eq!(super::lookup_throw_site(text), None, "{text}");
+        assert_eq!(super::lookup_throw_site(text.as_bytes()), None, "{text}");
     }
     assert_eq!(
         place("No alias or index file found for protein database [x] in search path [y]."),
@@ -2615,6 +2637,6 @@ fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
         "Error: Not a valid version 4 or 5 database.",
         "Accessions to Oids lookup error in x",
     ] {
-        assert_eq!(throw_site(text), None, "{text}");
+        assert_eq!(throw_site(text.as_bytes()), None, "{text}");
     }
 }

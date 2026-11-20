@@ -632,7 +632,7 @@ impl SeqidLookup<'_> {
             Err(error)
                 if self.skip_unindexed
                     && error.ncbi_message().as_deref()
-                        == Some(super::tax_files::NO_ACCESSION_INFO) =>
+                        == Some(super::tax_files::NO_ACCESSION_INFO.as_bytes()) =>
             {
                 Ok(None)
             }
@@ -703,8 +703,8 @@ impl SeqidLookup<'_> {
             }
             return self.lmdb_oids(&key);
         }
-        let simplified =
-            seqdb_simplify_seqid(seqid).map_err(|error| SeqDbError::NotFound(error.to_string()))?;
+        let simplified = seqdb_simplify_seqid(seqid)
+            .map_err(|error| SeqDbError::NotFound(error.to_string().into_bytes()))?;
         let mut fasta = Vec::new();
         label::fasta(seqid, &mut fasta);
         let mut oids = Vec::new();

@@ -26,7 +26,9 @@ pub(crate) struct DbMetadata {
     pub number_of_taxids: Option<i32>,
     pub bytes_total: i64,
     pub bytes_to_cache: i64,
-    pub files: Vec<String>,
+    /// The names of the files: bytes, as NCBI's `std::string` holds the name of an LMDB file
+    /// that is not UTF-8 (line LIB-B).
+    pub files: Vec<Vec<u8>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:731-752
@@ -172,7 +174,7 @@ impl DbMetadata {
                 out.put_char(b',')?;
             }
             out.put_eol()?;
-            write_json_string(out, file.as_bytes())?;
+            write_json_string(out, file)?;
         }
         out.dec_indent_level();
         out.put_eol()?;
@@ -195,9 +197,9 @@ impl DbMetadata {
 }
 
 /// `CDirEntry(path).GetName()`: the part after the last path separator.
-fn file_name(path: &str) -> &str {
-    let is_separator = |c: char| c == '/' || (cfg!(windows) && (c == '\\' || c == ':'));
-    match path.rfind(is_separator) {
+fn file_name(path: &[u8]) -> &[u8] {
+    let is_separator = |c: &u8| *c == b'/' || (cfg!(windows) && (*c == b'\\' || *c == b':'));
+    match path.iter().rposition(is_separator) {
         Some(at) => &path[at + 1..],
         None => path,
     }
@@ -209,7 +211,7 @@ fn file_name(path: &str) -> &str {
 // the length cannot be read; a file whose `stat` succeeded a moment before gives its
 // length here (`None` only when it is not a regular file).
 /// `CFile(path).Exists()` and `GetLength()`: the length of the regular file `path`.
-fn file_length(path: &str) -> Option<i64> {
+fn file_length(path: impl AsRef<Path>) -> Option<i64> {
     let meta = std::fs::metadata(path).ok()?;
     meta.is_file().then_some(meta.len() as i64)
 }
@@ -224,21 +226,24 @@ fn file_length(path: &str) -> Option<i64> {
 // the earlier database of the same name left (a `<db>.pjs` that the removal of a database
 // of several volumes does not take) is listed and counted as NCBI lists it.
 /// `x_GetDBFilesMetaData`: the bytes of the database's files, the bytes of its index
-/// and sequence files, and the sorted names of its files, each after `user_path`.
+/// and sequence files, and the sorted names of its files, each after `user_path`. An LMDB
+/// file's name is the bytes of the volume's header (`lmdb_file_names`), which need not be
+/// UTF-8; NCBI finds, counts and lists the files of such a name (line LIB-B).
 pub(crate) fn db_files_metadata(
     volumes: &[String],
     alias_files: &[String],
-    lmdbs: &[String],
+    lmdbs: &[std::path::PathBuf],
     is_protein: bool,
     user_path: &str,
-) -> (i64, i64, Vec<String>) {
+) -> (i64, i64, Vec<Vec<u8>>) {
+    use crate::utils::os_bytes::{path_bytes, path_from_bytes};
     let mut db_files = Vec::new();
     let mut disk_bytes = 0i64;
     let mut cached_bytes = 0i64;
-    let listed = |name: &str| format!("{user_path}{}", file_name(name));
+    let listed = |name: &[u8]| [user_path.as_bytes(), file_name(name)].concat();
     for alias in alias_files {
         if let Some(length) = file_length(alias) {
-            db_files.push(listed(alias));
+            db_files.push(listed(alias.as_bytes()));
             disk_bytes += length;
         }
     }
@@ -247,7 +252,7 @@ pub(crate) fn db_files_metadata(
         for ext in VOLUME_EXTENSIONS {
             let file = format!("{path}.{mol}{ext}");
             if let Some(length) = file_length(&file) {
-                db_files.push(listed(&file));
+                db_files.push(listed(file.as_bytes()));
                 disk_bytes += length;
                 if ext == "in" || ext == "sq" {
                     cached_bytes += length;
@@ -257,13 +262,17 @@ pub(crate) fn db_files_metadata(
     }
     for lmdb in lmdbs {
         if let Some(length) = file_length(lmdb) {
-            db_files.push(listed(lmdb));
+            let lmdb = path_bytes(lmdb);
+            db_files.push(listed(&lmdb[..]));
             disk_bytes += length;
-            let base = lmdb.rfind('.').map_or(lmdb.as_str(), |dot| &lmdb[..dot]);
+            let base = lmdb
+                .iter()
+                .rposition(|&b| b == b'.')
+                .map_or(&lmdb[..], |dot| &lmdb[..dot]);
             for ext in ["os", "ot", "tf", "to"] {
-                let file = format!("{base}.{mol}{ext}");
-                if let Some(length) = file_length(&file) {
-                    db_files.push(listed(&file));
+                let file = [base, format!(".{mol}{ext}").as_bytes()].concat();
+                if let Some(length) = file_length(path_from_bytes(file.as_slice())) {
+                    db_files.push(listed(&file[..]));
                     disk_bytes += length;
                 }
             }
@@ -712,7 +721,7 @@ mod tests {
             files: [
                 "db.pdb", "db.phr", "db.pin", "db.pot", "db.psq", "db.ptf", "db.pto",
             ]
-            .map(String::from)
+            .map(|name| name.as_bytes().to_vec())
             .to_vec(),
         };
         let expected =
@@ -786,11 +795,15 @@ mod tests {
     /// The metadata of a protein database of `volumes` volumes of four files each, with a
     /// description of `pad` bytes.
     fn metadata(volumes: usize, pad: usize) -> DbMetadata {
-        let mut files: Vec<String> = (0..volumes)
-            .flat_map(|v| ["phr", "pin", "pog", "psq"].map(|e| format!("db.{v:03}.{e}")))
+        let mut files: Vec<Vec<u8>> = (0..volumes)
+            .flat_map(|v| {
+                ["phr", "pin", "pog", "psq"].map(|e| format!("db.{v:03}.{e}").into_bytes())
+            })
             .collect();
-        files
-            .extend(["db.pal", "db.pdb", "db.pos", "db.pot", "db.ptf", "db.pto"].map(String::from));
+        files.extend(
+            ["db.pal", "db.pdb", "db.pos", "db.pot", "db.ptf", "db.pto"]
+                .map(|name| name.as_bytes().to_vec()),
+        );
         DbMetadata {
             dbname: b"db".to_vec(),
             dbtype: "Protein",

@@ -40,7 +40,7 @@ pub struct ProteinOptionsCheck<'a> {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1759-1776
 pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Result<()> {
-    use crate::blastinput::app::options_error;
+    use crate::blastinput::app::{options_error, options_error_bytes};
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:910-936 (the scoring
     // check of BLAST_ValidateOptions; blastp and tblastn may use IDENTITY)
     // psiblast and PSI-TBLASTN are neither blastp nor tblastn: their matrices are the standard
@@ -55,13 +55,13 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
         ) {
             Ok(_) => {}
             Err(TableStatus::UnknownMatrix) => {
-                return Err(options_error(&print_matrix_message(
+                return Err(options_error_bytes(&print_matrix_message(
                     check.matrix_name,
                     std_matrix_only,
                 )))
             }
             Err(TableStatus::UnknownGapCosts) => {
-                return Err(options_error(&print_allowed_values(
+                return Err(options_error_bytes(&print_allowed_values(
                     check.matrix_name,
                     check.gap_open,
                     check.gap_extend,

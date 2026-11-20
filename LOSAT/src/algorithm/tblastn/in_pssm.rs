@@ -83,7 +83,7 @@ pub(super) fn file_error_in_run(error: &anyhow::Error) -> bool {
         .is_some_and(|native| {
             native
                 .message
-                .starts_with("Command line argument error: Argument \"in_pssm\".")
+                .starts_with(b"Command line argument error: Argument \"in_pssm\".")
         })
 }
 

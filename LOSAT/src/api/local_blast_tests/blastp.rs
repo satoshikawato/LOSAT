@@ -383,7 +383,7 @@ fn a_batch_of_queries_without_residues_stops() {
     assert_eq!(native.exit, 3);
     assert_eq!(
         native.message,
-        "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        b"BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
     assert!(diagnostics.is_empty());
     let prolog = String::from_utf8_lossy(&outputs[0]);

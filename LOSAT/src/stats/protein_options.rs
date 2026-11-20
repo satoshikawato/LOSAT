@@ -90,7 +90,9 @@ fn snprintf(buffer: &mut Vec<u8>, size: i32, text: &str) -> i32 {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3760-3788
-pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> String {
+/// The message's bytes: the buffer can end inside a character of the name (NCBI BLAST+ 2.17.0,
+/// probe R9 of line LIB-B: 1,000 `a` and 30 `é` end with the byte 0xC3).
+pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut buffer_sz: i32 = 1024;
     let out_sz = snprintf(
@@ -108,11 +110,12 @@ pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> String {
         let out_sz = snprintf(&mut buffer, buffer_sz, &format!("{} \n", table.name));
         buffer_sz = (buffer_sz - out_sz).max(0);
     }
-    String::from_utf8_lossy(&buffer).into_owned()
+    buffer
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3792-3839
-pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -> String {
+/// The message's bytes ([`print_matrix_message`]).
+pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut buffer_sz: i32 = 2048;
     let out_sz = snprintf(
@@ -139,7 +142,7 @@ pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -
             buffer_sz = (buffer_sz - out_sz).max(0);
         }
     }
-    String::from_utf8_lossy(&buffer).into_owned()
+    buffer
 }
 
 /// The best gap costs of the matrix `name`, the row whose preference is
@@ -224,12 +227,19 @@ mod tests {
     fn matrix_message_lists_ncbis_matrices() {
         assert_eq!(
             print_matrix_message("FOO", false),
-            "FOO is not a supported matrix, supported matrices are:\nBLOSUM80 \nBLOSUM62 \nBLOSUM50 \nBLOSUM45 \nPAM250 \nBLOSUM90 \nPAM30 \nPAM70 \nIDENTITY \n"
+            b"FOO is not a supported matrix, supported matrices are:\nBLOSUM80 \nBLOSUM62 \nBLOSUM50 \nBLOSUM45 \nPAM250 \nBLOSUM90 \nPAM30 \nPAM70 \nIDENTITY \n"
         );
-        assert!(!print_matrix_message("FOO", true).contains("IDENTITY"));
+        assert!(!print_matrix_message("FOO", true)
+            .windows(8)
+            .any(|w| w == b"IDENTITY"));
         // The 1024-byte buffer: a long name truncates the message.
         let long = "M".repeat(2000);
         assert_eq!(print_matrix_message(&long, false).len(), 1023);
+        // ... inside a character, whose first byte stays (probe R9 of line LIB-B).
+        let cut = format!("{}{}", "a".repeat(1000), "\u{e9}".repeat(30));
+        let message = print_matrix_message(&cut, false);
+        assert_eq!(message.len(), 1023);
+        assert_eq!(&message[1020..], b"\xc3\xa9\xc3");
     }
 
     // NCBI BLAST+ 2.17.0 `blastp -matrix PAM30 -gapopen 1 -gapextend 1` (status 2).
@@ -237,7 +247,7 @@ mod tests {
     fn allowed_values_list_the_table_in_order() {
         assert_eq!(
             print_allowed_values("PAM30", 1, 1),
-            "Gap existence and extension values of 1 and 1 not supported for PAM30\nsupported values are:\n32767, 32767\n7, 2\n6, 2\n5, 2\n10, 1\n9, 1\n8, 1\n15, 3\n14, 2\n14, 1\n13, 3\n"
+            b"Gap existence and extension values of 1 and 1 not supported for PAM30\nsupported values are:\n32767, 32767\n7, 2\n6, 2\n5, 2\n10, 1\n9, 1\n8, 1\n15, 3\n14, 2\n14, 1\n13, 3\n"
         );
     }
 

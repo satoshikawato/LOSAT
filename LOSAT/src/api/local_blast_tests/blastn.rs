@@ -575,7 +575,10 @@ fn native_error(result: anyhow::Result<()>) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .unwrap_or_else(|| panic!("NCBI's error: {error:#}"));
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652

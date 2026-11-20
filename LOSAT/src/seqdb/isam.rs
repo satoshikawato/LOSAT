@@ -286,11 +286,14 @@ pub(super) fn index_exists(index: &Path, data: &Path) -> bool {
 /// ([`DbFile::open`]: no regular file, or one that `open` refuses).
 pub(super) fn open_files(index: &Path, data: &Path) -> Result<(DbFile, DbFile), SeqDbError> {
     let message = || {
-        SeqDbError::NotFound(format!(
-            "Error: Could not open input file ({}/{})",
-            index.display(),
-            data.display()
-        ))
+        SeqDbError::NotFound(
+            format!(
+                "Error: Could not open input file ({}/{})",
+                index.display(),
+                data.display()
+            )
+            .into(),
+        )
     };
     let index_file = DbFile::open(index).map_err(|_| message())?;
     let data_file = DbFile::open(data).map_err(|_| message())?;
@@ -338,7 +341,7 @@ impl StringIsam {
     pub fn file_names(dbname: &str, protein: bool) -> Result<(PathBuf, PathBuf), SeqDbError> {
         if dbname.is_empty() {
             return Err(SeqDbError::NotFound(
-                "Error: argument not valid".to_string(),
+                "Error: argument not valid".to_string().into(),
             ));
         }
         let mut index = format!("{dbname}.{}s", if protein { 'p' } else { 'n' });
@@ -1208,7 +1211,11 @@ impl ScanChunk {
 
 /// NCBI's `CSeqDBException(eArgErr, "Error: Unable to use ISAM index in batch mode.")`.
 fn batch_mode_error() -> SeqDbError {
-    SeqDbError::NotFound("Error: Unable to use ISAM index in batch mode.".to_string())
+    SeqDbError::NotFound(
+        "Error: Unable to use ISAM index in batch mode."
+            .to_string()
+            .into(),
+    )
 }
 
 /// One entry of a list of string ids (`CSeqDBGiList::SSiOid`): the id and its OID, set by

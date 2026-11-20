@@ -3235,9 +3235,9 @@ mod tests {
         let native = error.downcast::<crate::cli::NativeError>().unwrap();
         assert_eq!(native.exit, 2);
         assert!(
-            native.message.contains("DB contains no accession info."),
+            String::from_utf8_lossy(&native.message).contains("DB contains no accession info."),
             "{}",
-            native.message
+            String::from_utf8_lossy(&native.message)
         );
     }
 

@@ -613,12 +613,14 @@ mod tests {
             crate::wording::losat_text(&format!(
                 "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/seq/../seqalign/Seq_align.cpp\", line 227: Error: (CSeqalignException::eInvalidAlignment) CSeq_align::GetSeqRange(): Row is empty\n\n"
             ))
+            .as_bytes()
         );
         assert_eq!(
             crate::cli::NativeError::exception(&std_seg_lengths_not_accurate()).message,
             crate::wording::losat_text(&format!(
                 "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/seq/../seqalign/Seq_align.cpp\", line 801: Error: (CSeqalignException::eInvalidInputAlignment) CreateDensegFromStdseg(): Std-seg segment lengths not accurate!\n\n"
             ))
+            .as_bytes()
         );
     }
 

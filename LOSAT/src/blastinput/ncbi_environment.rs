@@ -151,24 +151,27 @@ fn registry_search_path(
     env: &dyn Fn(&str) -> Option<OsString>,
     process: &ProcessFacts,
 ) -> Result<Vec<PathBuf>, String> {
-    let delimiters: &[char] = if cfg!(windows) { &[';'] } else { &[':', ';'] };
+    let delimiter = |byte: &u8| *byte == b';' || (!cfg!(windows) && *byte == b':');
     let mut path: Vec<PathBuf> = Vec::new();
     let mut tail: Vec<PathBuf> = Vec::new();
     if let Some(config_path) = env("NCBI_CONFIG_PATH") {
-        let config_path = config_path.to_string_lossy().into_owned();
+        // The variable's bytes (`NcbiSys_getenv`), as the directories' names: a directory whose
+        // name is not UTF-8 is searched as NCBI searches it (probe R7 of line LIB-B).
+        let config_path = crate::utils::os_bytes::os_str_bytes(&config_path);
         if config_path.is_empty() {
             return Ok(Vec::new());
         }
-        let parts: Vec<&str> = config_path.split(delimiters).collect();
+        let directory = |part: &&[u8]| crate::utils::os_bytes::path_from_bytes(*part);
+        let parts: Vec<&[u8]> = config_path.split(delimiter).collect();
         match parts.iter().position(|part| part.is_empty()) {
-            None => return Ok(parts.iter().map(PathBuf::from).collect()),
+            None => return Ok(parts.iter().map(directory).collect()),
             Some(empty) => {
-                path.extend(parts[..empty].iter().map(PathBuf::from));
+                path.extend(parts[..empty].iter().map(directory));
                 tail.extend(
                     parts[empty + 1..]
                         .iter()
                         .filter(|part| !part.is_empty())
-                        .map(PathBuf::from),
+                        .map(directory),
                 );
             }
         }

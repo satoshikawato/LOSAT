@@ -684,7 +684,7 @@ pub(super) fn write_pairwise(
         .collect();
     let pairwise_report = BlastpPairwiseReport {
         version: crate::NCBI_BLAST_VERSION.to_string(),
-        database_name: blastp_scan_mode_definition(subject_input_label),
+        database_name: blastp_scan_mode_definition(subject_input_label).into(),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267: options.GetMatrixName(), as typed.

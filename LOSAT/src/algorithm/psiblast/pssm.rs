@@ -222,7 +222,7 @@ impl std::error::Error for PssmStop {}
 fn blast_options_error(message: &str) -> anyhow::Error {
     crate::cli::NativeError {
         exit: 1,
-        message: format!("BLAST options error: {message}\n"),
+        message: format!("BLAST options error: {message}\n").into(),
     }
     .into()
 }

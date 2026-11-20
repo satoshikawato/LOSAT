@@ -124,7 +124,7 @@ fn read_source<R: std::io::Read>(
             Role::Query => error.into_app_error(),
             Role::Subject => error.into_all_seqs_error(),
         };
-        Error::Input(format!("{error:#}").trim_end_matches('\n').into())
+        Error::Input(super::error::input_bytes(&error))
     })
 }
 
@@ -134,8 +134,7 @@ fn read_source<R: std::io::Read>(
 /// `.bz2` or `.zst` is inflated (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8). `read_fasta`
 /// and `read_inputs` read the bytes.
 pub fn read_input_file(role: Role, path: &std::path::Path) -> Result<Vec<u8>, Error> {
-    let input_error =
-        |error: anyhow::Error| Error::Input(format!("{error:#}").trim_end_matches('\n').into());
+    let input_error = |error: anyhow::Error| Error::Input(super::error::input_bytes(&error));
     let name = match role {
         Role::Query => "query",
         Role::Subject => "subject",
@@ -424,6 +423,21 @@ mod tests {
                 .into()
             )
         );
+        // A name that is not UTF-8 keeps its bytes, as on the command line (line LIB-B).
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let missing = directory.join(std::ffi::OsStr::from_bytes(b"none\xE9.fa"));
+            let error = read_input_file(Role::Query, &missing).unwrap_err();
+            let expected = [
+                b"Command line argument error: Argument \"query\". File is not accessible:  `"
+                    .as_slice(),
+                missing.as_os_str().as_bytes(),
+                b"'",
+            ]
+            .concat();
+            assert_eq!(error, Error::Input(expected));
+        }
         std::fs::remove_dir_all(&directory).unwrap();
     }
 

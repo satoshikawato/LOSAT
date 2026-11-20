@@ -379,9 +379,7 @@ pub(super) fn write_blastx_tabular(
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1316
     let database: Vec<u8> = match shown {
-        ShownSubjects::Fasta { path, .. } => {
-            format!("User specified sequence set (Input: {})", path.display()).into_bytes()
-        }
+        ShownSubjects::Fasta { path, .. } => crate::report::pairwise::subject_set_name(path),
         ShownSubjects::Database { name, .. } => name.as_bytes().to_vec(),
     };
     let names = match shown {

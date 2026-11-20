@@ -1049,6 +1049,21 @@ impl BlastpPrelimKernel<'_> {
         // 			   align_length * hit_options->percent_identity) ||
         // 			   align_length < hit_options->min_hit_length) ;
         // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+        // `-subject_besthit` on the subject's list of every query, sorted by score, before the test
+        // below deletes the HSPs of a negative length: the step sees them, as NCBI's does (it runs
+        // in the engine; the reevaluation that deletes them is the caller's).
+        if args.subject_besthit {
+            crate::core::blast_hits::subject_besthit(&mut preliminary_hsp_list, false, |hsp| {
+                crate::core::blast_hits::BestHitExtent {
+                    context: i64::from(hsp.query_context),
+                    query_frame: 0,
+                    offset: i64::from(hsp.query_start),
+                    end: i64::from(hsp.query_end),
+                    query_length: 0,
+                }
+            });
+        }
         // BLASTP has no `-perc_identity` and its minimum hit length is 0: the test deletes an HSP
         // of a negative length (`align_length` of an ungapped HSP is the length of its query range,
         // blast_hits.c:773-780) and keeps the others, whose scores did not change, in their order.
@@ -1680,6 +1695,20 @@ impl BlastpPrelimKernel<'_> {
                 &timing.preliminary_endpoint_duplicates_purged,
                 endpoint_duplicates_purged,
             );
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+        // `-subject_besthit` on the subject's list of every query, sorted by score, before the
+        // e-values and the reap by the preliminary e-value.
+        if args.subject_besthit {
+            crate::core::blast_hits::subject_besthit(&mut preliminary_hsp_list, false, |hsp| {
+                crate::core::blast_hits::BestHitExtent {
+                    context: i64::from(hsp.query_context),
+                    query_frame: 0,
+                    offset: i64::from(hsp.query_start),
+                    end: i64::from(hsp.query_end),
+                    query_length: 0,
+                }
+            });
         }
         if x_hits_flat::x_bphitsflat() {
             x_hits_flat::x_lists_by_query(

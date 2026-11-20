@@ -2184,6 +2184,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 },

@@ -470,6 +470,10 @@ pub struct BlastpArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
+    /// Return only the best HSP for each non overlapping query region
+    #[arg(long)]
+    pub subject_besthit: bool,
     #[arg(long)]
     pub ungapped: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229, 276-286
@@ -852,6 +856,8 @@ pub struct ResolvedBlastpArgs {
     pub query_cov_hsp_perc: f64,
     /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
     pub culling_limit: i32,
+    /// Whether -subject_besthit was given.
+    pub subject_besthit: bool,
     pub ungapped: bool,
     /// The X-drops in bits (`word_options->x_dropoff`, `ext_options->gap_x_dropoff` and
     /// `gap_x_dropoff_final`): `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or the defaults
@@ -1594,6 +1600,7 @@ impl BlastpArgs {
             // opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit_value(),
+            subject_besthit: self.subject_besthit,
             ungapped: self.ungapped,
             x_drop_ungapped_bits: self
                 .xdrop_ungap

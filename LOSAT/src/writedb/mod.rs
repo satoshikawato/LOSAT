@@ -133,29 +133,48 @@ pub enum WriteDbError {
 // "other" errors ("Error: " and exit status 255, `makeblastdb::MakedbError::exit_code`),
 // with the path and the system's message; they are not errors of the database's contents
 // ("BLAST Database creation error").
-impl std::fmt::Display for WriteDbError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl WriteDbError {
+    /// A creation error with the message `message`, whose bytes are kept when they are not UTF-8.
+    pub(crate) fn creation(message: Vec<u8>) -> Self {
+        match String::from_utf8(message) {
+            Ok(text) => WriteDbError::Creation(text),
+            Err(error) => WriteDbError::CreationBytes(error.into_bytes()),
+        }
+    }
+
+    /// The message makeblastdb prints for the error (without the line feed that ends it), as
+    /// bytes: a name or a word of the input that is not UTF-8 keeps its bytes, as in NCBI's
+    /// `std::string`.
+    pub fn message(&self) -> Vec<u8> {
+        let text = |prefix: &str, message: &[u8]| [prefix.as_bytes(), message].concat();
         match self {
             WriteDbError::Creation(message) => {
-                write!(f, "BLAST Database creation error: {message}")
+                text("BLAST Database creation error: ", message.as_bytes())
             }
-            WriteDbError::CreationBytes(message) => write!(
-                f,
-                "BLAST Database creation error: {}",
-                String::from_utf8_lossy(message)
-            ),
-            WriteDbError::Options(message) => write!(f, "BLAST options error: {message}"),
-            WriteDbError::Database(message) => write!(f, "BLAST Database error: {message}"),
+            WriteDbError::CreationBytes(message) => {
+                text("BLAST Database creation error: ", message)
+            }
+            WriteDbError::Options(message) => text("BLAST options error: ", message.as_bytes()),
+            WriteDbError::Database(message) => text("BLAST Database error: ", message.as_bytes()),
             // `what()` ends with a line feed and the message gets one more: the report ends
             // with an empty line.
-            WriteDbError::Exception(e) => write!(f, "Error: {}", e.what()),
-            WriteDbError::Other(message) => write!(f, "Error: {message}"),
-            WriteDbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
-            WriteDbError::OutOfMemory => f.write_str("BLAST ran out of memory"),
-            WriteDbError::Io { path, source } => {
-                write!(f, "Error: {}: {source}", path.display())
-            }
+            WriteDbError::Exception(e) => text("Error: ", &e.what()),
+            WriteDbError::Other(message) => text("Error: ", message.as_bytes()),
+            WriteDbError::Unsupported(message) => text("losat makeblastdb: ", message.as_bytes()),
+            WriteDbError::OutOfMemory => b"BLAST ran out of memory".to_vec(),
+            WriteDbError::Io { path, source } => [
+                b"Error: ".as_slice(),
+                &crate::utils::os_bytes::path_bytes(path),
+                format!(": {source}").as_bytes(),
+            ]
+            .concat(),
         }
+    }
+}
+
+impl std::fmt::Display for WriteDbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&String::from_utf8_lossy(&self.message()))
     }
 }
 

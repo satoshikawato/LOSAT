@@ -76,6 +76,9 @@ pub(super) struct WordFinderCx<'a> {
     /// The query batch as the extensions read it past a context's ends (its refusals go to
     /// `x_read_failure`; extension/query_batch.rs).
     pub(super) query_batch: QueryBatch<'a>,
+    /// `-subject_besthit`: each subject frame's list is filtered after each merge of a chunk
+    /// (`frame_chunks::add_chunk_result`).
+    pub(super) subject_besthit: bool,
 }
 
 /// The subject's and the subject frame's values the word finder reads, made per frame by the

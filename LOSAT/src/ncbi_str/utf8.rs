@@ -210,12 +210,12 @@ mod tests {
         let ncbi = |text: &str| crate::wording::losat_text(text).into_owned();
         let error = Utf8Error::SymbolToChar.exception();
         assert_eq!(error.site().line, 6901);
-        assert_eq!(error.what(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)\n"));
+        assert_eq!(String::from_utf8(error.what()).unwrap(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)\n"));
         let error = Utf8Error::DecodeFirst.exception();
         assert_eq!(error.site().line, 7190);
-        assert_eq!(error.what(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7190: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeFirst() - Source string is not in UTF8 format (m_Pos = 0)\n"));
+        assert_eq!(String::from_utf8(error.what()).unwrap(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7190: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeFirst() - Source string is not in UTF8 format (m_Pos = 0)\n"));
         let error = Utf8Error::DecodeNext.exception();
         assert_eq!(error.site().line, 7202);
-        assert_eq!(error.what(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7202: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeNext() - Source string is not in UTF8 format (m_Pos = 0)\n"));
+        assert_eq!(String::from_utf8(error.what()).unwrap(), ncbi("NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7202: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeNext() - Source string is not in UTF8 format (m_Pos = 0)\n"));
     }
 }

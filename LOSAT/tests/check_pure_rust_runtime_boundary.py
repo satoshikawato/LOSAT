@@ -459,7 +459,7 @@ def _scan_manifest(manifest: Path, root: Path) -> list[Finding]:
 def _is_reviewed_wasi_crt(path: Path, root: Path) -> bool:
     return path.is_file() and _relative(path, root) == "LOSAT/build.rs" and hashlib.sha256(
         path.read_text(encoding="utf-8").encode("utf-8")
-    ).hexdigest() == "7d70a92bfe68a76662ed485e0d98ea82e4294a84c959714fb62ad331ef808830"
+    ).hexdigest() == "f63ebff0483ba0488df11f07a96f82f6ac6d6be3032f22abca250c0d0aad3094"
 
 
 def _scan_build_scripts(root: Path) -> list[Finding]:

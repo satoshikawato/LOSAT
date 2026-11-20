@@ -41,7 +41,7 @@ pub(super) fn fixture(name: &str) -> (Vec<FastaRecord>, PreparedQueryBatch, Reso
     let batch = prepare_queries(&records, &o).unwrap();
     (records, batch, o)
 }
-// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/split_query_unit_test.cpp:1901-1930 CalculateNumberChunks
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/split_query_unit_test.cpp:1901-1925 CalculateNumberChunks
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/split_query_unit_test.cpp:1927-1931 InvalidChunkSizeBlastx
 #[test]
 fn active_n04_mutable_chunk_size_and_invalid_divisibility() {
@@ -260,7 +260,7 @@ fn kept_blocks_equal_score_block_of_the_unsplit_chunk() {
         }
     }
 }
-// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:282-302 BackboneSequenceTest
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:282-292 BackboneSequenceTest
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:294-304 SmallboneSequenceTest
 #[test]
 fn active_ncbi_lookup_overflow_u16_boundary_preserves_all_offsets() {

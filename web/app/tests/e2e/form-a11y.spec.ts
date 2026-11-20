@@ -6,6 +6,7 @@
 // high contrast), the selected mode, tab and row are marked in a system colour.
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
+import { axeViolations } from './support/axe';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { focused } from './support/live';
 import { chooseRun, openParameters, openSearch, paste, program, submit, waitStatus } from './support/search';
@@ -26,6 +27,19 @@ async function expectAccepted(control: Locator): Promise<void> {
   await expect(control).not.toHaveAttribute('aria-invalid');
   await expect(control).not.toHaveAttribute('aria-describedby');
 }
+
+// Line WQA's random walk (2026-11-19): the error colour was 4.3:1 on the page's ground under these two
+// messages, in the three engines (tests/unit/colour-contrast.test.ts checks the colours themselves).
+test('axe finds nothing in a refused Run\'s message and in a refusal of "Additional options"', async ({ page }) => {
+  await openSearch(page);
+  await submit(page);
+  await expect(page.getByTestId('search-message')).toHaveText('Add the query sequences: paste them or open FASTA files.');
+  expect(await axeViolations(page, ['[data-testid="search-message"]'])).toEqual([]);
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('-evalue abc');
+  await expect(page.getByTestId('argv-validation')).toHaveText('-evalue is set in the form: Expect threshold');
+  expect(await axeViolations(page, ['[data-testid="argv-validation"]'])).toEqual([]);
+});
 
 test('a refusal of "Additional options" marks its text box, which points to the message, until it is fixed', async ({ page }) => {
   await openSearch(page);

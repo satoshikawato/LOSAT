@@ -19,6 +19,7 @@
 //! ```
 
 use crate::stats::{blast_spouge_etos, blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::utils::glibc_fma_libm::GlibcLibm;
 
 /// What the e-values and the hit-saving cutoff of a PSSM search read besides the Karlin block:
 /// the Gumbel block, and without it the context's effective search space.
@@ -182,7 +183,7 @@ fn karlin_stoe_simple(score: i32, kbp: &KarlinParams, searchsp: i64) -> f64 {
     if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 {
         return -1.0;
     }
-    searchsp as f64 * (-kbp.lambda * score as f64 + kbp.k.ln()).exp()
+    searchsp as f64 * (-kbp.lambda * score as f64 + kbp.k.glibc_ln()).glibc_exp()
 }
 
 #[cfg(test)]
@@ -238,12 +239,12 @@ mod tests {
         assert!((e - 0.0011139502021664525).abs() < 1e-18, "{e:e}");
         assert_eq!(
             e.to_bits(),
-            (10_000f64 * (-0.267 * 48f64 + 0.041f64.ln()).exp()).to_bits()
+            (10_000f64 * (-0.267 * 48f64 + 0.041f64.glibc_ln()).glibc_exp()).to_bits()
         );
         let max = EvalueStats::new(None, i64::MAX);
         assert_eq!(
             max.e_value(48, &kbp, 302, 250),
-            9_223_372_036_854_775_807f64 * (-0.267 * 48f64 + 0.041f64.ln()).exp()
+            9_223_372_036_854_775_807f64 * (-0.267 * 48f64 + 0.041f64.glibc_ln()).glibc_exp()
         );
         for invalid in [
             KarlinParams {

@@ -7,7 +7,10 @@
 //
 // One subject is registered once per program and reused by consecutive runs with other
 // queries and options (plan §4.6). The serial reactor runs with 1 thread, the threaded
-// reactor with 1, 2 and 4 (the host appends -num_threads, docs/web/abi_v2.md §7).
+// reactor with 1, 2 and 4 (the host appends -num_threads, docs/web/abi_v2.md §7). A search whose
+// *start* JSON says `register_inputs` (-parse_deflines) reads its query and subject together for
+// each run's argv (`losat_web2_register_inputs`, abi_v2.md §4; line WQA's sweep, D7, 2026-11-19),
+// and the IDs that the response shows for the records are the first two columns of outfmt 6.
 //
 // The searches come from web/adapter/tools/v_abi_cases.py; where a frozen SHA-256
 // exists (Gate A, the Stage G matrix, NCBI's fixtures) the match is recorded as well, for a
@@ -20,6 +23,16 @@
 // (`"files": true`) is a ZIP archive, whose entries are compared with the files of the CLI's run
 // with `-out results`: the side files `results_<n>.json|xml`, and the master file as
 // `results.json|xml`.
+//
+// A search with `"fails_alone"` lists the formats of 0, 6 and 7 whose CLI run of the argv fails
+// while the argv's own format runs (a record that is both a query and a subject under
+// -parse_deflines and has masks: LOSAT refuses outfmt 0 alone; line WQA's sweep, D7, 2026-11-19):
+// the run writes no stream for them, and stream 3 is the CLI's standard error of the argv's own
+// format followed by each such format's error (the last line of its CLI run's standard error), as
+// the adapter writes a refusal of a format that failed alone (abi_v2.md §7), and the run's signals of
+// stream 9 name them and no other stream, each with the place of its error, which holds it (abi_v2.md §5). Its `"outfmt"` may be 6 or 7 (the argv's own
+// format then is that stream, and no stream 4 is written). Every run that succeeds says once where its messages go
+// (stream 10): stream 3 without -logfile (line WQA's sweep, D7, 2026-11-20).
 //
 // A BLASTN search with `-window_masker_db` names a counts file: the host registers that file under
 // the argv's value (`file_begin`, `file_chunk`, `file_end`; abi_v2.md §4) before the run, and keeps
@@ -342,13 +355,23 @@ function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
   let stderr = null, status = null;
   const stderrs = new Map();
+  const alone = new Set(search.fails_alone || []);
+  const refusals = [];
   for (const format of FORMATS[search.program]) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
     const failed = result.status !== 0;
-    if (failed !== (search.expect === "failure")) {
+    if (failed !== (search.expect === "failure" || alone.has(format))) {
       throw new Error(`native ${argv.join(" ")} ${failed ? "failed" : "succeeded"} (exit ${result.status}): ${result.error ?? result.stderr}`);
+    }
+    if (alone.has(format)) {
+      // The format that fails alone: no stream, and its error after the warnings on stream 3.
+      fs.rmSync(out, { force: true });
+      outputs.set(format, Buffer.alloc(0));
+      const messages = result.stderr.toString().split("\n").filter(Boolean);
+      refusals.push(Buffer.from(`${messages[messages.length - 1]}\n`));
+      continue;
     }
     outputs.set(format, fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0));
     fs.rmSync(out, { force: true });
@@ -365,12 +388,12 @@ function nativeOutputs(native, search, scratch) {
   if (stderrs.has(6)) {
     stderr = stderrs.get(6);
     if (stderrs.has(7)) assert.equal(sha256(stderrs.get(7)), sha256(stderr), "outfmt 7 writes the warnings of outfmt 6");
-    for (const format of FORMATS[search.program].filter((f) => f !== 6)) {
+    for (const format of FORMATS[search.program].filter((f) => f !== 6 && !alone.has(f))) {
       assert.deepEqual(withoutHandler(format), withoutHandler(6), `outfmt ${format}: the same warnings but the handler's`);
       for (const line of lines(format)) assert.ok(lines(6).includes(line), `outfmt ${format}: ${line} is in the warnings of outfmt 6`);
     }
   }
-  if (search.outfmt !== undefined) {
+  if (customStream(search)) {
     const directory = fs.mkdtempSync(path.join(scratch, "native.custom."));
     const out = path.join(directory, search.files ? "results" : "native.custom.out");
     const argv = [...search.argv, "-outfmt", search.outfmt, "-num_threads", "1", "-out", out];
@@ -384,7 +407,13 @@ function nativeOutputs(native, search, scratch) {
     }
     stderr = result.stderr;
   }
-  return { outputs, stderr, status };
+  return { outputs, stderr, status, diagnostics: Buffer.concat([stderr, ...refusals]) };
+}
+
+// Whether the search's `"outfmt"` writes stream 4: a format besides 0, 6 and 7, or 6 or 7 with
+// fields (an argv's own plain 6 or 7, of a search with `"fails_alone"`, is that stream).
+function customStream(search) {
+  return search.outfmt !== undefined && !/^\s*[67]\s*$/.test(search.outfmt);
 }
 
 // A run that fails as the CLI fails: the CLI's error is the last message of its standard
@@ -407,7 +436,7 @@ function checkFailure(run, expected, search, label) {
   }
 }
 
-function checkHits(streams, program, label, queryIds) {
+function checkHits(streams, program, label, queryIds, shownIds) {
   const records = (streams.get(1) || Buffer.alloc(0)).toString().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   // A stream without bytes (a search without hits) is never emitted.
   const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
@@ -430,6 +459,10 @@ function checkHits(streams, program, label, queryIds) {
     if (index > 0) assert.ok(record.q_idx >= records[index - 1].q_idx, `${label}: q_idx order at HSP ${index}`);
     const id = queryIds[record.q_idx];
     if (/^[A-Za-z_]+[0-9]+(\.[0-9]+)?$/.test(id)) assert.equal(fields[0], id, `${label}: q_idx of HSP ${index}`);
+    if (shownIds) {
+      assert.equal(fields[0], shownIds.query[record.q_idx], `${label}: the shown query ID of HSP ${index}`);
+      assert.equal(fields[1], shownIds.subject[record.s_idx], `${label}: the shown subject ID of HSP ${index}`);
+    }
     // A subject beyond the alignments that outfmt 0 shows (for example BLASTN's 250) has
     // no section and no heading.
     if (record.out0 === null) {
@@ -437,10 +470,20 @@ function checkHits(streams, program, label, queryIds) {
       return;
     }
     const section = out0.subarray(record.out0[0], record.out0[1]).toString();
+    // A subject whose title NCBI cannot decode (pd.undec.*, under -parse_deflines) has an empty
+    // heading, and NCBI's line stands in place of each alignment (showalign.cpp:1976-1981;
+    // LOSAT's report/pairwise.rs write_skipped_alignment; line WQA's sweep, D7, 2026-11-19).
+    if (/^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped\n$/.test(section)) {
+      assert.equal(record.out0_subject[0], record.out0_subject[1], `${label}: the empty heading of HSP ${index}`);
+      assert.ok(record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
+      return;
+    }
     assert.ok(section.startsWith(" Score ="), `${label}: out0 of HSP ${index}`);
     assert.ok(section.includes(`bits (${record.raw_score}),`), `${label}: raw score in out0 of HSP ${index}`);
     const heading = out0.subarray(record.out0_subject[0], record.out0_subject[1]).toString();
-    assert.ok(heading.startsWith("> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
+    // A local id that is not shown leaves "> " before the title; under -parse_deflines the
+    // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19).
+    assert.ok(heading.startsWith(shownIds ? ">" : "> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
   });
   return records.length;
 }
@@ -471,7 +514,9 @@ function checkSurface(reactor, native) {
   // file of -conffile as a registry file (kind 2), and -dryrun.
   const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
   assert.equal(started.status, 0, started.error);
-  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true });
+  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true, register_inputs: false });
+  const parsed = reactor.call("losat_web2_start", ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"].join("\0"));
+  assert.equal(JSON.parse(parsed.streams.get(2).toString()).register_inputs, true, "-parse_deflines reads the inputs together");
   const conffile = ["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"].join("\0");
   assert.equal(reactor.call("losat_web2_validate", conffile).error, 'Critical: (106.23) Registry file "e1w3a.ini" not found, aborting.');
   const registry = Buffer.from("[BLAST]\n");
@@ -660,7 +705,7 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor, close, waitForWorkers } = await engine.open();
-    assert.equal(reactor.exports.losat_web2_abi_version(), 3);
+    assert.equal(reactor.exports.losat_web2_abi_version(), 4);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const subjects = new Map(); // "program subject" -> handle, kept across runs
@@ -671,14 +716,16 @@ async function main() {
       const query = inputPath(search, "-query"), subject = inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
       const subjectKey = `${program} ${subject}`;
-      if (!subjects.has(subjectKey)) {
+      const started = reactor.call("losat_web2_start", search.argv.join("\0"));
+      const together = started.status === 0 && JSON.parse(started.streams.get(2).toString()).register_inputs === true;
+      if (!together && !subjects.has(subjectKey)) {
         const registered = reactor.call("losat_web2_register", program, 1, fs.readFileSync(subject));
         assert.ok(registered.status > 0, `register subject: ${registered.error}`);
         subjects.set(subjectKey, registered.status);
       }
-      const q = reactor.call("losat_web2_register", program, 0, fs.readFileSync(query));
-      assert.ok(q.status > 0, `register query: ${q.error}`);
-      const queryIds = JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
+      const q = together ? undefined : reactor.call("losat_web2_register", program, 0, fs.readFileSync(query));
+      if (q) assert.ok(q.status > 0, `register query: ${q.error}`);
+      let queryIds = q && JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
       const taxid = registerTaxidCounts(reactor, counts, search);
       const named = registerCounts(reactor, counts, search) ?? taxid;
       if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
@@ -695,9 +742,27 @@ async function main() {
             assert.equal(validated.status, 0, `${engine.name} n${threads} ${search.cases.join(",")}: validate: ${validated.error}`);
           }
         }
-        const run = reactor.call("losat_web2_run", argv, q.status, subjects.get(subjectKey));
-        if (waitForWorkers) await waitForWorkers();
         const label = `${engine.name} n${threads} ${search.cases.join(",")}`;
+        let handles = [q?.status, subjects.get(subjectKey)], shownIds;
+        if (together) {
+          const inputs = reactor.call("losat_web2_register_inputs", argv, fs.readFileSync(query), fs.readFileSync(subject));
+          if (inputs.status < 0) {
+            // The CLI fails reading the inputs, before any output.
+            assert.equal(search.expect, "failure", `${label}: register_inputs: ${inputs.error}`);
+            assert.ok(inputs.error.length > 0 && expected.stderr.toString().endsWith(`${inputs.error}\n`), `${label}: the CLI's error (${inputs.error})`);
+            for (const format of FORMATS[program]) assert.equal(expected.outputs.get(format).length, 0, `${label}: the CLI writes no outfmt ${format}`);
+            results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {}, failure: inputs.error });
+            console.log(`ok ${label} (fails as the CLI, reading the inputs)`);
+            continue;
+          }
+          const response = JSON.parse(inputs.streams.get(2).toString());
+          handles = [response.query.handle, response.subject.handle];
+          queryIds = response.query.records.map((record) => record.id);
+          shownIds = { query: response.query.records.map((record) => record.shown_id), subject: response.subject.records.map((record) => record.shown_id) };
+        }
+        const run = reactor.call("losat_web2_run", argv, ...handles);
+        if (waitForWorkers) await waitForWorkers();
+        if (together) for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
         if (search.expect === "failure") {
           checkFailure(run, expected, search, label);
           results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
@@ -734,7 +799,7 @@ async function main() {
           const sides = entries.slice(0, -1).map(([, bytes]) => sha256(toFrozen(bytes, search.frozen_prefix))).join(",");
           if (search.frozen.custom) row.frozen.custom = master === search.frozen.custom;
           if (search.frozen.sides !== undefined) row.frozen.sides = sides === search.frozen.sides;
-        } else if (search.outfmt !== undefined) {
+        } else if (customStream(search)) {
           const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
           const actual = search.sam ? withoutCl(sent) : sent;
           const cli = expected.outputs.get(CUSTOM_STREAM);
@@ -744,13 +809,39 @@ async function main() {
         } else {
           assert.ok(!run.streams.has(CUSTOM_STREAM), `${label}: no stream ${CUSTOM_STREAM} without -outfmt`);
         }
-        assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(expected.stderr), `${label}: diagnostics`);
-        row.diagnostics = sha256(expected.stderr);
-        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds) : null;
+        const diagnostics = run.streams.get(3) || Buffer.alloc(0);
+        assert.equal(sha256(diagnostics), sha256(expected.diagnostics), `${label}: diagnostics\n${diagnostics}`);
+        row.diagnostics = sha256(expected.diagnostics);
+        // The run's signals of stream 9 name the streams that it could not write: those whose CLI run of the argv
+        // fails (abi_v2.md §5; line WQA's sweep, D7, 2026-11-19), each with where its error is (2026-11-20): stream 3,
+        // which then holds it, the file of -logfile (stream 8), or nowhere.
+        const signals = run.streams.get(9) || Buffer.alloc(0);
+        assert.equal(signals.length % 8, 0, `${label}: signals of 8 bytes (stream 9)`);
+        const failed = Array.from({ length: signals.length / 8 }, (_, i) => [signals.readUInt32LE(8 * i), signals.readUInt32LE(8 * i + 4)]);
+        const failedStreams = failed.map(([stream]) => stream).sort((a, b) => a - b);
+        assert.deepEqual(failedStreams, [...(search.fails_alone || [])].sort((a, b) => a - b), `${label}: the streams that the run says failed (stream 9)`);
+        for (const [stream, place] of failed) {
+          if (place === 3) assert.ok(diagnostics.length > 0, `${label}: the error of stream ${stream} is on stream 3, which is empty`);
+          else if (place === 8) assert.ok(run.streams.has(8), `${label}: the error of stream ${stream} is in the file of -logfile, which the run did not give`);
+          else assert.equal(place, 0xffffffff, `${label}: the place of the error of stream ${stream}`);
+        }
+        // The run's signal of stream 10 says where its messages go (abi_v2.md §5; line WQA's sweep, D7, 2026-11-20): one
+        // signal of 4 bytes; stream 3 without -logfile; the file of -logfile only where the run gave it.
+        const messages = run.streams.get(10) || Buffer.alloc(0);
+        assert.equal(messages.length, 4, `${label}: one signal of 4 bytes (stream 10)`);
+        const messagesPlace = messages.readUInt32LE(0);
+        assert.ok([3, 8, 0xffffffff].includes(messagesPlace), `${label}: the place of the run's messages (${messagesPlace})`);
+        if (!search.argv.some((word) => word === "-logfile" || word.startsWith("-logfile="))) {
+          assert.equal(messagesPlace, 3, `${label}: the run's messages go to stream 3 without -logfile`);
+        }
+        if (messagesPlace === 8) assert.ok(run.streams.has(8), `${label}: the run's messages are in the file of -logfile, which the run did not give`);
+        if (search.fails_alone) row.fails_alone = search.fails_alone;
+        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds) : null;
+        if (together) row.inputs = "register_inputs";
         results.push(row);
         console.log(`ok ${label}`);
       }
-      assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
+      if (q) assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
     }
     for (const handle of subjects.values()) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
     for (const { handle } of counts.values()) assert.equal(reactor.call("losat_web2_file_release", handle).status, 0);

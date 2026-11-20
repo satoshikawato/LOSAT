@@ -296,7 +296,8 @@ pub struct PairwiseHit {
 impl PairwiseHit {
     /// Whether the rows of the HSP are empty: BLASTX's ungapped HSPs of length 0
     /// (`algorithm::blastx::empty_rows::rows_empty`), the only ones without a column, whose
-    /// `CSeq_align::GetSeqRange` throws `Row is empty` (Seq_align.cpp:227).
+    /// `CSeq_align::GetSeqRange` throws `Row is empty` (Seq_align.cpp:227). It reads the hit's
+    /// offsets, which a BLASTX hit takes from its Seq-align (`Hsp::seqalign_ends`).
     pub(crate) fn rows_empty(&self) -> bool {
         self.hit.has_sort_offsets
             && super::serial::seqalign::ungapped_rows_empty(
@@ -515,8 +516,11 @@ pub struct BlastpPairwiseQuery {
 pub struct BlastpPairwiseReport {
     pub version: String,
     pub database_name: String,
-    pub database_num_sequences: usize,
-    pub database_total_letters: usize,
+    /// The `Database:` lines' counts of a FASTA subject set (its records and letters), NCBI's
+    /// `Int8` (`tot_num_seqs`, `tot_length`); a `-db` search prints `PairwiseDatabase` and keeps
+    /// its sums here (an alias file's `LENGTH` can pass 2^32 on a 32-bit target).
+    pub database_num_sequences: i64,
+    pub database_total_letters: i64,
     /// `options.GetMatrixName()`; `None` where NCBI's options name no matrix (a null `const
     /// char*`: an RPS search that set up no query batch, `write_matrix_line`).
     pub matrix_name: Option<String>,
@@ -2337,8 +2341,8 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
     version: &str,
     program: &str,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_blastp_pairwise_intro(writer, version, program)?;
@@ -2518,8 +2522,8 @@ fn write_final_database_block<W: Write>(
 fn write_blastp_database_header_spacing<W: Write>(
     writer: &mut W,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     trailing: usize,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:513-525
@@ -2543,8 +2547,8 @@ fn write_blastp_database_header_spacing<W: Write>(
     writeln!(
         writer,
         "           {} sequences; {} total letters",
-        crate::ncbi_str::int8_with_commas(i64::try_from(database_num_sequences).unwrap_or(0)),
-        crate::ncbi_str::int8_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+        crate::ncbi_str::int8_with_commas(database_num_sequences),
+        crate::ncbi_str::int8_with_commas(database_total_letters)
     )?;
     for _ in 0..trailing {
         writeln!(writer)?;
@@ -2835,8 +2839,8 @@ fn write_blastp_final_footer<W: Write>(
 fn write_final_database_report<W: Write>(
     writer: &mut W,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:543-544
     // out << "  Database: "; x_WrapOutputLine(dbinfo->definition, line_length, out);
@@ -2846,7 +2850,7 @@ fn write_final_database_report<W: Write>(
     writeln!(
         writer,
         "  Number of letters in database: {}",
-        crate::ncbi_str::int8_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+        crate::ncbi_str::int8_with_commas(database_total_letters)
     )?;
     writeln!(
         writer,
@@ -3398,13 +3402,23 @@ impl BlastpSections<'_> {
     /// The gapped Karlin block of query `q_idx`'s footer: the report's, with rpsblast's K of
     /// the query (the first query of a batch has the K that the RPS traceback wrote).
     fn gapped_karlin(&self, q_idx: usize) -> KarlinParams {
-        match self.query_gapped_k {
-            Some(gapped_k) => KarlinParams {
-                k: gapped_k[q_idx],
-                ..self.report.gapped_karlin
-            },
-            None => self.report.gapped_karlin,
-        }
+        query_gapped_karlin(self.report, self.query_gapped_k, q_idx)
+    }
+}
+
+/// The gapped Karlin block of query `q_idx`'s footer: the report's, with the query's K where
+/// the search gives each query its own (`query_gapped_k`: rpsblast's and RPSTBLASTN's).
+fn query_gapped_karlin(
+    report: &BlastpPairwiseReport,
+    query_gapped_k: Option<&[f64]>,
+    q_idx: usize,
+) -> KarlinParams {
+    match query_gapped_k {
+        Some(gapped_k) => KarlinParams {
+            k: gapped_k[q_idx],
+            ..report.gapped_karlin
+        },
+        None => report.gapped_karlin,
     }
 }
 
@@ -3641,8 +3655,9 @@ pub struct BlastnPairwiseReport {
     /// `-task megablast` (NCBI's `m_Megablast`; the program name stays `blastn`).
     pub megablast: bool,
     pub database_name: String,
-    pub database_num_sequences: usize,
-    pub database_total_letters: usize,
+    /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
+    pub database_num_sequences: i64,
+    pub database_total_letters: i64,
     /// The database of a `-db` search (its `Database:` lines); `None` for a subject set,
     /// whose lines are `database_name` with a period and the counts.
     pub database: Option<PairwiseDatabase>,
@@ -4554,8 +4569,8 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     version: &str,
     megablast: bool,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     if megablast {
@@ -4911,8 +4926,9 @@ pub struct TblastxPairwiseQuery {
 pub struct TblastxPairwiseReport {
     pub version: String,
     pub database_name: String,
-    pub database_num_sequences: usize,
-    pub database_total_letters: usize,
+    /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
+    pub database_num_sequences: i64,
+    pub database_total_letters: i64,
     /// The `-matrix` name as typed (`options.GetMatrixName()`), BLOSUM62 when omitted.
     pub matrix_name: String,
     /// `-threshold` and `-window_size` (the epilog prints them when they are not 0).
@@ -4953,8 +4969,8 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_translated_pairwise_intro(writer, "TBLASTX", version)?;
@@ -5589,6 +5605,44 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:533-538
+    // (quoted at `write_blastp_database_header_spacing`)
+    // ```c++
+    //         out << NStr::Int8ToString(tot_num_seqs, NStr::fWithCommas) <<
+    //             " sequences; " <<
+    //             NStr::Int8ToString(tot_length, NStr::fWithCommas) <<
+    //             " total letters\n\n";
+    // ```
+    // The `Database:` lines of a FASTA subject set print NCBI's `Int8` counts whole: a set of
+    // 2^32 letters or more (two records of 3,000,000,000 letters, each below 2^32 as on wasm32) is
+    // not cut to a 32-bit `usize`.
+    #[test]
+    fn subject_set_database_lines_print_totals_of_2_to_the_32_letters_or_more() {
+        let mut prolog = Vec::new();
+        write_blastp_pairwise_prolog(
+            &mut prolog,
+            "2.17.0+",
+            "BLASTP",
+            "s",
+            2,
+            6_000_000_000,
+            None,
+        )
+        .unwrap();
+        let prolog = String::from_utf8(prolog).unwrap();
+        assert!(
+            prolog.contains("Database: s.\n           2 sequences; 6,000,000,000 total letters\n"),
+            "{prolog}"
+        );
+        let mut epilog = Vec::new();
+        write_final_database_report(&mut epilog, "s", 2, 6_000_000_000).unwrap();
+        let epilog = String::from_utf8(epilog).unwrap();
+        assert!(
+            epilog.contains("  Number of letters in database: 6,000,000,000\n  Number of sequences in database:  2\n"),
+            "{epilog}"
+        );
+    }
 
     /// `write_flatfile_wrapped_with` finds the break of a line without newlines or backspaces from the window's
     /// end; it equals the scan of every column (the form it takes for a text that may hold a
@@ -6700,8 +6754,8 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     program: &str,
     version: &str,
     database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
+    database_num_sequences: i64,
+    database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_translated_pairwise_intro(writer, program, version)?;
@@ -7350,6 +7404,8 @@ pub fn write_blastx_pairwise_report<W: Write>(
     database: Option<BlastxDatabaseSubjects<'_>>,
     records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     record_titles: &[&[u8]],
+    // Each query's gapped K where it is not the report's (`BatchResults::gapped_k`).
+    query_gapped_k: Option<&[f64]>,
     probe: Option<&mut FormatProbe<'_>>,
     first_hsp: HspIndex,
     // The sequences of the query-anchored sections (outfmt 1 to 4, `config.view`; `None` for
@@ -7363,6 +7419,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         queries,
         subject_labels,
         report,
+        query_gapped_k,
         database,
         records_parsed,
         record_titles,
@@ -7424,6 +7481,9 @@ struct BlastxSections<'a> {
     /// The description line of each subject, by subject index (`database_description_label`).
     subject_labels: &'a [DescriptionLabel],
     report: &'a BlastpPairwiseReport,
+    /// Each query's gapped K where it is not the report's (an RPSTBLASTN search with
+    /// composition-based statistics, `BatchResults::gapped_k`), as rpsblast's.
+    query_gapped_k: Option<&'a [f64]>,
     /// A `-db` report's subjects (`None` for `-subject`).
     database: Option<BlastxDatabaseSubjects<'a>>,
     /// A `-subject` report's records with parsed Seq-ids, by subject index.
@@ -7672,6 +7732,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             writer,
             &self.queries[q_idx],
             self.report,
+            query_gapped_karlin(self.report, self.query_gapped_k, q_idx),
             self.options.gapped,
         )
     }
@@ -7795,7 +7856,7 @@ pub fn write_blastx_epilog(
         writeln!(
             writer,
             "  Number of letters in database: {}",
-            crate::ncbi_str::int8_with_commas(report.database_total_letters as i64)
+            crate::ncbi_str::int8_with_commas(report.database_total_letters)
         )?;
         writeln!(
             writer,
@@ -7899,11 +7960,12 @@ pub fn write_blastx_epilog(
 //             out << buffer;
 // ```
 /// The footer of a BLASTX query (`BlastpPairwiseQuery::valid` and `batch_skipped`: its Karlin
-/// blocks, `gapped`: the gapped one).
+/// blocks, `gapped`: the gapped one, `gapped_karlin`: the query's, `query_gapped_karlin`).
 fn write_blastx_query_footer(
     writer: &mut impl Write,
     query: &BlastpPairwiseQuery,
     report: &BlastpPairwiseReport,
+    gapped_karlin: KarlinParams,
     gapped: bool,
 ) -> io::Result<()> {
     let (valid, skipped) = (query.valid, query.batch_skipped);
@@ -7914,7 +7976,7 @@ fn write_blastx_query_footer(
         return write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
-            report.gapped_karlin,
+            gapped_karlin,
             report.gumbel,
             query.effective_search_space,
             false,
@@ -8852,6 +8914,7 @@ mod tblastx_tests {
                 None,
                 &[],
                 &[],
+                None,
                 None,
                 0,
                 None,

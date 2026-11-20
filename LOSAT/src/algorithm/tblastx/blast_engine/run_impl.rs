@@ -2356,10 +2356,14 @@ fn write_pairwise_prologs(
                         &mut writer,
                         crate::NCBI_BLAST_VERSION,
                         &tblastx_database_name(args),
-                        records.len(),
+                        records.len() as i64,
+                        // NCBI's `Int8` sum (seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
+                        // (Int8) (*iter)->length`).
                         match x_stored {
-                            Some((stores, _)) => stores.iter().map(|store| store.len()).sum(),
-                            None => records.iter().map(|r| r.seq().len()).sum(),
+                            Some((stores, _)) => {
+                                stores.iter().map(|store| store.len() as i64).sum()
+                            }
+                            None => records.iter().map(|r| r.seq().len() as i64).sum(),
                         },
                         None,
                     )?
@@ -2457,15 +2461,22 @@ fn write_tblastx_outputs(
         .iter()
         .map(|format| report::output_format(format.outfmt))
         .collect();
-    // Outfmt 0's refusal (formats 1 to 4 write a query's own record in its section,
-    // `query_anchored::aln_mix`, and end with NCBI's exception where NCBI's merge throws,
-    // `query_anchored::write_section`).
-    if args.parse_deflines
-        && output_formats.contains(&report::TblastxOutputFormat::Pairwise(
-            crate::report::pairwise::PairwiseView::Pairwise,
-        ))
-    {
-        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+    // Outfmt 0's refusal, each such output's (`refuse_shared_masks_in`; formats 1 to 4 write a
+    // query's own record in its section, `query_anchored::aln_mix`, and end with NCBI's exception
+    // where NCBI's merge throws, `query_anchored::write_section`).
+    if args.parse_deflines {
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
+            outputs
+                .formats
+                .iter_mut()
+                .zip(&output_formats)
+                .filter(|(_, output_format)| {
+                    **output_format
+                        == report::TblastxOutputFormat::Pairwise(
+                            crate::report::pairwise::PairwiseView::Pairwise,
+                        )
+                })
+                .map(|(format, _)| &mut format.refusal),
             run.queries,
             |query| {
                 run.query_stats
@@ -2824,14 +2835,16 @@ fn write_tblastx_outputs(
                         version: crate::NCBI_BLAST_VERSION.to_string(),
                         database_name: database.clone(),
                         // `-db`: the `Database:` lines are the database's (`database` below).
+                        // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
+                        // held in memory.
                         database_num_sequences: match &run.database {
-                            Some(database) => database.pairwise.num_sequences as usize,
-                            None => run.subjects.len(),
+                            Some(database) => database.pairwise.num_sequences,
+                            None => run.subjects.len() as i64,
                         },
                         database_total_letters: match &run.database {
-                            Some(database) => database.pairwise.total_letters as usize,
+                            Some(database) => database.pairwise.total_letters,
                             None => (0..run.subjects.len())
-                                .map(|s_idx| run.subject_letters.length(s_idx))
+                                .map(|s_idx| run.subject_letters.length(s_idx) as i64)
                                 .sum(),
                         },
                         matrix_name: args.matrix_name().to_string(),

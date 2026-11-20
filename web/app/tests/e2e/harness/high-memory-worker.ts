@@ -12,7 +12,7 @@ import { ThreadHost } from '../../../../packages/losat/src/infra/engine-worker/t
 import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../../../packages/losat/src/infra/reactor/abi';
 import { createSharedMemory } from '../../../../packages/losat/src/infra/reactor/shared-memory';
 import { createWasi } from '../../../../packages/losat/src/infra/reactor/wasi';
-import type { HighMemoryCase, HighMemoryMode, HighMemoryRequest, HighMemoryResult } from './protocol';
+import type { HighMemoryCase, HighMemoryEvent, HighMemoryMode, HighMemoryRequest, HighMemoryResult } from './protocol';
 
 const PAGE = 65_536;
 const TWO_GIB = 2 ** 31;
@@ -20,7 +20,7 @@ const TWO_GIB = 2 ** 31;
 const HIGH_INITIAL_PAGES = TWO_GIB / PAGE + 1024;
 
 const scope = self as unknown as {
-  postMessage(message: unknown): void;
+  postMessage(message: HighMemoryEvent, transfer?: Transferable[]): void;
   onmessage: ((event: MessageEvent<HighMemoryRequest>) => void) | null;
 };
 
@@ -51,8 +51,15 @@ async function runMode(
     module,
     memory,
     maximumPages,
-    faultChannel: request.faultChannel,
-    keeperChannel: `${request.faultChannel}:keeper`,
+    // As the Engine worker links its thread workers and the keeper to the page (engine-worker.ts).
+    main: {
+      link: () => {
+        const channel = new MessageChannel();
+        scope.postMessage({ type: 'link', port: channel.port2 }, [channel.port2]);
+        return channel.port1;
+      },
+      fault: (fault) => scope.postMessage({ type: 'fault', message: fault.message }),
+    },
     use: InstanceUse.create(),
   });
   try {

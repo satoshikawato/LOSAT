@@ -1589,21 +1589,24 @@ fn write_pairwise(
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
     };
-    // The set's numbers: a database's, or those of the subject records (the whole set).
+    // The set's numbers, NCBI's `Int8`: a database's, or those of the subject records (the whole
+    // set, each held in memory).
     let (num_sequences, total_nt) = match shown {
         ShownSubjects::Fasta { .. } => (
-            subject_records.len(),
-            subject_letters.lengths().sum::<usize>(),
+            subject_records.len() as i64,
+            subject_letters
+                .lengths()
+                .map(|length| length as i64)
+                .sum::<i64>(),
         ),
         // A database's lines print `pairwise` itself (NCBI's signed counts); these numbers serve
         // a FASTA set's lines only.
-        ShownSubjects::Database { pairwise, .. } => (
-            usize::try_from(pairwise.num_sequences).unwrap_or(usize::MAX),
-            usize::try_from(pairwise.total_letters).unwrap_or(usize::MAX),
-        ),
+        ShownSubjects::Database { pairwise, .. } => {
+            (pairwise.num_sequences, pairwise.total_letters)
+        }
     };
     // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
-    let gumbel = subject_set.gumbel_block(&spec, total_nt as u64);
+    let gumbel = subject_set.gumbel_block(&spec, total_nt);
     if gumbel.is_none() && !subject_set.old_fsc {
         anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
     }

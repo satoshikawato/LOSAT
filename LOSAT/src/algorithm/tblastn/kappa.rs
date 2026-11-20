@@ -602,6 +602,7 @@ pub(super) fn redo_preliminary_match<'s>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::glibc_fma_libm::GlibcLibm;
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:321-357:
     // GapEditScript * editScript = align->context; align->context = NULL;
@@ -780,7 +781,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(160, true)],
-            subject_nt.len(),
+            subject_nt.len() as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -1050,7 +1051,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
-            subject_nt.len(),
+            subject_nt.len() as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -1330,7 +1331,8 @@ mod tests {
             would[2].parse::<f64>().unwrap().to_bits()
         );
         let bit =
-            normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.ln(), 32.0)[0];
+            normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.glibc_ln(), 32.0)
+                [0];
         assert_eq!(linked.hsps[0].hsp.score, heap[3].parse().unwrap());
         assert_eq!(bit.to_bits(), heap[4].parse::<f64>().unwrap().to_bits());
         assert_eq!(
@@ -1838,8 +1840,12 @@ mod tests {
             );
             assert_eq!(linked.hsps[0].hsp.score, would[3].parse().unwrap());
             assert_eq!(would[9], "1");
-            let bits =
-                normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.ln(), 32.0);
+            let bits = normalize_postredo_scores(
+                &mut linked,
+                gapped.lambda / 32.0,
+                gapped.k.glibc_ln(),
+                32.0,
+            );
             let heap_rows: Vec<_> = heap_trace
                 .lines()
                 .filter(|line| line.starts_with("K_TRACE_HEAP_HSP\t"))
@@ -2229,7 +2235,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
-            total_nt_length,
+            total_nt_length as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -2552,7 +2558,8 @@ mod tests {
                 would[8].parse::<f64>().unwrap().to_bits()
             );
             assert_eq!(heap.would_insert(candidate), would[9] == "1");
-            let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
+            let bits =
+                normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
             let mut target = TargetTranslation::new(subject, &code);
             let identities = postredo_num_ident(align, &query_aa, &mut target).unwrap();
             let heap_hsp: Vec<_> = heap_hsp_rows[redo_index].split('\t').collect();

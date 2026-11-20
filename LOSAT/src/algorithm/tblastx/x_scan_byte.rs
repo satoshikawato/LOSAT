@@ -62,8 +62,8 @@
 //! loops nothing changes. `LOSAT_X_CHAINRUN=0` runs the copy before.
 //!
 //! The offset array must have `X_SCAN_BYTE_SLACK` entries after `array_size`; the entries past the
-//! returned count are not part of the result. `presence` depends on the lookup table only; each
-//! thread builds it once per table (`presence_bytes`).
+//! returned count are not part of the result. `presence` depends on the lookup table only; the
+//! first thread that asks for a table builds it once and every thread reads it (`presence_bytes`).
 //!
 //! Probe and source of the form: line F s3 P3 V2 (candidates) and s5 P3b arm 7 (copy),
 //! `exp/f2-tbn-scan` ff918e61: HsG_p1 x hsap_dna `-db` n1 whole-run cycles x0.703 of dev, with
@@ -238,20 +238,40 @@ fn build_presence(lookup: &BlastAaLookupTable) -> XPresence {
     XPresence(bytes.try_into().expect("one byte per index"))
 }
 
-/// The table `presence_bytes` built last on this thread, its bytes and whether it is sparse. The
-/// `Weak` keeps the table's allocation, so no other table can have its address while the entry is
-/// kept.
-type KeptPresence = Option<(std::sync::Weak<BlastAaLookupTable>, XPresence, bool)>;
+/// A table, its presence bytes and whether it is sparse. The `Weak` keeps the table's allocation,
+/// so no other table can have its address while the entry is kept.
+type PresenceEntry = (std::sync::Weak<BlastAaLookupTable>, XPresence, bool);
+
+/// The entry `presence_bytes` gave last on this thread (its bytes are those of `SHARED`).
+type KeptPresence = Option<PresenceEntry>;
 
 thread_local! {
-    /// The presence bytes this thread built last (`KeptPresence`).
+    /// The presence bytes this thread read last (`KeptPresence`).
     static PRESENCE: std::cell::RefCell<KeptPresence> = const { std::cell::RefCell::new(None) };
 }
 
-// No NCBI counterpart: the presence vector in another layout, made once per table and thread; it
-// does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes of `lookup` (see `build_presence`), built
-/// on this thread when it last saw another table. The table must `fit`.
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:95-140
+// ```c
+// typedef struct BlastAaLookupTable {
+// ...
+//     PV_ARRAY_TYPE *pv;     /**< Presence vector bitfield; bit positions that
+//                                 are set indicate that the corresponding thick
+//                                 backbone cell contains hits */
+// ...
+// } BlastAaLookupTable;
+// ```
+// NCBI's presence vector is part of its table, one array that every search thread reads. These
+// are the presence bytes of the live tables, one array per table that every thread reads: an
+// entry whose table is gone goes when a thread next looks up a table. It does not change any value
+// NCBI computes.
+static SHARED: std::sync::Mutex<Vec<PresenceEntry>> = std::sync::Mutex::new(Vec::new());
+
+// No NCBI counterpart: the presence vector in another layout, made once per table; it does not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes of `lookup` (see `build_presence`) and
+/// whether it is sparse, built by the first thread that asks for this table and read by every
+/// thread after it (`SHARED`); a thread asks again only when it saw another table last. The table
+/// must `fit`.
 pub(super) fn presence_bytes(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bool) {
     PRESENCE.with(|kept| {
         let mut kept = kept.borrow_mut();
@@ -260,18 +280,87 @@ pub(super) fn presence_bytes(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bo
                 return (bytes.clone(), *sparse);
             }
         }
-        let bytes = build_presence(lookup);
-        let sparse = sparse(&bytes, lookup);
+        let (bytes, sparse) = shared_presence(lookup);
         *kept = Some((Arc::downgrade(lookup), bytes.clone(), sparse));
         (bytes, sparse)
     })
+}
+
+// No NCBI counterpart: finds or makes the entry of `SHARED`; it does not change any value NCBI
+// computes.
+/// The `SHARED` entry of `lookup`, made now if there is none; the entries of tables that are gone
+/// go first.
+fn shared_presence(lookup: &Arc<BlastAaLookupTable>) -> (XPresence, bool) {
+    let mut shared = SHARED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    shared.retain(|(table, _, _)| table.strong_count() > 0);
+    if let Some((_, bytes, sparse)) = shared
+        .iter()
+        .find(|(table, _, _)| table.as_ptr() == Arc::as_ptr(lookup))
+    {
+        return (bytes.clone(), *sparse);
+    }
+    let bytes = build_presence(lookup);
+    let sparse = sparse(&bytes, lookup);
+    shared.push((Arc::downgrade(lookup), bytes.clone(), sparse));
+    (bytes, sparse)
 }
 
 // No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
 /// Whether at most `X_SPARSE_TENTHS` tenths of the backbone cells of `lookup` have hits.
 fn sparse(presence: &[u8; X_MASK + 1], lookup: &BlastAaLookupTable) -> bool {
     let ones = presence.iter().filter(|&&b| b == 1).count();
+    sparse_ones(ones, lookup)
+}
+
+// No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
+/// `sparse` for a table whose presence bytes hold `ones` ones.
+fn sparse_ones(ones: usize, lookup: &BlastAaLookupTable) -> bool {
     ones * 10 <= lookup.backbone.len() * X_SPARSE_TENTHS
+}
+
+// No NCBI counterpart: counts the presence bits of `lookup`; it does not change any value NCBI
+// computes.
+/// The ones `build_presence` would write for `lookup`: the bits of `pv` at the indexes of the
+/// 15-bit space inside the backbone.
+fn presence_ones(lookup: &BlastAaLookupTable) -> usize {
+    let end = lookup.backbone.len().min(X_MASK + 1);
+    lookup
+        .pv
+        .iter()
+        .enumerate()
+        .map(|(w, &word)| {
+            let first = w << PV_ARRAY_BTS;
+            let bits = end.saturating_sub(first).min(PV_ARRAY_MASK + 1);
+            let mask = if bits > PV_ARRAY_MASK {
+                u32::MAX
+            } else {
+                (1u32 << bits) - 1
+            };
+            (word & mask).count_ones() as usize
+        })
+        .sum()
+}
+
+// No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): whether `mode` scans `lookup` on presence bytes (it is on, the
+/// table `fits`, and it is sparse if `mode` asks), decided from `pv` without the bytes: the
+/// same answer as `x_kept_presence(mode, &x_table_presence(lookup)).is_some()`, for a caller that
+/// builds the bytes when a scan first needs them (`x_build_presence`; tblastx's unit-group tables).
+pub(crate) fn x_table_takes(mode: XScanByte, lookup: &BlastAaLookupTable) -> bool {
+    mode.on()
+        && fits(lookup)
+        && (mode != XScanByte::Sparse || sparse_ones(presence_ones(lookup), lookup))
+}
+
+// No NCBI counterpart: the presence vector in another layout; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table that `fits` (`build_presence`),
+/// for a caller that decided with `x_table_takes`.
+pub(crate) fn x_build_presence(lookup: &BlastAaLookupTable) -> XPresence {
+    debug_assert!(fits(lookup), "presence bytes of a table that does not fit");
+    build_presence(lookup)
 }
 
 // No NCBI counterpart: chooses LOSAT's scan; it does not change any value NCBI computes.
@@ -1525,6 +1614,46 @@ mod tests {
         assert!(
             near_end > 0,
             "no chain too near the overflow array's end for a run"
+        );
+    }
+
+    // No NCBI counterpart: LOSAT_X_TBXSCANBYTE decides from `pv` (`x_table_takes`) what the kept
+    // bytes decide (`x_kept_presence` of `x_table_presence`), on sparse and dense tables, in every
+    // mode, and the ones counted from `pv` are the ones of the bytes.
+    #[test]
+    fn table_takes_equals_kept_presence() {
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        let modes = [
+            XScanByte::Off,
+            XScanByte::On { avx2: false },
+            XScanByte::On { avx2: true },
+            XScanByte::Sparse,
+        ];
+        let mut sides = [0usize; 2];
+        for case in 0..24 {
+            let queries: Vec<Vec<u8>> = (0..1 + case % 4)
+                .map(|_| {
+                    let len = 8 + rng.below([40, 400, 4_000][case % 3]);
+                    (0..len).map(|_| AMINO[rng.below(AMINO.len())]).collect()
+                })
+                .collect();
+            let lookup = lookup_for(&queries, [11, 13, 15][case % 3]);
+            let kept = x_table_presence(&lookup);
+            let (bytes, _) = kept.as_ref().expect("a tblastn-shaped table fits");
+            let ones = bytes.iter().filter(|&&b| b == 1).count();
+            assert_eq!(presence_ones(&lookup), ones, "case {case}");
+            for mode in modes {
+                let want = x_kept_presence(mode, &kept).is_some();
+                assert_eq!(x_table_takes(mode, &lookup), want, "case {case} {mode:?}");
+                if mode == XScanByte::Sparse {
+                    sides[usize::from(want)] += 1;
+                }
+            }
+            assert_eq!(*x_build_presence(&lookup), **bytes, "case {case}");
+        }
+        assert!(
+            sides[0] > 0 && sides[1] > 0,
+            "both sides of the sparse rule: {sides:?}"
         );
     }
 

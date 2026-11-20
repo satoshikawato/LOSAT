@@ -468,7 +468,6 @@ where
         pool.threads(),
         db.num_seqs() as usize,
         db.num_seqs() as usize,
-        0,
     ) && pool.enabled()
     {
         let wide = x_bp_db_wide();

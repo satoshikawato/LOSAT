@@ -12,7 +12,7 @@
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`BlastpReport`, `BlastpReports`, `BlastpRanges`, `blastp_pairwise_view_of`,
-//! `blastp_hit_list_hsp_count`, `query_record_masks`) and its sibling modules `database`,
+//! `blastp_hit_list_hsp_count`) and its sibling modules `database`,
 //! `psi_round` and `pssm_hooks`.
 //!
 //! Before the rows of the reports, `run_call` calls the functions after those three, also once
@@ -32,14 +32,13 @@ use anyhow::Result;
 
 use super::{
     blastp_hit_list_hsp_count, blastp_pairwise_view_of, database, psi_round, pssm_hooks,
-    query_record_masks, BlastpRanges, BlastpReport, BlastpReports,
+    BlastpRanges, BlastpReport, BlastpReports,
 };
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::hsp::{collect_hits_and_methods_from_hit_lists, BlastpHitList};
 use crate::algorithm::blastp::seqalign::EngineCounts;
 use crate::algorithm::common::database::BatchPrefetch;
 use crate::algorithm::psiblast::pssm::PssmFiles;
-use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::RangedBatch;
@@ -65,7 +64,6 @@ pub(super) struct ReportPrep<'a, 'o> {
     pub(super) reports: &'a BlastpReports<'a>,
     pub(super) ranges: &'a BlastpRanges<'a>,
     pub(super) query_records: &'a [FastaRecord],
-    pub(super) query_frames: &'a [Vec<QueryFrame>],
     pub(super) query_valid: &'a [bool],
     pub(super) query_batch_skipped: &'a [bool],
     pub(super) query_batches: &'a [RangedBatch],
@@ -720,9 +718,10 @@ pub(super) fn prefetch_reported_subjects(
     })
 }
 
-/// Refuse, before any format of the call is written, what LOSAT does not report as NCBI does:
-/// with outfmt 0 and `-parse_deflines`, a query that is also a subject and has masks; with
-/// outfmt 1 to 4 of a `-subject` search, a query whose own record is one of the subjects and
+/// Refuse, before any format of the call is written, what LOSAT does not report as NCBI does
+/// (with outfmt 0 and `-parse_deflines`, a query that is also a subject and has masks: outfmt 0's
+/// refusal alone, which `run_call` makes after this one and puts first, `refuse_shared_masks_in`):
+/// with outfmt 1 to 4 of a `-subject` search, a query whose own record is one of the subjects and
 /// whose query-anchored section NCBI aborts on (the error is that abort's); and with outfmt 1 to
 /// 4 of a database search, or outfmt 0 to 4 with the queries' ids, a reported sequence that shows
 /// a query's id of the batch that reports it. `rows_of` makes the rows of a window of queries,
@@ -742,7 +741,6 @@ pub(super) fn refuse_unreportable(
         reports,
         ranges,
         query_records,
-        query_frames,
         query_batches,
         database,
         listed_titles,
@@ -754,31 +752,13 @@ pub(super) fn refuse_unreportable(
         psi_found_before,
         ..
     } = *prep;
-    // Outfmt 0 only: the query-anchored sections draw these masks as NCBI does
-    // (`query_anchored::fill_loc_list`).
-    if args.parse_deflines
-        && format_plans.iter().any(|outfmt| {
-            matches!(
-                outfmt,
-                BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
-            )
-        })
-    {
-        let masks = query_record_masks(query_frames, &ranges.query_input.placements);
-        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
-            query_records,
-            |query| masks.get(query).is_some_and(|m| !m.is_empty()),
-            args.lcase_masking,
-            args.app.name(),
-        )?;
-    }
     // Outfmt 1 to 4 of a `-subject` search: a query whose own record is one of the subjects
     // (`-parse_deflines`) and whose query-anchored section NCBI BLAST+ aborts on is refused
     // before any format of the call is written (`pairwise::blastp_section_aborts`; line RG T3a,
     // PD-LOSAT-NCBI-DEFECTS rule 3): in a block search (`x_query_block_plan`), the call of the
     // query's block, after the bytes of the blocks before, as outfmt 0's refusal of the masks of
-    // such a record above (NCBI's own bytes before its abort depend on its buffers, so no prefix
-    // is NCBI's). The formats 1 to 4 merge one section (their views differ in the letters they
+    // such a record (`run_call`, `believed::refuse_shared_masks_in`; NCBI's own bytes before its
+    // abort depend on its buffers, so no prefix is NCBI's). The formats 1 to 4 merge one section (their views differ in the letters they
     // show).
     let anchored_view = format_plans.iter().find_map(|outfmt| match outfmt {
         BlastpReport::Pairwise(view)
@@ -949,7 +929,7 @@ use crate::stats::KarlinParams;
 /// What the functions from `read_shown_residues` to `report_labels` read of `run_call`: each
 /// field is `run_call`'s value of the same name, by reference where it is not `Copy`
 /// (`requested_formats` is the requested formats, `run_call`'s `format_plans` after them;
-/// `total_db_len` is the letters of the searched subjects).
+/// `total_db_len` is the letters of the searched subjects, NCBI's `Int8`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:283-285
 /// ```c++
@@ -971,7 +951,7 @@ pub(super) struct ReportSetup<'a> {
     pub(super) gapped_params: &'a KarlinParams,
     pub(super) subject_source: BlastpSubjectSource<'a>,
     pub(super) subject_label: &'a str,
-    pub(super) total_db_len: usize,
+    pub(super) total_db_len: i64,
 }
 
 /// The residues that the reports read of a database's listed subjects, read from the database
@@ -1442,7 +1422,7 @@ pub(super) fn report_values(
 
 /// The labels that the reports show of the subjects (`report_labels`), each `run_call`'s value of
 /// the same name: the subject tag (`subject_input_label`), the numbers of sequences and letters of
-/// the `Database:` lines, the database's sums as NCBI's `Int8` values (`shown_database`, `None` for
+/// the `Database:` lines (NCBI's `Int8`), the database's sums as NCBI's `Int8` values (`shown_database`, `None` for
 /// a subject set: the XML report's `db-num`, `db-len` and their overflow), and the context of the
 /// tabular reports.
 ///
@@ -1453,8 +1433,8 @@ pub(super) fn report_values(
 /// ```
 pub(super) struct ReportLabels {
     pub(super) subject_input_label: String,
-    pub(super) shown_num_sequences: usize,
-    pub(super) shown_total_letters: usize,
+    pub(super) shown_num_sequences: i64,
+    pub(super) shown_total_letters: i64,
     pub(super) shown_database: Option<crate::report::pairwise::PairwiseDatabase>,
     pub(super) context: ReportContext,
 }
@@ -1492,11 +1472,11 @@ pub(super) fn report_labels(
     // read the list's (line DI-8).
     let shown_database = database.map(|database| database.pairwise_database());
     let shown_num_sequences = match &shown_database {
-        Some(shown) => usize::try_from(shown.num_sequences).unwrap_or(usize::MAX),
-        None => shown_records.len(),
+        Some(shown) => shown.num_sequences,
+        None => shown_records.len() as i64,
     };
     let shown_total_letters = match &shown_database {
-        Some(shown) => usize::try_from(shown.total_letters).unwrap_or(usize::MAX),
+        Some(shown) => shown.total_letters,
         None => total_db_len,
     };
     let context = ReportContext {

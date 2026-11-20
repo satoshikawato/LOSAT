@@ -21,7 +21,7 @@ use std::ffi::OsString;
 
 // The command line's arguments (`cli.rs`): the clap types of every program, the parser's
 // messages, and the command line's own errors.
-pub use crate::cli::{render_message, Cli, Commands, NativeError, WEB_V2_PROGRAMS};
+pub use crate::cli::{command_line_message, Cli, Commands, NativeError, WEB_V2_PROGRAMS};
 
 /// `cli::try_parse_with_own_start` for the command line's own arguments (`Cli`): the argv read as
 /// the command line reads it after its application start, NCBI's single-dash options included. A
@@ -42,9 +42,9 @@ where
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
 // before the arguments (`preparse`, NCBI's scan of `-logfile`), the registry files that the host
 // registered (`RegistryFiles`), and where the run's files go (`RunFiles`: the file of `-logfile`).
-pub use crate::api::start::CallerStart;
+pub use crate::api::start::{CallerSink, CallerStart, ErrorSource};
 pub use crate::blastinput::ncbi_environment::{
-    log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles,
+    log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles, TextPlace,
 };
 pub use crate::report::run_files::{FileReceiver, RunFiles};
 
@@ -111,7 +111,10 @@ pub use crate::blastinput::seq_range::{
 pub use crate::config::ScoringMatrix;
 
 // The FASTA reader (the port of CBlastFastaInputSource, `blastinput/fasta_reader`) that reads
-// the registered inputs; its records are `api::FastaRecord`.
+// the registered inputs; its records are `api::FastaRecord`. The inputs of a run whose reading
+// needs its options (`-parse_deflines`: the ids of the deflines, read in one scope of ids for the
+// query and the subjects) are read together, by the reading of the library API's `read_inputs`.
+pub use crate::api::input::{parse_deflines_of, read_search_inputs};
 pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };

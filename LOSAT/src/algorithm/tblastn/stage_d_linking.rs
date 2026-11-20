@@ -1,5 +1,6 @@
 //! TBLASTN gapped uneven-gap linking before preliminary E-value reap.
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::cmp::Ordering;
 
 use anyhow::{ensure, Result};
@@ -398,7 +399,7 @@ fn x_link_values(
                 ),
                 None => {
                     lengths[context].eff_searchsp as f64
-                        * (-kbp.lambda * hsp.score as f64 + kbp.k.ln()).exp()
+                        * (-kbp.lambda * hsp.score as f64 + kbp.k.glibc_ln()).glibc_exp()
                 }
             } / gap_decay_divisor(link.gap_decay_rate, 1);
             WorkHsp {
@@ -411,7 +412,7 @@ fn x_link_values(
                 },
                 prev: None,
                 next: None,
-                sum_score: kbp.lambda * hsp.score as f64 - kbp.k.ln(),
+                sum_score: kbp.lambda * hsp.score as f64 - kbp.k.glibc_ln(),
             }
         })
         .collect();
@@ -746,7 +747,7 @@ mod tests {
                     gap_open: 11,
                     gap_extend: 1,
                 },
-                (subject_nt_length / 3) as i64,
+                subject_nt_length / 3,
             )
             .unwrap();
             // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
@@ -1190,7 +1191,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
-            total_nt,
+            total_nt as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -1711,7 +1712,8 @@ mod tests {
                 best_score: postredo.hsps[0].hsp.score,
             };
             assert_eq!(candidate.best_score, would[3].parse().unwrap());
-            let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
+            let bits =
+                normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
             let mut target = TargetTranslation::new(subject, &code);
             let stats: Vec<_> = postredo
                 .hsps

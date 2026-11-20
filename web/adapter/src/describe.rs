@@ -17,18 +17,10 @@ use crate::run::Program;
 /// `run::parse_run`) and the thread count, and the
 /// options of NCBI's command line that the application has no control for (`-mt_mode`,
 /// which needs `-num_threads` and has no effect; `-use_index`, which a search of records ignores
-/// as NCBI ignores it with `-subject`;
-/// `-parse_deflines`, since a record is read before the options of a run are known).
+/// as NCBI ignores it with `-subject`).
 /// `-num_descriptions` and `-num_alignments` are described: a run searches once for each
 /// distinct hit list size of its formats (`run::search_groups`).
-const ADAPTER_OWNED: [&str; 6] = [
-    "out",
-    "outfmt",
-    "num_threads",
-    "mt_mode",
-    "use_index",
-    "parse_deflines",
-];
+const ADAPTER_OWNED: [&str; 5] = ["out", "outfmt", "num_threads", "mt_mode", "use_index"];
 
 /// Genetic codes are small integers; every accepted one is below this bound.
 const GENETIC_CODE_PROBE: u32 = 64;
@@ -38,14 +30,7 @@ const GENETIC_CODE_PROBE: u32 = 64;
 /// `-export_search_strategy`, until line RG's F1w gives it as a side file): the browser's list
 /// (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out.
 fn records_refused(program: Program) -> &'static [&'static str] {
-    let program = match program {
-        Program::Blastp => losat::api::Program::Blastp,
-        Program::Tblastn => losat::api::Program::Tblastn,
-        Program::Blastn => losat::api::Program::Blastn,
-        Program::Tblastx => losat::api::Program::Tblastx,
-        Program::Blastx => losat::api::Program::Blastx,
-    };
-    losat::web_adapter::records_refused_options(program)
+    losat::web_adapter::records_refused_options(program.api())
 }
 
 /// Each program's response after its first `describe`: the response is pure, and its

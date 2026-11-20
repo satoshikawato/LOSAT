@@ -1212,9 +1212,64 @@ fn subject_compare_windows(w1: &WindowInfo, w2: &WindowInfo) -> Ordering {
     w1.query_range.context.cmp(&w2.query_range.context)
 }
 
-// NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,626-751:
+/// `s_GetTranslatedLength`: the letters of `frame`'s translation of a sequence of `length`
+/// (nucleotides; with a position-based matrix, RPSTBLASTN's translation buffer of the six frames,
+/// whose nucleotide length `GET_NUCL_LENGTH` estimates). C's `/` (toward zero) as NCBI's.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:624-635
+/// ```c
+/// static
+/// int s_GetTranslatedLength(int length,int frame, int is_pos_based) {
+/// 	if(is_pos_based) {
+/// 		int f = GET_SEQ_FRAME(frame);
+/// 		int nucl_length = GET_NUCL_LENGTH(length);
+/// 		return GET_TRANSLATED_LENGTH(nucl_length, f);
+/// 	}
+///
+/// 	return	((length - ABS(frame) + 1)/3);
+/// }
+/// ```
+pub(crate) fn translated_length(length: i32, frame: i32, is_pos_based: bool) -> i32 {
+    if is_pos_based {
+        get_translated_length(get_nucl_length(length), get_seq_frame(frame))
+    } else {
+        (length - frame.abs() + 1) / 3
+    }
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:491-499
+// ```c
+// /** Get translation frame number */
+// #define GET_SEQ_FRAME(f) ((f<0)?ABS(f)+2: f-1)
+//
+// /** Get nucleotide sequence length */
+// #define GET_NUCL_LENGTH(l) ((l-5)/2 +2)
+//
+// /** Get translated sequence length */
+// #define GET_TRANSLATED_LENGTH(l,f) ((l-f% 3)/3)
+// ```
+/// `GET_SEQ_FRAME`: the index (0 to 5) of a frame.
+pub(crate) fn get_seq_frame(frame: i32) -> i32 {
+    if frame < 0 {
+        frame.abs() + 2
+    } else {
+        frame - 1
+    }
+}
+
+/// `GET_NUCL_LENGTH`: the nucleotide length of a translation buffer of `length` bytes.
+pub(crate) fn get_nucl_length(length: i32) -> i32 {
+    (length - 5) / 2 + 2
+}
+
+/// `GET_TRANSLATED_LENGTH`: the letters of the frame of index `f` of `length` nucleotides.
+pub(crate) fn get_translated_length(length: i32, f: i32) -> i32 {
+    (length - f % 3) / 3
+}
+
+// NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,644-765:
 // static const int kWindowBorder = 200;
-// translated_length = (sequence_length - ABS(frame) + 1)/3;
+// translated_length = s_GetTranslatedLength(sequence_length, frame, is_pos_based);
 // begin = MAX(0, align->matchStart - border);
 // end = MIN(translated_length, align->matchEnd + border);
 // windows[k] = s_WindowInfoNew(begin, end, frame, 0,
@@ -1224,12 +1279,14 @@ fn subject_compare_windows(w1: &WindowInfo, w2: &WindowInfo) -> Ordering {
 //     nextWindow->subject_range.begin) s_WindowInfoJoin(nextWindow, &windows[k]);
 // s_DistinctAlignmentsSort(&windows[k]->align, windows[k]->hspcnt);
 // qsort(windows, *nWindows, sizeof(s_WindowInfo*), s_SubjectCompareWindows);
-#[allow(dead_code)] // Entered by TBLASTN Kappa only after translated callbacks are ported.
-fn windows_from_translated_aligns(
+// The sorts are glibc's `qsort`, a stable merge sort (see `blastp::hsp::sort_hsplist_by_score`).
+// `is_pos_based`: NCBI's `params->positionBased` (RPSTBLASTN's redo, series PR, item PS12b).
+pub(crate) fn windows_from_translated_aligns(
     alignments: &Option<Box<BlastCompoAlignment>>,
     query_lengths: &[i32],
     subject_nt_length: i32,
     border: i32,
+    is_pos_based: bool,
 ) -> Result<Vec<WindowInfo>> {
     let mut windows = Vec::with_capacity(distinct_alignments_length(alignments));
     let mut current = alignments.as_deref();
@@ -1239,7 +1296,7 @@ fn windows_from_translated_aligns(
         let query_length = *query_lengths
             .get(query_index)
             .ok_or_else(|| anyhow::anyhow!("NCBI translated window query index is missing"))?;
-        let translated_length = (subject_nt_length - align.frame.abs() + 1) / 3;
+        let translated_length = translated_length(subject_nt_length, align.frame, is_pos_based);
         windows.push(window_info_new(
             (align.match_start - border).max(0),
             (align.match_end + border).min(translated_length),
@@ -1251,7 +1308,7 @@ fn windows_from_translated_aligns(
         ));
         current = align.next.as_deref();
     }
-    windows.sort_unstable_by(location_compare_windows);
+    windows.sort_by(location_compare_windows);
     let mut input = windows.into_iter().peekable();
     let mut joined = Vec::new();
     while let Some(window) = input.next() {
@@ -1269,7 +1326,7 @@ fn windows_from_translated_aligns(
     for window in &mut joined {
         distinct_alignments_sort(&mut window.align);
     }
-    joined.sort_unstable_by(subject_compare_windows);
+    joined.sort_by(subject_compare_windows);
     Ok(joined)
 }
 
@@ -2682,6 +2739,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
             &query_lengths,
             matching_seq.length,
             WINDOW_BORDER,
+            params.position_based,
         )?
     } else {
         let query_info = query_infos
@@ -3177,9 +3235,14 @@ mod tests {
                     next: input,
                 }));
             }
-            let actual =
-                windows_from_translated_aligns(&input, &query_lengths, subject_nt_length, 200)
-                    .unwrap();
+            let actual = windows_from_translated_aligns(
+                &input,
+                &query_lengths,
+                subject_nt_length,
+                200,
+                false,
+            )
+            .unwrap();
             let mut expected = Vec::new();
             let mut expected_translation = Vec::new();
             let mut pending_translation = false;
@@ -3466,6 +3529,7 @@ mod tests {
                     &query_lengths,
                     nt_length,
                     WINDOW_BORDER,
+                    false,
                 )
                 .unwrap();
                 let params = BlastRedoAlignParams {

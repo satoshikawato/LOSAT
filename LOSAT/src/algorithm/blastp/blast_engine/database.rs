@@ -22,7 +22,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -211,9 +211,17 @@ impl BlastpDatabase {
         self.db.statistics()
     }
 
-    /// The total length the statistics' setup reads (`DbStatistics::setup_total`).
-    pub(super) fn total_letters(&self) -> u64 {
-        self.statistics().setup_total as u64
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-906
+    // ```c
+    //    Uint4 min_subject_length;
+    //    Int8 total_length = -1;
+    //    Int4 num_seqs = -1;
+    // ```
+    /// The total length the statistics' setup reads (`DbStatistics::setup_total`), NCBI's `Int8`
+    /// on every target: an alias file's `LENGTH` declares it, so it is not bounded by the
+    /// letters LOSAT holds (2^32 or more on a 32-bit target).
+    pub(super) fn total_letters(&self) -> i64 {
+        self.statistics().setup_total
     }
 
     /// The length of the included sequences (`SeqDb::included_length`), which the schedules read.
@@ -251,20 +259,6 @@ impl BlastpDatabase {
     /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
     pub(super) fn first_oid_read_fails(&self) -> bool {
         self.db.first_oid_read_fails()
-    }
-
-    /// The total length as the engine holds it.
-    pub(super) fn total_letters_usize(&self) -> Result<usize> {
-        let total = self.total_letters();
-        usize::try_from(total)
-            .ok()
-            .filter(|&letters| i64::try_from(letters).is_ok())
-            .with_context(|| {
-                format!(
-                    "a database of {total} letters is not supported by LOSAT's {} on this platform",
-                    self.program
-                )
-            })
     }
 
     /// What the `Database:` lines of the pairwise report show
@@ -706,7 +700,6 @@ where
         pool.threads(),
         db.num_seqs() as usize,
         db.num_seqs() as usize,
-        0,
     ) && pool.enabled()
     {
         let round_blocks = pool.threads().saturating_mul(blocks_per_thread).max(1);
@@ -2834,13 +2827,60 @@ mod tests {
         let database = open("prot_mv");
         assert_eq!(database.num_sequences(), 10);
         assert_eq!(database.total_letters(), 801);
-        assert_eq!(database.total_letters_usize().unwrap(), 801);
         let shown = database.pairwise_database();
         assert_eq!(shown.definition, b"protein in volumes");
         assert_eq!(shown.databases[0].date, "Oct 12, 2026  4:12 PM");
         assert_eq!((shown.num_sequences, shown.total_letters), (10, 801));
         // The name is the `-db` value as given.
         assert_eq!(database.name(), fixture("prot_mv"));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-910
+    // ```c
+    //    Int8 total_length = -1;
+    //    Int4 num_seqs = -1;
+    //
+    //    if (seq_src) {
+    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
+    //       if (total_length <= 0)
+    //           total_length = BlastSeqSrcGetTotLen(seq_src);
+    // ```
+    // An alias file's `LENGTH` of 2^32 letters or more over the 23 sequences of
+    // `tests/db_search/taxfilter/tfp` (`tests/db_search/dbcounts`, rows db.cnt.l4295.bp.*,
+    // db.cnt.l4294.bp.0 and db.cnt.avg2p32.bp_c0) is NCBI's `Int8` on every target, wasm32's
+    // 32-bit `usize` included.
+    #[test]
+    fn totals_of_2_to_the_32_letters_or_more_are_held_whole() {
+        for (name, total) in [
+            ("l4295", 4_294_967_296_000_000_000),
+            ("l4294", 4_294_967_295_999_999_999),
+            ("avg2p32", 98_784_247_808),
+        ] {
+            assert!(total > i64::from(u32::MAX), "{name}");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/dbcounts")
+                .join(name);
+            let database = BlastpDatabase::open(
+                path.to_str().unwrap(),
+                &ApplicationSettings::default(),
+                "BLASTP",
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            assert_eq!(
+                (
+                    database.total_letters(),
+                    database.statistics_num_sequences()
+                ),
+                (total, 23),
+                "{name}"
+            );
+            let shown = database.pairwise_database();
+            assert_eq!(
+                (shown.num_sequences, shown.total_letters),
+                (23, total),
+                "{name}"
+            );
+        }
     }
 
     // align_format_util.cpp:385-387: an empty title is shown as the name.
@@ -3657,8 +3697,8 @@ mod tests {
             let multi = open_path(&multi_name);
             let lengths = generated_lengths();
             let letters: usize = lengths.iter().sum();
-            assert_eq!(single.total_letters(), letters as u64);
-            assert_eq!(multi.total_letters(), letters as u64);
+            assert_eq!(single.total_letters(), letters as i64);
+            assert_eq!(multi.total_letters(), letters as i64);
             assert_eq!(single.db.volumes().len(), 1);
             assert!(multi.db.volumes().len() > 2, "{}", multi.db.volumes().len());
             let (reference, reference_listed) = search(&single, 1, 2, Some(BLOCK_BYTES)).unwrap();

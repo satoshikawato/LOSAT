@@ -2078,20 +2078,22 @@ pub(crate) mod arch {
     pub unsafe fn shr16n(v: V, n: u32) -> V {
         _mm_srl_epi16(v, _mm_cvtsi32_si128(n as i32))
     }
-    /// 32-bit lanes shifted right (logical) by `N` bits.
-    #[inline(always)]
-    pub unsafe fn shr32<const N: i32>(v: V) -> V {
-        _mm_srli_epi32::<N>(v)
-    }
     /// The low 16 bits of the products of the 16-bit lanes.
     #[inline(always)]
     pub unsafe fn mullo16(a: V, b: V) -> V {
         _mm_mullo_epi16(a, b)
     }
-    /// 8-bit lanes: all ones where equal, zero elsewhere.
+    /// `pick` with wasm32's rule for every index byte: an index of 16 or more gives 0 (`pshufb`
+    /// after a saturating add of 0x70, which sets the top bit of those indices).
     #[inline(always)]
-    pub unsafe fn eq8(a: V, b: V) -> V {
-        _mm_cmpeq_epi8(a, b)
+    pub unsafe fn pickz(v: V, idx: V) -> V {
+        _mm_shuffle_epi8(v, _mm_adds_epu8(idx, _mm_set1_epi8(0x70)))
+    }
+    /// `v` itself (x86-64 reads a vector constant from memory where it is used; see the wasm32
+    /// layer).
+    #[inline(always)]
+    pub unsafe fn hoisted(v: V) -> V {
+        v
     }
     /// The bytes of `b` where `mask`'s byte is all ones, those of `a` where it is zero (`mask` has
     /// no other bytes).
@@ -2439,20 +2441,24 @@ pub(crate) mod arch {
     pub unsafe fn shr16n(v: V, n: u32) -> V {
         u16x8_shr(v, n)
     }
-    /// 32-bit lanes shifted right (logical) by `N` bits.
-    #[inline(always)]
-    pub unsafe fn shr32<const N: i32>(v: V) -> V {
-        u32x4_shr(v, N as u32)
-    }
     /// The low 16 bits of the products of the 16-bit lanes.
     #[inline(always)]
     pub unsafe fn mullo16(a: V, b: V) -> V {
         i16x8_mul(a, b)
     }
-    /// 8-bit lanes: all ones where equal, zero elsewhere.
+    /// `pick` (`i8x16.swizzle`: an index of 16 or more gives 0).
     #[inline(always)]
-    pub unsafe fn eq8(a: V, b: V) -> V {
-        i8x16_eq(a, b)
+    pub unsafe fn pickz(v: V, idx: V) -> V {
+        i8x16_swizzle(v, idx)
+    }
+    /// `v` as a value LLVM does not see as a constant (`black_box`), so that a loop keeps the one
+    /// made before it: in a loop LLVM makes a vector constant again at every use (`v128.const`),
+    /// which V8 builds with three or four instructions, and turns a multiplication by powers of
+    /// two into shifts by lane, which wasm32 lacks (eight lane moves). Only the speed depends on
+    /// it.
+    #[inline(always)]
+    pub unsafe fn hoisted(v: V) -> V {
+        core::hint::black_box(v)
     }
     /// The bytes of `b` where `mask`'s byte is all ones, those of `a` where it is zero (`mask` has
     /// no other bytes).

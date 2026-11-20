@@ -530,7 +530,8 @@ pub(super) fn batch_spaces(inputs: &SpaceInputs<'_>) -> Result<BatchSpaces> {
 #[derive(Clone, Copy)]
 pub(super) struct CutoffInputs<'a> {
     pub(super) subjects: SubjectSource<'a>,
-    pub(super) db_len_total: usize,
+    /// NCBI's `Int8` (`SubjectMetadata::db_len_total`).
+    pub(super) db_len_total: i64,
     /// NCBI's `Int4` (`SubjectMetadata::db_num_seqs`).
     pub(super) db_num_seqs: i32,
     pub(super) query_contexts: &'a [QueryContext],

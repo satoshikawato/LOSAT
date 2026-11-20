@@ -91,7 +91,6 @@ fn the_xml_keeps_the_arguments_that_the_parser_reads() {
                     );
                     let text = error.to_string();
                     text.contains(&format!("option -{name} is not supported by LOSAT's"))
-                        || text.contains(&format!("unsupported BLASTX option '-{name}'"))
                 }
             };
             // The arguments whose run LOSAT refuses whatever their value pass the parser.

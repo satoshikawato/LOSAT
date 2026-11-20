@@ -109,8 +109,9 @@ pub(super) struct ReportView<'a> {
     pub(super) pairwise_database: &'a Option<PairwiseDatabase>,
     pub(super) shown_database: &'a Option<PairwiseDatabase>,
     pub(super) subject_input_label: &'a str,
-    pub(super) shown_num_sequences: usize,
-    pub(super) shown_total_letters: usize,
+    /// NCBI's `Int8` (`report_prep::ReportLabels`).
+    pub(super) shown_num_sequences: i64,
+    pub(super) shown_total_letters: i64,
     pub(super) subjects: &'a [EncodedProtein],
     pub(super) subject_records: &'a [FastaRecord],
     pub(super) subject_titles: &'a [Arc<[u8]>],

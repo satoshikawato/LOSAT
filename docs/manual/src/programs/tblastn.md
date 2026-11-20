@@ -113,7 +113,6 @@ LOSAT stops with an error for these `tblastn` settings instead of running someth
 
 - `-ungapped`, `-use_sw_tback` and `-subject_besthit`.
 - `-best_hit_overhang` and `-best_hit_score_edge`.
-- `-max_intron_length` other than 0 while sum statistics are on (the default).
 - An `-evalue` of 1.7976931348623157e308 or more.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.

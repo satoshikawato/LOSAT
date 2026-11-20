@@ -7,8 +7,8 @@
 // The MIT License text is in THIRD_PARTY_NOTICES (section 4).
 
 //! The data tables of `exp`, `log` and `pow` (`__exp_data`, `__log_data`, `__pow_log_data` of Arm
-//! Optimized Routines, notice above), as bit patterns read from glibc 2.35's library file (libm.so.6
-//! of Ubuntu 2.35-0ubuntu3.18, x86-64), which holds the same data (glibc's
+//! Optimized Routines, notice above), as bit patterns read from glibc 2.35's library file
+//! (libm.so.6 of Ubuntu 2.35-0ubuntu3.18, x86-64), which holds the same data (glibc's
 //! sysdeps/ieee754/dbl-64/e_exp_data.c, e_log_data.c and e_pow_log_data.c).
 
 // __exp_data: invln2N, shift, negln2hiN, negln2loN, poly[4], exp2_shift, exp2_poly[5], tab[256].

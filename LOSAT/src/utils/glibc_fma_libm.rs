@@ -32,9 +32,9 @@
 //! glibc 2.35 carries, built to give glibc's bits; `log10` is Sun's fdlibm code as in glibc's
 //! e_log10.c. Every fused multiply-add of the compiled glibc function (read from the disassembly of
 //! the library, libm.so.6 of Ubuntu 2.35-0ubuntu3.18) is one call of an [`Fma`] method here, every
-//! other operation is the same IEEE operation in the same order, and the tables are the same bits as
-//! glibc's (`tables.rs`, read from that library). An FMA rounds once, so its result is the same on every
-//! target; how it is computed is the only thing that differs:
+//! other operation is the same IEEE operation in the same order, and the tables are the same bits
+//! as glibc's (`tables.rs`, read from that library). An FMA rounds once, so its result is the same
+//! on every target; how it is computed is the only thing that differs:
 //! - [`Fused`] (`f64::mul_add`): the FMA instruction on aarch64, in the x86-64 copies compiled with
 //!   the `fma` feature (taken when the CPU has it, `x86_fma`), and on x86-64 builds that enable
 //!   `fma`; elsewhere the C library's correctly rounded `fma`.

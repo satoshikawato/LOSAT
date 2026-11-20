@@ -872,7 +872,7 @@ impl Failed {
     {
         let native = error
             .downcast_ref::<losat::web_adapter::NativeError>()
-            .map(|native| native.message.clone().into_bytes());
+            .map(|native| native.message.clone());
         let cli_stderr = match &native {
             Some(native) => native.clone(),
             None => format!("Error: {error:?}\n").into_bytes(),

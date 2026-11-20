@@ -6645,7 +6645,7 @@ fn blastn_pairwise_report(
     let pairwise_report = BlastnPairwiseReport {
         version: crate::NCBI_BLAST_VERSION.to_string(),
         megablast: report.megablast,
-        database_name: subject_title.to_string(),
+        database_name: subject_title.as_bytes().to_vec(),
         database_num_sequences: report.shown_num_seqs(),
         database_total_letters: report.shown_total_letters(),
         database: report.database.cloned(),
@@ -8293,7 +8293,7 @@ pub fn run(
     if report.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
-            message: "BLAST failed to write output\n".to_string(),
+            message: "BLAST failed to write output\n".into(),
         }
         .into());
     }
@@ -8375,7 +8375,7 @@ fn read_cli_subjects(
             message: format!(
                 "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
-            ),
+            ).into(),
         }
         .into());
     };
@@ -8857,7 +8857,7 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     if subjects.is_empty() {
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
         }
         .into());
     }
@@ -10511,7 +10511,7 @@ fn run_in_pool(
         write_pairwise_prologs(outputs, &output_formats, megablast, &shown, false)?;
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
         }
         .into());
     }
@@ -10747,7 +10747,7 @@ fn run_in_pool(
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             return Err(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+                message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
             }
             .into());
         }
@@ -10986,7 +10986,11 @@ fn run_in_pool(
                 message.push(' ');
             }
             message.push('\n');
-            return Err(crate::cli::NativeError { exit: 3, message }.into());
+            return Err(crate::cli::NativeError {
+                exit: 3,
+                message: message.into(),
+            }
+            .into());
         }
         warnings[start].append(&batch_title_warnings);
         check_batch_window(&args, batch_records.batch_queries().records())?;
@@ -11951,7 +11955,7 @@ fn write_format_prolog(
             &mut writer,
             crate::NCBI_BLAST_VERSION,
             megablast,
-            &shown.name,
+            shown.name.as_bytes(),
             // Printed for a subject set only (a database prints `database`).
             i64::from(shown.num_seqs),
             shown.total_letters,
@@ -15206,7 +15210,7 @@ mod tests {
         };
         let native = |error: anyhow::Error| {
             let native = error.downcast::<crate::cli::NativeError>().unwrap();
-            (native.exit, native.message)
+            (native.exit, String::from_utf8(native.message).unwrap())
         };
         let options = |text: &str| {
             (

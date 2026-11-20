@@ -277,6 +277,8 @@ const windowSize: ParameterField = { flag: '-window_size', label: 'Two-hit windo
 const xdropUngap: ParameterField = { flag: '-xdrop_ungap', label: 'X-dropoff, ungapped (bits)', ...decimal };
 const xdropGap: ParameterField = { flag: '-xdrop_gap', label: 'X-dropoff, preliminary gapped (bits)', ...decimal };
 const xdropGapFinal: ParameterField = { flag: '-xdrop_gap_final', label: 'X-dropoff, final gapped (bits)', ...decimal };
+// BLASTX, TBLASTN and TBLASTX: -sum_stats (NCBI's page does not show it).
+const sumStats: ParameterField = { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' };
 
 // BLAST+'s -num_descriptions / -num_alignments (NCBI's page has them as "Descriptions" / "Alignments" of its
 // display settings; they also set the hit list sizes, so a run may search twice, abi_v2.md §7).
@@ -510,7 +512,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           xdropGapFinal,
           maxHsps,
           { flag: '-strand', label: 'Query strand', kind: 'choice' },
-          { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' },
+          sumStats,
         ],
       },
     ],
@@ -551,7 +553,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           xdropUngap,
           xdropGap,
           xdropGapFinal,
-          { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' },
+          sumStats,
         ],
       },
     ],
@@ -583,7 +585,17 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: OTHER,
         placement: 'algorithm',
-        fields: [numDescriptions, numAlignments, lineLength, sortHits, sortHsps, threshold, windowSize, xdropUngap],
+        fields: [
+          numDescriptions,
+          numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
+          threshold,
+          windowSize,
+          xdropUngap,
+          sumStats,
+        ],
       },
     ],
   },

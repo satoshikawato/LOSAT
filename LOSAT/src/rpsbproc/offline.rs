@@ -873,34 +873,7 @@ fn write_residue(text: &mut [u8], at: i64, c: u8) -> Result<(), ProcessError> {
 /// libstdc++'s `basic_string::replace(pos, n1, str, pos2, n2)`: `n1` bytes from `pos` (fewer at
 /// the end) replaced by `n2` bytes of `str` from `pos2` (fewer at its end); the string may grow.
 /// Its `std::out_of_range` when a position is past its string's length, `pos2` checked first.
-// NCBI reference (GCC 13 libstdc++): include/c++/13/bits/basic_string.h:395-402,2311-2316,2352-2358
-// ```c++
-//       size_type
-//       _M_check(size_type __pos, const char* __s) const
-//       {
-// 	if (__pos > this->size())
-// 	  __throw_out_of_range_fmt(__N("%s: __pos (which is %zu) > "
-// 				       "this->size() (which is %zu)"),
-// 				   __s, __pos, this->size());
-// 	return __pos;
-//       }
-// ...
-//       basic_string&
-//       replace(size_type __pos1, size_type __n1, const basic_string& __str,
-// 	      size_type __pos2, size_type __n2 = npos)
-//       { return this->replace(__pos1, __n1, __str._M_data()
-// 			     + __str._M_check(__pos2, "basic_string::replace"),
-// 			     __str._M_limit(__pos2, __n2)); }
-// ...
-//       basic_string&
-//       replace(size_type __pos, size_type __n1, const _CharT* __s,
-// 	      size_type __n2)
-//       {
-// 	__glibcxx_requires_string_len(__s, __n2);
-// 	return _M_replace(_M_check(__pos, "basic_string::replace"),
-// 			  _M_limit(__pos, __n1), __s, __n2);
-//       }
-// ```
+// libstdc++ (GCC 13): include/c++/13/bits/basic_string.h:395-402,2311-2316,2352-2358
 // (`_M_limit(pos, n)` is `min(n, size() - pos)`. `qf`, an `int` (its value past `int`'s range
 // where exception 12 took it there), is the `size_t` `pos`: a negative one is beyond any length.)
 fn string_replace(

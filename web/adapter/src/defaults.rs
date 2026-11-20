@@ -131,6 +131,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-threshold", args.word_threshold().to_string());
             put("-window_size", args.window().to_string());
             put("-xdrop_ungap", args.x_drop_ungapped_bits().to_string());
+            put("-sum_stats", bool_text(args.sum_stats()));
             put(
                 "-seg",
                 args.seg_spec()

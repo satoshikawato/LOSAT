@@ -120,26 +120,8 @@ fn max_entry_per_txn(settings: &LmdbEnvSettings) -> Result<u32, WriteDbError> {
 //             NCBI_THROW(CSeqDBException, eFileErr, "LMDB runtime error: " + (string)e.what());
 //         }
 // ```
-// NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:356-365
-// ```c++
-// static inline void
-// lmdb::env_open(MDB_env* const env,
-//                const char* const path,
-//                const unsigned int flags,
-//                const mode mode) {
-//   const int rc = ::mdb_env_open(env, path, flags, mode);
-//   if (rc != MDB_SUCCESS) {
-//     error::raise("mdb_env_open", rc);
-//   }
-// }
-// ```
-// NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:130-139
-// ```c++
-//   virtual const char* what() const LMDB_NOEXCEPT {
-//   ...
-// 	 LMDB_SNPRINTF(buffer, sizeof(buffer),
-// 		"%s: %s", origin(), ::mdb_strerror(code()));
-// ```
+// lmdb++ (NCBI 598d8ae6 copy): c++/include/util/lmdbxx/lmdb++.h:356-365
+// lmdb++ (NCBI 598d8ae6 copy): c++/include/util/lmdbxx/lmdb++.h:130-139
 // Every failure of `mdb_env_open` (the lock file or the data file that cannot be created, the
 // map) is this `CSeqDBException`. makeblastdb 2.17.0 with an output name of 247 to 251 bytes:
 // `BLAST Database error: LMDB runtime error: mdb_env_open: File name too long` (exit status 2)
@@ -379,21 +361,7 @@ fn kv_cmp(ids: &[u8], a: KeyValuePair, b: KeyValuePair) -> std::cmp::Ordering {
     id_cmp(ids, a, b).then_with(|| a.oid().to_le_bytes().cmp(&b.oid().to_le_bytes()))
 }
 
-// NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:850-861
-// ```c++
-// static inline bool
-// lmdb::dbi_put(MDB_txn* const txn,
-//               const MDB_dbi dbi,
-//               const MDB_val* const key,
-//               const MDB_val* const data,
-//               const unsigned int flags = 0) {
-//   const int rc = ::mdb_put(txn, dbi, const_cast<MDB_val*>(key), const_cast<MDB_val*>(data), flags);
-//   if (rc != MDB_SUCCESS && rc != MDB_KEYEXIST) {
-//     error::raise("mdb_put", rc);
-//   }
-//   return (rc == MDB_SUCCESS);
-// }
-// ```
+// lmdb++ (NCBI 598d8ae6 copy): c++/include/util/lmdbxx/lmdb++.h:850-861
 // The error of a put in `x_CommitTransaction` (an id of more than 511 bytes, which LMDB refuses
 // with MDB_BAD_VALSIZE) is raised in `~CWriteDB_LMDB`, where it ends makeblastdb 2.17.0 with
 // SIGABRT after its `.pos` file (S3c x_key512). LOSAT ends with lmdb++'s text and the key it

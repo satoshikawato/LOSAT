@@ -119,7 +119,6 @@ pub struct SubjectMetadata {
 /// Sequence data and metadata (`R`: the query records, `InputRecord`)
 pub struct SequenceData<'a, R = FastaRecord> {
     pub queries: &'a [R],
-    pub query_ids: Vec<String>,
     pub query_masks: Vec<Vec<MaskedInterval>>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c
@@ -1540,7 +1539,6 @@ pub fn chunk_query_masks<R: InputRecord + Sync>(
 /// Prepare all sequence data and configuration
 pub fn prepare_sequence_data<'a, R>(
     queries: &'a [R],
-    query_ids: Vec<String>,
     query_masks: Vec<Vec<MaskedInterval>>,
     subject_metadata: SubjectMetadata,
 ) -> SequenceData<'a, R> {
@@ -1554,7 +1552,6 @@ pub fn prepare_sequence_data<'a, R>(
 
     SequenceData {
         queries,
-        query_ids,
         query_masks,
         db_len_total,
         db_num_seqs,

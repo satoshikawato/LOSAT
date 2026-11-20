@@ -604,7 +604,7 @@ fn optimize(
 }
 
 /// `createCacheBitArray`: one bit per unit, set for each unit whose count is at least `textend`
-/// and for its reverse complement.
+/// and for its reverse complement; an array of no words (units of 1 or 2 letters) has none set.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_opt.cpp:120-160
 fn cache_bit_array(
@@ -614,6 +614,9 @@ fn cache_bit_array(
     textend: u32,
 ) -> Result<Vec<u32>, FinalizeError> {
     let (mut cba, size) = cache_bit_array_space(unit_size)?;
+    if size == 0 {
+        return Ok(cba);
+    }
     cba.resize(size, 0u32);
     for (&unit, &count) in units.iter().zip(counts) {
         if u32::from(count) >= textend {

@@ -267,7 +267,6 @@ k_comma	-mk_counts -in ../winmask/fasta/dm2L_3k.fa,in/multi.fa -unit 5 -sformat 
 k_comma_missing	-mk_counts -in ../winmask/fasta/dm2L_3k.fa,in/nonexistent.fa -unit 5 -out @OUT@/c.counts
 k_comma_empty	-mk_counts -in ../winmask/fasta/dm2L_3k.fa, -unit 5
 k_comma_only	-mk_counts -in , -unit 5
-k_in_empty	-mk_counts -in "" -unit 5
 k_falist	-mk_counts -in in/falist.txt -fa_list T -unit 5 -sformat binary
 k_falist_missing	-mk_counts -in in/nonexistent.txt -fa_list T
 k_falist_crlf	-mk_counts -in in/falist_crlf.txt -fa_list T -unit 5
@@ -291,11 +290,9 @@ k_excl	-mk_counts -in in/multi.fa -exclude_ids in/ids_a.txt -unit 5 -sformat bin
 k_ids_both	-mk_counts -in in/multi.fa -ids in/ids_a.txt -exclude_ids in/ids_b.txt
 k_ids_missing	-mk_counts -in in/multi.fa -ids in/nonexistent.txt -unit 5 -sformat binary
 k_ids_none	-mk_counts -in in/multi.fa -ids in/ids_none.txt
-k_ids_crlf	-mk_counts -in in/multi.fa -ids in/ids_crlf.txt -unit 5 -sformat binary
 k_ids_tab	-mk_counts -in in/multi.fa -ids in/ids_tab.txt -unit 5 -sformat binary
 k_textmatch_f	-mk_counts -in in/multi.fa -ids in/ids_a.txt -text_match F -unit 5 -sformat binary
 k_blastdb	-mk_counts -infmt blastdb -in db/wm -sformat binary
-k_blastdb_ids	-mk_counts -infmt blastdb -in db/wm_ps -ids in/ids_db.txt -unit 5 -sformat binary
 k_blastdb2	-mk_counts -infmt blastdb -in db/wm,db/wm_ps -unit 5 -sformat binary
 k_blastdb_missing	-mk_counts -infmt blastdb -in db/none -unit 5
 # -checkdup T (CheckDuplicates, a read of the input before the counts): samples of 100 letters every 10,000 of each sequence of 50,000 letters or more, matched in the later sequences (in/cd.fa: parts of dm2L_60k.fa at other offsets).

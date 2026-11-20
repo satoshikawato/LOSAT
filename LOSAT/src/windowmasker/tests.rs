@@ -57,6 +57,9 @@ fn the_library_refuses_xmlhelp_as_blastdbcmd_does() {
 #[test]
 fn the_counts_modes_refuse_what_ncbi_gives_no_one_result_for() {
     let refusal = |what: &str| format!("Error: {what} is not supported by LOSAT's WINDOWMASKER\n");
+    let warning =
+        "FASTA-Reader: Start of first data line in seq is about 100% ambiguous nucleotides \
+                   (shouldn't be over 40%)\n";
     let nan = refusal(
         "-mk_counts of an input without a unit of unambiguous letters, whose percentages NCBI \
          BLAST+ prints as the C runtime prints 0/0 (-nan on x86-64 Linux)",
@@ -66,7 +69,7 @@ fn the_counts_modes_refuse_what_ncbi_gives_no_one_result_for() {
         (
             1,
             String::new(),
-            format!("computing the genome length\npass 1\n{nan}")
+            format!("computing the genome length\n{warning}pass 1\n{warning}{nan}")
         )
     );
     assert_eq!(

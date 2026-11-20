@@ -540,26 +540,27 @@ impl SeqRange {
 struct RangeCollection(Vec<SeqRange>);
 
 impl RangeCollection {
-    /// `std::lower_bound` from `start` with `PRangeLessPos` (`R.GetToOpen() <= Pos`): the first
-    /// range with `to_open > pos` while the ranges are sorted. libstdc++'s halving, step for
-    /// step, since a range that a query gap made (`to_open` 0, `uniq_seq_coverage`) leaves the
-    /// collection unsorted, where the probes decide the result.
+    /// `lower_bound(begin, end, pos, p)` of `x_CombineWith` and `x_Subtract` (quoted below) from
+    /// position `start`: the first position of `start..len` whose range is not less than `pos` by
+    /// `p` (less: `to_open <= pos`), or `len` when there is none.
     ///
-    /// libstdc++ reference (bits/stl_algobase.h, `std::__lower_bound`):
+    /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:44-51
+    /// ```c++
+    /// template<class Range, class Position>
+    /// struct PRangeLessPos
+    /// {
+    ///     using is_transparent = void;
+    ///     bool operator()(const Range &R, Position Pos)     { return R.GetToOpen() <= Pos;  }
+    ///     //bool operator()(Position Pos, const Range &R)     { return Pos < R.GetToOpen();  }
+    ///     bool operator()(const Range &R1, const Range &R2) { return R1.GetToOpen() < R2.GetToOpen();  }
+    /// };
+    /// ```
+    /// The ranges are not always in the order of `to_open`: a query gap at the first or last subject
+    /// letter of a part gives a query range whose `TSeqPos` arithmetic wrapped (`uniq_seq_coverage`).
+    /// The position found then depends on which ranges are compared, so they are compared in the
+    /// order NCBI's `lower_bound` compares them (`lower_bound_by`).
     fn lower_bound(&self, start: usize, pos: u32) -> usize {
-        let mut first = start;
-        let mut len = self.0.len() - start;
-        while len > 0 {
-            let half = len >> 1;
-            let middle = first + half;
-            if self.0[middle].to_open <= pos {
-                first = middle + 1;
-                len = len - half - 1;
-            } else {
-                len = half;
-            }
-        }
-        first
+        lower_bound_by(start, self.0.len(), |i| self.0[i].to_open <= pos)
     }
 
     /// `x_CombineWith(const TRange&)`.
@@ -665,6 +666,37 @@ impl RangeCollection {
             .iter()
             .fold(0u32, |total, range| total.wrapping_add(range.length()))
     }
+}
+
+/// The position `lower_bound` returns for the indices `start..end`, where `less(i)` answers whether
+/// the element at index `i` is less than the value searched for: the first index for which `less`
+/// answers false when it answers true for every index before that one and false from it on, and
+/// `end` when it answers true for all. For other answers the result is where this search ends,
+/// which is where NCBI's `lower_bound` ends: `less` is asked about the same indices, in the same
+/// order, as the C++ `std::lower_bound` that NCBI's code calls asked a comparator that recorded
+/// its calls, built with g++ 13 (`LOSAT/tests/unit/lower_bound_observed/README.md`).
+///
+/// The search keeps a window of `n` indices from `lo`, at first `start..end`. While the window is
+/// not empty, it asks about the index `n / 2` places into the window. When the answer is true, the
+/// window becomes the indices after that one; otherwise, the indices before it. It returns `lo` of
+/// the empty window.
+///
+/// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:331-334, 355, 369 (the calls of
+/// `lower_bound`, quoted at `RangeCollection::combine_with` and `RangeCollection::subtract`).
+fn lower_bound_by(start: usize, end: usize, mut less: impl FnMut(usize) -> bool) -> usize {
+    let mut lo = start;
+    let mut n = end - start;
+    while n > 0 {
+        let half = n / 2;
+        let probe = lo + half;
+        if less(probe) {
+            lo = probe + 1;
+            n -= half + 1;
+        } else {
+            n = half;
+        }
+    }
+    lo
 }
 
 /// The subject range of an HSP's Seq-align (`GetSeqRange(1)`, record coordinates, 0-based).
@@ -843,35 +875,120 @@ mod tests {
         assert_eq!(pairs(&zero), [(0, 9)]);
     }
 
-    // A query gap at a part's last subject letter makes the range [from, to_open 0), which is
-    // empty and leaves the collection unsorted: the probes of `std::lower_bound` then decide
-    // where later ranges go (`uniq_seq_coverage`).
+    /// A tree of `probe_trees.txt`: the index of a call, then the tree after the answer false,
+    /// then the tree after the answer true; or the position returned.
+    enum ProbeTree {
+        Call {
+            index: usize,
+            if_false: Box<ProbeTree>,
+            if_true: Box<ProbeTree>,
+        },
+        Returned(usize),
+    }
+
+    fn parse_probe_tree<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> ProbeTree {
+        let token = tokens.next().expect("a token of the tree");
+        match token.strip_prefix('p') {
+            Some(index) => {
+                let index = index.parse().unwrap();
+                let if_false = Box::new(parse_probe_tree(tokens));
+                let if_true = Box::new(parse_probe_tree(tokens));
+                ProbeTree::Call {
+                    index,
+                    if_false,
+                    if_true,
+                }
+            }
+            None => ProbeTree::Returned(token.strip_prefix('r').unwrap().parse().unwrap()),
+        }
+    }
+
+    /// Every path of a tree: its answers, the indices of its calls, the position returned.
+    type ProbePath = (Vec<bool>, Vec<usize>, usize);
+
+    fn probe_paths(
+        tree: &ProbeTree,
+        answers: &mut Vec<bool>,
+        calls: &mut Vec<usize>,
+        out: &mut Vec<ProbePath>,
+    ) {
+        match tree {
+            ProbeTree::Returned(position) => out.push((answers.clone(), calls.clone(), *position)),
+            ProbeTree::Call {
+                index,
+                if_false,
+                if_true,
+            } => {
+                calls.push(*index);
+                for (answer, subtree) in [(false, if_false), (true, if_true)] {
+                    answers.push(answer);
+                    probe_paths(subtree, answers, calls, out);
+                    answers.pop();
+                }
+                calls.pop();
+            }
+        }
+    }
+
+    // For every sequence of answers of the recorded trees, `lower_bound_by` asks about the
+    // indices that `std::lower_bound` gave its comparator, in the same order, and returns the
+    // same position (`LOSAT/tests/unit/lower_bound_observed/README.md`).
     #[test]
-    fn lower_bound_probes_as_libstdcxx() {
-        let unsorted = RangeCollection(vec![
-            SeqRange::new(0, 9),
-            SeqRange {
-                from: 1546,
-                to_open: 0,
-            },
-            SeqRange::new(20, 29),
-            SeqRange::new(40, 49),
-        ]);
-        // The probes: [20, 30) is below 35, then [40, 50) is not.
-        assert_eq!(unsorted.lower_bound(0, 35), 3);
-        // A linear scan would answer 0 ([0, 10) is not below 5); the halving probes [20, 30),
-        // which is not below 5, then [1546, 0), which is, and answers 2.
-        assert_eq!(unsorted.lower_bound(0, 5), 2);
-        let mut collection = unsorted.clone();
-        collection.combine_with(SeqRange::new(12, 14));
-        assert_eq!(
-            collection
-                .0
-                .iter()
-                .map(|r| (r.from, r.to_open))
-                .collect::<Vec<_>>(),
-            [(0, 10), (1546, 0), (12, 15), (20, 30), (40, 50)]
-        );
+    fn lower_bound_asks_in_the_observed_order() {
+        let trees = include_str!("../../../tests/unit/lower_bound_observed/probe_trees.txt");
+        let (mut tree_count, mut path_count) = (0, 0);
+        for line in trees.lines() {
+            let mut tokens = line.split(' ');
+            assert_eq!(tokens.next(), Some("tree"), "{line}");
+            let n: usize = tokens.next().unwrap().parse().unwrap();
+            let start: usize = tokens.next().unwrap().parse().unwrap();
+            let total: usize = tokens.next().unwrap().parse().unwrap();
+            assert!(start + n <= total, "{line}");
+            let tree = parse_probe_tree(&mut tokens);
+            assert_eq!(tokens.next(), None, "{line}");
+            let mut paths = Vec::new();
+            probe_paths(&tree, &mut Vec::new(), &mut Vec::new(), &mut paths);
+            assert_eq!(paths.len(), n + 1, "{line}");
+            for (answers, calls, returned) in paths {
+                let mut asked = Vec::new();
+                let position = lower_bound_by(start, start + n, |i| {
+                    asked.push(i);
+                    answers.get(asked.len() - 1).copied().unwrap_or(false)
+                });
+                assert_eq!(
+                    (asked, position),
+                    (calls, returned),
+                    "{n} from {start}, answers {answers:?}"
+                );
+                path_count += 1;
+            }
+            tree_count += 1;
+        }
+        assert_eq!((tree_count, path_count), (137, 5535));
+    }
+
+    // Ranges out of the order of `to_open` (a range whose `to_open` wrapped to 0 after larger
+    // ones): the positions that `std::lower_bound` returned for them (`observe_lower_bound one`,
+    // `LOSAT/tests/unit/lower_bound_observed/README.md`), none of them the first range not less
+    // than the value (at 1, 1, 1, 0 and 2).
+    #[test]
+    fn lower_bound_of_unordered_ranges_is_the_observed_one() {
+        let ranges = |to_opens: &[u32]| {
+            RangeCollection(
+                to_opens
+                    .iter()
+                    .map(|&to_open| SeqRange {
+                        from: to_open,
+                        to_open,
+                    })
+                    .collect(),
+            )
+        };
+        assert_eq!(ranges(&[40, 50, 0, 60]).lower_bound(0, 45), 3);
+        assert_eq!(ranges(&[10, 30, 0, 40, 50]).lower_bound(0, 25), 3);
+        assert_eq!(ranges(&[10, 30, 0, 40, 50]).lower_bound(1, 25), 3);
+        assert_eq!(ranges(&[100, 0, 0, 0, 0, 0, 0, 0]).lower_bound(0, 50), 8);
+        assert_eq!(ranges(&[50, 0, 120, 4, 90, 200]).lower_bound(1, 100), 5);
     }
 
     #[test]

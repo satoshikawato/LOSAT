@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "excl",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "excl",
+  "number-of-letters": 364,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-21T03:21:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50070,
+  "bytes-to-cache": 480,
+  "files": [
+    "excl.pdb",
+    "excl.phr",
+    "excl.pin",
+    "excl.pog",
+    "excl.pos",
+    "excl.pot",
+    "excl.psq",
+    "excl.ptf",
+    "excl.pto"
+  ]
+}

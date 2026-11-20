@@ -1267,6 +1267,17 @@ docstring has the usage and the records) writes with NCBI BLAST+ 2.17.0 makeblas
 sets the batch's status back to 0 (`blast_kappa.c:3560-3575`), which clears the failure of the match on sfail before it
 (exit 0 where `fail` ends with `Traceback failed`).
 
+`x4b2/`: rows `db.x4b2.fail.w.db.*`, `db.x4b2.dbsize1.w.db.*`, `db.x4b2.rej.crash.db.*` and `db.x4b2.excl.*` (line RG,
+item X4b-2: blastx `-use_sw_tback`). `x4b2/make_x4b2.py` (its docstring has the usage and the records) writes the
+queries `tests/fasta/x4b2/*.fna` (X4's crafted proteins back-translated with one codon per letter, and cuts of
+`bslice_q.fna`), the subjects `tests/fasta/x4b2/ok_fail.faa`, and with NCBI BLAST+ 2.17.0 makeblastdb (version 5,
+`-parse_seqids`) the protein databases `x4b2/fail` (sok1 and sfail, on which tks_W's Smith-Waterman redo fails) and
+`x4b2/excl` (the same and, at OID 2, a weaker copy of sfail's first half whose only line has a ti). `x4b2/neg.txt` lists
+an id that no database holds: as a `-negative_seqidlist` it keeps OID 2 of `excl` without a line, so NCBI's redo
+excludes that subject at its fetch and sets the batch's status back to 0, which clears the failure of the match on sfail
+before it. The databases carry their creation date: the committed files, not a new run of the script, are the inputs
+of the frozen outputs.
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like

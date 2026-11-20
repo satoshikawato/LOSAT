@@ -648,7 +648,8 @@ fn bm_invalid() -> Abort {
     Abort {
         exit: 255,
         message: crate::wording::losat_text("Error: BM::Invalid serialization format\n")
-            .into_owned(),
+            .into_owned()
+            .into_bytes(),
     }
 }
 
@@ -687,7 +688,7 @@ fn bitmagic_exceptions_and_refusals() {
             index(&[&failing_feature(), &annot]).unwrap().abort,
             Some(Abort {
                 exit: 255,
-                message: "\n".to_string()
+                message: b"\n".to_vec()
             }),
             "{case}"
         );

@@ -12664,10 +12664,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     let queries = query_records.records();
     // The records' letters for the readers below (`x_query_drop::Letters`).
     let letters = query_records.letters();
-    let query_ids = queries
-        .iter()
-        .map(|record| String::from_utf8_lossy(record.shown_id()).into_owned())
-        .collect();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1312-1325
     // ```c
     // if (lookup_options->db_filter) {
@@ -12779,7 +12775,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
-    let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
+    let seq_data = prepare_sequence_data(queries, masks, subject_metadata);
 
     // The subjects as the reports show them (the outfmt 0 prolog of an error below).
     let shown = ShownSubjects::new(args, subjects);
@@ -13082,7 +13078,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     // are built (`x_query_drop.rs`). The search reads only the records' count from here on.
     let SequenceData {
         queries: _,
-        query_ids,
         query_masks,
         db_len_total,
         db_num_seqs,
@@ -13090,7 +13085,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     query_records.after_encoding();
     let seq_data = SequenceData {
         queries: query_records.records(),
-        query_ids,
         query_masks,
         db_len_total,
         db_num_seqs,

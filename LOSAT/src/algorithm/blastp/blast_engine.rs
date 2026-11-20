@@ -12206,7 +12206,10 @@ fn run_call(
             gapped.k = k[first];
         }
         super::archive::FirstContext {
-            karlin: Some((contexts[first].karlin_params, (!args.ungapped).then_some(gapped))),
+            karlin: Some((
+                contexts[first].karlin_params,
+                (!args.ungapped).then_some(gapped),
+            )),
             search_space: context0.space,
             length_adjustment: search_spaces[first].length_adjustment,
             context0_space: context0.space,

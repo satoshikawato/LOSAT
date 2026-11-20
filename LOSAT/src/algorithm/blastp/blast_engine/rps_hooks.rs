@@ -276,6 +276,31 @@ pub(super) fn dbsize_volume_num_seqs(
     Some(volumes.first().num_oids() as usize)
 }
 
+/// The total length that the statistics of an RPS search with a `-searchsp` and no `-dbsize` read
+/// on several volumes: volume 0's own (`rps_search::volumes::per_volume_lengths`), whose
+/// statistics the footers, the XML and the archive print. `None` where the database's total
+/// length is the one to use.
+#[cold]
+#[inline(never)]
+pub(super) fn searchsp_volume_length(
+    args: &ResolvedBlastpArgs,
+    database: &database::BlastpDatabase,
+) -> Option<i64> {
+    if args.rps_search.is_none()
+        || args.dbsize > 0
+        || !crate::algorithm::rps_search::volumes::per_volume_lengths(
+            args.dbsize,
+            args.searchsp.unwrap_or(0),
+            RpsVolumeSet::of(database.seqdb()).order.len(),
+        )
+    {
+        return None;
+    }
+    Some(crate::algorithm::rps_search::volumes::volume_db_length(
+        RpsVolumeSet::of(database.seqdb()).first(),
+    ))
+}
+
 /// Whether the volumes of rpsblast's search have their own effective search spaces
 /// (`rps_search::volumes::per_volume_search_spaces`).
 pub(super) fn per_volume_search_spaces(args: &ResolvedBlastpArgs, volumes: usize) -> bool {

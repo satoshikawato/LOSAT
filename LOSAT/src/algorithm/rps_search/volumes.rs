@@ -166,6 +166,33 @@ pub(crate) fn search_sets(
     sets
 }
 
+/// Whether each volume of an RPS search reads its own statistics: with several volumes, a
+/// `-searchsp` or a `-dbsize` makes `x_AdjustDbSize` return before it sets the database's length
+/// and count, so that each volume's search reads its own sequence count and, without `-dbsize`,
+/// its own total length (`real_db_length`); the reports print volume 0's (`first`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-727
+/// ```c
+///    if (eff_len_options->db_length > 0)
+///       db_length = eff_len_options->db_length;
+///    else
+///       db_length = eff_len_params->real_db_length;
+///    ...
+///    if (eff_len_options->dbseq_num > 0)
+///       db_num_seqs = eff_len_options->dbseq_num;
+///    else
+///       db_num_seqs = eff_len_params->real_num_seqs;
+/// ```
+pub(crate) fn per_volume_lengths(dbsize: i64, searchsp: i64, volumes: usize) -> bool {
+    volumes >= 2 && (dbsize > 0 || searchsp != 0)
+}
+
+/// The total length that a volume's statistics read without `-dbsize` (`real_db_length` of the
+/// volume's own database): its letters.
+pub(crate) fn volume_db_length(volume: &Volume) -> i64 {
+    i64::try_from(volume.index().volume_length).unwrap_or(i64::MAX)
+}
+
 /// Whether the volumes of an RPS search have their own effective search spaces: `-dbsize`
 /// (`dbsize` above 0) with several volumes and no `-searchsp` above 0 (`x_AdjustDbSize` returns
 /// early, so each volume's statistics read the given length and the volume's own sequence count).

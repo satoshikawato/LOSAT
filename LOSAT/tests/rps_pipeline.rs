@@ -191,7 +191,11 @@ fn the_archive_and_the_xml_are_ncbis_and_rpsbproc_reads_them() {
             }
             let mut command = losat(&dir.0);
             command.arg("rpsbproc").args(["-i", &file]).args(REPORT);
-            check_report(&run(command), &format!("{}.{}", case.stem, &file[5..]), &file);
+            check_report(
+                &run(command),
+                &format!("{}.{}", case.stem, &file[5..]),
+                &file,
+            );
         }
     }
 }
@@ -215,6 +219,10 @@ fn the_search_pipes_into_rpsbproc() {
             .unwrap();
         assert_eq!(search.wait().unwrap().code(), Some(0));
         assert_eq!(report.status.code(), Some(0));
-        check_report(&report, &format!("{}.stdin", case.stem), "the standard input");
+        check_report(
+            &report,
+            &format!("{}.stdin", case.stem),
+            "the standard input",
+        );
     }
 }

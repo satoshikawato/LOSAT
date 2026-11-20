@@ -185,7 +185,11 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
     // RPSTBLASTN's first query of a batch has its profile's K (`BatchResults::gapped_k`, the
     // footer's and the XML's), the table's otherwise.
     let gapped = gapped.map(|mut block| {
-        if let Some(&k) = batch.gapped_k.as_ref().and_then(|gapped_k| gapped_k.first()) {
+        if let Some(&k) = batch
+            .gapped_k
+            .as_ref()
+            .and_then(|gapped_k| gapped_k.first())
+        {
             block.k = k;
         }
         block

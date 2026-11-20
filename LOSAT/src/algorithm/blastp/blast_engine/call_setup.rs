@@ -874,7 +874,11 @@ pub(super) fn db_extent(
     let eff_db_length: i64 = if args.dbsize > 0 {
         args.dbsize
     } else {
-        total_db_len
+        // An RPS search with a `-searchsp` on several volumes: volume 0's own length
+        // (`rps_hooks::searchsp_volume_length`).
+        database
+            .and_then(|database| rps_hooks::searchsp_volume_length(args, database))
+            .unwrap_or(total_db_len)
     };
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136
     // ```c++

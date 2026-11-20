@@ -155,11 +155,15 @@ pub(super) fn query_records<'a>(
             use_this_seqid: crate::report::db_subject::use_this_seqid(parsed),
         });
         for hsp in &list.hsps {
-            let (q_end, s_end) = hsp.seqalign_ends();
+            // The subject's end is the Seq-align's (the edit script from the starts); the query's
+            // is the HSP's own, which `Blast_HSPGetQueryCoverage` reads for `hsp_percent_coverage`
+            // (blast_seqalign.cpp:1222-1225): the redo of RPSTBLASTN leaves an HSP whose own end
+            // is not the script's, as the tabular `qcovhsp` reads it (`raw.q_end - raw.q_start`).
+            let (_, s_end) = hsp.seqalign_ends();
             hsp_records.push(HspRecord {
                 subject: subject_index,
                 q_offset: hsp.hsp.q_start,
-                q_end,
+                q_end: hsp.hsp.q_end,
                 s_offset: hsp.hsp.s_start,
                 s_end,
                 q_frame: hsp.hsp.frame,

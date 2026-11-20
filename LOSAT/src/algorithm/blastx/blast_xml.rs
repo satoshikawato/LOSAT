@@ -1343,7 +1343,11 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     );
     let run = XmlRun {
         program: options.program().lower,
-        version: &format!("{} {}", options.program().upper, crate::ncbi_blast_version!()),
+        version: &format!(
+            "{} {}",
+            options.program().upper,
+            crate::ncbi_blast_version!()
+        ),
         reference: REFERENCE_GAPPED_BLAST,
         db_name: &db_name,
         matrix: Some(&options.matrix),
@@ -1386,6 +1390,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             if texts.len() == reports {
                 break;
             }
+            // Several volumes: the merged lists cut once per query (`TrimSeqAlign`).
+            let lists = &lists[..lists.len().min(options.shown_lists())];
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
             texts.push(query_text(
@@ -1423,6 +1429,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     let mut texts = texts.iter();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
+            let lists = &lists[..lists.len().min(options.shown_lists())];
             let query = &queries[batch.query_ordinal + qidx];
             let Some(text) = texts.next() else {
                 // The held report that is never written (`written_queries`); the one held before

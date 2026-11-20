@@ -47,8 +47,8 @@ use crate::algorithm::rps_search::engine::{
     batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers, NUM_FRAMES,
 };
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids, Consensus,
-    RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
+    mask_unsupported_letters, merge_volume, per_volume_lengths, shift_ordinal_ids,
+    volume_db_length, Consensus, RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::core::blast_util::frame_to_context;
 use crate::stats::KarlinParams;
@@ -445,7 +445,7 @@ impl TranslatedRpsSearch {
         // rpsblast's `cutoff_subject_length`).
         let cutoff_subject_length = database.x_seqdb().min_length();
         let x_drops = self.search.x_drop_bits();
-        let per_volume = per_volume_search_spaces(
+        let per_volume = per_volume_lengths(
             options.db_length,
             options.effective_search_space,
             volumes.order.len(),
@@ -503,11 +503,17 @@ impl TranslatedRpsSearch {
                 if !parameters.iter().any(|p| p.valid) {
                     continue;
                 }
-                // `-dbsize` on several volumes: each volume's statistics read the volume's own
-                // number of sequences (`per_volume_search_spaces`, as rpsblast's).
+                // `-dbsize` or `-searchsp` on several volumes: each volume's statistics read the
+                // volume's own number of sequences, and its own length without `-dbsize`
+                // (`per_volume_lengths`, as rpsblast's).
                 let lengths = if per_volume {
                     let num_seqs = volume.num_oids() as i32;
-                    effective_lengths(prepared, parameters, options, db_length, num_seqs, None)
+                    let volume_length = if options.db_length > 0 {
+                        db_length
+                    } else {
+                        volume_db_length(volume)
+                    };
+                    effective_lengths(prepared, parameters, options, volume_length, num_seqs, None)
                         .inspect(|()| {
                             // The merged result keeps the first volume's statistics (in path
                             // order), which the reports print (`RpsVolumeSet::first`, as
@@ -562,7 +568,8 @@ impl TranslatedRpsSearch {
                         .as_deref()
                         .expect("a searching batch has its score blocks"),
                     masked,
-                    i32::from(options.outfmt) != crate::blastinput::app::output_format::ARCHIVE_FORMAT,
+                    i32::from(options.outfmt)
+                        != crate::blastinput::app::output_format::ARCHIVE_FORMAT,
                 ));
                 spans.push(queries.len() - start);
             }

@@ -505,7 +505,8 @@ function checkSurface(reactor, native) {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
       assert.ok(flags.includes("-window_masker_db"), "blastn: -window_masker_db");
       const task = description.parameters.find((parameter) => parameter.flag === "-task");
-      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short"), "blastn: tasks in -task's help");
+      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short") && task.help.includes("rmblastn"),
+                "blastn: tasks in -task's help");
     }
   }
   // validate: accepted argv, and CLI errors with the CLI's words.
@@ -532,8 +533,7 @@ function checkSurface(reactor, native) {
                       ["blastn", "-query", "q", "-subject", "s", "-nosuchoption", "1"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding",
-                       "-template_length", "17"],
-                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"]]) {
+                       "-template_length", "17"]]) {
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
@@ -575,8 +575,9 @@ function checkSurface(reactor, native) {
     assert.equal(validated.error, cli.stderr.toString(), `-outfmt ${outfmt}: the CLI's message`);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-out", "x"].join("\0")).error, /not accepted/);
-  // The tasks of Session SD and NCBI's option check of a template (blast_options.c:1247-1261).
-  for (const task of ["dc-megablast", "blastn-short"]) {
+  // The tasks of Session SD and line RG X6, and NCBI's option check of a template
+  // (blast_options.c:1247-1261).
+  for (const task of ["dc-megablast", "blastn-short", "rmblastn"]) {
     assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", task].join("\0")).status, 0, task);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",

@@ -1011,7 +1011,6 @@ fn refuses_option(scope: &clap::Command, name: &str) -> bool {
 /// as it leaves the parser's refusals (`refuses_option`).
 pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
     ("blastp", "ungapped", "an ungapped search"),
-    ("blastp", "use_sw_tback", "the Smith-Waterman traceback"),
     ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),
     ("tblastn", "ungapped", "an ungapped search"),
     (
@@ -1761,20 +1760,7 @@ impl std::io::Write for ReportStream {
     }
 }
 
-// NCBI reference (GCC 13 libstdc++): include/c++/13/bits/basic_ios.tcc:39-49
-// ```c++
-//   template<typename _CharT, typename _Traits>
-//     void
-//     basic_ios<_CharT, _Traits>::clear(iostate __state)
-//     {
-//       if (this->rdbuf())
-// 	_M_streambuf_state = __state;
-//       else
-// 	_M_streambuf_state = __state | badbit;
-//       if (this->exceptions() & this->rdstate())
-// 	__throw_ios_failure(__N("basic_ios::clear"));
-//     }
-// ```
+// libstdc++ (GCC 13): include/c++/13/bits/basic_ios.tcc:39-49
 /// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
 /// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
 /// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream with
@@ -1809,27 +1795,7 @@ impl std::fmt::Display for BadbitInsertion {
 
 impl std::error::Error for BadbitInsertion {}
 
-// NCBI reference (glibc 2.17 to 2.39): libio/filedoalloc.c `_IO_file_doallocate`
-// ```c
-//   size = BUFSIZ;
-//   if (fp->_fileno >= 0 && __builtin_expect (_IO_SYSSTAT (fp, &st), 0) >= 0)
-//     {
-//       if (S_ISCHR (st.st_mode))
-// 	{
-// 	  /* Possibly a tty.  */
-// 	  if (
-// #ifdef DEV_TTY_P
-// 	      DEV_TTY_P (&st) ||
-// #endif
-// 	      local_isatty (fp->_fileno))
-// 	    fp->_flags |= _IO_LINE_BUF;
-// 	}
-// #if defined _STATBUF_ST_BLKSIZE
-//       if (st.st_blksize > 0 && st.st_blksize < BUFSIZ)
-// 	size = st.st_blksize;
-// #endif
-//     }
-// ```
+// glibc 2.17 to 2.39: libio/filedoalloc.c `_IO_file_doallocate`
 /// The size of glibc's buffer of standard output (`cout` writes into it, synchronized with C's
 /// `stdout`): `st_blksize` of the standard output where it is below `BUFSIZ`, else `BUFSIZ` (4096
 /// for a pipe and for most files, 1024 for a terminal); 4096 where LOSAT cannot ask.
@@ -1866,7 +1832,7 @@ pub enum NcbiStdio {
 
 impl NcbiStdio {
     /// The stream of a report on standard output: glibc's buffer of it, line-buffered on a
-    /// terminal (`_IO_file_doallocate`, quoted at `stdio_buffer_size`: `local_isatty`, as
+    /// terminal (`_IO_file_doallocate`, cited at `stdio_buffer_size`: `local_isatty`, as
     /// `is_terminal`).
     pub fn cout() -> Self {
         use std::io::IsTerminal;
@@ -1911,43 +1877,13 @@ impl NcbiBuffer {
     /// An insertion of `n` bytes (`sputn`: a string or a number), the last `n` bytes of `stream`
     /// (the stream's bytes up to the insertion's end; a line-buffered `cout` reads the insertion's
     /// newlines).
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
-    // ```c
-    //   /* First figure out how much space is available in the buffer. */
-    //   ...
-    //   else if (f->_IO_write_end > f->_IO_write_ptr)
-    //     count = f->_IO_write_end - f->_IO_write_ptr; /* Space available. */
-    //   ...
-    //   if (to_do + must_flush > 0)
-    //     {
-    //       size_t block_size, do_write;
-    //       /* Next flush the (full) buffer. */
-    //       if (_IO_OVERFLOW (f, EOF) == EOF)
-    //     ...
-    //       block_size = f->_IO_buf_end - f->_IO_buf_base;
-    //       do_write = to_do - (block_size >= 128 ? to_do % block_size : 0);
-    // ```
+    // glibc 2.17 to 2.39: libio/fileops.c `_IO_new_file_xsputn`
     // Before the first insertion `stdout` has no buffer (no space available): `_IO_OVERFLOW`
     // makes it, and the first insertion keeps `n % block` (glibc 2.39, `T/t2/fix2/
     // glibc_first_write.c` on a file of `st_blksize` 4096: an `fwrite` of 4,096 bytes is written at
     // once, 4,095 and then 1 are held, and 10 more write 4,096).
-    // NCBI reference (GCC 13 libstdc++): include/c++/13/bits/fstream.tcc:766-778
+    // libstdc++ (GCC 13): include/c++/13/bits/fstream.tcc:766-778
     // (`basic_filebuf::xsputn`)
-    // ```c++
-    // 	  streamsize __bufavail = this->epptr() - this->pptr();
-    //
-    // 	  // Don't mistake 'uncommitted' mode buffered with unbuffered.
-    // 	  if (!_M_writing && _M_buf_size > 1)
-    // 	    __bufavail = _M_buf_size - 1;
-    //
-    // 	  if (__n >= __bufavail)
-    // 	    {
-    // 	      const streamsize __buffill = this->pptr() - this->pbase();
-    // 	      const char* __buf = reinterpret_cast<const char*>(this->pbase());
-    // 	      __ret = _M_file.xsputn_2(__buf, __buffill,
-    // 				       reinterpret_cast<const char*>(__s),
-    // 				       __n);
-    // ```
     // A line-buffered `stdout` (a terminal, `_IO_LINE_BUF` from `_IO_file_doallocate`): the same
     // function's branch for it copies, of an insertion that fits, up to its last newline and then
     // writes the buffer (`must_flush`); what follows is written with it where the buffer is under
@@ -1959,49 +1895,8 @@ impl NcbiBuffer {
     // and 1,900 write 2,401; line RG T2 review 5's `T/t2/review5/glibc/line_small.c`, three
     // `fwrite`s of `xxxxx\nyyy` with a line buffer of 64 bytes write 9, 18 and 27 bytes, of 1,024
     // bytes 6, 15 and 24).
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
-    // ```c
-    //   if ((f->_flags & _IO_LINE_BUF) && (f->_flags & _IO_CURRENTLY_PUTTING))
-    //     {
-    //       count = f->_IO_buf_end - f->_IO_write_ptr;
-    //       if (count >= n)
-    //         {
-    //           const char *p;
-    //           for (p = s + n; p > s; )
-    //             {
-    //               if (*--p == '\n')
-    //                 {
-    //                   count = p - s + 1;
-    //                   must_flush = 1;
-    //                   break;
-    //                 }
-    //             }
-    //         }
-    //     }
-    //   ...
-    //   /* Then fill the buffer. */
-    //   if (count > 0)
-    //     {
-    //       if (count > to_do)
-    // 	count = to_do;
-    //       f->_IO_write_ptr = __mempcpy (f->_IO_write_ptr, s, count);
-    //       s += count;
-    //       to_do -= count;
-    //     }
-    //   ...
-    //       /* Now write out the remainder.  Normally, this will fit in the
-    // 	 buffer, but it's somewhat messier for line-buffered files,
-    // 	 so we let _IO_default_xsputn handle the general case. */
-    //       if (to_do)
-    // 	to_do -= _IO_default_xsputn (f, s+do_write, to_do);
-    // ```
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_overflow`
-    // ```c
-    //   if ((f->_flags & _IO_UNBUFFERED)
-    //       || ((f->_flags & _IO_LINE_BUF) && ch == '\n'))
-    //     if (_IO_do_write (f, f->_IO_write_base,
-    // 		      f->_IO_write_ptr - f->_IO_write_base) == EOF)
-    // ```
+    // glibc 2.17 to 2.39: libio/fileops.c `_IO_new_file_xsputn`
+    // glibc 2.17 to 2.39: libio/fileops.c `_IO_new_file_overflow`
     pub fn sputn(&mut self, n: usize, stream: &[u8]) {
         if n == 0 {
             return;
@@ -2060,62 +1955,12 @@ impl NcbiBuffer {
     /// which a full or unallocated buffer passes to `__overflow`: the buffer is made or written,
     /// then it keeps the byte (an `fwrite` of one byte keeps none where the buffer is under 128
     /// bytes, `sputn`), and a line-buffered `stdout` writes it with what it holds at a newline.
-    // NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:570-576 (a `char` is put, not
+    // libstdc++ (GCC 13): include/c++/13/ostream:570-576 (a `char` is put, not
     // written with `sputn`)
-    // ```c++
-    //   template<typename _Traits>
-    //     inline basic_ostream<char, _Traits>&
-    //     operator<<(basic_ostream<char, _Traits>& __out, char __c)
-    //     {
-    //       if (__out.width() != 0)
-    // 	return __ostream_insert(__out, &__c, 1);
-    //       __out.put(__c);
-    //       return __out;
-    //     }
-    // ```
-    // NCBI reference (GCC 13 libstdc++): include/ext/stdio_sync_filebuf.h `overflow`
-    // ```c++
-    //       virtual int_type
-    //       overflow(int_type __c = traits_type::eof())
-    //       {
-    // 	int_type __ret;
-    // 	if (traits_type::eq_int_type(__c, traits_type::eof()))
-    // 	  {
-    // 	    if (std::fflush(_M_file))
-    // 	      __ret = traits_type::eof();
-    // 	    else
-    // 	      __ret = traits_type::not_eof(__c);
-    // 	  }
-    // 	else
-    // 	  __ret = std::putc(__c, _M_file);
-    // 	return __ret;
-    //       }
-    // ```
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_overflow` (`putc` calls it
+    // libstdc++ (GCC 13): include/ext/stdio_sync_filebuf.h `overflow`
+    // glibc 2.17 to 2.39: libio/fileops.c `_IO_new_file_overflow` (`putc` calls it
     // when `_IO_write_ptr >= _IO_write_end`: a full or unallocated buffer, and every `char` of a
     // line-buffered stream, whose `_IO_write_end` stays at `_IO_write_base`)
-    // ```c
-    //   if ((f->_flags & _IO_CURRENTLY_PUTTING) == 0 || f->_IO_write_base == NULL)
-    //     {
-    //       /* Allocate a buffer if needed. */
-    //       if (f->_IO_write_base == NULL)
-    // 	{
-    // 	  _IO_doallocbuf (f);
-    //     ...
-    //       if (f->_mode <= 0 && f->_flags & (_IO_LINE_BUF | _IO_UNBUFFERED))
-    // 	f->_IO_write_end = f->_IO_write_ptr;
-    //     }
-    //   ...
-    //   if (f->_IO_write_ptr == f->_IO_buf_end ) /* Buffer is really full */
-    //     if (_IO_do_flush (f) == EOF)
-    //       return EOF;
-    //   *f->_IO_write_ptr++ = ch;
-    //   if ((f->_flags & _IO_UNBUFFERED)
-    //       || ((f->_flags & _IO_LINE_BUF) && ch == '\n'))
-    //     if (_IO_do_write (f, f->_IO_write_base,
-    // 		      f->_IO_write_ptr - f->_IO_write_base) == EOF)
-    //       return EOF;
-    // ```
     pub fn sputc(&mut self, stream: &[u8]) {
         match self.stream {
             NcbiStdio::Cout { block, lines } => {

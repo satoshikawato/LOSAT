@@ -2,20 +2,7 @@
 //! 64-bit little-endian, `MDB_DEVEL` off). Accessors over a page buffer: a page starts at
 //! offset 0 of the slice (a sub-page inside a node is a slice that starts at the node data).
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:805-848
-// ```c
-// typedef struct MDB_page {
-//     union { pgno_t p_pgno; struct MDB_page *p_next; } mp_p;
-//     uint16_t mp_pad;            /**< key size if this is a LEAF2 page */
-// #define P_BRANCH 0x01 ... #define P_SUBP 0x40
-//     uint16_t mp_flags;
-//     union { struct { indx_t pb_lower; indx_t pb_upper; } pb; uint32_t pb_pages; } mp_pb;
-//     indx_t mp_ptrs[1];          /**< dynamic size */
-// } MDB_page;
-// #define PAGEHDRSZ ((unsigned) offsetof(MDB_page, mp_ptrs))
-// #define NUMKEYS(p) (((p)->mp_lower - (PAGEHDRSZ-PAGEBASE)) >> 1)
-// #define SIZELEFT(p) (indx_t)((p)->mp_upper - (p)->mp_lower)
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:805-848
 
 /// `PAGEHDRSZ`.
 pub(super) const PAGEHDRSZ: usize = 16;
@@ -30,12 +17,7 @@ pub(super) const P_DIRTY: u16 = 0x10;
 pub(super) const P_LEAF2: u16 = 0x20;
 pub(super) const P_SUBP: u16 = 0x40;
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:906-914
-// ```c
-// #define F_BIGDATA	 0x01			/**< data put on overflow page */
-// #define F_SUBDATA	 0x02			/**< data is a sub-database */
-// #define F_DUPDATA	 0x04			/**< data has duplicates */
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:906-914
 pub(super) const F_BIGDATA: u16 = 0x01;
 pub(super) const F_SUBDATA: u16 = 0x02;
 pub(super) const F_DUPDATA: u16 = 0x04;
@@ -160,22 +142,7 @@ pub(super) fn set_ptr(p: &mut [u8], i: usize, v: u16) {
     put_u16(p, PAGEHDRSZ + 2 * i, v)
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:898-990
-// ```c
-// typedef struct MDB_node {
-//     unsigned short mn_lo, mn_hi;    /**< part of data size or pgno */
-//     unsigned short mn_flags;
-//     unsigned short mn_ksize;        /**< key size */
-//     char mn_data[1];                /**< key and data are appended here */
-// } MDB_node;
-// #define NODEPTR(p, i)	 ((MDB_node *)((char *)(p) + (p)->mp_ptrs[i] + PAGEBASE))
-// #define NODEKEY(node)	 (void *)((node)->mn_data)
-// #define NODEDATA(node)	 (void *)((char *)(node)->mn_data + (node)->mn_ksize)
-// #define NODEPGNO(node) ((node)->mn_lo | ((pgno_t) (node)->mn_hi << 16) | \
-//	 (PGNO_TOPWORD ? ((pgno_t) (node)->mn_flags << PGNO_TOPWORD) : 0))
-// #define NODEDSZ(node)	 ((node)->mn_lo | ((unsigned)(node)->mn_hi << 16))
-// #define LEAF2KEY(p, i, ks)	((char *)(p) + PAGEHDRSZ + ((i)*(ks)))
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:898-990
 // Node accessors take the offset of the node in the page (`mp_ptrs[i]`).
 
 /// Offset of node `i` (`NODEPTR(p, i)`).
@@ -240,19 +207,7 @@ pub(super) fn even(n: usize) -> usize {
     (n + 1) & !1
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:1005-1014
-// ```c
-// typedef struct MDB_db {
-//     uint32_t md_pad;      /**< also ksize for LEAF2 pages */
-//     uint16_t md_flags;    /**< @ref mdb_dbi_open */
-//     uint16_t md_depth;    /**< depth of this tree */
-//     pgno_t   md_branch_pages;
-//     pgno_t   md_leaf_pages;
-//     pgno_t   md_overflow_pages;
-//     size_t   md_entries;
-//     pgno_t   md_root;     /**< the root page of this tree */
-// } MDB_db;
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1005-1014
 /// `MDB_db`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct MdbDb {
@@ -297,18 +252,7 @@ impl MdbDb {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:1036-1048
-// ```c
-// typedef struct MDB_meta {
-//     uint32_t mm_magic;
-//     uint32_t mm_version;
-//     void    *mm_address;        /**< address for fixed mapping */
-//     size_t   mm_mapsize;        /**< size of mmap region */
-//     MDB_db   mm_dbs[CORE_DBS];  /**< first is free space, 2nd is main db */
-//     pgno_t   mm_last_pg;
-//     volatile txnid_t mm_txnid;  /**< txnid that committed this page */
-// } MDB_meta;
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1036-1048
 /// `MDB_meta`, kept in memory as it is in the file (the map in NCBI's LMDB).
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Meta {

@@ -731,7 +731,15 @@ impl std::error::Error for PreliminaryReadError {}
 /// sequence file (`rps_hooks::failed_batch_error`), or where a batch's prefetch looks up a
 /// Seq-align id whose lookup fails on a file (`batch_prefetch`): `query` is the query whose hit
 /// list reached it (rpsblast and the prefetch: the batch's first query). NCBI fails that query's
-/// batch, after the reports of the batches before.
+/// batch, after the reports of the batches before. BLASTP's `-use_sw_tback` redo whose batch's
+/// last redone match fails (`Traceback failed`, `blastp::blast_engine::redo_run`) is such an error
+/// of NCBI's search too, and BLASTP's refusals of a step where NCBI's search of a batch stops,
+/// crashes or never ends (a Smith-Waterman redo without end, a failed batch whose first query
+/// holds a redone match, a query chunk split again or without a query) take its form (the batch's
+/// first query): the type of an error of a batch's search after the reports of the batches before
+/// in the drivers that search all batches together, which name the failing batch. The batch loops
+/// of TBLASTX and TBLASTN, which search a batch at a time, hold the same error without the query
+/// (`blastinput::app::ErrorAfterBatchReports`).
 #[derive(Debug)]
 pub(crate) struct HeaderReadError {
     pub(crate) query: usize,

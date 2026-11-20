@@ -2736,19 +2736,7 @@ fn write_blastp_query_footer_spacing<W: Write>(
 //         m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
 //     }
 // ```
-// NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:661-670
-// ```c++
-//     inline basic_ostream<char, _Traits>&
-//     operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
-//     {
-//       if (!__s)
-// 	__out.setstate(ios_base::badbit);
-//       else
-// 	__ostream_insert(__out, __s,
-// 			 static_cast<streamsize>(_Traits::length(__s)));
-//       return __out;
-//     }
-// ```
+// libstdc++ (GCC 13): include/c++/13/ostream:661-670
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:96-103
 // ```c++
 // void

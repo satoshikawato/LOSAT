@@ -56,6 +56,9 @@ x05n	same	nucl.fa conv_other.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db
 x07	same	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	{C}/abs_gm
 x08	same	nolc.fa dust_nolc.asnb	-in	nolc.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nolc.asnb	-gi_mask	-gi_mask_name	e
 x09	same	nucl.fa dust_nucl_noparse.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl_noparse.asnb	-gi_mask	-gi_mask_name	np
+x10_1	same	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb
+x10_2	same	^ ncbi_single.nal=>db.nal	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	gm1
+x10_3	same	^ ncbi_single.nal=>db.nal	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb
 m01	same	nucl.fa dust_nucl.asnb dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-mask_data	dust_nucl.asnb,dust10_nucl.asnb	-gi_mask	-gi_mask_name	m1,m2
 m03	same	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-gi_mask
 m04	refuse	nucl.fa dust_nucl.asnb dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-mask_data	dust_nucl.asnb,dust10_nucl.asnb	-gi_mask	-gi_mask_name	x,x

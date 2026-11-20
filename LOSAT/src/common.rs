@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::sync::Arc;
 
 // =============================================================================
 // Gap Edit Script for traceback trimming
@@ -183,31 +182,6 @@ pub struct Hit {
 }
 
 impl Hit {
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-    //                       Set to 0 if not applicable */
-    // } BlastHSPList;
-    // ```
-    #[inline]
-    pub fn resolve_ids<'a>(
-        &self,
-        query_ids: &'a [Arc<str>],
-        subject_ids: &'a [Arc<str>],
-    ) -> (&'a str, &'a str) {
-        let query_id = query_ids
-            .get(self.q_idx as usize)
-            .map(|id| id.as_ref())
-            .unwrap_or("unknown");
-        let subject_id = subject_ids
-            .get(self.s_idx as usize)
-            .map(|id| id.as_ref())
-            .unwrap_or("unknown");
-        (query_id, subject_id)
-    }
-
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
     // ```c
     // s_Blast_HSPGetNumIdentitiesAndPositives(..., Int4* num_ident_ptr, ...,

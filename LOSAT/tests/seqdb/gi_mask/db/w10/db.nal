@@ -1,6 +1,6 @@
 #
-# Alias file created: Nov 20, 2026  3:43 PM
+# Alias file created: Nov 20, 2026  8:20 PM
 #
 TITLE t
-DBLIST <C>/db
+DBLIST db
 MASKLIST mt 

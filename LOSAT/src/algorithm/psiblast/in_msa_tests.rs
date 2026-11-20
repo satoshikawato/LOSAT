@@ -89,7 +89,7 @@ fn the_engine_msa_marks_unaligned_cells() {
     assert_eq!((master.len(), long.len(), short.len()), (24, 24, 24));
     let aln = rows(&[master, long, short]);
     let query = extract_query(&aln, None).unwrap();
-    let msa = engine_msa(&aln, &query);
+    let msa = engine_msa(&QueryRows::new(&aln, &query).unwrap());
     assert_eq!(msa.query_length, 23);
     assert_eq!(msa.rows.len(), 3);
     // The master: only the lower-case `v` is not aligned.
@@ -129,30 +129,52 @@ fn the_query_bioseq_is_the_first_equal_one() {
         .is_none());
     let dna = read(&[("q1", "T"), ("s1", "T")]);
     let error = query_bioseq(&dna.bioseqs, &codes("T")).unwrap_err();
-    assert!(error
-        .what()
-        .contains("(CSeqUtilException::Invalid coding) ncbi::CSeqConvert_imp::Convert() - Unknown conversion."));
+    // NCBI's report (PS6 corpus `e.len1`, standard error after `Error: `) in LOSAT's words
+    // (`crate::wording::losat_text`, the one mapping of the freeze): the message.
+    let ncbi = format!(
+        "NCBI C++ Exception:\n    T0 \"{}/src/util/sequtil/sequtil_convert_imp.cpp\", line 225: Error: (CSeqUtilException::Invalid coding) ncbi::CSeqConvert_imp::Convert() - Unknown conversion.\n",
+        crate::ncbi_exception::NCBI_BUILD_ROOT
+    );
+    assert_eq!(error.what(), crate::wording::losat_text(&ncbi));
+    assert_eq!(error.what(), "Unknown conversion.\n");
 }
 
-// What NCBI's score block says of the options' matrix and gap costs (`o.ok.matrix`, `b.gap.bad`).
-#[test]
-fn the_score_block_reports_the_matrix_and_the_gap_costs() {
-    let scoring = |matrix_name, gap_open, gap_extend| MsaScoring {
+fn scoring(matrix_name: &str, gap_open: i32, gap_extend: i32) -> MsaScoring<'_> {
+    MsaScoring {
         matrix_name,
         gap_open,
         gap_extend,
         save_ascii_pssm: false,
-    };
-    assert!(score_block(&scoring("BLOSUM62", 11, 1)).is_ok());
-    assert!(score_block(&scoring("blosum80", 10, 1)).is_ok());
-    let error = score_block(&scoring("NOPE", 11, 1)).err().unwrap();
+    }
+}
+
+/// The error of `score_block` for the options and the query's letters.
+fn score_block_error(
+    matrix_name: &str,
+    gap_open: i32,
+    gap_extend: i32,
+    query: &str,
+) -> (i32, String) {
+    let error = score_block(&scoring(matrix_name, gap_open, gap_extend), &codes(query))
+        .err()
+        .unwrap();
+    message(&error)
+}
+
+const TK_MASTER: &str = "TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV";
+
+// What NCBI's score block says of the options' matrix and gap costs (`o.ok.matrix`, `b.gap.bad`).
+#[test]
+fn the_score_block_reports_the_matrix_and_the_gap_costs() {
+    let query = codes(TK_MASTER);
+    assert!(score_block(&scoring("BLOSUM62", 11, 1), &query).is_ok());
+    assert!(score_block(&scoring("blosum80", 10, 1), &query).is_ok());
     assert_eq!(
-        message(&error),
+        score_block_error("NOPE", 11, 1, TK_MASTER),
         (3, "BLAST engine error: Unknown error code -1\n".to_string())
     );
-    let error = score_block(&scoring("blosum62", 5, 5)).err().unwrap();
     assert_eq!(
-        message(&error),
+        score_block_error("blosum62", 5, 5, TK_MASTER),
         (
             3,
             "BLAST engine error: Gap existence and extension values of 5 and 5 not supported for BLOSUM62\n"
@@ -160,10 +182,102 @@ fn the_score_block_reports_the_matrix_and_the_gap_costs() {
         )
     );
     // IDENTITY has no frequency ratios: no score block for the engine.
-    assert!(score_block(&scoring("IDENTITY", 15, 2))
+    assert!(score_block(&scoring("IDENTITY", 15, 2), &query)
         .unwrap()
         .1
         .is_none());
+}
+
+// S1 of the PS6 review: a gap cost of 0 is "not given" to the PSSM engine, which then takes its
+// default (11 for the existence, 1 for the extension), and so is an empty matrix name (BLOSUM62).
+// NCBI BLAST+ 2.17.0, review probes `z.go0`, `z.ge0`, `z.go0.ge0` (the engine goes on),
+// `z.go0.ge5`, `z.go5.ge0`, `z.b45.go0.ge0`, `z.pam30.go0.ge0` (the engine's own message, with the
+// values it took), and `PS/logs/fix6/probe_mx` for the matrix name.
+#[test]
+fn a_gap_cost_of_zero_is_the_engines_default() {
+    let query = codes(TK_MASTER);
+    for (gap_open, gap_extend) in [(0, 1), (11, 0), (0, 0)] {
+        let (matrix, block) = score_block(&scoring("BLOSUM62", gap_open, gap_extend), &query)
+            .unwrap_or_else(|error| panic!("{gap_open}/{gap_extend}: {error}"));
+        assert_eq!(matrix, ScoringMatrix::Blosum62);
+        // The gapped block is the one of 11/1.
+        let wanted = score_block(&scoring("BLOSUM62", 11, 1), &query)
+            .unwrap()
+            .1
+            .unwrap();
+        let block = block.unwrap();
+        assert_eq!(block.gap_psi, wanted.gap_psi, "{gap_open}/{gap_extend}");
+        assert_eq!(
+            block.gap_std_k.to_bits(),
+            wanted.gap_std_k.to_bits(),
+            "{gap_open}/{gap_extend}"
+        );
+    }
+    // BLOSUM80 has 11/1 too (`z.b80.go0.ge0`: the engine goes on).
+    assert!(score_block(&scoring("BLOSUM80", 0, 0), &query).is_ok());
+    for (matrix_name, gap_open, gap_extend, said) in [
+        ("BLOSUM62", 0, 5, "11 and 5 not supported for BLOSUM62"),
+        ("BLOSUM62", 5, 0, "5 and 1 not supported for BLOSUM62"),
+        ("BLOSUM45", 0, 0, "11 and 1 not supported for BLOSUM45"),
+        ("BLOSUM45", 0, 2, "11 and 2 not supported for BLOSUM45"),
+        ("PAM30", 0, 0, "11 and 1 not supported for PAM30"),
+        ("", 5, 5, "5 and 5 not supported for BLOSUM62"),
+    ] {
+        assert_eq!(
+            score_block_error(matrix_name, gap_open, gap_extend, TK_MASTER),
+            (
+                3,
+                format!("BLAST engine error: Gap existence and extension values of {said}\n")
+            ),
+            "{matrix_name} {gap_open}/{gap_extend}"
+        );
+    }
+    // An empty matrix name is BLOSUM62 to the engine.
+    let (matrix, block) = score_block(&scoring("", 11, 1), &query).unwrap();
+    assert_eq!(matrix, ScoringMatrix::Blosum62);
+    assert!(block.is_some());
+}
+
+// S2 of the PS6 review: with gap costs that the matrix does not have, the engine's error is its
+// first message, which for a master whose ungapped parameters cannot be computed is the ungapped
+// calculation's (NCBI BLAST+ 2.17.0, review probes `k.X20.badgap`, `k.star20.badgap`,
+// `o.allx.badgap`, `z.x20.go0.ge5`, `z.x20.b45.go5.ge5`: exit status 3 and this line).
+#[test]
+fn the_ungapped_message_comes_before_the_gap_costs_one() {
+    let ungapped = (
+        3,
+        "BLAST engine error: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options\n"
+            .to_string(),
+    );
+    let all_x = "X".repeat(20);
+    assert_eq!(score_block_error("BLOSUM62", 5, 5, &all_x), ungapped);
+    assert_eq!(score_block_error("BLOSUM62", 0, 5, &all_x), ungapped);
+    assert_eq!(score_block_error("BLOSUM45", 5, 5, &all_x), ungapped);
+    assert_eq!(
+        score_block_error("BLOSUM62", 5, 5, &"*".repeat(20)),
+        ungapped
+    );
+    // The text has one owner (the search's own report of such a query).
+    assert_eq!(
+        ungapped.1,
+        format!(
+            "BLAST engine error: {}\n",
+            crate::report::query_warnings::INVALID_QUERY_MESSAGE
+        )
+    );
+    // With gap costs that the matrix has there is no error here: the engine goes on without the
+    // query's block (`ungapped_karlin_valid`), where NCBI crashes and LOSAT refuses the run.
+    assert!(score_block(&scoring("BLOSUM62", 11, 1), &codes(&all_x)).is_ok());
+    assert!(score_block(&scoring("BLOSUM62", 0, 0), &codes(&all_x)).is_ok());
+    // A master with letters whose parameters can be computed keeps the gap costs' message.
+    assert_eq!(
+        score_block_error("BLOSUM62", 5, 5, "XXXXXXXXXXXXXXXXMK"),
+        (
+            3,
+            "BLAST engine error: Gap existence and extension values of 5 and 5 not supported for BLOSUM62\n"
+                .to_string()
+        )
+    );
 }
 
 // A query of X alone leaves NCBI's ungapped Karlin-Altschul block invalid (`r.ch.q.allX`,
@@ -309,28 +423,42 @@ const TK_IGNORE: [(usize, [i32; 20]); 10] = [
     ),
 ];
 
-fn tk_scores(ignore_master: bool) -> (Vec<i32>, usize) {
+/// `pssm_from_msa` of the Clustal text `alignment` written to a file of a directory named after
+/// `name`.
+fn pssm_of(
+    name: &str,
+    alignment: &str,
+    master_index: Option<i32>,
+    ignore_master: bool,
+    scoring: &MsaScoring<'_>,
+) -> Result<crate::report::serial::pssm::PssmWithParameters> {
     let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-in-msa-{}-{ignore_master}",
+        "losat-in-msa-{}-{name}",
         crate::utils::test_dir::process_id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("tk.aln");
-    std::fs::write(&path, TK_ALIGNMENT).unwrap();
+    let path = dir.join("m.aln");
+    std::fs::write(&path, alignment).unwrap();
     let input = MsaInput {
         path: path.clone(),
-        master_index: None,
+        master_index,
         ignore_master,
     };
-    let scoring = MsaScoring {
-        matrix_name: "BLOSUM62",
-        gap_open: 11,
-        gap_extend: 1,
-        save_ascii_pssm: false,
-    };
-    let pssm = pssm_from_msa(&input, &scoring).unwrap();
+    let pssm = pssm_from_msa(&input, scoring);
     let _ = std::fs::remove_dir_all(&dir);
+    pssm
+}
+
+fn tk_scores(ignore_master: bool) -> (Vec<i32>, usize) {
+    let pssm = pssm_of(
+        &format!("tk-{ignore_master}"),
+        TK_ALIGNMENT,
+        None,
+        ignore_master,
+        &scoring("BLOSUM62", 11, 1),
+    )
+    .unwrap();
     (
         pssm.pssm.final_data.unwrap().scores,
         pssm.pssm.num_rows as usize,
@@ -362,4 +490,152 @@ fn the_engine_scores_the_alignment_as_ncbi_does() {
 #[test]
 fn the_ignored_master_changes_the_scores_as_in_ncbis_nsg_mode() {
     check_tk(&TK_IGNORE, true);
+}
+
+// B1 of the PS6 review (DECISIONS 75.1 of line PS): the review's `p.pfx.10of12`. The master of
+// `-msa_master_idx 3` (10 letters) is the start of row 1 (12 letters), which is the first row that
+// starts with the master's letters and so the one that NCBI's alignment is filled from.
+const PREFIX_ALIGNMENT: &str = "CLUSTAL W (1.83) multiple sequence alignment\n\n\np1      TMAGRVELVTGP\np2      TNIGKIHLVIGP\np3      TMAGRVELVT--\n        *::*:::**:  \n\n";
+
+// The first row after the swap can have more letters than the query; the engine's alignment is
+// made only of rows whose first row has the query's letters, one a cell.
+#[test]
+fn the_engine_alignment_takes_no_first_row_longer_than_the_query() {
+    let mut aln = rows(&["TMAGRVELVTGP", "TNIGKIHLVIGP", "TMAGRVELVT--"]);
+    let query = extract_query(&aln, Some(3)).unwrap();
+    assert_eq!(query.len(), 10);
+    // Row 1 is found (it starts with the master's letters) and stays in front.
+    assert_eq!(validate_query(&mut aln, &query).unwrap(), 0);
+    assert_eq!(aln[0], b"TMAGRVELVTGP");
+    assert!(QueryRows::new(&aln, &query).is_none());
+    // The same letters in a row with gaps, and a row longer by one letter.
+    assert!(QueryRows::new(&rows(&["TMAGRV-ELVTG-", "TNIGKI-HLVIGP"]), &query).is_none());
+    // No row at all, and a first row with fewer letters (which `validate_query` never leaves).
+    assert!(QueryRows::new(&[], &query).is_none());
+    assert!(QueryRows::new(&rows(&["TMAGRVELV---"]), &query).is_none());
+    // The master's own row, and a row above it with the same letters (lower case, other gaps).
+    let own = rows(&["TMAGRVELVT--", "TNIGKIHLVIGP"]);
+    let aligned = QueryRows::new(&own, &query).unwrap();
+    let msa = engine_msa(&aligned);
+    assert_eq!((msa.query_length, msa.rows.len()), (10, 2));
+    assert!(msa.rows.iter().all(|cells| cells.len() == 10));
+    assert!(QueryRows::new(&rows(&["tmag-rvelvt-", "TNIGKIHLVIGP"]), &query).is_some());
+}
+
+// The run of such a master is refused where NCBI fills its alignment, after the score block's
+// errors (`w.pfx.badgap`: NCBI's gap costs message), and the refusal says what to change; with
+// the master above the longer row the same alignment gives a PSSM.
+#[test]
+fn a_master_that_starts_a_longer_row_above_it_is_refused() {
+    let error = pssm_of(
+        "prefix",
+        PREFIX_ALIGNMENT,
+        Some(3),
+        false,
+        &scoring("BLOSUM62", 11, 1),
+    )
+    .err()
+    .unwrap();
+    assert!(error.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert_eq!(
+        error.to_string(),
+        "-in_msa with -msa_master_idx 3, a master sequence that is the start of the longer sequence of row 1 above it, is not supported by LOSAT's PSIBLAST (NCBI BLAST+ 2.17.0 reads and writes past its alignment buffers there); put the master sequence above row 1 in the alignment file"
+    );
+    // `-ignore_msa_master` changes nothing of it.
+    let ignored = pssm_of(
+        "prefix-ign",
+        PREFIX_ALIGNMENT,
+        Some(3),
+        true,
+        &scoring("BLOSUM62", 11, 1),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(ignored.to_string(), error.to_string());
+    // NCBI's errors of the score block come first.
+    let gap = pssm_of(
+        "prefix-gap",
+        PREFIX_ALIGNMENT,
+        Some(3),
+        false,
+        &scoring("BLOSUM62", 5, 5),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        message(&gap),
+        (
+            3,
+            "BLAST engine error: Gap existence and extension values of 5 and 5 not supported for BLOSUM62\n"
+                .to_string()
+        )
+    );
+    // The other masters of the file are read, and so is this one from above the longer row.
+    for master in [None, Some(1), Some(2)] {
+        let pssm = pssm_of(
+            &format!("prefix-{master:?}"),
+            PREFIX_ALIGNMENT,
+            master,
+            false,
+            &scoring("BLOSUM62", 11, 1),
+        )
+        .unwrap();
+        assert_eq!(pssm.pssm.num_columns, 12);
+    }
+    let moved = PREFIX_ALIGNMENT.replace(
+        "p1      TMAGRVELVTGP\np2      TNIGKIHLVIGP\np3      TMAGRVELVT--\n",
+        "p3      TMAGRVELVT--\np1      TMAGRVELVTGP\np2      TNIGKIHLVIGP\n",
+    );
+    assert_ne!(moved, PREFIX_ALIGNMENT);
+    let pssm = pssm_of(
+        "prefix-moved",
+        &moved,
+        None,
+        false,
+        &scoring("BLOSUM62", 11, 1),
+    )
+    .unwrap();
+    assert_eq!(pssm.pssm.num_columns, 10);
+}
+
+// N1 of the PS6 review: the two refusals of a query Seq-id name what the user gave, the
+// alignment's master sequence, not a PSSM (review probes `i.r1.gim`, `i.r1.gnl.ord`).
+#[test]
+fn the_id_refusals_name_the_master_sequence() {
+    for (id, said) in [
+        (
+            "gim|12345",
+            "the query Seq-id gim|12345 of the alignment's master sequence is a Geninfo import id, which NCBI BLAST+ cannot resolve; this is not supported by LOSAT's PSIBLAST",
+        ),
+        (
+            "gnl|BL_ORD_ID|3",
+            "the query Seq-id gnl|BL_ORD_ID|3 of the alignment's master sequence names a database ordinal; this is not supported by LOSAT's PSIBLAST",
+        ),
+    ] {
+        let alignment = TK_ALIGNMENT.replace("q1      TMAG", &format!("{id} TMAG"));
+        assert_ne!(alignment, TK_ALIGNMENT);
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-in-msa-{}-ids-{}",
+            crate::utils::test_dir::process_id(),
+            id.len()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("m.aln");
+        std::fs::write(&path, alignment).unwrap();
+        let input = MsaInput {
+            path,
+            master_index: None,
+            ignore_master: false,
+        };
+        let error = read_in_msa(
+            &input,
+            &scoring("BLOSUM62", 11, 1),
+            crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+        )
+        .err()
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(error.to_string(), said);
+    }
 }

@@ -387,7 +387,7 @@ pub(crate) fn create_pssm_with_options(
     let mut aligned_block = stages::AlignedBlock::new(query_length);
     let mut seq_weights = stages::SequenceWeights::new(msa.num_seqs, query_length);
     let mut internal = stages::InternalPssm::new(query_length);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:150-156
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:151-156
     // ```c
     //     if (options->nsg_compatibility_mode) {
     //         _PSIStructureGroupCustomization(msa);

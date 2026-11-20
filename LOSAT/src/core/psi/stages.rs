@@ -743,7 +743,7 @@ fn purge_aligned_region(msa: &mut PackedMsa, seq_index: usize, start: usize, sto
 /// `ignore_unaligned_positions` (`PSIBlastOptions`, set by `CPsiBlastInputClustalW`) skips the
 /// check of the aligned columns:
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:828-860
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:836-848
 /// ```c
 ///     retval = s_PSIValidateNoFlankingGaps(msa);
 ///     ...
@@ -806,7 +806,7 @@ pub(super) fn validate_msa(msa: &Msa, ignore_unaligned_positions: bool) -> Resul
 /// `_PSIValidateMSA_StructureGroup(msa)`: only the check that sequences take part
 /// (`s_PSIValidateParticipatingSequences`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:810-826
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:810-819
 /// ```c
 /// int
 /// _PSIValidateMSA_StructureGroup(const _PSIMsa* msa)

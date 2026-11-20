@@ -415,6 +415,40 @@ mod tests {
         }
     }
 
+    // N5 of the PS6 review: the three options of psiblast's alignment query are refused by
+    // `validate`, in the words below, and only for psiblast (another program's parser rejects
+    // them as unknown options).
+    #[test]
+    fn the_alignment_options_are_refused_by_validate() {
+        for argv in [
+            &["-in_msa", "m.aln"][..],
+            &["-in_msa=m.aln"],
+            &["-evalue", "1", "--msa_master_idx", "2"],
+            &["-ignore_msa_master"],
+        ] {
+            let word = argv
+                .iter()
+                .find(|word| word.contains("msa"))
+                .copied()
+                .unwrap();
+            assert_eq!(
+                validate(Program::Psiblast, argv),
+                Err(Error::Argv(format!(
+                    "{} is not accepted by the library API: the query is given as records or a PSSM (Inputs::pssm), and an alignment as the query is not supported",
+                    key(word)
+                ))),
+                "{argv:?}"
+            );
+        }
+        for program in [Program::Blastp, Program::Tblastn] {
+            let error = validate(program, &["-in_msa", "m.aln"]).unwrap_err();
+            assert!(
+                !error.message().contains("an alignment as the query"),
+                "{program}: {error}"
+            );
+        }
+    }
+
     // Series Q item Q6a: psiblast's PSSM files go to the parser as on the command line, and the
     // search writes them (`tests/library_api.rs`).
     #[test]

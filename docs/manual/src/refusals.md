@@ -332,7 +332,8 @@ These refusals apply to every search program that reads databases.
 | :--- | :--- |
 | `-phi_pattern` | Refused: not yet supported. |
 | `-in_msa` with an alignment in FASTA, PHYLIP, NEXUS, Sequin or MultAlin format | Refused: not yet supported. Only Clustal alignments are read. |
-| `-in_msa` with a query sequence of X or O alone, or with `-matrix IDENTITY` | Refused. NCBI crashes. |
+| `-in_msa` with a master sequence from which no ungapped Karlin-Altschul parameters can be computed (X, O, `*` or lower-case x alone, or X with gaps: no residue that the parameters can be computed from), or with `-matrix IDENTITY` | Refused. NCBI crashes. |
+| `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-html` | Refused: not yet supported. |
 | `-best_hit_overhang`, `-best_hit_score_edge`, `-subject_besthit` | Refused, as in `blastp`. |
 | `-use_sw_tback` | Refused. |

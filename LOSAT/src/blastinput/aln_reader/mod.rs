@@ -14,7 +14,7 @@
 //! ([`AlnError::NotAvailable`]). So the read needs the exact decision of success or failure, not
 //! the messages of the scanners.
 //!
-//! NCBI reference (598d8ae6): c++/src/objtools/readers/aln_error_reporter.cpp:111-135
+//! NCBI reference (598d8ae6): c++/src/objtools/readers/aln_error_reporter.cpp:130-136
 //! ```c++
 //!     string message(descr);
 //!     if (!seqId.empty()) {
@@ -24,7 +24,7 @@
 //!         NCBI_THROW2(CObjReaderParseException, eFormat, message, 0);
 //!     }
 //! ```
-//! NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:112-134
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:122-138
 //! ```c++
 //!     CAlnReader reader(input_file);
 //!     reader.SetClustal(CAlnReader::eAlpha_Protein);
@@ -35,7 +35,10 @@
 //!         // Seq-IDs are encountered
 //!         if ((e.GetErrCode() == CObjReaderParseException::eFormat) &&
 //!             (NStr::Find(e.GetMsg(), "Not all sequences have same length") != NPOS)) {
-//!             ...
+//!             string msg("Repeated Seq-IDs detected in multiple sequence ");
+//!             msg += "alignment file, please ensure all Seq-IDs are unique ";
+//!             msg += "before proceeding.";
+//!             NCBI_THROW(CBlastException, eInvalidOptions, msg);
 //!         }
 //!     }
 //!     m_AsciiMsa = reader.GetSeqs();
@@ -98,9 +101,27 @@ pub(crate) enum AlnError {
     /// An input that NCBI reads as `format` (`AlignFormat`'s name), a format that LOSAT's reader
     /// does not read yet.
     Unsupported(&'static str),
-    /// What NCBI reads and LOSAT's reader does not (named as the refusal's text).
-    Refused(&'static str),
+    /// A state of the reader that no input gives: one of its two preconditions on the Seq-id
+    /// parser does not hold ([`NO_SEQ_ID_WARNING`], [`AN_ID_OF_EVERY_ROW`]; named as LOSAT's
+    /// internal error names it). Not a refusal: no alignment reaches it.
+    Internal(&'static str),
 }
+
+/// The flags of `x_ParseAndValidateSeqIds` (`fParse_AnyLocal | fParse_RawText`, quoted at
+/// [`row_ids`]).
+const ID_PARSE_FLAGS: u32 = parse_flags::ANY_LOCAL | parse_flags::RAW_TEXT;
+
+/// Precondition 1 of [`row_ids`]: NCBI's Seq-id parser posts a warning only where
+/// `fParse_PartialOK` is set (`CSeq_id::ParseIDs` and `CSeq_id::Set`, `seqid::parse`), and
+/// [`ID_PARSE_FLAGS`] do not set it, so the parser of a row's id posts none (a post would be a
+/// line of NCBI's standard error that this reader does not write).
+pub(crate) const NO_SEQ_ID_WARNING: &str =
+    "the Seq-id parser posted a warning without the flag that allows one";
+
+/// Precondition 2 of [`row_ids`]: `CSeq_id::ParseIDs` gives no id and no exception only for a
+/// string of white space, and a row's id is the first token of a line whose ends carry no white
+/// space (`clustal::scan`), so every row has an id (`GetSeqEntry` reads `ids.front()`).
+pub(crate) const AN_ID_OF_EVERY_ROW: &str = "the Seq-id parser read a row's id as no id";
 
 /// The text of `x_GetSequenceMolType`'s error (the message that `CObjReaderParseException`
 /// carries).
@@ -127,7 +148,7 @@ fn format_name(format: AlignFormat) -> &'static str {
 /// `CAlnReader::Read(false, true)` and `GetSeqs()` and `GetSeqEntry()` of `bytes`, the whole
 /// input.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:319-340
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:319-339
 /// ```c++
 /// void CAlnReader::Read(
 ///     bool /*guess*/,
@@ -167,20 +188,31 @@ pub(crate) fn read_alignment(bytes: &[u8]) -> Result<Alignment, AlnError> {
 }
 
 /// `CAlnReader::x_VerifyAlignmentInfo`: at least two sequences, and the ids of the rows parsed
-/// (`x_ParseAndValidateSeqIds`) and checked.
+/// and checked ([`row_ids`]).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:239-286
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:377-403
 /// ```c++
 ///     const auto num_sequences = alignmentInfo.NumSequences();
 ///
 ///     if (num_sequences == 0) {
-///         throw SShowStopper(...);
+///         throw SShowStopper(
+///             -1,
+///             eAlnSubcode_BadSequenceCount,
+///             "No sequence data was detected in alignment file.");
 ///     }
 ///
+///
 ///     if (num_sequences == 1) {
-///         throw SShowStopper(...);
+///         throw SShowStopper(
+///         -1,
+///         eAlnSubcode_BadSequenceCount,
+///         "Only one sequence was detected in the alignment file. An alignment file must contain more than one sequence.");
 ///     }
-///     ...
+///
+///
+///     m_Seqs.assign(alignmentInfo.mSequences.begin(), alignmentInfo.mSequences.end());
+///
+///
 ///     for (auto seqIdInfo : alignmentInfo.mIds) {
 ///         m_IdStrings.push_back(seqIdInfo.mData); // m_IdStrings is redundant and should be removed
 ///         TIdList ids;
@@ -188,18 +220,33 @@ pub(crate) fn read_alignment(bytes: &[u8]) -> Result<Alignment, AlnError> {
 ///         m_Ids.push_back(ids);
 ///     }
 /// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:216-237
+fn verify_alignment_info(scanned: &clustal::Scanned) -> Result<Vec<Vec<ParsedSeqId>>, AlnError> {
+    if scanned.rows.len() < 2 {
+        return Err(AlnError::NotAvailable);
+    }
+    scanned.ids.iter().map(|id| row_ids(id)).collect()
+}
+
+/// `CAlnReader::x_ParseAndValidateSeqIds` of the id string of one row: its Seq-ids, at least one.
+/// A parse exception and a report of the id validator are read failures (the error reporter
+/// throws: no listener).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:349-368
 /// ```c++
 ///     CSeq_id::TParseFlags parseFlags = CSeq_id::fParse_AnyLocal;
 ///     if (flags^fGenerateLocalIDs) {
 ///         parseFlags |= CSeq_id::fParse_RawText;
 ///     }
 ///
+///
 ///     try {
 ///         CSeq_id::ParseIDs(ids, idString, parseFlags);
 ///     }
 ///     catch (...) {  // report an error and interpret the id string as a local ID
-///         theErrorReporter->Error(...);   // throws
+///         theErrorReporter->Error(
+///                 seqIdInfo.mNumLine,
+///                 EAlnSubcode::eAlnSubcode_IllegalSequenceId,
+///                 "Unable to parse sequence ID string.");
 ///         ids.push_back(Ref(new CSeq_id(CSeq_id::e_Local, idString)));
 ///     }
 ///
@@ -208,46 +255,35 @@ pub(crate) fn read_alignment(bytes: &[u8]) -> Result<Alignment, AlnError> {
 ///     }
 /// ```
 /// (`flags` is 0 here, so `flags^fGenerateLocalIDs` is not 0 and the raw text flag is set.)
-fn verify_alignment_info(scanned: &clustal::Scanned) -> Result<Vec<Vec<ParsedSeqId>>, AlnError> {
-    if scanned.rows.len() < 2 {
+///
+/// Two states cannot come out of the parser for a row's id, and each is LOSAT's internal error
+/// ([`AlnError::Internal`]), not a refusal, because no alignment reaches it (review S3 of line PS
+/// item PS6: 185 probed ids of every Seq-id type, and the parser's code): a warning
+/// ([`NO_SEQ_ID_WARNING`]) and an empty list of ids ([`AN_ID_OF_EVERY_ROW`]). The tests hold both
+/// preconditions (`the_seq_id_parser_posts_no_warning_under_the_readers_flags`,
+/// `every_scanned_id_parses_to_an_id_or_fails`).
+pub(crate) fn row_ids(id: &[u8]) -> Result<Vec<ParsedSeqId>, AlnError> {
+    let mut warned = false;
+    let parsed = parse_ids(id, ID_PARSE_FLAGS, &mut |_| warned = true)
+        .map_err(|_| AlnError::NotAvailable)?;
+    if warned {
+        return Err(AlnError::Internal(NO_SEQ_ID_WARNING));
+    }
+    let ids: Vec<ParsedSeqId> = parsed.into_iter().flatten().collect();
+    if ids.is_empty() {
+        return Err(AlnError::Internal(AN_ID_OF_EVERY_ROW));
+    }
+    if crate::writedb::fasta_source::defline_ids::alignment_ids_are_reported(&ids) {
         return Err(AlnError::NotAvailable);
     }
-    let mut all = Vec::with_capacity(scanned.ids.len());
-    for id in &scanned.ids {
-        let mut warned = false;
-        let parsed = parse_ids(
-            id,
-            parse_flags::ANY_LOCAL | parse_flags::RAW_TEXT,
-            &mut |_| warned = true,
-        )
-        .map_err(|_| AlnError::NotAvailable)?;
-        // A Seq-id warning is a post that LOSAT would have to write as NCBI does; none comes
-        // from the ids of the corpus of line PS PS6.
-        if warned {
-            return Err(AlnError::Refused(
-                "a sequence id for which NCBI's Seq-id parser posts a warning",
-            ));
-        }
-        let ids: Vec<ParsedSeqId> = parsed.into_iter().flatten().collect();
-        if crate::writedb::fasta_source::defline_ids::alignment_ids_are_reported(&ids) {
-            return Err(AlnError::NotAvailable);
-        }
-        if ids.is_empty() {
-            // `ids.front()` of an empty list in `GetSeqEntry`: undefined behaviour in NCBI.
-            return Err(AlnError::Refused(
-                "a sequence id that NCBI's Seq-id parser reads as no id",
-            ));
-        }
-        all.push(ids);
-    }
-    Ok(all)
+    Ok(ids)
 }
 
 /// `CAlnReader::GetSeqAlign`'s `m_SeqVec` and `GetSeqEntry`: the upper-case letters of each row
 /// without gaps, its Bioseq with the molecule of its first id (`IdentifyAccession`) or, for an id
 /// that names none, of its letters (`x_GetSequenceMolType`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:640-680
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:749-769
 /// ```c++
 ///     for (TNumrow row_i = 0; row_i < m_Dim; row_i++) {
 ///         const string& seq_str     = m_SeqVec[row_i];
@@ -273,7 +309,7 @@ fn verify_alignment_info(scanned: &clustal::Scanned) -> Result<Vec<Vec<ParsedSeq
 /// ```
 /// `x_GetSequenceMolType` (the alphabet has 53 letters, so an undefined guess is protein):
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:553-600
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:670-698
 /// ```c++
 ///     auto formatGuess = CFormatGuess::SequenceType(seqChars.data(), seqChars.length());
 ///     if (formatGuess == CFormatGuess::eProtein) {
@@ -293,13 +329,21 @@ fn verify_alignment_info(scanned: &clustal::Scanned) -> Result<Vec<Vec<ParsedSeq
 ///         string msg = "Invalid Mol Type: "
 ///                      "U and T cannot appear in the same nucleotide sequence. "
 ///                      "Reinterpreting as protein.";
-///         sReportError(pErrorListener, ...);   // no listener: throws CObjReaderParseException
-///         ...
+///         sReportError(pErrorListener,
+///                      eDiag_Error,
+///                      eReader_Alignment,
+///                      eAlnSubcode_InconsistentMolType,
+///                      seqId, 0, msg);
+///
+///
+///         //impossible NA- can't contain both
+///         return CSeq_inst::eMol_aa;
 ///     }
 ///     return (posFirstU == string::npos  ?  CSeq_inst::eMol_dna : CSeq_inst::eMol_rna);
 /// ```
-/// (The letters are upper case with no gap: `m_SeqVec`; the missing characters of the sequence
-/// info are none.) An id that names a molecule decides before the letters are looked at.
+/// (`sReportError` throws `CObjReaderParseException`: no listener. The letters are upper case with
+/// no gap: `m_SeqVec`; the missing characters of the sequence info are none.) An id that names a
+/// molecule decides before the letters are looked at.
 fn entries(rows: Vec<Vec<u8>>, ids: Vec<Vec<ParsedSeqId>>) -> Result<Alignment, AlnError> {
     let mut bioseqs = Vec::with_capacity(rows.len());
     for (row, ids) in rows.iter().zip(ids) {

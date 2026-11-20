@@ -21,7 +21,7 @@ const SAMPLE_SIZE: usize = 10;
 
 /// `CAlnFormatGuesser::GetFormat(iStr)`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:49-120
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:50-74
 /// ```c++
 ///     vector<string> testSample;
 ///
@@ -91,14 +91,17 @@ fn starts_with(str: &[u8], prefix: &[u8]) -> bool {
 /// `NStr::Split(str, " \t", tokens, fSplit_MergeDelimiters)` of a line whose ends carry no white
 /// space (the lines of the sample are cut; an empty line has no token).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:182-188
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:199-201
 /// ```c++
 ///     string testLine = sample[0];
 ///     vector<string> tokens;
 ///     NStr::Split(testLine, " \t", tokens, NStr::fSplit_MergeDelimiters);
 /// ```
 /// A line that was not cut (the lines that `sample_is_clustal` appends are not) can start or end
-/// with a delimiter, and `fSplit_MergeDelimiters` then leaves an empty token there.
+/// with a delimiter, and `fSplit_MergeDelimiters` then leaves an empty token there. That is not
+/// `fSplit_Tokenize` (`utils::format_guess::tokens`, which the Clustal scanner uses: it has
+/// `fSplit_Truncate` too and gives no empty token), and the repository has no other port of the
+/// flag alone, so this one stays here.
 fn split_merge(line: &[u8]) -> Vec<&[u8]> {
     if line.is_empty() {
         return Vec::new();
@@ -123,7 +126,7 @@ fn split_merge(line: &[u8]) -> Vec<&[u8]> {
 
 /// `xSampleIsNexus`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:133-137
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:106-108
 /// ```c++
 ///     string testLine = sample[0];
 ///     NStr::ToLower(testLine);
@@ -138,7 +141,7 @@ fn sample_is_nexus(sample: &[Vec<u8>]) -> bool {
 /// conservation line. The lines past the sample come from the stream as it is, not cut, and the
 /// sample grows with them.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:144-186
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:123-161
 /// ```c++
 ///     const string CONSENSUS_CHARS = " .:*";
 ///
@@ -212,7 +215,7 @@ fn sample_is_clustal(sample: &mut Vec<Vec<u8>>, input: &mut PeekAheadStream<'_>)
 
 /// `xSampleIsFastaGap`: the first line that does not start with `;` starts with `>`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:198-214
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:175-185
 /// ```c++
 ///     size_t i = 0;
 ///     for ( ; i < sample.size(); ++i) {
@@ -235,7 +238,7 @@ fn sample_is_fasta_gap(sample: &[Vec<u8>]) -> bool {
 
 /// `xSampleIsPhylip`: a first line of two numbers.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:226-240
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:199-211
 /// ```c++
 ///     string testLine = sample[0];
 ///     vector<string> tokens;
@@ -262,7 +265,7 @@ fn sample_is_phylip(sample: &[Vec<u8>]) -> bool {
 
 /// `xSampleIsSequin`: an empty first line and a second line of the offsets 10, 20, 30, ...
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:252-272
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:225-240
 /// ```c++
 ///     if (!sample[0].empty()) {
 ///         return false;
@@ -304,7 +307,7 @@ fn sample_is_sequin(sample: &[Vec<u8>]) -> bool {
 /// `xSampleIsMultAlign`: an optional `//` line, an empty line, a line `1 N` (N up to 50), and a
 /// line with the name and the N letters of the first block.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:283-325
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:254-295
 /// ```c++
 ///     size_t lineIndex = 0;
 ///     if (NStr::StartsWith(sample[0], "//")) {

@@ -4,7 +4,7 @@
 /// The lines of the input, `getline`'s: split at `\n` only, a last line without a newline is a
 /// line, a `\r` stays in its line, and a file that ends with `\n` has no empty line after it.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_peek_ahead.hpp:56-95
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_peek_ahead.hpp:64-94
 /// ```c++
 ///     bool
 ///     PeekLine(

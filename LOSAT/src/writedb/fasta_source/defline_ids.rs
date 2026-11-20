@@ -699,7 +699,7 @@ fn check_for_excessive_prot_data(id: &ParsedSeqId, warn: ReaderWarn<'_>) {
 /// limits. The alignment reader has no message listener, so every report, a warning too,
 /// throws (`CAlnErrorReporter::Report`, quoted at `blastinput::aln_reader`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:128-135
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:162-168
 /// ```c++
 /// void CDefaultIdValidate::operator()(
 ///         const TIds& ids,

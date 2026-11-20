@@ -59,7 +59,7 @@ search = pylosat.Search.from_argv("blastn", ["-task", "dc-megablast", "-evalue",
 
 An unknown keyword, or a value of the wrong Python type, raises `TypeError`. The command line's parser checks everything else, so an option means, and fails, as it does there (`ArgumentError`, with the parser's message).
 
-`-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not options here: the inputs, the formats and the output file are arguments of `run`, `batches` and `run_to_file`. `psiblast` runs its rounds (`num_iterations`) as on the command line, and its PSSM files (`out_pssm` and `out_ascii_pssm`, with `save_pssm_after_last_round` and `save_each_pssm`) are written where the command line writes them.
+`-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not options here: the inputs, the formats and the output file are arguments of `run`, `batches` and `run_to_file`. `psiblast` runs its rounds (`num_iterations`) as on the command line, and its PSSM files (`out_pssm` and `out_ascii_pssm`, with `save_pssm_after_last_round` and `save_each_pssm`) are written where the command line writes them. `psiblast`'s `-in_msa`, `-msa_master_idx` and `-ignore_msa_master` (a PSSM made from a Clustal alignment) are not accepted either: the query of a search is its sequences or a `Pssm`; make the PSSM on the command line with `losat psiblast -in_msa ... -out_pssm`, then read it with `Pssm.from_file`.
 
 ## Inputs
 

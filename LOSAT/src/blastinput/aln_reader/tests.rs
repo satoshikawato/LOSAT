@@ -168,3 +168,140 @@ fn a_nucleotide_row_with_t_and_u_is_an_invalid_mol_type() {
         .iter()
         .all(|bioseq| bioseq.mol == Mol::Nucleotide));
 }
+
+/// Id strings of every shape that the Seq-id parser tells apart: one to four pieces of FASTA
+/// tags (known ones of each field count, unknown ones of two and three letters), accessions,
+/// numbers and empty pieces, joined by `|` (41,370 strings).
+fn id_strings() -> Vec<Vec<u8>> {
+    const PIECES: [&str; 14] = [
+        "gi", "sp", "lcl", "gnl", "pdb", "pat", "ref", "xx", "abc", "", "123", "P12345", "1ABC",
+        "A",
+    ];
+    let mut strings: Vec<Vec<u8>> = Vec::new();
+    let mut last: Vec<String> = vec![String::new()];
+    for length in 1..=4 {
+        let mut next = Vec::new();
+        for head in &last {
+            for piece in PIECES {
+                let joined = if length == 1 {
+                    piece.to_string()
+                } else {
+                    format!("{head}|{piece}")
+                };
+                strings.push(joined.clone().into_bytes());
+                next.push(joined);
+            }
+        }
+        last = next;
+    }
+    strings
+}
+
+// S3 of the PS6 review, precondition 1 (`NO_SEQ_ID_WARNING`): under the reader's flags the Seq-id
+// parser posts no warning, whatever the id (it fails instead); with `fParse_PartialOK`, which the
+// reader does not set, the same strings do post some.
+#[test]
+fn the_seq_id_parser_posts_no_warning_under_the_readers_flags() {
+    let strings = id_strings();
+    assert_eq!(
+        strings.len(),
+        14 + 14 * 14 + 14 * 14 * 14 + 14 * 14 * 14 * 14
+    );
+    let mut with_partial = 0;
+    for id in &strings {
+        let mut warned = false;
+        let _ = parse_ids(id, ID_PARSE_FLAGS, &mut |_| warned = true);
+        assert!(!warned, "{}", String::from_utf8_lossy(id));
+        let mut warned = false;
+        let _ = parse_ids(id, ID_PARSE_FLAGS | parse_flags::PARTIAL_OK, &mut |_| {
+            warned = true
+        });
+        with_partial += usize::from(warned);
+        assert!(
+            !matches!(
+                row_ids(id),
+                Err(AlnError::Internal(what)) if what == NO_SEQ_ID_WARNING
+            ),
+            "{}",
+            String::from_utf8_lossy(id)
+        );
+    }
+    assert!(with_partial > 0);
+}
+
+// S3 of the PS6 review, precondition 2 (`AN_ID_OF_EVERY_ROW`): the parser gives a list without
+// an id only for a string of white space, and the scanner gives no such id (the id is the first
+// token of a line whose ends were cut).
+#[test]
+fn every_scanned_id_parses_to_an_id_or_fails() {
+    for id in id_strings() {
+        let blank = crate::ncbi_str::truncate_spaces(&id).is_empty();
+        match parse_ids(&id, ID_PARSE_FLAGS, &mut |_| {}) {
+            Ok(ids) => assert_eq!(
+                ids.iter().flatten().next().is_none(),
+                blank,
+                "{}",
+                String::from_utf8_lossy(&id)
+            ),
+            Err(_) => assert!(!blank),
+        }
+        assert_eq!(
+            matches!(row_ids(&id), Err(AlnError::Internal(_))),
+            blank,
+            "{}",
+            String::from_utf8_lossy(&id)
+        );
+    }
+    // The state itself: a blank id string, which only a caller other than the scanner can give.
+    for blank in [&b""[..], b" ", b"\t \x0b\x0c\r\n"] {
+        assert_eq!(
+            row_ids(blank),
+            Err(AlnError::Internal(AN_ID_OF_EVERY_ROW)),
+            "{blank:?}"
+        );
+    }
+    // The scanner's ids: never blank, also where a row's line starts or ends with white space of
+    // any kind or holds other white space than the two delimiters.
+    let texts: &[&[u8]] = &[
+        BASIC,
+        b"CLUSTAL W\n\n  q1 MKV\n\ts1\tMKV  \n\n",
+        b"CLUSTAL W\n\n\x0bq1 MKV\n\x0c\x0bs1 MKV\x0b\n\n",
+        b"CLUSTAL W\n\nq1\x0b MKV\n\x0bs1\x0c MKV\n\n",
+        b"CLUSTAL W\n\n\x0b MKV 3\n\x0c LKV 3\n\n",
+        b"CLUSTAL W\r\n\r\nq1 MKV\r\ns1 MKV\r\n\r\n",
+    ];
+    let mut scanned_ids = 0;
+    for text in texts {
+        let Ok(scanned) = clustal::scan(&mut PeekAheadStream::new(text)) else {
+            continue;
+        };
+        for id in &scanned.ids {
+            assert!(
+                !crate::ncbi_str::truncate_spaces(id).is_empty(),
+                "{:?}",
+                String::from_utf8_lossy(text)
+            );
+            assert!(!matches!(row_ids(id), Err(AlnError::Internal(_))));
+            scanned_ids += 1;
+        }
+    }
+    assert!(scanned_ids >= 9, "{scanned_ids}");
+}
+
+// The two formats that the guess tells last (review probes `g.sequin`, `g.multalin` of line PS
+// item PS6: NCBI BLAST+ 2.17.0 fails to read both; LOSAT names the format it does not read).
+#[test]
+fn sequin_and_multalin_are_refused_by_name() {
+    let sequin = b"\n        10        20        30        40        50        60\nBDT63543.1  --MRFIAFLAVVMLAAFIVAALFTANSNYLDGNINKNLDLTKSLQLHGSFTEDDIAANNT\nBDT63093.1  --MSFLAFLIVALLAAYVFSLLFTLNSNYLDHKINTSLDLTSSLKLQGQFTDKDRAENNR\n\n";
+    assert_eq!(guess(sequin), AlignFormat::Sequin);
+    assert_eq!(
+        read_alignment(sequin).unwrap_err(),
+        AlnError::Unsupported("Sequin")
+    );
+    let multalin = b"//\n\n       1          50\nBDT63543.1  --MRFIAFLAVVMLAAFIVAALFTANSNYLDGNINKNLDLTKSLQLHGSF\nBDT63093.1  --MSFLAFLIVALLAAYVFSLLFTLNSNYLDHKINTSLDLTSSLKLQGQF\n\n";
+    assert_eq!(guess(multalin), AlignFormat::MultAlign);
+    assert_eq!(
+        read_alignment(multalin).unwrap_err(),
+        AlnError::Unsupported("MultAlin")
+    );
+}

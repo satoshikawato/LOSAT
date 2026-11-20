@@ -2610,12 +2610,14 @@ pub(crate) fn refuse_id_of_a_query(
     program: &str,
 ) -> Result<()> {
     let keys = subject.query_scope_keys();
+    let query = query_with_shown_ids(program);
     if queries.has_key(&keys.own) {
         return Err(parsed_refusal(
             oid(),
-            "has the Seq-id of a query read with -parse_deflines (or of the PSSM query of \
-             -in_pssm) in the query batch that reports it (in any with outfmt 5; NCBI BLAST+ shows \
-             the query for it)",
+            &format!(
+                "has the Seq-id of {query} in the query batch that reports it (in any with \
+                 outfmt 5; NCBI BLAST+ shows the query for it)"
+            ),
             program,
         ));
     }
@@ -2624,7 +2626,7 @@ pub(crate) fn refuse_id_of_a_query(
             oid(),
             &format!(
                 "has the Seq-align id {}, which NCBI BLAST+'s scope can match weakly to the id \
-                 of a query read with -parse_deflines (or of the PSSM query of -in_pssm) in the \
+                 of {query} in the \
                  query batch that reports it (in any with outfmt 5): an accession with a version for one without, a name with or \
                  without an accession, a pir or prf accession as a name; NCBI BLAST+ then shows \
                  the query for it",
@@ -2634,6 +2636,19 @@ pub(crate) fn refuse_id_of_a_query(
         ));
     }
     Ok(())
+}
+
+/// How the refusals of `refuse_id_of_a_query` and `refuse_display_id_of_a_query` name a query
+/// whose ids the reports show, for `program` (its name in the refusals): one read with
+/// `-parse_deflines`, or the PSSM query, which the user gives with `-in_pssm` (PSIBLAST, TBLASTN)
+/// or, to PSIBLAST alone, as an alignment with `-in_msa` (line PS item PS6; the PSSM made of it
+/// keeps the master sequence's id). The text of every other program is the one before PS6.
+fn query_with_shown_ids(program: &str) -> &'static str {
+    if program == "PSIBLAST" {
+        "a query read with -parse_deflines (or of the PSSM query of -in_pssm or -in_msa)"
+    } else {
+        "a query read with -parse_deflines (or of the PSSM query of -in_pssm)"
+    }
 }
 
 /// What the refusals of the query-anchored formats (`refuse_generated_query_id`,
@@ -2675,6 +2690,7 @@ pub(crate) fn refuse_display_id_of_a_query(
     if let Some(id) = subject.display_id() {
         crate::seqid::label::fasta(id, &mut display);
     }
+    let shown = format!("the id of {}", query_with_shown_ids(program));
     let (queries, weak, formats) = if generated {
         (
             GENERATED_QUERY_ID,
@@ -2683,7 +2699,7 @@ pub(crate) fn refuse_display_id_of_a_query(
         )
     } else {
         (
-            "the id of a query read with -parse_deflines (or of the PSSM query of -in_pssm)",
+            shown.as_str(),
             ", or an id that NCBI BLAST+'s scope matches weakly to it",
             "outfmt 0 to 4",
         )

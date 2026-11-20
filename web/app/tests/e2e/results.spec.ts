@@ -1728,6 +1728,42 @@ test('the dot plot: a popup taller than a short plot is under it, and stays ther
   await expectNoSideScroll(page, 'dot plot popup under a short plot');
 });
 
+// The plot follows the window's width without a loop of its resize observer (line WQA's sweep 2, S2-2, 2026-11-20): the
+// observer of the plot's stage set the plot's width, and the square plot then changed the stage's height in the same
+// frame, so that each change of the width ended with "ResizeObserver loop completed with undelivered notifications." on
+// the window (in the three engines; an uncaught page error in WebKit).
+test('the dot plot follows changes of the window width without a ResizeObserver loop error', async ({ page }) => {
+  const uncaught: string[] = [];
+  page.on('pageerror', (error) => uncaught.push(String(error)));
+  // A record against itself: a square plot, whose height follows its width.
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${S1}\n`);
+  await paste(page, 'subject', `>s\n${S1}\n`);
+  await run(page, 1);
+  await openRun(page, 1);
+  await show(page, 'dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  await expect(canvas).toHaveAttribute('data-segments', /^[1-9]/);
+  await page.evaluate(() => {
+    const errors: string[] = [];
+    (window as unknown as { __windowErrors: string[] }).__windowErrors = errors;
+    window.addEventListener('error', (event) => errors.push(event.message));
+  });
+  const sides = new Map<number, string>();
+  for (const width of [1024, 320, 1280, 500, 1000, 900, 1100]) {
+    await page.setViewportSize({ width, height: 800 });
+    // The frame of the new width, and the next.
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    sides.set(width, (await canvas.getAttribute('data-plot'))!);
+  }
+  expect(await page.evaluate(() => (window as unknown as { __windowErrors: string[] }).__windowErrors)).toEqual([]);
+  expect(uncaught).toEqual([]);
+  // The plot took each width: narrower at 320 px than at 1280 px, and square.
+  const side = (width: number) => sides.get(width)!.split('x').map(Number);
+  expect(side(320)[0]).toBeLessThan(side(1280)[0]!);
+  for (const [w, h] of [side(320), side(1280)]) expect(w).toBe(h);
+});
+
 test('the E value filter compares the values that the lists show: an E value written 0.0 passes "E value ≤ 0"', async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, 'NCBI writes an E value below 1e-180 as 0.0; the FakeEngine writes FAKE');
   // 450 identical letters: an E value of about 1e-240, not 0 (1,200 letters underflow to 0), written 0.0.

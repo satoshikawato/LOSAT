@@ -21,7 +21,7 @@ The public surface is the module `losat::api`. Every other module is the command
 - **Inputs.** Records in memory (`Inputs::new`), a BLAST database by name (`Inputs::database`, the command line's `-db`), or the PSSM of `psiblast` and `tblastn` by file (`Inputs::pssm` and `Inputs::pssm_database`, the command line's `-in_pssm`).
 - **Batches.** `run_batches` gives the same records one of NCBI's query batches at a time. A caller keeps one batch in memory, reports progress between batches and stops by not asking for the next.
 - **Files.** `run_to_file` is the command line's `-out`, and the way to `-outfmt 13` and `14` with their side files. `run` writes each report to writers you give it.
-- **Tools.** `run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker` and `run_convert2blastmask` run the tools with your reader as their standard input and your writers as their output.
+- **Tools.** `run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`, `run_convert2blastmask` and `run_blast_formatter` run the tools with your reader as their standard input and your writers as their output.
 - **Errors and output.** Errors carry the command line's messages. The library writes nothing to standard output or standard error; what the command line writes to its standard error comes back as diagnostics.
 
 The reports are the command line's. The HSP records give the numbers of the `-outfmt` columns (scores, coordinates, strands, frames, counts), and the statistics give each query's effective search space, length adjustment, lambda, K and H.
@@ -78,7 +78,7 @@ What `pylosat` offers:
 - **Inputs.** `Sequences.from_fasta(path)`, `Sequences.from_text(text)` and `Sequences.from_pairs([(title, sequence), ...])` for FASTA; `Pssm.from_file(path)` for `-in_pssm`; `Database("name")` for `-db`.
 - **Results.** `outcome.hsps` is a table with the names of the `-outfmt` columns. Any Arrow consumer reads it without a copy, for example `polars.DataFrame(hsps)` or `pyarrow.table(hsps)`. `outcome.reports` holds the command line's reports. `outcome.query_stats` holds the statistics of each query.
 - **Long searches.** `search.batches(query, subject)` searches one query batch at a time. `search.run_to_file(...)` is the command line's `-out`.
-- **Tools.** `pylosat.makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` take the command line's words and return what the tool writes.
+- **Tools.** `pylosat.makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask` and `blast_formatter` take the command line's words and return what the tool writes.
 - **Errors.** `ArgumentError`, `InputError` and `SearchError` derive from `LosatError`, each with the command line's message.
 
 The package README, `python/README.md` in the repository, has the full description.

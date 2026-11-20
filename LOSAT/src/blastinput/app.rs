@@ -631,8 +631,15 @@ pub fn report_format(
 ///     s_ValidateCustomDelim(m_CustomOutputFormatSpec,m_CustomDelim);
 /// ```
 pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyhow::Result<()> {
+    formatting_handler_check_with(choice, program.is_sam())
+}
+
+/// `formatting_handler_check` of formatting arguments made with `eIsSAM` (`is_sam`) or without:
+/// the search programs' (`Program::is_sam`) and blast_formatter's (`CFormattingArgs(false,
+/// CFormattingArgs::eIsSAM)`, blast_formatter.cpp:131, `blast_formatter::formatting`).
+pub fn formatting_handler_check_with(choice: &FormatChoice, is_sam: bool) -> anyhow::Result<()> {
     match choice.number {
-        SAM if !program.is_sam() => Err(options_error("SAM format is only applicable to blastn")),
+        SAM if !is_sam => Err(options_error("SAM format is only applicable to blastn")),
         AIRR_REARRANGEMENT => Err(options_error(
             "AIRR rearrangement format is only applicable to igblastn",
         )),

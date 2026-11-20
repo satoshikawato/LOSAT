@@ -165,6 +165,17 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("convert2blastmask") {
         std::process::exit(crate::convert2blastmask::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592
+    // ```c++
+    // int main(int argc, const char* argv[] /*, const char* envp[]*/)
+    // {
+    //     return CBlastFormatterApp().AppMain(argc, argv);
+    // }
+    // ```
+    // `losat blast_formatter` too.
+    if let Some(start) = started("blast_formatter") {
+        std::process::exit(crate::blast_formatter::run(&argv[2..], start));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
     if argv

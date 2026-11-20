@@ -595,13 +595,26 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 
 </details>
 
+## blast_formatter
+
+`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `8`, `9` and `12` from archives in ASN.1 text.
+
+| Input | What happens |
+| :--- | :--- |
+| `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `10`, `11`, `13`, `14`, `15`, `16`, `17`, `18` and `20` | Refused, with LOSAT's own error message. |
+| An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`) | Refused. |
+| A database named in the archive that is not found as NCBI finds a database | Refused. NCBI BLAST+ then asks NCBI's servers for its sequences. |
+| `-rid` | Refused. It names the results of a search that NCBI's servers ran, as `-remote` does for the search programs. |
+
+An empty `-rid`, the archive's other errors and the errors of `-outfmt` come as in NCBI.
+
 ## Programs LOSAT does not provide
 
 `blastdb_aliastool`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `makembindex`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
 
 ## On the list for a later release
 
-- The programs `deltablast`, `makeprofiledb`, `blast_formatter` and `windowmasker`.
+- The programs `deltablast`, `makeprofiledb` and `windowmasker`.
 - `psiblast -in_msa` (with `-msa_master_idx` and `-ignore_msa_master`) and `-phi_pattern`.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
 - The `rpsblast` output formats other than `0`, `6`, `7` and `10`, and the `rpstblastn` ones other than `0` to `4`, `6`, `7` and `10`. Until then, `rpsbproc` reads the `-outfmt 11` archives that NCBI's `rpsblast` and `rpstblastn` write.

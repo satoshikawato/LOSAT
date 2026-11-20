@@ -1,0 +1,16 @@
+USAGE
+  blast_formatter [-h] [-help] [-rid BLAST_RID] [-archive ArchiveFile]
+    [-outfmt format] [-show_gis] [-num_descriptions int_value]
+    [-num_alignments int_value] [-line_length line_length] [-html]
+    [-sorthits sort_hits] [-sorthsps sort_hsps]
+    [-max_target_seqs num_sequences] [-out output_file] [-parse_deflines]
+    [-version]
+
+DESCRIPTION
+   Stand-alone BLAST formatter client, version 2.17.0+
+
+Use '-help' to print detailed descriptions of command line arguments
+========================================================================
+
+Error: Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'
+Error:  (CArgException::eConstraint) Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'

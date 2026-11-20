@@ -71,9 +71,38 @@ pub(crate) enum Constraint {
     Strings(&'static [&'static str]),
     /// `CArgAllowValuesGreaterThanOrEqual(min)` (blast_input_aux.hpp:101-121).
     AtLeast(i64),
+    /// `CArgAllowValuesBetween(min, max, true)`: from `min` to `max`, both included.
+    Between(i64, i64),
 }
 
 impl Constraint {
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:161-184
+    // ```c++
+    //     virtual bool Verify(const string& value) const {
+    //         double val = NStr::StringToDouble(value);
+    //         bool retval = false;
+    //         if ( !m_Inclusive ) {
+    //             retval = (val > m_MinValue && val < m_MaxValue);
+    //         } else {
+    //             retval = (val >= m_MinValue && val <= m_MaxValue);
+    //         }
+    //         return retval;
+    //     }
+    //
+    //     /// Overloaded method from CArgAllow
+    //     virtual string GetUsage(void) const {
+    //         string retval;
+    //         if ( !m_Inclusive ) {
+    //             retval = "(>" + NStr::DoubleToString(m_MinValue) + " and <"
+    //                 + NStr::DoubleToString(m_MaxValue) + ")";
+    //         } else {
+    //             retval = "(>=" + NStr::DoubleToString(m_MinValue) + " and =<"
+    //                 + NStr::DoubleToString(m_MaxValue) + ")";
+    //         }
+    //         return retval;
+    //     }
+    // ```
+    // (`NStr::DoubleToString` of a whole number writes it without a decimal point.)
     fn usage(self) -> String {
         match self {
             Constraint::Strings(values) => values
@@ -82,7 +111,13 @@ impl Constraint {
                 .collect::<Vec<_>>()
                 .join(", "),
             Constraint::AtLeast(min) => format!(">={min}"),
+            Constraint::Between(min, max) => format!("(>={min} and =<{max})"),
         }
+    }
+
+    /// Whether the constraint compares the value as a number (`NStr::StringToDouble`).
+    fn numeric(self) -> bool {
+        matches!(self, Constraint::AtLeast(_) | Constraint::Between(..))
     }
 }
 
@@ -312,10 +347,14 @@ pub(crate) fn arg_message(name: &str, what: &str, attr: &str) -> String {
 // ```
 /// The exception of a stream asked of the argument `name` that has no value.
 fn no_value(name: &str) -> ArgException {
-    ArgException::new(
-        "eNoValue",
-        arg_message(name, "The argument has no value", ""),
-    )
+    ArgException::new("eNoValue", no_value_message(name))
+}
+
+/// The message of `THROW_CArg_NoValue` (quoted above) for the argument `name`: the value of an
+/// argument that has none asked for (`AsString()` too, ncbiargs.cpp:213), which a program's `Run`
+/// reports (blast_formatter's `-rid`).
+pub(crate) fn no_value_message(name: &str) -> String {
+    arg_message(name, "The argument has no value", "")
 }
 
 /// The arguments of one command line: those given and the defaults NCBI adds.
@@ -783,6 +822,11 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
             Some(Number::Double(number)) => number >= min as f64,
             None => false,
         },
+        Some(Constraint::Between(min, max)) => match number {
+            Some(Number::Integer(number)) => (min..=max).contains(&i64::from(number)),
+            Some(Number::Double(number)) => number >= min as f64 && number <= max as f64,
+            None => false,
+        },
     };
     match desc.constraint {
         Some(constraint) if !allowed => Err(invalid(
@@ -852,7 +896,7 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
         .is_some_and(|head| head.eq_ignore_ascii_case(b"0x"));
     let converted = match string_to_int8(bytes, 0) {
         Ok(number) => Ok(number),
-        Err(_) if hexadecimal && matches!(desc.constraint, Some(Constraint::AtLeast(_))) => {
+        Err(_) if hexadecimal && desc.constraint.is_some_and(Constraint::numeric) => {
             return Err(ArgsError::Refused(format!(
                 "the hexadecimal value '{value}' of -{} is not supported by LOSAT's {}",
                 desc.name, tool.refusal_name

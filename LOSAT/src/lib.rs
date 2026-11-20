@@ -117,8 +117,10 @@ pub(crate) mod dustmasker;
 pub(crate) mod segmasker;
 // NCBI app/blastdb/convert2blastmask.cpp: the masking information of lower case FASTA input.
 pub(crate) mod convert2blastmask;
+// NCBI app/blast/blast_formatter.cpp: the reports of a BLAST archive (`-outfmt 11`).
+pub(crate) mod blast_formatter;
 // NCBI corelib/ncbiapp.cpp and corelib/ncbiargs.cpp: the application and argument reader of
-// blastdbcmd, dustmasker, segmasker and convert2blastmask.
+// blastdbcmd, dustmasker, segmasker, convert2blastmask and blast_formatter.
 pub(crate) mod ncbi_app;
 // NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;

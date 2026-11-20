@@ -25,6 +25,7 @@
 - [dustmasker](programs/dustmasker.md)
 - [segmasker](programs/segmasker.md)
 - [convert2blastmask](programs/convert2blastmask.md)
+- [blast_formatter](programs/blast_formatter.md)
 
 # Reference
 

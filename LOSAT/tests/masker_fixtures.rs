@@ -1,12 +1,13 @@
-//! `losat dustmasker`, `losat segmasker` and `losat convert2blastmask` against NCBI BLAST+
-//! 2.17.0 dustmasker 1.0.0, segmasker 1.0.0 and convert2blastmask: each row of
-//! `tests/<program>/cases.tsv` (its arguments as shell words, run in `tests/<program>`; `< file`
-//! is the standard input) gives NCBI's standard output, standard error and exit status, frozen
-//! in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3,
-//! 2026-11-12 and 11-13, on ws and the local official release). A name the table repeats is
-//! compared on its last row, whose output the probe kept. NCBI is not run here. Every row runs
-//! through the library API too (`losat::api::run_dustmasker`, `run_segmasker`,
-//! `run_convert2blastmask`, by `examples/library_command_line`), with the same bytes.
+//! `losat dustmasker`, `losat segmasker`, `losat convert2blastmask` and `losat blast_formatter`
+//! against NCBI BLAST+ 2.17.0 dustmasker 1.0.0, segmasker 1.0.0, convert2blastmask and
+//! blast_formatter: each row of `tests/<program>/cases.tsv` (its arguments as shell words, run in
+//! `tests/<program>`; `< file` is the standard input) gives NCBI's standard output, standard error
+//! and exit status, frozen in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items
+//! K1, K2 and K3, 2026-11-12 and 11-13, on ws and the local official release; item F3,
+//! 2026-11-20, on ws). A name the table repeats is compared on its last row, whose output the
+//! probe kept. NCBI is not run here. Every row runs through the library API too
+//! (`losat::api::run_dustmasker`, `run_segmasker`, `run_convert2blastmask`,
+//! `run_blast_formatter`, by `examples/library_command_line`), with the same bytes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -306,6 +307,12 @@ fn convert2blastmask_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
+#[test]
+fn blast_formatter_gives_ncbis_bytes() {
+    let differ = rows_that_differ("blast_formatter");
+    assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
+}
+
 // `run_dustmasker`, `run_segmasker` and `run_convert2blastmask` run NCBI's application start as
 // the command line does (`ncbi_app::run_with`, line RG item E1w-2): the rows of `-logfile`,
 // `-conffile` and `-dryrun` give the command line's bytes through the library too. `-xmlhelp`,
@@ -374,6 +381,15 @@ fn segmasker_through_the_library_gives_the_command_line_s_bytes() {
 #[test]
 fn convert2blastmask_through_the_library_gives_the_command_line_s_bytes() {
     let differ = rows_that_differ_through_the_library("convert2blastmask", "CONVERT2BLASTMASK");
+    assert!(
+        differ.is_empty(),
+        "rows that differ through the library: {differ:?}"
+    );
+}
+
+#[test]
+fn blast_formatter_through_the_library_gives_the_command_line_s_bytes() {
+    let differ = rows_that_differ_through_the_library("blast_formatter", "BLAST_FORMATTER");
     assert!(
         differ.is_empty(),
         "rows that differ through the library: {differ:?}"

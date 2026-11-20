@@ -43,8 +43,11 @@ pub(crate) enum Refusal {
     UnreadText(String),
     /// A stored message of the severity `Fatal`, whose post ends NCBI's program (`abort`).
     FatalMessage,
-    /// A negative hit list size in the archive's options (NCBI's searches write none).
-    HitlistSize(i32),
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` with an output format that LOSAT writes (8, 9, 12):
+    /// NCBI's blast_formatter then loads each subject of the results through its data loaders
+    /// (its BLAST database loader, or NCBI's servers where the database or the subjects lack
+    /// one), which may post their own texts (decision C3-1 of line RG).
+    Prefetch,
     /// An archive of a program whose Seq-annot NCBI's formatter does not name as the others
     /// (PHI-BLAST, the mapper): its task.
     Program(&'static str),
@@ -93,8 +96,10 @@ impl Refusal {
                  aborts, is not supported by LOSAT's {}",
                 super::PROGRAM
             ),
-            Refusal::HitlistSize(size) => format!(
-                "a BLAST archive whose hit list size is {size} is not supported by LOSAT's {}",
+            Refusal::Prefetch => format!(
+                "PRE_FETCH_SEQS_LIMIT=2147483647, with which NCBI BLAST+ loads the subject \
+                 sequences of output formats 8, 9 and 12 ahead (from NCBI's servers where the \
+                 database lacks one), is not supported by LOSAT's {}",
                 super::PROGRAM
             ),
             Refusal::Program(task) => format!(
@@ -130,7 +135,7 @@ impl Refusal {
             Refusal::Undecided(_) => "no defined result".to_string(),
             Refusal::UnreadText(_) => "form of ASN.1 text".to_string(),
             Refusal::FatalMessage => "severity Fatal".to_string(),
-            Refusal::HitlistSize(_) => "negative hit list size".to_string(),
+            Refusal::Prefetch => "`PRE_FETCH_SEQS_LIMIT=2147483647`".to_string(),
             Refusal::Program(_) => "PHI-BLAST".to_string(),
         }
     }
@@ -173,7 +178,7 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::Undecided(""),
         Refusal::UnreadText(String::new()),
         Refusal::FatalMessage,
-        Refusal::HitlistSize(-1),
+        Refusal::Prefetch,
         Refusal::Program("phiblastp"),
     ]);
     refusals

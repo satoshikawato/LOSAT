@@ -50,7 +50,8 @@ None that change the output of a normal run. The options, NCBI's help and usage 
 - An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`).
 - A database named in the archive that cannot be opened here as NCBI opens it. NCBI BLAST+ then asks NCBI's servers for its sequences.
 - `BL2SEQ_LEGACY` with an archive of `-subject` sequences, as the search programs refuse it with `-subject`.
-- Archives that NCBI's own programs do not write and on which NCBI BLAST+ has no defined result, a stored message of severity Fatal, a negative hit list size, and archives of PHI-BLAST or of the mapper.
+- `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12`: NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one.
+- Archives that NCBI's own programs do not write and on which NCBI BLAST+ has no defined result, a stored message of severity Fatal, and archives of PHI-BLAST or of the mapper.
 - `-rid`: the results of a search that NCBI's servers ran. The search programs refuse `-remote` in the same way.
 
 An empty `-rid`, the archive's other errors and the errors of `-outfmt` come as in NCBI. See [What LOSAT refuses](../refusals.md).

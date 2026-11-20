@@ -609,7 +609,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 | An archive on which NCBI BLAST+ has no defined result: a query or subject sequence without an id, a request without a query or subject, values that make NCBI's code abort | Refused. NCBI reads memory the archive does not decide, follows a null pointer or aborts. NCBI's own programs do not write such archives. |
 | An archive in a form of ASN.1 text that LOSAT does not read | Refused, with the form named. |
 | A stored message of severity Fatal in the archive | Refused. NCBI BLAST+ aborts after posting it. |
-| A negative hit list size in the archive's options | Refused. NCBI's searches do not write one. |
+| `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12` | Refused. NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one. |
 | An archive of PHI-BLAST or of the mapper | Refused. |
 | `-rid` | Refused. It names the results of a search that NCBI's servers ran, as `-remote` does for the search programs. |
 

@@ -346,6 +346,28 @@ impl<'r, 'o> Run<'r, 'o> {
     //     			}
     //     		}
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2957-2962
+    // ```c++
+    //     	if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
+    //     		hitlist_size = args[kArgMaxTargetSequences].AsInteger();
+    //     	}
+    //     	else if (args.Exist(kArgNumAlignments) && args[kArgNumAlignments]) {
+    //     		hitlist_size = args[kArgNumAlignments].AsInteger();
+    //     	}
+    // ```
+    // (the formats up to 4: `-max_target_seqs`, or `max(m_NumDescriptions, m_NumAlignments)`
+    // where `-num_descriptions` or `-num_alignments` is given, quoted at
+    // `blastinput::report_counts::report_counts_from`.)
+    /// Whether the command line's options set the hit list size of `ExtractAlgorithmOptions` for
+    /// the output format `outfmt`, so that the options' own size is not kept.
+    fn options_set_hitlist(&self, outfmt: i32) -> bool {
+        let options = self.options;
+        options.max_target_seqs.is_some()
+            || options.num_alignments.is_some()
+            || (outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES
+                && options.num_descriptions.is_some())
+    }
+
     /// `PrintFormattedOutput` of one search object, in NCBI's order: `-out` opened, the
     /// formatting options of the object (`extract_formatting` with the kept hit list size, its
     /// warnings), the check of SAM, the queries (`check_queries`), the database or the subject
@@ -356,12 +378,15 @@ impl<'r, 'o> Run<'r, 'o> {
     /// alignments (`x_PrintStructuredReport`).
     fn print(&mut self, search: &Search, diag: &mut Diag) -> anyhow::Result<()> {
         self.output.open(&self.options.out)?;
-        let hitlist =
-            usize::try_from(self.hitlist).map_err(|_| Refusal::HitlistSize(self.hitlist))?;
-        let formatting = extract_formatting(self.options, hitlist)?;
+        // A negative hit list size (an archive that NCBI's searches do not write, probes
+        // P9.005, P9.009): `ExtractAlgorithmOptions` keeps it where no option sets the size, and
+        // posts its warning (`hitlist_size < 5`) as for 0, which the handler reads in its place.
+        let formatting = extract_formatting(self.options, self.hitlist.max(0) as usize)?;
         post_line(&mut self.output, diag, &formatting.warnings);
-        self.hitlist = i32::try_from(formatting.counts.hitlist_size)
-            .map_err(|_| Refusal::HitlistSize(i32::MAX))?;
+        if self.hitlist >= 0 || self.options_set_hitlist(formatting.choice.number) {
+            self.hitlist = i32::try_from(formatting.counts.hitlist_size)
+                .expect("a hit list size that the handler read from an int");
+        }
         let search_options = self
             .search_options
             .as_ref()
@@ -428,10 +453,14 @@ impl<'r, 'o> Run<'r, 'o> {
         // `BlastFormatter_PreFetchSequenceData`: a value of `PRE_FETCH_SEQS_LIMIT` that is no
         // integer stops NCBI here (the search programs' one reader of the variable, decision
         // F3-6 (4)); NCBI's formats 8, 9 and 12 fetch nothing for any other value but `INT_MAX`
-        // (`s_IsPrefetchFormat`).
-        prefetch_seqs_limit()?;
+        // (`s_IsPrefetchFormat`, quoted at `common::database::prefetch_reads_seq_aligns`), with
+        // which NCBI loads each subject through its data loaders: refused (decision C3-1).
+        if prefetch_seqs_limit()? == Some(i32::MAX) {
+            return Err(Refusal::Prefetch.into());
+        }
         let alignments = search.results.alignments();
-        let number = u32::try_from(self.hitlist).unwrap_or(u32::MAX);
+        // `PruneSeqalign`'s `unsigned int number`: a negative size is its value modulo 2^32.
+        let number = self.hitlist as u32;
         for set in sets {
             let set = &alignments[set];
             if set.is_empty() {

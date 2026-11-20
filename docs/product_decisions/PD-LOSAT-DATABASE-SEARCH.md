@@ -355,8 +355,9 @@ PSI-BLAST (rows `db.ak.bp.nseq0.oldfsc.allx.7`, `db.ak.bp.nseq0.ssp.allx.7` and
 `db.ak.tbn.nseq0.ssp.allx.7`; they refused it at the database's open, probe e8 of fix round 3 of
 D1a-4). Every program makes the refusal with one test (`common::database::check_setup_count`) in
 the setup of the first query batch (BLASTN: or query chunk) with a valid context, where NCBI
-divides: BLASTN and TBLASTX after the reports of the batches before, TBLASTN, BLASTP and PSI-BLAST
-before any output, as their other refusals there. With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+divides: BLASTN, TBLASTX and TBLASTN after the reports of the batches before (NCBI writes them
+before it crashes in the next batch: 150 and 152 bytes of outfmt 7 with `BATCH_SIZE=1`, two queries
+without letters to search then a valid one), BLASTP and PSI-BLAST before any output. With the Gumbel block, a TBLASTN database whose `GetMinLength` is
 below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
 average subject length is too short`, exit status 3.
 

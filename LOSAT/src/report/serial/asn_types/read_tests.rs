@@ -29,7 +29,7 @@ fn serial(root: u16, text: &str) {
 /// The report of the exception that stops the reader (`what()`), with the official build's tree.
 fn exception(root: u16, text: &str) -> String {
     match read(root, text).0 {
-        Err(ReadError::Exception(e)) => e.what(),
+        Err(ReadError::Exception(e)) => String::from_utf8(e.what()).unwrap(),
         other => panic!("{text}: {other:?}"),
     }
 }
@@ -890,7 +890,7 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
             let Err(ReadError::Exception(exception)) = value else {
                 panic!("an exception");
             };
-            let report = exception.what();
+            let report = String::from_utf8(exception.what()).unwrap();
             assert!(
                 report.lines().count() > 2 * depth,
                 "{}",

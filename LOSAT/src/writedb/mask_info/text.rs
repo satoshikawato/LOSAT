@@ -72,7 +72,7 @@ impl<S: AsnSource> TextIn<S> {
                 let eof = NcbiException::new(FILL_BUFFER_EOF, "end of file").what();
                 Fail::serial(NcbiException::new(
                     SKIP_WHITE_SPACE_EOF,
-                    format!("line {line}: {eof}"),
+                    [format!("line {line}: ").as_bytes(), &eof].concat(),
                 ))
             }
             (AsnTextErrorKind::Eof, _) => Fail::Eof,
@@ -196,12 +196,9 @@ impl<S: AsnSource> TextIn<S> {
     #[cold]
     #[inline(never)]
     fn unexpected_member(&self, id: &[u8], names: impl Iterator<Item = &'static str>) -> Fail {
-        let mut message = format!(
-            "\"{}\": unexpected member, should be one of: ",
-            String::from_utf8_lossy(id)
-        );
+        let mut message = [b"\"", id, b"\": unexpected member, should be one of: "].concat();
         for name in names {
-            message.push_str(&format!("\"{name}\" "));
+            message.extend_from_slice(format!("\"{name}\" ").as_bytes());
         }
         throw_error(UNEXPECTED_MEMBER, &self.position(), message)
     }

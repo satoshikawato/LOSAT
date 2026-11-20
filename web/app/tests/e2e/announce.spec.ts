@@ -94,7 +94,10 @@ test('a failed run is told as an alert, with its reason', async ({ page }) => {
   await forget(page);
   await submit(page);
   await waitStatus(page, 1, 'failed');
-  await expect.poll(() => told(page, 'alert')).toContainEqual(expect.stringMatching(/^Run 1 failed: .+ A failed run keeps no results\.$/));
+  // Both runs write a warning before their error, which the run keeps (line WQA's sweep, D3, 2026-11-19).
+  await expect
+    .poll(() => told(page, 'alert'))
+    .toContainEqual(expect.stringMatching(/^Run 1 failed: .+ A failed run keeps no results\. It keeps the warnings written before the error\.$/));
 });
 
 test('a cancelled run is told; Cancel leaves the focus on the Results heading, and Tab goes on from there', async ({ page }) => {

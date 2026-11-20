@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
+import { describeBrowserThreads } from './browser-threads';
 import { REPOSITORY } from './harness-server';
 import { navigate } from './navigate';
 
@@ -97,7 +98,15 @@ export async function waitStatus(
   timeout = 120_000,
 ): Promise<void> {
   const option = page.getByTestId(`run-${run}-option`);
-  await expect(option).toHaveAttribute('data-status', /^(completed|cancelled|failed)$/, { timeout });
+  try {
+    await expect(option).toHaveAttribute('data-status', /^(completed|cancelled|failed)$/, { timeout });
+  } catch (error) {
+    // A run that did not end: whether the browser's threads run (a slow search) or wait, and where (browser-threads.ts).
+    const threads = await describeBrowserThreads();
+    if (threads === undefined || !(error instanceof Error)) throw error;
+    error.message = `${error.message}\n\n${threads}`;
+    throw error;
+  }
   const actual = await option.getAttribute('data-status');
   if (actual !== status) {
     const error = await runMessage(page, run);

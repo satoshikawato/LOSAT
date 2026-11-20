@@ -61,6 +61,12 @@ pub(crate) trait Fma: Sized {
     fn fma_exact_sum(a: f64, b: f64, c: f64) -> f64 {
         Self::fma(a, b, c)
     }
+    /// [`Fma::fma_exact_sum`] with `b` from a table and `b_split` its Veltkamp split
+    /// ([`Emulated::split`], computed with the table: [`invc_split`]).
+    #[inline(always)]
+    fn fma_exact_sum_split(a: f64, b: f64, _b_split: (f64, f64), c: f64) -> f64 {
+        Self::fma_exact_sum(a, b, c)
+    }
     /// `a` is an integer below 2^26 in magnitude; the product's rounding error reaches the result.
     #[inline(always)]
     fn fma_small_int(a: f64, b: f64, c: f64) -> f64 {
@@ -144,15 +150,16 @@ const E_BOUND: u64 = 0x3ca0_0000_0000_0001;
 /// twice the bound on `|tmp|` unfused minus fused there, 2^-59 (see `exp_tail`).
 const EXP_R_MAX: f64 = 0.00271;
 const EXP_TMP_SLACK: u64 = 0x3c40_0000_0000_0000; // 2^-59
-/// `ln_tail`: `|r|` at most 0.0041 (glibc: `|r| < 1/256` and a little) and three times the bound
-/// on `|y|` unfused minus fused there, 2^-66 (see `ln_tail`).
+/// `ln_tail`: `|r|` at most 0.0041 (glibc: `|r| < 1/256` and a little) and the half width of the
+/// bracket around the unfused `y`, 2^-66: three times the bound on `|y|` unfused minus fused there
+/// (see `ln_tail`).
 const LN_R_MAX: f64 = 0.0041;
 const LN_Y_SLACK: u64 = 0x3bd0_0000_0000_0000; // 2^-66
 
 impl Emulated {
     /// Veltkamp's split: `a = hi + lo` with 26 and 27 significant bits.
     #[inline(always)]
-    fn split(a: f64) -> (f64, f64) {
+    const fn split(a: f64) -> (f64, f64) {
         let t = 134217729.0 * a; // 2^27 + 1
         let hi = t - (t - a);
         (hi, a - hi)
@@ -161,8 +168,13 @@ impl Emulated {
     /// `a * b - p` for `p = RN(a * b)`, exact (Dekker).
     #[inline(always)]
     fn product_error(a: f64, b: f64, p: f64) -> f64 {
+        Self::product_error_split(a, Self::split(b), p)
+    }
+
+    /// [`Emulated::product_error`] with `b` given by its split.
+    #[inline(always)]
+    fn product_error_split(a: f64, (bh, bl): (f64, f64), p: f64) -> f64 {
         let (ah, al) = Self::split(a);
-        let (bh, bl) = Self::split(b);
         (((ah * bh - p) + ah * bl) + al * bh) + al * bl
     }
 
@@ -266,8 +278,15 @@ impl Fma for Emulated {
     /// `RN(a * b) + c` exact plus the exact rounding error of the product: one rounding.
     #[inline(always)]
     fn fma_exact_sum(a: f64, b: f64, c: f64) -> f64 {
+        Self::fma_exact_sum_split(a, b, Self::split(b), c)
+    }
+
+    /// The same, with the split of `b` read from its table instead of computed.
+    #[inline(always)]
+    fn fma_exact_sum_split(a: f64, b: f64, b_split: (f64, f64), c: f64) -> f64 {
+        debug_assert_eq!(b_split, Self::split(b));
         let p = a * b;
-        let r = (p + c) + Self::product_error(a, b, p);
+        let r = (p + c) + Self::product_error_split(a, b_split, p);
         Self::checked(r, a, b, c)
     }
 
@@ -329,18 +348,28 @@ impl Fma for Emulated {
     /// by 2^-69 + 8.41e-6 2^-53 + that = 1.551 2^-69; `A1 + r A2` in [0.332, 0.335) by 1.0021
     /// 2^-54 and `A3 + r A4` in [0.199, 0.201) by 1.003 2^-55, so `p` in [0.332, 0.335) by
     /// 2.0021 2^-54; `y` (below 2^-16; `|r3| <= 6.9e-8`) by 2^-69 + 1.551 2^-69 + 6.9e-8 (2.0021
-    /// 2^-54 + 0.335 2^-53) = 2.557 2^-69. `LN_Y_SLACK` (2^-66) is three times that. Fails for
-    /// about 2^-7 of the arguments, which take every FMA exactly.
+    /// 2^-54 + 0.335 2^-53) = 2.557 2^-69.
+    ///
+    /// The test brackets the fused `y`: with `s` = `LN_Y_SLACK` (2^-66), `RN(y - s)` is at most
+    /// `y - s` plus half an ulp of `|y| + s` (below 2^-16 + 2^-66, so at most 2^-69), so at most
+    /// `y - 7 2^-69`, below the fused `y` (at least `y - 2.557 2^-69`); `RN(y + s)` is above it the
+    /// same way. Rounding to nearest is monotone, so glibc's `RN(y + hi)` lies between
+    /// `RN(RN(y - s) + hi)` and `RN(RN(y + s) + hi)`, and is both when they are equal. Fails when
+    /// a rounding boundary of `y + hi` lies within about `s` of the unfused sum: at most 2^-9 of
+    /// the arguments (the result is at least 0.0625, an ulp at least 2^-56), which take every FMA
+    /// exactly.
     #[inline(always)]
     fn ln_tail(r: f64, kd: f64, w: f64, hi: f64) -> f64 {
         if r.abs() <= LN_R_MAX {
             let y = ln_poly::<Unfused>(r, kd, w, hi);
-            let u = y + hi;
-            let yb = u - hi;
-            let z = (hi - (u - yb)) + (y - yb);
-            if Self::rounds_to(u, z, d(LN_Y_SLACK)) {
-                debug_assert_eq!(u.to_bits(), (ln_poly::<Self>(r, kd, w, hi) + hi).to_bits());
-                return u;
+            let below = (y - d(LN_Y_SLACK)) + hi;
+            let above = (y + d(LN_Y_SLACK)) + hi;
+            if below.to_bits() == above.to_bits() {
+                debug_assert_eq!(
+                    below.to_bits(),
+                    (ln_poly::<Self>(r, kd, w, hi) + hi).to_bits()
+                );
+                return below;
             }
         }
         ln_poly::<Self>(r, kd, w, hi) + hi
@@ -372,6 +401,24 @@ impl Fma for Emulated {
         hi + ln1_poly::<Self>(r, r2, r3, parts)
     }
 }
+
+/// [`Emulated::split`] of every `invc` of a table of `N` doubles in rows of `STRIDE`, `invc` first
+/// (`LOG_TAB`, `POW_LOG_TAB`), evaluated by the compiler, for [`Fma::fma_exact_sum_split`].
+const fn invc_split<const N: usize, const STRIDE: usize, const ROWS: usize>(
+    tab: &[u64; N],
+) -> [(f64, f64); ROWS] {
+    assert!(N == STRIDE * ROWS);
+    let mut out = [(0.0, 0.0); ROWS];
+    let mut i = 0;
+    while i < ROWS {
+        out[i] = Emulated::split(f64::from_bits(tab[STRIDE * i]));
+        i += 1;
+    }
+    out
+}
+
+static LOG_INVC_SPLIT: [(f64, f64); 128] = invc_split::<256, 2, 128>(&LOG_TAB);
+static POW_LOG_INVC_SPLIT: [(f64, f64); 128] = invc_split::<384, 3, 128>(&POW_LOG_TAB);
 
 #[inline(always)]
 fn top12(x: f64) -> u32 {
@@ -539,7 +586,7 @@ fn ln_impl<F: Fma>(x: f64) -> f64 {
     let logc = d(LOG_TAB[2 * i + 1]);
     let z = d(iz);
     // z * invc is within 2^-7 of 1; kd * Ln2hi is a double (|k| < 2^11, Ln2hi has 42 bits).
-    let r = F::fma_exact_sum(z, invc, -1.0);
+    let r = F::fma_exact_sum_split(z, invc, LOG_INVC_SPLIT[i], -1.0);
     let kd = k as f64;
     let w = F::fma_exact_product(kd, d(LOG_HEAD[0]), logc);
     let hi = r + w;
@@ -648,7 +695,7 @@ fn pow_log_inline<F: Fma>(ix: u64) -> (f64, f64) {
     let logc = d(POW_LOG_TAB[3 * i + 1]);
     let logctail = d(POW_LOG_TAB[3 * i + 2]);
     let a = |j: usize| d(POW_LOG_HEAD[2 + j]);
-    let r = F::fma_exact_sum(z, invc, -1.0);
+    let r = F::fma_exact_sum_split(z, invc, POW_LOG_INVC_SPLIT[i], -1.0);
     // k*Ln2 + log(c) + r.
     let t1 = F::fma_exact_product(kd, d(POW_LOG_HEAD[0]), logc);
     let t2 = t1 + r;

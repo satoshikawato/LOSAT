@@ -33,7 +33,8 @@ LOSAT/tests/db_search (README.md there says how they were built).
   (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
   2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject; exception 3: a one-hit gapped
   start whose window reads past the end of a database volume's last memory page, where NCBI faults). The row has no
-  frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row_id`).
+  frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row_id`). A `losat-rejection` row uses it too
+  (two queries of one ID, refused at a later query batch, line WQA D10): the frozen NCBI run of a near input is the expectation of its stdout.
 - a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
   memcheck, where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3: the window of a one-hit
   gapped start of negative length; natively NCBI may crash there or read bytes that differ from run to run, valgrind

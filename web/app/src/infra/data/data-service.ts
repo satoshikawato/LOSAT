@@ -259,7 +259,11 @@ export class DataService implements DataGateway {
     if (this.runs.get(runId) !== run) throw new Error(`run ${runId} was discarded`);
     const failure =
       run.failure ??
-      (result.state === 'broken' ? new Error(`The output of the run arrived incomplete: ${result.detail}`) : undefined);
+      (result.state === 'broken'
+        ? new Error(`The output of the run arrived incomplete: ${result.detail}`)
+        : result.state === 'failed'
+          ? new Error('The engine failed the run')
+          : undefined);
     // A failure to clean up must not hide why the run failed.
     if (failure !== undefined) {
       await this.discardRun(runId).catch(() => undefined);
@@ -283,6 +287,22 @@ export class DataService implements DataGateway {
     const run = this.runs.get(runId);
     if (run?.state !== 'staged') return;
     await this.drop(runId, run);
+  }
+
+  async discardFailedRun(runId: string): Promise<string> {
+    const run = this.runs.get(runId);
+    if (run?.state !== 'staged') return '';
+    try {
+      // The chunks of a failed run, then its `fail`: stream 3 is whole once `fail` arrived.
+      const result = await run.receiver.finished;
+      if (result.state !== 'failed' || run.failure !== undefined || this.runs.get(runId) !== run) return '';
+      const length = await run.writers.get(DIAGNOSTICS_STREAM)!.seal();
+      if (length === 0) return '';
+      return new TextDecoder().decode(await this.deps.store.read(blockPath(run.token, DIAGNOSTICS_STREAM), 0, length));
+    } finally {
+      // As the callers of `discardRun` do, a failure to remove the blocks does not hide the warnings.
+      if (this.runs.get(runId) === run) await this.drop(runId, run).catch(() => undefined);
+    }
   }
 
   async readOutput(runId: string, output: RunOutput): Promise<Uint8Array> {

@@ -1078,6 +1078,7 @@ fn search_database(
         name,
         &settings,
         list.as_ref(),
+        args.db_mask.option().as_ref(),
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
     )?
@@ -1132,8 +1133,25 @@ fn search_database(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
+    // The formatter resolves the database masking before its other work (`native::run_inner`).
+    if let Some(option) = args.db_mask.option() {
+        let mask =
+            database.resolve_mask_option(&option, archive, None, &mut *outputs.diagnostics)?;
+        if let Some(mask) = &mask {
+            let window_size = resolved.first().map_or(0, |options| options.window_size);
+            let word_size = resolved.first().map_or(0, |options| options.word_size);
+            database.check_mask_limits(mask, (window_size == 0).then_some(word_size as usize))?;
+        }
+        for options in &mut resolved {
+            options.db_mask = mask.clone();
+        }
+    }
     app::check_search_environment("BLASTX", false)?;
-    let pairwise = database.pairwise_database();
+    let pairwise = database.pairwise_database_masked(
+        resolved
+            .first()
+            .and_then(|options| options.db_mask.as_ref()),
+    );
     let no_reported = ReportedSubjects::default();
     let shown = ShownSubjects::Database {
         name: database.name(),

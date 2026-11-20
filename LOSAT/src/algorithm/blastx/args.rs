@@ -114,6 +114,9 @@ pub struct BlastxArgs {
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
+    /// `-db_soft_mask` and `-db_hard_mask` (`blastinput::db_mask`; series NP, M4b).
+    #[command(flatten)]
+    pub db_mask: crate::blastinput::db_mask::DbMaskArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -915,6 +918,10 @@ pub struct ResolvedOptions {
     /// RPSTBLASTN's search (`BlastxArgs::rpstblastn`): the run is RPSTBLASTN's, whose reports name
     /// it; `None` in every BLASTX run.
     pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
+    /// The database masking as the formatter resolved it (`DbMaskOption::resolve`, in
+    /// `native::run` and `local::run_local_database`; series NP, M4b); `None` before, and for a
+    /// search without it.
+    pub db_mask: Option<crate::blastinput::db_mask::ResolvedMask>,
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:185-191
@@ -1525,6 +1532,7 @@ impl BlastxArgs {
             num_threads: self.num_threads,
             query_range: None,
             rpstblastn: self.rpstblastn.clone(),
+            db_mask: None,
         };
         // The gapped X-drops that NCBI's kernels cannot size are refused before the search.
         super::parameters::check_gapped_x_drops(&options)?;

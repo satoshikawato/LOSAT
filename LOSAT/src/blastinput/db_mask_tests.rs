@@ -284,7 +284,9 @@ fn each_name_of_the_list_needs_the_id_in_its_own_database() {
     // The search's table puts `a5` first (NCBI sorts the volumes by name): its 11 is `a5`'s
     // dust, which `b5`'s volume does not have (NCBI's stale volume-algorithm cache, M/DECISIONS
     // 9): LOSAT refuses the search (decision D5).
-    let error = resolved.check_losat_limits(&db, "BLASTN", HardScan::Nucleotide { scanned_word: 11 }).unwrap_err();
+    let error = resolved
+        .check_losat_limits(&db, "BLASTN", HardScan::Nucleotide { scanned_word: 11 })
+        .unwrap_err();
     assert!(
         format!("{error:#}")
             .contains("the volume has mask data without the filtering algorithm 11"),

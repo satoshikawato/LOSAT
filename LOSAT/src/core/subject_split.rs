@@ -237,10 +237,11 @@ impl HardSplitState {
     // ```
     /// The next chunk of the subject (`None`: `SUBJECT_SPLIT_DONE`): one chunk per hard range (a
     /// range above `MAX_DBSEQ_LEN` in overlapping chunks of `MAX_DBSEQ_LEN` letters), from `next -
-    /// next % 4` (from `next` in a protein program), of `right - offset` letters (0 for a hard range of no letters: a mask at 0,
-    /// masks that touch), scanned from the residual (NCBI scans the full range in the "no
-    /// chunking" branch, [`HardChunk::full_range`]); with the overlap of the merge after it
-    /// ([`HardChunk::overlap`], [`HardChunk::overlap_past_list`]). NCBI's `Int4` arithmetic: the
+    /// next % 4` (from `next` in a protein program), of `right - offset` letters (0 for a hard
+    /// range of no letters: a mask at 0, masks that touch), scanned from the residual (NCBI scans
+    /// the full range in the "no chunking" branch, [`HardChunk::full_range`]); with the overlap of
+    /// the merge after it ([`HardChunk::overlap`], [`HardChunk::overlap_past_list`]). NCBI's
+    /// `Int4` arithmetic: the
     /// hard ranges of sorted masks never go back, so no length is negative (masks out of order
     /// are refused before the search, `HardMaskShape::Unsorted`); a negative one would be clamped
     /// to 0, where NCBI moves the diagonal offset back by it.

@@ -5996,6 +5996,7 @@ fn open_search_database(
                 settings,
                 args.app.name(),
                 list,
+                resolved.db_mask.as_ref(),
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
@@ -7364,7 +7365,7 @@ fn blastp_xml_matrix_failure(
 /// (`read_query_batches`), the search of the batches that NCBI searches and their reports.
 #[allow(clippy::too_many_arguments)]
 fn search(
-    args: ResolvedBlastpArgs,
+    mut args: ResolvedBlastpArgs,
     query_records: &[FastaRecord],
     reading: QueryReading,
     subjects: &SubjectSet<'_>,
@@ -7410,6 +7411,26 @@ fn search(
     // The batch size is read before the formatter is made and before the queries, which
     // NCBI reads one batch at a time after the outfmt 0 prolog (`read_query_batches`).
     let batch_size = args.query_batch_size()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (quoted at
+    // `blastinput::db_mask::DbMaskOption::resolve`)
+    // The formatter resolves the database masking (`-db_soft_mask`, `-db_hard_mask`; series NP,
+    // M4b) before its other work (`shared::resolve_database_masking`).
+    if let (Some(database), Some(option)) = (database, args.db_mask.as_ref()) {
+        let diagnostics = &mut *outputs.diagnostics;
+        let archive = args.archive.as_ref();
+        args.db_mask_resolved = crate::algorithm::common::database::resolve_database_masking(
+            database.seqdb(),
+            database.name(),
+            option,
+            args.app.name(),
+            archive,
+            args.strategy.as_ref(),
+            &mut |text| match archive {
+                Some(handle) => handle.write_warning(diagnostics, text),
+                None => diagnostics.write_all(text),
+            },
+        )?;
+    }
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:225-227
     // ```c
     //         CBlastFormat formatter(opt, *db_adapter,
@@ -7481,6 +7502,17 @@ fn search(
             seq_range::QueryInput::whole(query_records),
         ),
     };
+    // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
+    // starts the search, after its checks.
+    if let (Some(database), Some(mask)) = (database, args.db_mask_resolved.as_ref()) {
+        mask.check_losat_limits(
+            database.seqdb(),
+            args.app.name(),
+            crate::blastinput::db_mask::HardScan::Protein {
+                one_hit_word: (args.window_size == 0).then_some(args.word_size),
+            },
+        )?;
+    }
     check_blastp_environment(args.app, database.is_none())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // ```c++
@@ -9061,7 +9093,7 @@ fn write_pairwise_prologs(
     let (num_sequences, total_letters) = subject_source.shown_totals();
     let pairwise_database = subject_source
         .database()
-        .map(database::BlastpDatabase::pairwise_database);
+        .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if blastp_pairwise_view_of(args.app, number).is_some() {
@@ -9118,7 +9150,7 @@ fn write_reports_without_queries(
     let (num_sequences, total_db_len) = subject_source.shown_totals();
     let pairwise_database = subject_source
         .database()
-        .map(database::BlastpDatabase::pairwise_database);
+        .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     for format in outputs.formats.iter_mut() {
         // A Seq-annot format writes nothing without a query. BLAST XML writes the epilog's end
         // of line alone: `m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl`, with the
@@ -12795,6 +12827,7 @@ mod tests {
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
             db_filter: Default::default(),
+            db_mask: Default::default(),
             dbsize: None,
             show_gis: false,
             parse_deflines: false,

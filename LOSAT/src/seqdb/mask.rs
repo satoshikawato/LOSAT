@@ -1284,7 +1284,9 @@ impl SeqDb {
                     .flatten();
                 let length = || {
                     if protein {
-                        self.protein_length(seq_ordinal).ok().map(|length| length as usize)
+                        self.protein_length(seq_ordinal)
+                            .ok()
+                            .map(|length| length as usize)
                     } else {
                         self.nucleotide_length(seq_ordinal).ok()
                     }

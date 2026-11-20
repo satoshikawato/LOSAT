@@ -8154,7 +8154,7 @@ pub fn run(
             anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 archive::option_inputs(&args, args.dust_filtering.as_deref()),
-                choice.number,
+                choice.number(),
                 crate::report::archive::strategy::HitlistArgs {
                     max_target_seqs: args.max_target_seqs,
                     num_descriptions: args.num_descriptions,
@@ -8964,15 +8964,21 @@ fn cli_output_formats(
     outfmt: &str,
     out: Option<&std::path::Path>,
 ) -> Result<Vec<BlastnOutputFormat>> {
-    output_formats_of(&app::parse_formatting_string(outfmt)?, out)
+    output_formats_of(
+        &app::EarlyFormat::Parsed(app::parse_formatting_string(outfmt)?),
+        out,
+    )
 }
 
 /// The report of the choice `choice` that `app::early_format_choice` read (`cli_output_formats`):
 /// none for one that NCBI itself rejects later, nor for one it left to the formatting handler.
 fn output_formats_of(
-    choice: &app::FormatChoice,
+    choice: &app::EarlyFormat,
     out: Option<&std::path::Path>,
 ) -> Result<Vec<BlastnOutputFormat>> {
+    let Some(choice) = choice.parsed() else {
+        return Ok(Vec::new());
+    };
     app::report_format(choice, Program::Blastn, out)?
         .map(|format| BlastnOutputFormat::of(format, choice))
         .into_iter()

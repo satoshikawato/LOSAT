@@ -1058,8 +1058,7 @@ pub fn run(
     )?;
     let choice =
         crate::blastinput::app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
-    let format = crate::blastinput::app::report_format(
-        &choice,
+    let format = choice.report_format(
         crate::blastinput::app::Program::Tblastx,
         args.out.as_deref(),
     )?;
@@ -1079,7 +1078,7 @@ pub fn run(
             anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 super::super::archive::option_inputs(&args),
-                choice.number,
+                choice.number(),
                 crate::report::archive::strategy::HitlistArgs {
                     max_target_seqs: args.max_target_seqs,
                     num_descriptions: args.num_descriptions,
@@ -1170,10 +1169,10 @@ pub fn run(
     // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
     // or the value as given when it has a delimiter, which `normalized` drops and the custom
     // tabular report reads (`report::output_format`, which parses it again as NCBI does).
-    let outfmt = if choice.delimiter.is_empty() {
-        choice.normalized()
-    } else {
-        args.outfmt.clone()
+    // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers (`search_cli`).
+    let outfmt = match choice.parsed() {
+        Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
+        _ => args.outfmt.clone(),
     };
     // The organism report's `-out` file is written as NCBI's buffer writes it.
     let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
@@ -1451,7 +1450,7 @@ fn check_subjects_not_empty(subjects: &[FastaRecord]) -> Result<()> {
 /// TBLASTX has no cutoff score option, so an `-evalue` of 0 (or one that reads as 0) fails.
 fn check_ncbi_options(
     args: &TblastxArgs,
-    choices: &[crate::blastinput::app::FormatChoice],
+    choices: &[crate::blastinput::app::EarlyFormat],
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<(Option<SequenceRange>, ReportCounts)> {
     use crate::blastinput::app::{formatting_handler_check, options_error, Program};
@@ -1471,15 +1470,14 @@ fn check_ncbi_options(
         crate::blastinput::seq_range::RangeRole::Query,
     )?;
     // Each requested format's (the library's `-outfmt` values are its outputs', not `args.outfmt`).
+    let mut outfmts = Vec::with_capacity(choices.len());
     for choice in choices {
-        formatting_handler_check(
-            &choice.at_formatting_handler(&args.outfmt)?,
-            Program::Tblastx,
-        )?;
+        let choice = choice.at_formatting_handler(&args.outfmt)?;
+        formatting_handler_check(&choice, Program::Tblastx)?;
+        outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report
     // (`blastinput::report_counts`), with the handler's warnings.
-    let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "tblastx",
         &outfmts,
@@ -1563,7 +1561,7 @@ fn check_ncbi_options(
 /// The `-outfmt` of the command line (`check_ncbi_options`), as `app::early_format_choice` reads
 /// it: with a search strategy file a value that does not parse is `check_ncbi_options`' to
 /// reject, at its formatting handler.
-fn cli_outfmts(args: &TblastxArgs) -> Result<[crate::blastinput::app::FormatChoice; 1]> {
+fn cli_outfmts(args: &TblastxArgs) -> Result<[crate::blastinput::app::EarlyFormat; 1]> {
     Ok([crate::blastinput::app::early_format_choice(
         &args.outfmt,
         args.strategy.is_some(),
@@ -1571,13 +1569,14 @@ fn cli_outfmts(args: &TblastxArgs) -> Result<[crate::blastinput::app::FormatChoi
 }
 
 /// The requested formats as NCBI parses `-outfmt` (`check_ncbi_options`).
-fn output_choices(
-    outputs: &ReportOutputs<'_>,
-) -> Result<Vec<crate::blastinput::app::FormatChoice>> {
+fn output_choices(outputs: &ReportOutputs<'_>) -> Result<Vec<crate::blastinput::app::EarlyFormat>> {
     outputs
         .formats
         .iter()
-        .map(|format| crate::blastinput::app::parse_formatting_string(format.outfmt))
+        .map(|format| {
+            crate::blastinput::app::parse_formatting_string(format.outfmt)
+                .map(crate::blastinput::app::EarlyFormat::Parsed)
+        })
         .collect()
 }
 

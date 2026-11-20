@@ -241,34 +241,6 @@ pub struct FormatChoice {
 }
 
 impl FormatChoice {
-    /// The choice of a `-outfmt` value that the early reading left to the formatting handler
-    /// (`early_format_choice`): no format number (-1 is none of NCBI's), no custom
-    /// specification. A run that holds it stops at NCBI's formatting handler with the error of
-    /// the value, where each program's handler reads the value again.
-    pub fn deferred() -> Self {
-        FormatChoice {
-            number: -1,
-            spec: String::new(),
-            delimiter: String::new(),
-        }
-    }
-
-    /// Whether the choice is `deferred`.
-    pub fn is_deferred(&self) -> bool {
-        self.number < 0
-    }
-
-    /// The choice at the program's formatting handler, the last of its option handlers: a
-    /// `deferred` choice reads the value `outfmt` again, with NCBI's error (the one owner of
-    /// where the value's error comes), any other is as read.
-    pub fn at_formatting_handler(&self, outfmt: &str) -> anyhow::Result<FormatChoice> {
-        if self.is_deferred() {
-            parse_formatting_string(outfmt)
-        } else {
-            Ok(self.clone())
-        }
-    }
-
     /// Whether a custom specification (fields or a delimiter) remains.
     pub fn custom(&self) -> bool {
         !self.spec.is_empty() || !self.delimiter.is_empty()
@@ -280,6 +252,59 @@ impl FormatChoice {
             self.number.to_string()
         } else {
             format!("{} {}", self.number, self.spec)
+        }
+    }
+}
+
+/// A `-outfmt` value after the early reading that every program's `run` makes before its option
+/// handlers (`early_format_choice`): the choice it read, or the value left to the formatting
+/// handler. A deferred value has no format number and no custom specification, so the type has
+/// nothing to read for it: a place that needs the choice takes it from `parsed`, `number` or
+/// `at_formatting_handler`, and says what it does for a value not read yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EarlyFormat {
+    /// A value that NCBI's `ParseFormattingString` read.
+    Parsed(FormatChoice),
+    /// A value that does not parse, of a run that writes a search strategy file: NCBI reads no
+    /// `-outfmt` before its option handlers, and the program's formatting handler reads the
+    /// value again and stops with its error (`at_formatting_handler`).
+    Deferred,
+}
+
+impl EarlyFormat {
+    /// The choice that was read, none for a deferred value.
+    pub fn parsed(&self) -> Option<&FormatChoice> {
+        match self {
+            EarlyFormat::Parsed(choice) => Some(choice),
+            EarlyFormat::Deferred => None,
+        }
+    }
+
+    /// The format number that was read, none for a deferred value.
+    pub fn number(&self) -> Option<i32> {
+        self.parsed().map(|choice| choice.number)
+    }
+
+    /// The choice at the program's formatting handler, the last of its option handlers: a
+    /// deferred value reads the value `outfmt` again, with NCBI's error (the one owner of where
+    /// the value's error comes), any other is as read.
+    pub fn at_formatting_handler(&self, outfmt: &str) -> anyhow::Result<FormatChoice> {
+        match self {
+            EarlyFormat::Parsed(choice) => Ok(choice.clone()),
+            EarlyFormat::Deferred => parse_formatting_string(outfmt),
+        }
+    }
+
+    /// `report_format` of the choice; a deferred value has no report (its error comes at the
+    /// formatting handler).
+    pub fn report_format(
+        &self,
+        program: Program,
+        out: Option<&Path>,
+    ) -> anyhow::Result<Option<ReportFormat>> {
+        match self {
+            EarlyFormat::Parsed(choice) => report_format(choice, program, out),
+            EarlyFormat::Deferred => Ok(None),
         }
     }
 }
@@ -672,9 +697,6 @@ pub fn report_format(
     program: Program,
     out: Option<&Path>,
 ) -> anyhow::Result<Option<ReportFormat>> {
-    if choice.is_deferred() {
-        return Ok(None);
-    }
     let to_standard_output = out.is_none_or(|path| path.as_os_str() == "-");
     let name = program.name();
     let format = match ReportFormat::from_number(choice.number) {
@@ -796,20 +818,20 @@ pub fn ncbi_refuses_format(choice: &FormatChoice, program: Program, out: Option<
 
 /// The early reading of the `-outfmt` value `outfmt` that every program's `run` makes before its
 /// option handlers (NCBI's `ArchiveFormatRequested`), with NCBI's errors: the choice, or
-/// `FormatChoice::deferred` where the value does not parse and the run writes a search strategy
+/// `EarlyFormat::Deferred` where the value does not parse and the run writes a search strategy
 /// file (`strategy`). NCBI then reads no `-outfmt` before its option handlers: the strategy file
 /// is created first and the early read is skipped (the `||` of that reference), so the value's error comes
 /// from the formatting handler, the last of the handlers, after the arguments' own errors in
 /// their order (`-subject` opened and `-subject_loc` read, `-query` opened, `-out` created,
 /// `-query_loc` read; line RG F/d36 review 2c B1). The program's own formatting handler reads the
-/// value again and raises it there; nothing before it uses a deferred choice (`report_format`
-/// reports no format for it).
+/// value again and raises it there; nothing before it can use a deferred choice (`EarlyFormat`
+/// has no number for it).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<FormatChoice> {
+pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<EarlyFormat> {
     match parse_formatting_string(outfmt) {
-        Ok(choice) => Ok(choice),
-        Err(_) if strategy => Ok(FormatChoice::deferred()),
+        Ok(choice) => Ok(EarlyFormat::Parsed(choice)),
+        Err(_) if strategy => Ok(EarlyFormat::Deferred),
         Err(error) => Err(error),
     }
 }
@@ -1718,7 +1740,12 @@ mod tests {
             let message = |error: anyhow::Error| error.to_string();
             assert!(early_format_choice(outfmt, false).is_err(), "{outfmt}");
             let choice = early_format_choice(outfmt, true).unwrap();
-            assert!(choice.is_deferred(), "{outfmt}");
+            assert_eq!(choice, EarlyFormat::Deferred, "{outfmt}");
+            assert_eq!(choice.number(), None, "{outfmt}");
+            assert!(choice
+                .report_format(Program::Blastp, None)
+                .unwrap()
+                .is_none());
             assert_eq!(
                 message(choice.at_formatting_handler(outfmt).unwrap_err()),
                 message(parse_formatting_string(outfmt).unwrap_err()),
@@ -1726,7 +1753,8 @@ mod tests {
             );
         }
         let choice = early_format_choice("6 qseqid", true).unwrap();
-        assert!(!choice.is_deferred());
-        assert_eq!(choice.at_formatting_handler("99").unwrap(), choice);
+        let parsed = choice.parsed().unwrap().clone();
+        assert_eq!(choice.number(), Some(6));
+        assert_eq!(choice.at_formatting_handler("99").unwrap(), parsed);
     }
 }

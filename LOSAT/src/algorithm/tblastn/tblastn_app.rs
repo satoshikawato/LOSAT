@@ -128,7 +128,7 @@ impl TblastnArgs {
             "TBLASTN",
         )?;
         let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
-        let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
+        let format = choice.report_format(app::Program::Tblastn, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
         // The run's options handle, which its archive and its search strategy share.
@@ -145,7 +145,7 @@ impl TblastnArgs {
                 anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                     file,
                     super::archive::option_inputs(&args),
-                    choice.number,
+                    choice.number(),
                     crate::report::archive::strategy::HitlistArgs {
                         max_target_seqs: args.max_target_seqs,
                         num_descriptions: args.num_descriptions,
@@ -403,10 +403,10 @@ impl TblastnArgs {
         // The format as the reports read it: the number and the custom fields, or the value as
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
         // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
-        let outfmt = if choice.delimiter.is_empty() {
-            choice.normalized()
-        } else {
-            args.outfmt.clone()
+        // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
+        let outfmt = match choice.parsed() {
+            Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
+            _ => args.outfmt.clone(),
         };
         let strategy = args.strategy.clone();
         let result = {
@@ -420,7 +420,7 @@ impl TblastnArgs {
                 &subject_placements,
                 x_subject_stores.as_deref(),
                 &mut outputs,
-                &choice,
+                choice,
                 settings,
             )
         };
@@ -781,13 +781,15 @@ fn search_cli(
     // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
     x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
     outputs: &mut ReportOutputs<'_>,
-    choice: &crate::blastinput::app::FormatChoice,
+    choice: crate::blastinput::app::EarlyFormat,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     use crate::blastinput::fasta_reader::{
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
     };
     let resolved = args.check_options(outputs.diagnostics)?;
+    // The options' handlers have read a value that the early reading left to them (`Deferred`).
+    let choice = &choice.at_formatting_handler(&args.outfmt)?;
     let joins_scope = resolved
         .pssm
         .as_deref()

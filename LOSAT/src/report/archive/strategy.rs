@@ -569,16 +569,20 @@ impl StrategyExport {
     /// The export of a run into its strategy file (`open_strategy_file`), buffered: the program's
     /// recorded options `inputs` with the `HitlistSize` of the run's format `outfmt` and `counts`
     /// (the archive's is outfmt 11's), and the run's options handle `options` (made once per run
-    /// and given to its archive too, `ArchiveHandle::for_program`).
+    /// and given to its archive too, `ArchiveHandle::for_program`). `outfmt` is none for a
+    /// `-outfmt` value that was not read (`app::EarlyFormat::Deferred`): the run stops at its
+    /// formatting handler before any request, so the options keep their own hitlist size.
     pub fn for_run(
         file: StrategyFile,
         mut inputs: OptionInputs,
-        outfmt: i32,
+        outfmt: Option<i32>,
         counts: HitlistArgs,
         database: Option<&str>,
         options: &OptionsHandle,
     ) -> Self {
-        inputs.hitlist_size = hitlist_size(outfmt, counts);
+        if let Some(outfmt) = outfmt {
+            inputs.hitlist_size = hitlist_size(outfmt, counts);
+        }
         // A refused file gets no request (`check_report_stream`, `write_with`); `-` has none.
         let sink: Box<dyn StrategySink> = match file.file {
             Some(file) => Box::new(std::io::BufWriter::new(file)),
@@ -1529,7 +1533,7 @@ mod tests {
         let export = StrategyExport::for_run(
             create_strategy_file(Path::new("-"), None, "BLASTP").unwrap(),
             OptionInputs::new(Program::Blastp, "blastp"),
-            6,
+            Some(6),
             HitlistArgs::default(),
             None,
             &OptionsHandle::default(),

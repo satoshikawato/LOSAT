@@ -5568,7 +5568,7 @@ pub fn run(
         args.app.name(),
     )?;
     let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
-    let format = app::report_format(&choice, app::Program::Blastp, args.out.as_deref())?;
+    let format = choice.report_format(app::Program::Blastp, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
     // The run's options handle, which its archive and its search strategy share.
@@ -5585,7 +5585,7 @@ pub fn run(
             anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 super::archive::option_inputs(&args),
-                choice.number,
+                choice.number(),
                 crate::report::archive::strategy::HitlistArgs {
                     max_target_seqs: args.max_target_seqs,
                     num_descriptions: args.num_descriptions,
@@ -5720,12 +5720,15 @@ pub fn run(
     // library's: whether the app's formatter gets the delimiter (blastp's does, psiblast's and
     // rpsblast's do not, so their `6 delim=@` is the default outfmt 6) is the spec's, the one
     // that the reports read (`tabular::custom_tabular_spec`, `TabularSpec::of_app`).
-    let custom_delimiter = !choice.delimiter.is_empty()
-        && super::tabular::custom_tabular_spec(&args.outfmt, args.app).is_some();
-    let outfmt = if custom_delimiter {
-        args.outfmt.clone()
-    } else {
-        choice.normalized()
+    // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
+    let outfmt = match choice.parsed() {
+        Some(parsed)
+            if parsed.delimiter.is_empty()
+                || super::tabular::custom_tabular_spec(&args.outfmt, args.app).is_none() =>
+        {
+            parsed.normalized()
+        }
+        _ => args.outfmt.clone(),
     };
     let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
     let strategy = args.strategy.clone();
@@ -6129,7 +6132,7 @@ fn search_cli(
     query_file: Option<crate::blastinput::input_files::InputFile>,
     subjects: &SubjectSet<'_>,
     outputs: &mut ReportOutputs<'_>,
-    choice: crate::blastinput::app::FormatChoice,
+    choice: crate::blastinput::app::EarlyFormat,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     use crate::blastinput::fasta_reader::{
@@ -6168,7 +6171,7 @@ fn search_cli(
             database.as_ref(),
             "",
             outputs,
-            choice_to_standard_output.then_some(&choice),
+            choice.parsed().filter(|_| choice_to_standard_output),
         );
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:202-216
@@ -6255,7 +6258,7 @@ fn search_cli(
         .out
         .as_deref()
         .is_none_or(|path| path.as_os_str() == "-");
-    let xinclude = choice_to_standard_output.then_some(&choice);
+    let xinclude = choice.parsed().filter(|_| choice_to_standard_output);
     // The refusal of a PSSM file that LOSAT cannot write as NCBI does (one of the report
     // streams, a named pipe) comes before the first byte (`check_psiblast_pssm_files`). (A query
     // title with a byte that NCBI's stream replaces is written as NCBI writes it:

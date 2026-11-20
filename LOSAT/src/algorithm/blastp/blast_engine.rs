@@ -12049,7 +12049,9 @@ fn run_call(
                     hsp_len: search_spaces[q_idx].length_adjustment as i32,
                     eff_space: exact_search_spaces[q_idx]
                         .unwrap_or(search_spaces[q_idx].effective_space.round() as i64),
-                    kappa: gapped.k,
+                    // rpsblast: the footer's K, 1.2 times the profile's of the batch's first
+                    // query (`rps_hooks::rps_search`); the table's for every other.
+                    kappa: rps_gapped_k.as_ref().map_or(gapped.k, |k| k[q_idx]),
                     lambda: gapped.lambda,
                     entropy: gapped.h,
                 }

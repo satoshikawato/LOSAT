@@ -191,7 +191,12 @@ fn query_stats(
     XmlStats {
         hsp_len: parameters.length_adjustment,
         eff_space: parameters.search_space,
-        kappa: karlin.k,
+        // RPSTBLASTN's footer K of a batch's first query (`BatchResults::gapped_k`, 1.2 times the
+        // profile's) is the XML's `Statistics_kappa` too: one `kbp_gap` block per query.
+        kappa: match &batch.gapped_k {
+            Some(gapped_k) if gapped => gapped_k[qidx],
+            _ => karlin.k,
+        },
         lambda: karlin.lambda,
         entropy: karlin.h,
     }
@@ -900,13 +905,14 @@ impl<S: Write> Write for HeldFormatWriter<S> {
 /// The `QueryText` of a query, refused as the writer refuses it. `search_skipped`: NCBI did not
 /// search the query's batch (its message then carries the query's id, made of its title).
 fn query_text(
+    program: &str,
     query: &FastaRecord,
     search_skipped: bool,
     filtered_empty: bool,
     has_hits: bool,
 ) -> Result<QueryText> {
     names::query_text(
-        PROGRAM,
+        program,
         query.internal_id.as_bytes(),
         query.warning_id(),
         query.believed(),
@@ -1098,7 +1104,7 @@ pub(super) fn scan_queries(
             check?;
         }
         for (index, query) in batch.iter().enumerate() {
-            let check = query_text(query, false, false, true).map(drop);
+            let check = query_text(options.program().upper, query, false, false, true).map(drop);
             if holds_back && index + 1 == batch.len() {
                 held = Some(check);
             } else {
@@ -1321,8 +1327,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         options.soft_masking,
     );
     let run = XmlRun {
-        program: "blastx",
-        version: concat!("BLASTX ", crate::ncbi_blast_version!()),
+        program: options.program().lower,
+        version: &format!("{} {}", options.program().upper, crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
         db_name: &db_name,
         matrix: Some(&options.matrix),
@@ -1368,6 +1374,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
             texts.push(query_text(
+                options.program().upper,
                 query,
                 batch.search_skipped,
                 options.filtered_empty,

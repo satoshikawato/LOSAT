@@ -46,8 +46,15 @@ use crate::stats::tables::KarlinParams;
 /// always sets it (`S/DESIGN_OF8.md` 2.2). RPSTBLASTN, whose search is BLASTX's, gives its own
 /// (`BlastxArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
+    // The archive's `HitlistSize` is that of outfmt 11, whoever made the other options.
+    let hitlist_size = args
+        .max_target_seqs
+        .or(args.num_alignments.map(|size| size as i32))
+        .map_or(500, |size| size);
     if let Some(inputs) = &args.request_inputs {
-        return OptionInputs::clone(inputs);
+        let mut inputs = OptionInputs::clone(inputs);
+        inputs.hitlist_size = hitlist_size;
+        return inputs;
     }
     let mut inputs = OptionInputs::new(Program::Blastx, &args.task);
     inputs.dbsize = args.dbsize;
@@ -87,10 +94,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.subject_besthit = args.subject_besthit;
     inputs.max_intron_length = args.max_intron_length;
     inputs.query_gencode = i32::from(args.query_gencode);
-    inputs.hitlist_size = args
-        .max_target_seqs
-        .or(args.num_alignments.map(|size| size as i32))
-        .map_or(500, |size| size);
+    inputs.hitlist_size = hitlist_size;
     inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
     inputs
 }

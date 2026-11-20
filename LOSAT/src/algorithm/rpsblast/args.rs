@@ -348,10 +348,7 @@ impl RpsblastArgs {
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         Self::check_outfmt(&self.outfmt)?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
-        let request_inputs = self
-            .export_search_strategy
-            .is_some()
-            .then(|| Box::new(self.option_inputs()));
+        let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastpArgs {
             query: self.query,
             subject: None,

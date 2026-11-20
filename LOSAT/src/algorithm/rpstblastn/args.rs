@@ -244,10 +244,7 @@ impl RpstblastnArgs {
     pub fn into_blastx_args(self) -> Result<BlastxArgs> {
         let search = self.rps_search()?;
         let requested_cbs = search.search.requested_cbs;
-        let request_inputs = self
-            .export_search_strategy
-            .is_some()
-            .then(|| Box::new(self.option_inputs()));
+        let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastxArgs {
             query: self.query,
             subject: None,

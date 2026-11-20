@@ -81,6 +81,11 @@
   width: 100%;
 }
 
+/* What DotPlot's resize observer reads: the stage's width, at a height that the plot never changes (S2-2). */
+.plot-ruler {
+  height: 0;
+}
+
 .plot-layers {
   position: relative;
   max-width: 100%;

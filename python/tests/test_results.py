@@ -233,3 +233,5 @@ def test_each_field_of_an_hsp_reads_its_column(case):
 
 def test_the_versions():
     assert pylosat.ENGINE_VERSION.count(".") == 2
+    # pylosat is published under LOSAT's version number: `pip install pylosat==X` is LOSAT X.
+    assert pylosat.__version__ == pylosat.ENGINE_VERSION

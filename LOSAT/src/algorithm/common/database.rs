@@ -216,7 +216,9 @@ fn apply_list(
 /// (`SeqDb::statistics`),
 /// `translated` whether its subjects are translated (TBLASTN, TBLASTX). The requests'
 /// `EffectiveSearchSpace` is the search's own value where the statistics' length before the
-/// fallback to OID 0 (`DbStatistics::gumbel_db_length`) is positive or `-searchsp` is given, else
+/// fallback to OID 0 (`DbStatistics::gumbel_db_length`) is positive or `searchsp` (`-searchsp`
+/// is given, or an RPS-BLAST search hands the space of its last search unit,
+/// `rps_search::volumes::RpsUnits::request_space`), else
 /// `BLAST_CalcEffLengths` with that length (`archive::RequestLength`: 0 for a list that kept no
 /// sequence without `STATS_TOTLEN`; the context's query length for an alias file's `LENGTH` of
 /// 2^63 or more). `dbsize` is whether `-dbsize` is given: the
@@ -896,19 +898,19 @@ pub(crate) fn pairwise_database_masked(
 //     }
 // ```
 // The sums are signed overflow where they pass their type (NCBI 2.17.0 prints them wrapped,
-// probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3), and the serial XML writer's `-n` of
-// INT64_MIN is too (it writes `-0`, probes p5_neg_2p63 and p5b_neg_fmt): LOSAT refuses these
-// (DECISIONS D1a3-2 of line RG: Q2 = A, rule 3; Q1 waits for the Owner, refused until then).
+// probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3): LOSAT refuses these (DECISIONS D1a3-2 of
+// line RG: Q2 = A, rule 3). The serial XML writer's `-n` of INT64_MIN is signed overflow too (it
+// writes `-0`, probes p5_neg_2p63 and p5b_neg_fmt): LOSAT writes the digits of a summed length of
+// exactly -2^63 (`big_int`; PD-LOSAT-NCBI-DEFECTS approved exception 17 (Int8 -2^63 written as
+// digits), the Owner's Q1 = A of 2026-11-17, DECISIONS OQ-1117 of line RG).
 /// What LOSAT refuses of the database counts that the report of `outfmt` (NCBI's format number)
-/// would print where NCBI's arithmetic overflows (`num_sequences` and `total_letters` are the
-/// `PairwiseDatabase` sums over the names of the `-db` list, `total_letters_overflow` whether the
-/// lengths' sum passes `Int8`): a sum of the total lengths past `Int8` (the pairwise prolog of
-/// outfmt 0 to 4, BLAST XML 5, the XML2 and JSON documents 13 to 16), a sum of the numbers of
-/// sequences past NCBI's `int` (BLAST XML), and a summed length of exactly -2^63 in the serial
-/// XML of BLAST XML and XML2 (5, 14, 16).
+/// would print where NCBI's arithmetic overflows (`num_sequences` is the `PairwiseDatabase` sum
+/// over the names of the `-db` list, `total_letters_overflow` whether its lengths' sum passes
+/// `Int8`): a sum of the total lengths past `Int8` (the pairwise prolog of
+/// outfmt 0 to 4, BLAST XML 5, the XML2 and JSON documents 13 to 16) and a sum of the numbers of
+/// sequences past NCBI's `int` (BLAST XML).
 pub(crate) fn report_sum_refusal(
     num_sequences: i64,
-    total_letters: i64,
     total_letters_overflow: bool,
     outfmt: i32,
 ) -> Option<&'static str> {
@@ -920,11 +922,6 @@ pub(crate) fn report_sum_refusal(
     if outfmt == 5 && i32::try_from(num_sequences).is_err() {
         return Some(
             "the numbers of sequences of the databases of the -db list (their alias files' NSEQ) sum to more than BLAST XML's 32-bit count holds",
-        );
-    }
-    if matches!(outfmt, 5 | 14 | 16) && !total_letters_overflow && total_letters == i64::MIN {
-        return Some(
-            "a total length of 9223372036854775808 letters (an alias file's LENGTH), which NCBI BLAST+'s XML writer prints as -0 (a signed overflow), in BLAST XML or XML2",
         );
     }
     None
@@ -966,16 +963,15 @@ impl std::error::Error for ReportSumRefusal {}
 
 /// LOSAT's refusal (`ReportSumRefusal`) of the database counts that the report of `outfmt` would
 /// print where NCBI's sums overflow (`report_sum_refusal`), for `program` (its name in the
-/// message): `num_sequences`, `total_letters` and `total_letters_overflow` are the
-/// `PairwiseDatabase` sums of the `-db` list.
+/// message): `num_sequences` and `total_letters_overflow` are the `PairwiseDatabase` sums of the
+/// `-db` list.
 pub(crate) fn check_sums_of(
     num_sequences: i64,
-    total_letters: i64,
     total_letters_overflow: bool,
     outfmt: i32,
     program: &str,
 ) -> Result<()> {
-    match report_sum_refusal(num_sequences, total_letters, total_letters_overflow, outfmt) {
+    match report_sum_refusal(num_sequences, total_letters_overflow, outfmt) {
         Some(reason) => Err(ReportSumRefusal(refusal(reason, program).to_string()).into()),
         None => Ok(()),
     }
@@ -993,7 +989,6 @@ pub(crate) fn check_report_sums(
     }
     check_sums_of(
         database.num_sequences,
-        database.total_letters,
         database.total_letters_overflow,
         outfmt,
         program,
@@ -2944,12 +2939,45 @@ pub(crate) fn refuse_joined_hits<'a>(
 //                  break;
 //             }
 // ```
+/// NCBI's count of a cut to `cut` subjects (`PruneSeqalign`; `TrimSeqAlign` counts so too): the
+/// number of the entries at the start of `entries` (one for each HSP list of a hit list, in its
+/// order) that the cut keeps, where an entry that follows one of the same subject
+/// (`joined(previous, entry)`: their Seq-align ids match) is counted with it. An error of
+/// `entries` or `joined` (a caller's read, or its refusal of the pair) ends the count. The one
+/// count of that cut, which the reports (`joined_cut`) and RPS-BLAST's check of the profiles that
+/// the reports show (`rps_search::volumes::formatter_kept`) take.
+pub(crate) fn pruned_kept<T, E>(
+    cut: usize,
+    entries: impl IntoIterator<Item = std::result::Result<T, E>>,
+    mut joined: impl FnMut(&T, &T) -> std::result::Result<bool, E>,
+) -> std::result::Result<usize, E> {
+    let mut previous: Option<T> = None;
+    let mut counted = 0usize;
+    let mut kept = 0usize;
+    for entry in entries {
+        let entry = entry?;
+        let joins = match &previous {
+            Some(previous) => joined(previous, &entry)?,
+            None => false,
+        };
+        if !joins {
+            counted += 1;
+            if counted > cut {
+                break;
+            }
+        }
+        kept += 1;
+        previous = Some(entry);
+    }
+    Ok(kept)
+}
+
 /// The number of HSP lists of a hit list (query `query`; `subjects` and `oids`, as
-/// `refuse_joined_hits` takes them) that its cut to `max_target_seqs` subjects keeps, as NCBI's formatter cuts it
-/// (`PruneSeqalign`): it counts following Seq-aligns whose Seq-align ids match as those of one
-/// subject. A copy of one record that follows another (`joins_as_copy`) is kept with it; two
-/// other parsed subjects that the count reaches with matching Seq-align ids are LOSAT's refusal.
-/// psiblast cuts its traceback hit lists so, which are longer than `-max_target_seqs`.
+/// `refuse_joined_hits` takes them) that its cut to `max_target_seqs` subjects keeps, as NCBI's
+/// formatter cuts it (`pruned_kept`): following Seq-aligns whose Seq-align ids match count as
+/// those of one subject. A copy of one record that follows another (`joins_as_copy`) is kept with
+/// it; two other parsed subjects that the count reaches with matching Seq-align ids are LOSAT's
+/// refusal. psiblast cuts its traceback hit lists so, which are longer than `-max_target_seqs`.
 pub(crate) fn joined_cut<'a>(
     query: usize,
     max_target_seqs: usize,
@@ -2957,32 +2985,24 @@ pub(crate) fn joined_cut<'a>(
     oids: crate::seqdb::OidMap<'_>,
     program: &str,
 ) -> Result<usize> {
-    let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
-    let mut counted = 0usize;
-    let mut kept = 0usize;
-    for subject in subjects {
-        if let Some((before, ordinal)) = joined_apart(previous, subject) {
-            return Err(anyhow::Error::new(ParsedRefusal(format!(
-                "database sequences {} and {} follow each other in the hits of query {} that the cut to -max_target_seqs {max_target_seqs} counts and have Seq-align ids that NCBI BLAST+ takes for one sequence but are not copies of one record (it counts them as one sequence and keeps one more); this is not supported by LOSAT's {program}",
-                oids.oid(before),
-                oids.oid(ordinal),
-                query + 1
-            ))));
-        }
-        let joined = matches!(
-            (previous, subject),
-            (Some((_, a)), Some((_, b))) if crate::report::db_subject::joins_as_copy(a, b)
-        );
-        if !joined {
-            counted += 1;
-            if counted > max_target_seqs {
-                break;
+    pruned_kept(
+        max_target_seqs,
+        subjects.into_iter().map(Ok),
+        |&previous, &subject| {
+            if let Some((before, ordinal)) = joined_apart(previous, subject) {
+                return Err(anyhow::Error::new(ParsedRefusal(format!(
+                    "database sequences {} and {} follow each other in the hits of query {} that the cut to -max_target_seqs {max_target_seqs} counts and have Seq-align ids that NCBI BLAST+ takes for one sequence but are not copies of one record (it counts them as one sequence and keeps one more); this is not supported by LOSAT's {program}",
+                    oids.oid(before),
+                    oids.oid(ordinal),
+                    query + 1
+                ))));
             }
-        }
-        kept += 1;
-        previous = subject;
-    }
-    Ok(kept)
+            Ok(matches!(
+                (previous, subject),
+                (Some((_, a)), Some((_, b))) if crate::report::db_subject::joins_as_copy(a, b)
+            ))
+        },
+    )
 }
 
 /// The ordinal ids of `previous` and `subject`, parsed subjects that follow each other in a hit
@@ -4017,7 +4037,8 @@ mod tests {
     use super::*;
 
     // Probes p5_pr_sum2, p5b_sum_int and p5_neg_2p63 of line RG D1a-3 (NCBI 2.17.0 prints the
-    // wrapped sums and `-0`): the report counts LOSAT refuses, by format; the prolog's (outfmt 0 to
+    // wrapped sums and `-0`): the report counts LOSAT refuses, by format (not -2^63, whose digits
+    // it writes: approved exception 17, Int8 -2^63 written as digits); the prolog's (outfmt 0 to
     // 4) at open (`check_report_sums`), the documents' when they are written (`report_sum_refusal`,
     // after NCBI's own errors of the search: p5_pr_sum2#6).
     #[test]
@@ -4034,7 +4055,6 @@ mod tests {
         let refused = |database: &PairwiseDatabase, outfmt: i32| {
             report_sum_refusal(
                 database.num_sequences,
-                database.total_letters,
                 database.total_letters_overflow,
                 outfmt,
             )
@@ -4071,11 +4091,10 @@ mod tests {
         }
         // Two lengths of 2^64 - 1 (-1 as NCBI's Int8) sum to -2 without an overflow.
         assert!(check_report_sums(&two(info(23, -1), info(23, -1)), 0, "BLASTP").is_ok());
+        // A length of exactly -2^63 is written as its digits (PD-LOSAT-NCBI-DEFECTS approved
+        // exception 17, Int8 -2^63 written as digits: NCBI's XML writer prints -0).
         let int64_min = PairwiseDatabase::new(vec![info(23, i64::MIN)]);
-        for outfmt in [5, 14, 16] {
-            assert!(refused(&int64_min, outfmt), "{outfmt}");
-        }
-        for outfmt in [0, 13, 15, 6] {
+        for outfmt in [0, 5, 6, 13, 14, 15, 16] {
             assert!(!refused(&int64_min, outfmt), "{outfmt}");
         }
     }
@@ -4405,6 +4424,38 @@ mod tests {
         let abt = open("pjoin_abt");
         assert_eq!(copy(&abt, 0, 3), RecordCopy::OtherTaxids);
         assert_eq!(copy(&abt, 0, 7), RecordCopy::Same);
+    }
+
+    // Line RG D1a-4 (fix round 7, review F N3): the one count of NCBI's cut (`PruneSeqalign`),
+    // which `joined_cut` and RPS-BLAST's `formatter_kept` take: following entries of one subject
+    // count once, the entry past the cut ends the count unread by `joined`, and an error of an
+    // entry or of `joined` ends it.
+    #[test]
+    fn the_cut_counts_following_entries_of_one_subject_once() {
+        let ids = ["a", "a", "b", "c", "c", "c", "d"];
+        let count =
+            |cut: usize| pruned_kept(cut, ids.iter().map(Ok::<_, ()>), |a, b| Ok(a == b)).unwrap();
+        let kept: Vec<usize> = (0..6).map(count).collect();
+        assert_eq!(kept, [0, 2, 3, 6, 7, 7]);
+        let mut asked = Vec::new();
+        assert_eq!(
+            pruned_kept(2, ids.iter().map(Ok::<_, ()>), |a, b| {
+                asked.push((**a, **b));
+                Ok(a == b)
+            }),
+            Ok(3)
+        );
+        assert_eq!(asked, [("a", "a"), ("a", "b"), ("b", "c")]);
+        assert_eq!(
+            pruned_kept(9, ids.iter().map(Ok), |_, b| if **b == "c" {
+                Err(4)
+            } else {
+                Ok(false)
+            }),
+            Err(4)
+        );
+        let entries = [Ok("a"), Err(5), Ok("b")];
+        assert_eq!(pruned_kept(9, entries, |a, b| Ok(a == b)), Err(5));
     }
 
     // Line DBID N3: in NCBI's order of pjoin_abc's hits (r1 of c, r6, r1 of b and a, r2, r4,

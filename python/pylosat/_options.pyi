@@ -491,6 +491,7 @@ class TblastxOptions(TypedDict, total=False):
     sum_stats: bool
     """Use sum statistics [default: true]"""
     lcase_masking: bool
+    strand: Literal['both', 'plus', 'minus']
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     window_size: int

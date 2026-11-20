@@ -574,11 +574,16 @@ impl ReportedSubjects {
     /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
     /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`). `after`: what the reports do after a
-    /// subject whose lookup throws (`FormatThrow::of_run`; `None`: a report refuses it), for
-    /// `HitLoads::of` (where `one_by_one`, which subjects throw and which no report loads; the
-    /// refusals, the names, the tables' rows, the taxonomy reads and the run's record of the
-    /// loads, `note_loaded`, take that one answer).
+    /// one by one (`shared::ParsedShown::one_by_one`). `cut`: the formatter's cut of each query's
+    /// lists to the hit list size where RPSTBLASTN merges several volumes
+    /// (`ResolvedOptions::shown_lists`; `usize::MAX` for every other search), which counts
+    /// following lists whose Seq-align ids match as one subject (`BatchResults::shown`, which
+    /// every report that NCBI cuts reads, `ResolvedOptions::shown_lists`: BLAST XML, XML2 and
+    /// JSON too, whose `Hit`s `HitLoads` reads from the same lists, `BatchResults::cut_lists`).
+    /// `after`: what the reports do after a subject whose lookup throws (`FormatThrow::of_run`;
+    /// `None`: a report refuses it), for `HitLoads::of` (where `one_by_one`, which subjects throw
+    /// and which no report loads; the refusals, the names, the tables' rows, the taxonomy reads
+    /// and the run's record of the loads, `note_loaded`, take that one answer).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -597,6 +602,7 @@ impl ReportedSubjects {
         prefetched: bool,
         prefetch_runs: bool,
         one_by_one: bool,
+        cut: usize,
         after: Option<crate::report::db_subject::RunThrow>,
     ) -> Result<Self> {
         let BatchTitles {
@@ -629,12 +635,43 @@ impl ReportedSubjects {
                 }
             }
         }
+        // RPSTBLASTN's merged lists of several volumes, longer than the hit list size: NCBI's
+        // formatter keeps the Seq-aligns of its first `cut` subjects, counting following ones
+        // whose Seq-ids match as one (`PruneSeqalign`, quoted at `shared::joined_cut`): a copy of
+        // one record that follows another is kept with it, as RPSBLAST's lists are
+        // (`blastp::blast_engine::database::ListedTitles::joined_cut`); two other profiles that
+        // the count reaches with matching Seq-align ids are LOSAT's refusal.
+        if reports && cut != usize::MAX {
+            for batch in batches.iter_mut() {
+                let shown = batch
+                    .queries
+                    .iter()
+                    .enumerate()
+                    .map(|(qidx, lists)| {
+                        if parsed.is_empty() || lists.len() <= cut {
+                            return Ok(cut);
+                        }
+                        shared::joined_cut(
+                            batch.query_ordinal + qidx,
+                            cut,
+                            lists.iter().map(|list| {
+                                let ordinal = u32::try_from(list.oid).ok()?;
+                                Some((ordinal, parsed.get(&list.oid)?.as_ref()))
+                            }),
+                            database.db.oid_map(),
+                            database.program,
+                        )
+                    })
+                    .collect::<Result<Vec<usize>>>()?;
+                batch.shown = shown;
+            }
+        }
         // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below),
         // with the `Hit`s that the writer makes (`blast_xml::write_blastx_xml`: the reported lists
-        // of each query, `report::reported`).
+        // of each query that the cut above keeps, `report::reported`).
         let report_lists: Vec<&[super::results::HspList]> = batches
             .iter()
-            .flat_map(|batch| batch.queries.iter().map(Vec::as_slice))
+            .flat_map(|batch| (0..batch.queries.len()).map(move |qidx| batch.cut_lists(qidx, cut)))
             .collect();
         let loads = HitLoads::of(
             after,
@@ -1532,8 +1569,34 @@ mod tests {
             .unwrap(),
             parameters: Vec::new(),
             search_skipped: false,
+            request_space: None,
+            unlisted: Vec::new(),
+            shown: Vec::new(),
             gapped_k: None,
         }]
+    }
+
+    // Line RG D1a-4 (fix round 7, review F N2): the one owner of the formatter's cut of a query's
+    // lists, which every report that NCBI cuts reads (`BatchResults::shown_lists`) and the loads
+    // of `ReportedSubjects::for_batch`: `shown` (RPSTBLASTN's count over several volumes, which
+    // joins following lists of one Seq-align id) wins over the cut, the cut keeps at most the
+    // lists there are, and `usize::MAX` (every other search) keeps every list.
+    #[test]
+    fn the_cut_of_a_querys_lists_reads_shown_before_the_cut() {
+        let mut batches = one_query(&[(0, 90), (1, 80), (2, 70), (3, 60)]);
+        let batch = &mut batches[0];
+        let oids = |lists: &[super::super::results::HspList]| {
+            lists.iter().map(|list| list.oid).collect::<Vec<_>>()
+        };
+        assert_eq!(oids(batch.cut_lists(0, usize::MAX)), [0, 1, 2, 3]);
+        assert_eq!(oids(batch.cut_lists(0, 2)), [0, 1]);
+        assert_eq!(oids(batch.cut_lists(0, 9)), [0, 1, 2, 3]);
+        assert!(batch.cut_lists(0, 0).is_empty());
+        batch.shown = vec![3];
+        assert_eq!(oids(batch.cut_lists(0, 2)), [0, 1, 2]);
+        assert_eq!(oids(batch.cut_lists(0, usize::MAX)), [0, 1, 2]);
+        batch.shown = vec![9];
+        assert_eq!(oids(batch.cut_lists(0, 2)), [0, 1, 2, 3]);
     }
 
     // DBID item T: a batch's prefetch looks up the sequences that its reports show (an HSP with a
@@ -1574,6 +1637,7 @@ mod tests {
                 false,
                 false,
                 false,
+                usize::MAX,
                 None,
             )
             .unwrap();
@@ -1649,6 +1713,7 @@ mod tests {
                 false,
                 false,
                 false,
+                usize::MAX,
                 None,
             )
             .unwrap();

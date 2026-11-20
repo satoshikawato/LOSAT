@@ -42,6 +42,7 @@ use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::BlastCompositionWorkspace;
 use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
+use crate::report::diag_log::Posts;
 use crate::report::row_letters::RowSide;
 use crate::report::{
     write_blastp_pairwise_report, BlastpPairwiseReport, OutputConfig, OutputFormat, PairwiseConfig,
@@ -6008,12 +6009,19 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
-            if resolved.rps_search.is_some() {
-                rps_hooks::check_alias_keys(&database, args.app.name())?;
-            }
+            let rps = resolved.rps_search.is_some();
+            let database = if rps {
+                rps_hooks::with_units(resolved, database)?
+            } else {
+                database
+            };
             // The requests of the archive and of the search strategy, which a `-in_pssm` run that
             // the object manager ends as its query joins the scope never writes
             // (`PsiSearch::joins_scope`; NCBI saves the strategy in `DoIterations`, after it).
+            // rpsblast: each batch's `EffectiveSearchSpace` option is its last search unit's own
+            // (`rps_hooks::request_space`, `run_call`'s `set_call_searched`), and its units read
+            // `-dbsize` themselves (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes
+            // a list.
             if resolved
                 .psi_search
                 .as_deref()
@@ -6026,8 +6034,8 @@ fn open_search_database(
                     database.list_taxids(),
                     &database.statistics(),
                     false,
-                    args.searchsp.is_some_and(|space| space > 0),
-                    args.dbsize.is_some_and(|size| size > 0),
+                    rps || args.searchsp.is_some_and(|space| space > 0),
+                    !rps && args.dbsize.is_some_and(|size| size > 0),
                     args.app.name(),
                 )?;
             }
@@ -7866,6 +7874,7 @@ fn search(
         let ReportOutputs {
             formats,
             diagnostics,
+            later_warnings,
             hits,
             observer,
         } = &mut *outputs;
@@ -8077,6 +8086,7 @@ fn search(
                             })
                             .collect(),
                         diagnostics: &mut **diagnostics,
+                        later_warnings: later_warnings.as_deref_mut(),
                         hits: x_want_records.then_some(
                             &mut x_collect as &mut crate::api::local_blast::HitsSink<'_>,
                         ),
@@ -8355,7 +8365,8 @@ fn x_bp_encode_block_subjects(
 // outfmt 5's names too, `x_query_blocks::x_block_xml_subjects_allowed` and
 // `x_block_xml_run_allowed`; each check where any output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
-// (`blastp_database_search_space`, with `-db` or `-dbsize`), no query that is also a subject under
+// (`blastp_database_search_space`, with `-db` or `-dbsize`), no database whose setup count the
+// reference path refuses (`call_setup::setup_count_refused`), no query that is also a subject under
 // `-parse_deflines` where outfmt 0 can fail alone (its refusal of such a record's masks is outfmt
 // 0's alone, `believed::refuse_shared_masks_in`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -8525,9 +8536,16 @@ fn x_query_block_plan(
                 return None;
             }
         }
-        // A database without sequences fails in the first batch (`run_call`).
+        // A database without sequences fails in the first batch (`run_call`). A setup count that
+        // LOSAT refuses (`call_setup::setup_count_refused`, with the setup count of a search
+        // without RPS, `db_extent`'s: the statistics' count) is refused by the call that holds a
+        // valid query: the call of all queries refuses before any output, a block only after the
+        // reports of the blocks before, whose queries were invalid (review D of line RG D1a-4,
+        // SF1).
         BlastpSubjectSource::Database(database) => {
-            if database.num_sequences() == 0 {
+            if database.num_sequences() == 0
+                || call_setup::setup_count_refused(args, database.statistics_num_sequences())
+            {
                 return None;
             }
         }
@@ -9446,6 +9464,53 @@ fn context0_searched(
     }
 }
 
+/// The searched space of each batch of `call` (`CallRequests::set_searched`): its context 0
+/// (`context0_searched`) where NCBI searches the batch (not `query_batch_skipped`), with
+/// rpsblast's the space its last search unit leaves in the options handle
+/// (`rps_hooks::request_space`).
+fn set_call_searched(
+    call: &CallRequests<'_>,
+    args: &ResolvedBlastpArgs,
+    rps_units: Option<&crate::algorithm::rps_search::volumes::RpsUnits>,
+    contexts: &[QueryContext],
+    gapped_params: &KarlinParams,
+    (query_valid, query_batch_skipped): (&[bool], &[bool]),
+    (exact_search_spaces, search_spaces): (&[Option<i64>], &[SearchSpace]),
+) -> Result<()> {
+    let rps_request_spaces = match rps_units {
+        Some(units) => {
+            let mut spaces = vec![None; contexts.len()];
+            for first in call.batch_firsts() {
+                spaces[first] = Some(rps_hooks::request_space(
+                    units,
+                    args,
+                    &contexts[first],
+                    gapped_params,
+                )?);
+            }
+            Some(spaces)
+        }
+        None => None,
+    };
+    call.set_searched(|first| {
+        (!query_batch_skipped[first]).then(|| {
+            let mut context0 = context0_searched(
+                contexts,
+                query_valid,
+                args.searchsp,
+                exact_search_spaces,
+                search_spaces,
+                first,
+            );
+            if let Some(space) = rps_request_spaces.as_ref().and_then(|spaces| spaces[first]) {
+                context0.space = space;
+            }
+            context0
+        })
+    });
+    Ok(())
+}
+
 /// The batch whose search strategy request the run writes right after a call's batches are
 /// reported (`BlastpReports::strategy_next`): the batch that stops the run (every query without
 /// letters) after the searched batches, or the batch that fails with a header file NCBI cannot read
@@ -9535,6 +9600,11 @@ impl<'a> CallRequests<'a> {
             through: std::sync::Mutex::new(None),
             next,
         })
+    }
+
+    /// The call-local index of each batch's first query, in order.
+    fn batch_firsts(&self) -> impl Iterator<Item = usize> + '_ {
+        self.spans.iter().map(|span| span.start)
     }
 
     /// The searched space of each batch (`searched(first query)`, `None` for a batch NCBI does not
@@ -11041,46 +11111,15 @@ fn run_call(
         ));
     }
 
-    // The database's extent (`call_setup::db_extent`).
-    let call_setup::BlastpDbExtent {
-        total_db_len,
-        sorts_results,
-        gapped_gumbel,
-        num_subjects,
-        eff_db_length,
-        cutoff_subject_length,
-    } = call_setup::db_extent(&args, database, subjects)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-    // ```c
-    //    if (sbp->gbp) {
-    //    ...
-    //    } else {
-    //        min_subject_length = (Int4) (total_length/num_seqs);
-    //    }
-    //
-    //    if(min_subject_length <=0) {
-    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-    //    }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
-    // ```c
-    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
-    //         new_msg->message = strdup("The average subject length is too short");
-    //         new_msg->severity = eBlastSevFatal;
-    // ```
+    // The database's extent (`call_setup::db_extent`) and NCBI's error of its setup's average
+    // subject length (`call_setup::setup_fails`, after LOSAT's refusal of a count of 0).
+    let extent = call_setup::db_extent(&args, database, subjects)?;
     // The setup of the first searched batch fails: NCBI has written the outfmt 0 prolog and the
     // batch's reader messages (`preliminary_search_error`; NCBI 2.17.0 blastp and psiblast
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
-    if contexts.iter().any(|ctx| ctx.is_valid)
-        && crate::stats::setup::setup_subject_length(
-            total_db_len,
-            num_subjects,
-            (!args.old_fsc).then_some((cutoff_subject_length, false)),
-        )
-        .is_none()
-    {
+    if call_setup::setup_fails(&args, &extent, &contexts)? {
         return Err(preliminary_search_error(
             &args,
             query_records,
@@ -11094,9 +11133,19 @@ fn run_call(
             &query_batch_skipped,
             query_chunk,
             "",
-            "The average subject length is too short",
+            crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
         ));
     }
+    let call_setup::BlastpDbExtent {
+        total_db_len,
+        sorts_results,
+        gapped_gumbel,
+        num_subjects,
+        eff_db_length,
+        cutoff_subject_length,
+        rps_units,
+        ..
+    } = extent;
     let call_statistics = call_setup::CallStatistics {
         args: &args,
         database,
@@ -11268,6 +11317,7 @@ fn run_call(
         per_subject,
         num_subjects,
         cutoff_subject_length,
+        rps_units,
         prelim_hitlist_size,
         prelim_evalue,
         subject_space_overflow: &subject_space_overflow,
@@ -11288,6 +11338,7 @@ fn run_call(
     let prelim_run::PrelimOutcome {
         rps_gapped_k,
         rps_multi_volume,
+        rps_unlisted,
     } = match db_masking.as_ref() {
         None => prelim_run::run_preliminary_with(
             &prelim_stage,
@@ -11376,18 +11427,15 @@ fn run_call(
     // The search strategy's requests carry each batch's `EffectiveSearchSpace` option, the
     // archive's (`FirstContext::context0_space`), now that the call's set-up has computed them.
     if let Some(call) = reports.call_requests {
-        call.set_searched(|first| {
-            (!query_batch_skipped[first]).then(|| {
-                context0_searched(
-                    &contexts,
-                    &query_valid,
-                    args.searchsp,
-                    &exact_search_spaces,
-                    &search_spaces,
-                    first,
-                )
-            })
-        });
+        set_call_searched(
+            call,
+            &args,
+            rps_units,
+            &contexts,
+            &gapped_params,
+            (&query_valid, &query_batch_skipped),
+            (&exact_search_spaces, &search_spaces),
+        )?;
     }
     search_split_query_batches(
         &args,
@@ -11460,9 +11508,9 @@ fn run_call(
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
-    // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order, which
-    // NCBI sorts nowhere after.)
-    if !rps_multi_volume {
+    // (rpsblast: the RPS engine sorted its lists, `rps_search::engine::finish_volume_list`; over
+    // several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts nowhere.)
+    if args.rps_search.is_none() {
         for hit_list_opt in &mut preliminary_hit_lists {
             if let Some(hit_list) = hit_list_opt.as_mut() {
                 hit_list.sort_by_evalue();
@@ -11766,7 +11814,8 @@ fn run_call(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772
                 // (quoted at `DbStatistics::sorts_results`): not for a database length of 0 or of
                 // 2^63 or more, whose lists keep the traceback's order (by OID with
-                // `-comp_based_stats 0`, the composition heap's otherwise).
+                // `-comp_based_stats 0`, the composition heap's otherwise; rpsblast's engine
+                // sorted by the same gate, `RpsUnit::sorts_results`).
                 if sorts_results {
                     hit_list.sort_by_evalue();
                 }
@@ -11816,6 +11865,7 @@ fn run_call(
         subject_source,
         subject_label,
         total_db_len,
+        unlisted: &rps_unlisted,
     };
     report_prep::read_shown_residues(
         &setup,
@@ -12071,7 +12121,7 @@ fn run_call(
         pssm_made,
         pssm_reads: &pssm_reads,
     };
-    let mut query_warning_lines = report_prep::query_warning_lines(&prep);
+    let (mut query_warning_lines, kept) = report_prep::query_warning_lines(&prep);
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
@@ -12202,7 +12252,9 @@ fn run_call(
         }
         _ => Vec::new().into(),
     };
-    let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
+    // `-db_soft_mask` and `-db_hard_mask`: the `Masked using:` lines of each name.
+    let pairwise_database =
+        database.map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     // The reported database sequences with parsed Seq-ids by rank (empty without them).
     let listed_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
         .as_ref()
@@ -12370,6 +12422,8 @@ fn run_call(
             *after = posts;
         }
     }
+    // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+    let query_posts = Posts::with_later(query_posts, kept.as_deref().unwrap_or_default());
     let mut warning_lines: Option<&[crate::report::diag_log::Posts]> = Some(&query_posts);
     // Every structured format of the call is XML2 or JSON: none writes the report that a
     // `-subject` document holds back (`blast_xml::write_blastp_xml`).
@@ -12481,7 +12535,9 @@ fn run_call(
         // The first format's writer also writes the texts of the subjects that the reports
         // read one by one (`ReportedPrefetch::subject_reads`).
         let first_lines = warning_lines.take();
+        let own = format.later_warnings(kept.is_some(), &mut outputs.later_warnings, format_index);
         let mut warnings = (first_lines.is_some()
+            || own.is_some()
             || crate::report::query_warnings::report_posts(format.report_format())
             || matches!(
                 outfmt,
@@ -12493,7 +12549,8 @@ fn run_call(
                 first_lines.unwrap_or(&[]),
                 args.archive.as_ref(),
                 &mut *outputs.diagnostics,
-            );
+            )
+            .with_later(&query_posts, own);
             match first_lines {
                 Some(_) => warnings.with_subject_reads(prefetched.subject_reads.queries()),
                 None => warnings,
@@ -15195,6 +15252,68 @@ mod tests {
         }
         assert!(!BlastpReports::prelim_only(true).x_plan_blocks);
         assert!(!BlastpReports::prelim_only(false).x_plan_blocks);
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): a database search without the Gumbel block (`-searchsp`,
+    // `OLD_FSC`) keeps its block plan where the setup counts its sequences, and has none where the
+    // count is 0 (`call_setup::setup_count_refused`): that search refuses in the call of all
+    // queries, before any output (review E of line RG D1a-4, N3; the bytes are the rows'
+    // `db.ak.bp.rej.nseq0.oldfsc.blocks` and `db.ak.bp.nseq0.ssp.allx.7`). Thirty queries of 3,000
+    // letters, three batches, more than one block of the built-in 50,000 letters.
+    #[test]
+    fn x_query_block_plan_is_kept_without_the_gumbel_block_but_for_a_count_of_0() {
+        let records = x_block_test_records(&[3000; 30]);
+        let input = seq_range::QueryInput::whole(&records);
+        let batches = crate::blastinput::query_batch::read_query_batches(
+            &records,
+            &records,
+            &input,
+            crate::blastinput::query_batch::QueryReading::Records,
+            10000,
+            true,
+            None,
+        );
+        let settings = crate::blastinput::ncbi_environment::ApplicationSettings::default();
+        // From the manifest's directory, as the other tests' databases: a WASI module has no
+        // working directory (the runner preopens `/`).
+        let open = |name: &str| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
+            database::BlastpDatabase::open(path.to_str().expect("UTF-8 path"), &settings, "BLASTP")
+                .expect("test database")
+        };
+        // NSEQ 0 over `tfp` (`aliaskeys/p_nseq0.pal`), and `tfp` itself.
+        let counts_0 = open("tests/db_search/aliaskeys/p_nseq0");
+        let counts = open("tests/db_search/taxfilter/tfp");
+        assert_eq!(counts_0.statistics_num_sequences(), 0);
+        assert!(counts.statistics_num_sequences() > 0);
+        let gumbel = make_blastp_args().resolve().expect("resolved blastp args");
+        let mut searchsp = make_blastp_args();
+        searchsp.searchsp = Some(1000);
+        let searchsp = searchsp.resolve().expect("resolved blastp args");
+        let mut old_fsc = gumbel.clone();
+        old_fsc.old_fsc = true;
+        assert!(searchsp.old_fsc && !gumbel.old_fsc);
+        let mut stream: Vec<u8> = Vec::new();
+        let mut diagnostics = std::io::sink();
+        let outputs = ReportOutputs::single("7", OutputSink::Writer(&mut stream), &mut diagnostics);
+        let plan = |args: &ResolvedBlastpArgs, database: &database::BlastpDatabase| {
+            x_query_block_plan(
+                args,
+                &records,
+                &input,
+                &batches,
+                BlastpSubjectSource::Database(database),
+                &outputs,
+                10000,
+            )
+            .map(|(_, blocks)| blocks.len())
+        };
+        for args in [&searchsp, &old_fsc, &gumbel] {
+            assert!(plan(args, &counts).is_some_and(|blocks| blocks > 1));
+        }
+        assert_eq!(plan(&searchsp, &counts_0), None);
+        assert_eq!(plan(&old_fsc, &counts_0), None);
+        assert!(plan(&gumbel, &counts_0).is_some_and(|blocks| blocks > 1));
     }
 
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts of the search of all queries whose preliminary

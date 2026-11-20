@@ -19,7 +19,10 @@ fn message(error: &anyhow::Error) -> (i32, String) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .expect("a NativeError");
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).expect("a UTF-8 message"),
+    )
 }
 
 // `x_ExtractQueryFromMsa`: the master is the first row, or the `-msa_master_idx`-th (1-based); one

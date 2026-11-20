@@ -2032,7 +2032,7 @@ mod tests {
                 let abort = search.annot.abort.as_ref().unwrap();
                 (
                     String::from_utf8(search.annot.posts.text()).unwrap(),
-                    abort.message.clone(),
+                    String::from_utf8(abort.message.clone()).unwrap(),
                 )
             })
         };
@@ -2099,7 +2099,9 @@ mod tests {
                     .annot
                     .abort
                     .as_ref()
-                    .map_or_else(String::new, |abort| abort.message.clone())
+                    .map_or_else(String::new, |abort| {
+                        String::from_utf8(abort.message.clone()).unwrap()
+                    })
             })
         };
         let ids = "embl { accession \"AAA00001\", version 1 }, genbank { accession \"AAA00001\", version 1 }";

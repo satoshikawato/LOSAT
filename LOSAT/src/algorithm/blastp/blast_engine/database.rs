@@ -2956,7 +2956,10 @@ mod tests {
             let native = error
                 .downcast_ref::<NativeError>()
                 .unwrap_or_else(|| panic!("not a native error: {error:#}"));
-            (native.exit, native.message.clone())
+            (
+                native.exit,
+                String::from_utf8(native.message.clone()).unwrap(),
+            )
         };
         let settings = ApplicationSettings::default();
         let Err(error) = BlastpDatabase::open("", &settings, "BLASTP") else {
@@ -3013,7 +3016,7 @@ mod tests {
         assert_eq!(native.exit, 2);
         assert_eq!(
             native.message,
-            "BLAST Database error: Database memory map file error - CMemoryFile: Cannot memory map file '/data/db.psq':Permission denied\n"
+            b"BLAST Database error: Database memory map file error - CMemoryFile: Cannot memory map file '/data/db.psq':Permission denied\n"
         );
         let too_many = || SeqDbError::Open {
             path: "/data/db.psq".into(),
@@ -3026,7 +3029,8 @@ mod tests {
             read.0,
             "Too many open files, please raise the open file limit"
         );
-        let missing = SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string());
+        let missing =
+            SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string().into());
         let read = shared::search_read_error(missing, "BLASTP")
             .downcast::<PreliminaryReadError>()
             .expect("NCBI's error of the search stage");
@@ -4285,7 +4289,7 @@ mod tests {
         // the message names that directory: on macOS the temporary directory under `/var`
         // is shown under `/private/var`.
         assert_eq!(
-            native.message,
+            String::from_utf8(native.message.clone()).unwrap(),
             format!(
                 "BLAST Database error: Error: File ({}) not found.\n",
                 dir.canonicalize().unwrap().join("prot_mv.05.phr").display()

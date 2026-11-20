@@ -123,7 +123,7 @@ impl Xml2Kind {
 pub fn side_file_open_error() -> anyhow::Error {
     crate::cli::NativeError {
         exit: 1,
-        message: "Command line argument error: Cannot open output file\n".to_string(),
+        message: "Command line argument error: Cannot open output file\n".into(),
     }
     .into()
 }
@@ -140,7 +140,7 @@ pub fn side_file_open_error() -> anyhow::Error {
 pub fn side_file_write_error() -> anyhow::Error {
     crate::cli::NativeError {
         exit: 6,
-        message: "BLAST failed to write output\n".to_string(),
+        message: "BLAST failed to write output\n".into(),
     }
     .into()
 }

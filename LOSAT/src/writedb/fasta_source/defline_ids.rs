@@ -37,11 +37,11 @@ pub(crate) fn post_seq_id_warning(warning: SeqIdWarning, warn: Warn<'_>) {
 /// it (`SetDiagPostPrefix`; the BLAST programs' `-parse_deflines` name theirs).
 pub(crate) fn post_seq_id_warning_of(name: &str, warning: SeqIdWarning, warn: Warn<'_>) {
     warn(
-        format!(
-            "Warning: (1306.{}) [{name}] {}",
-            warning.subcode, warning.message
-        )
-        .as_bytes(),
+        &[
+            format!("Warning: (1306.{}) [{name}] ", warning.subcode).as_bytes(),
+            &warning.message,
+        ]
+        .concat(),
     );
 }
 
@@ -754,9 +754,11 @@ mod tests {
                 ReaderWarning::Line(line) => {
                     warnings.push(String::from_utf8_lossy(line).into_owned())
                 }
-                ReaderWarning::SeqId(w) => {
-                    warnings.push(format!("(1306.{}) {}", w.subcode, w.message))
-                }
+                ReaderWarning::SeqId(w) => warnings.push(format!(
+                    "(1306.{}) {}",
+                    w.subcode,
+                    String::from_utf8_lossy(&w.message)
+                )),
             },
         );
         (result, warnings)

@@ -281,3 +281,195 @@ fn rpsbprocs_terminal_writes_are_the_lines_and_blocks_of_a_line_buffered_stream(
     assert_eq!(tty[..5], [1024, 18, 9, 71, 5]);
     assert!(tty.iter().all(|&size| size <= 4096));
 }
+
+/// The buffer size that a standard output of `st_blksize` N gets (`stdio_buffer_size`).
+fn block_of(blksize: usize) -> usize {
+    blksize.min(NCBI_BUFSIZ)
+}
+
+fn check_blksize_table(table: &str, lines: bool) -> usize {
+    let mut rows = 0;
+    for line in table.lines().filter(|line| !line.starts_with('#')) {
+        let mut fields = line.split('\t');
+        let blksize: usize = fields.next().unwrap().parse().unwrap();
+        let ops = fields.next().unwrap();
+        let observed: Vec<u64> = fields
+            .next()
+            .unwrap()
+            .split(',')
+            .map(|n| n.parse().unwrap())
+            .collect();
+        let stream = NcbiStdio::Cout {
+            block: block_of(blksize),
+            lines,
+        };
+        assert_eq!(
+            replay(stream, ops),
+            observed,
+            "{stream:?} (st_blksize {blksize}): {ops}"
+        );
+        rows += 1;
+    }
+    rows
+}
+
+#[test]
+fn a_standard_output_of_any_block_size_writes_as_observed() {
+    // st_blksize 2 ... 4,194,304 (`blktrace` changes the kernel's answer): the buffer is the
+    // block size capped at `NCBI_BUFSIZ` (8192), and a block below 128 writes whole insertions.
+    let pipe = check_blksize_table(
+        include_str!("../../tests/fixtures/stdio_buffer/cout_blksize_pipe.tsv"),
+        false,
+    );
+    let file = check_blksize_table(
+        include_str!("../../tests/fixtures/stdio_buffer/cout_blksize_file.tsv"),
+        false,
+    );
+    let tty = check_blksize_table(
+        include_str!("../../tests/fixtures/stdio_buffer/cout_blksize_tty.tsv"),
+        true,
+    );
+    let sweep_pipe = check_blksize_table(
+        include_str!("../../tests/fixtures/stdio_buffer/cout_blksize_sweep_pipe.tsv"),
+        false,
+    );
+    let sweep_tty = check_blksize_table(
+        include_str!("../../tests/fixtures/stdio_buffer/cout_blksize_sweep_tty.tsv"),
+        true,
+    );
+    assert_eq!((pipe, file, tty), (1928, 1928, 1928));
+    assert!(
+        sweep_pipe > 4000 && sweep_tty > 4000,
+        "{sweep_pipe} {sweep_tty}"
+    );
+}
+
+/// The bytes written to the destination after each insertion of `ops` (`n`: a string of n
+/// bytes, `None`: one char, `Some(0)`: a flush), as the sums of the prefixes of the write
+/// calls that NCBI made are checked against.
+fn written_after_insertions(stream: NcbiStdio, insertions: &[Option<usize>]) -> Vec<u64> {
+    let mut buffer = NcbiBuffer::new(stream);
+    let mut pending: Vec<u8> = Vec::new();
+    let mut written = 0u64;
+    let mut after = Vec::new();
+    for insertion in insertions {
+        match insertion {
+            Some(0) => buffer.flush(),
+            Some(n) => {
+                pending.extend(std::iter::repeat_n(b'x', *n));
+                buffer.sputn(*n, &pending);
+            }
+            None => {
+                pending.push(b'x');
+                buffer.sputc(&pending);
+            }
+        }
+        let out = pending.len() - buffer.held();
+        written += out as u64;
+        pending.drain(..out);
+        after.push(written);
+    }
+    after
+}
+
+#[test]
+fn ncbis_blastn_and_rpsbproc_write_as_the_buffer_of_each_block_size_does() {
+    // Every row of `ncbi_blksize.tsv`: the ends of NCBI's insertions are boundaries of its
+    // write calls (the model's bytes written after each insertion are sums of a prefix of the
+    // calls), and the calls add up to the whole output. blastn's row is four insertions
+    // (`id`, a tab, `id`, a line end; the tab and the line end are strings of one byte);
+    // rpsbproc's report, from the 1127 bytes before the first
+    // `cerr` line, is fields and delimiters (`put`) as its formatter inserts them.
+    let oracle: &[u8] =
+        include_bytes!("../../tests/fixtures/rpsbproc/oracle/linux_cout_longdb.out");
+    let report = [&oracle[..1127 + 4096], &oracle[1127 + 4096 + 296..]].concat();
+    let table = include_str!("../../tests/fixtures/stdio_buffer/ncbi_blksize.tsv");
+    let mut counts = [0usize; 3];
+    for line in table.lines().filter(|line| !line.starts_with('#')) {
+        let f: Vec<&str> = line.split('\t').collect();
+        let (case, blksize, len, destination, calls) = (f[0], f[1], f[2], f[3], f[4]);
+        let blksize: usize = blksize.parse().unwrap();
+        let wanted_fd = if case == "blastn_out" {
+            None
+        } else {
+            Some("1")
+        };
+        let mut prefixes = std::collections::BTreeSet::new();
+        let mut sum = 0u64;
+        for call in calls.split(' ') {
+            let (fd, size) = call.split_once(':').unwrap();
+            if wanted_fd.is_none_or(|wanted| wanted == fd) {
+                sum += size.parse::<u64>().unwrap();
+                prefixes.insert(sum);
+            }
+        }
+        let (insertions, total) = match case {
+            "rpsbproc_longdb" => {
+                if destination == "pty" {
+                    continue;
+                }
+                let mut insertions = vec![Some(1127), Some(0)];
+                for piece in report[1127..].split_inclusive(|b| *b == b'\t' || *b == b'\n') {
+                    insertions.push(Some(piece.len() - 1));
+                    insertions.push(None);
+                    if piece.ends_with(b"\n") {
+                        insertions.push(Some(0));
+                    }
+                }
+                (insertions, report.len() as u64)
+            }
+            _ => {
+                let len: usize = len.parse().unwrap();
+                (
+                    vec![Some(len), Some(1), Some(len), Some(1)],
+                    2 * len as u64 + 2,
+                )
+            }
+        };
+        let stream = match (case, destination) {
+            ("blastn_out", _) => NcbiStdio::File,
+            (_, "pty") => NcbiStdio::Cout {
+                block: block_of(blksize),
+                lines: true,
+            },
+            _ => NcbiStdio::Cout {
+                block: block_of(blksize),
+                lines: false,
+            },
+        };
+        // blastn's tab and line end are single chars, and on a terminal the last one has a
+        // newline (a `put` of a newline); the row's last insertion is that char.
+        let after = if case == "blastn_stdout" && destination == "pty" {
+            let mut buffer = NcbiBuffer::new(stream);
+            let mut pending: Vec<u8> = Vec::new();
+            let mut written = 0u64;
+            let mut after = Vec::new();
+            let len: usize = len.parse().unwrap();
+            for (n, newline) in [(len, false), (1, false), (len, false), (1, true)] {
+                let byte = if newline { b'\n' } else { b'\t' };
+                pending.extend(std::iter::repeat_n(if n == 1 { byte } else { b'x' }, n));
+                buffer.sputn(n, &pending);
+                let out = pending.len() - buffer.held();
+                written += out as u64;
+                pending.drain(..out);
+                after.push(written);
+            }
+            after
+        } else {
+            written_after_insertions(stream, &insertions)
+        };
+        assert_eq!(sum, total, "{line}");
+        for bytes in after.into_iter().filter(|&bytes| bytes > 0) {
+            assert!(
+                prefixes.contains(&bytes),
+                "{case} {destination} {blksize} {len}: {bytes} of {calls}"
+            );
+        }
+        counts[match case {
+            "blastn_stdout" => 0,
+            "blastn_out" => 1,
+            _ => 2,
+        }] += 1;
+    }
+    assert_eq!(counts, [267, 89, 36]);
+}

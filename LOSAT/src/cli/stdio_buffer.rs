@@ -13,6 +13,10 @@
 //! operations into `std::cout` and `std::ofstream`, and of NCBI's rpsbproc 0.5.1 and BLAST+
 //! 2.17.0) and the tests of this module, which replay every row.
 
+/// The block size below which standard output's buffer writes whole insertions
+/// (`tests/fixtures/stdio_buffer/cout_blksize_*.tsv`).
+const SMALL_BLOCK: usize = 128;
+
 /// The C library's `BUFSIZ` of NCBI's builds.
 pub const NCBI_BUFSIZ: usize = 8192;
 
@@ -101,16 +105,36 @@ impl NcbiBuffer {
             return;
         }
         match self.stream {
+            NcbiStdio::Cout { block, lines } if block < SMALL_BLOCK => {
+                // A stream of a few bytes (a block size below 128, which no device reports but
+                // which the tables observe): its first insertion is written at once, a later
+                // one is held while it fits in the block and else written with all that is
+                // held, and on a terminal any insertion with a newline is written whole.
+                self.held = if !self.made {
+                    0
+                } else if self.held + n <= block {
+                    self.held + n
+                } else {
+                    0
+                };
+                self.made = true;
+                if lines && self.held > 0 {
+                    let inserted = &stream[stream.len().saturating_sub(n)..];
+                    if inserted.contains(&b'\n') {
+                        self.held = 0;
+                    }
+                }
+            }
             NcbiStdio::Cout { block, lines } => {
                 self.held = if self.made {
                     let room = block.saturating_sub(self.held);
                     if n <= room {
                         self.held + n
                     } else {
-                        (n - room) % block.max(1)
+                        (n - room) % block
                     }
                 } else {
-                    n % block.max(1)
+                    n % block
                 };
                 self.made = true;
                 if lines && self.held > 0 {

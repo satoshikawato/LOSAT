@@ -219,7 +219,8 @@ pub fn ncbi_positive_integer(value: &str) -> Result<i32, String> {
     ncbi_integer_at_least(value, 1)
 }
 /// A BLASTN reward: 0 or more, as NCBI's argument (blast_args.cpp:658-659). A reward of 0
-/// is an option that LOSAT rejects before the search (`blastn/scoring.rs`).
+/// runs with a penalty of 0 (matrix-only scoring, `-task rmblastn`); with another penalty LOSAT
+/// rejects it before the search (`blastn/scoring.rs`).
 pub fn blastn_reward(value: &str) -> Result<i32, String> {
     ncbi_integer_at_least(value, 0)
 }

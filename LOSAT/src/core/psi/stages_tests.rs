@@ -263,7 +263,7 @@ fn a_region_unaligned_to_the_query_keeps_the_matrix_scores() {
     }
 
     let mut seq_weights = SequenceWeights::new(msa.num_seqs, length);
-    compute_sequence_weights(&msa, &aligned_blocks, &mut seq_weights).unwrap();
+    compute_sequence_weights(&msa, &aligned_blocks, false, &mut seq_weights).unwrap();
     let column_weight = |pos: usize| -> f64 {
         (0..BLASTAA_SIZE)
             .filter(|&res| res != ncbistdaa::X as usize)
@@ -287,8 +287,10 @@ fn a_region_unaligned_to_the_query_keeps_the_matrix_scores() {
         &sbp,
         &aligned_blocks,
         0,
+        false,
         &mut internal,
-    );
+    )
+    .unwrap();
     convert_freq_ratios_to_pssm(&mut internal, &msa.query, &sbp, &seq_weights.std_prob);
     scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, &sbp).unwrap();
     assert_eq!(msa.num_seqs, 3);

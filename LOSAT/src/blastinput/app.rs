@@ -47,6 +47,19 @@ pub fn engine_error(message: &str) -> anyhow::Error {
     .into()
 }
 
+/// An error of a reader of NCBI's objtools (`CObjReaderParseException`: the FASTA reader's, the
+/// alignment reader's of psiblast's `-in_msa`), which the applications report with the reader's
+/// message and exit 1. The one producer of that line.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
+pub fn query_error(message: &str) -> anyhow::Error {
+    NativeError {
+        exit: 1,
+        message: format!("BLAST query error: {message}\n").into(),
+    }
+    .into()
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302 (TBLASTX's
 // loop is the same, tblastx_app.cpp:176-207)
 /// An error of a query batch's search that comes after the reports of the batches before, for

@@ -786,18 +786,13 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 // The rejection of an option that a program does not have: NCBI's options that LOSAT
 // has not ported, the NCBI C++ Toolkit options, and the rest (unknown to NCBI too).
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
-/// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
-/// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine does
+/// psiblast's NCBI arguments that LOSAT does not run: PHI-BLAST (PS8; the ASCII and ASN.1 PSSM
+/// files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
+/// `algorithm::psiblast::in_pssm`, the MSA inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
 /// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
 /// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
 /// of line RG).
-const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
-    "ignore_msa_master",
-    "in_msa",
-    "msa_master_idx",
-    "phi_pattern",
-];
+const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &["phi_pattern"];
 
 fn is_unported_psiblast_arg(name: &str) -> bool {
     UNPORTED_PSIBLAST_OWN_ARGS.contains(&name)

@@ -227,7 +227,8 @@ pub(crate) fn ungapped_beta(reward: i32, penalty: i32) -> f64 {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3237-3372
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3159-3170 (s_SplitArrayOf8)
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3192-3215 (s_AdjustGapParametersByGcd)
-/// The command line accepts no reward of 0, so the divisor is at least 1.
+/// The pair is the engine's (1/-3 under matrix-only scoring, never a reward of 0), so the divisor
+/// is at least 1.
 pub struct NuclValues {
     /// The affine gap costs of the table, with their values.
     normal: Vec<ParamEntry>,

@@ -4758,12 +4758,12 @@ fn search_pssm_query(
     )
 }
 
-/// Whether the query of `args` is a PSSM (psiblast's `-in_pssm`): a run of the records' entries
+/// Whether the query of `args` is a PSSM (psiblast's `-in_pssm` or `-in_msa`): a run of the records' entries
 /// with no query record then has a query (`ReportOutputs::finish_archive`).
 fn pssm_query(args: &BlastpArgs) -> bool {
     args.psiblast_pssm
         .as_ref()
-        .is_some_and(|options| options.in_pssm.is_some())
+        .is_some_and(|options| options.in_pssm.is_some() || options.in_msa.is_some())
 }
 
 /// Before the search of the FASTA queries `records`: the refusal of a PSSM file that LOSAT cannot

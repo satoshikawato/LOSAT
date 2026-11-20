@@ -99,6 +99,8 @@ pub(in super::super) struct NaInputs<'a> {
     pub(in super::super) reduced_cutoff_scores: &'a [i32],
     pub(in super::super) score_matrix: &'a [i32; 256],
     pub(in super::super) nucl_score_table: &'a [i32; 256],
+    /// `ScanBatch::exact_ungapped` (matrix-only scoring or a word shorter than 11 letters).
+    pub(in super::super) exact_ungapped: bool,
     pub(in super::super) diag_offset: isize,
     pub(in super::super) diag_hash_window: i32,
     pub(in super::super) use_array_indexing: bool,
@@ -317,6 +319,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
     pos: &[u32],
 ) {
     let safe_k = x.word_length;
+    let exact_ungapped = x.exact_ungapped;
     let s_len = x.s_len;
     let search_seq_packed = x.search_seq_packed;
     let diag_offset = x.diag_offset;
@@ -432,7 +435,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         } else {
             None
         };
-        let ungapped = if safe_k < 11 {
+        let ungapped = if exact_ungapped {
             extend_hit_ungapped_exact_ncbi(
                 x.encoded_query_concat_blastna,
                 search_seq_packed,
@@ -970,6 +973,7 @@ mod tests {
                 reduced_cutoff_scores: &[16, 16],
                 score_matrix: &score_matrix,
                 nucl_score_table: &nucl_score_table,
+                exact_ungapped: word_length < 11,
                 diag_offset,
                 diag_hash_window: diag_hash_insert_window(0, 0, word_length),
                 use_array_indexing: false,

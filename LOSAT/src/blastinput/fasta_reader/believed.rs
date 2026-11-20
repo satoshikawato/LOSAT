@@ -192,7 +192,8 @@ pub(crate) fn parse_believed_defline(
 }
 
 /// LOSAT's refusal of an id of a record, or `None`: a `gnl|BL_ORD_ID|n` id and a Geninfo import id.
-/// `origin` names where the id comes from (`-parse_deflines`, or the PSSM of `-in_pssm`).
+/// `origin` names where the id comes from (`-parse_deflines`, the PSSM of `-in_pssm`, or the
+/// master sequence of psiblast's `-in_msa` alignment).
 pub(crate) fn refused_id(
     ids: &[ParsedSeqId],
     role: &str,

@@ -9,6 +9,7 @@
 //! query (`in_pssm`).
 
 pub mod args;
+pub(crate) mod in_msa;
 pub(crate) mod in_pssm;
 pub(crate) mod in_pssm_files;
 pub mod pssm;

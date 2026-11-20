@@ -167,6 +167,31 @@ pub(crate) enum PsiError {
     ColumnOfGaps,
     StartingGap,
     EndingGap,
+    /// `PSIERR_UNKNOWN` (-255): a column without weight in the structure group's compatibility
+    /// mode (`_PSIComputeFreqRatios`).
+    Unknown,
+    /// The stage of the frequency ratios of a matrix without frequency data (IDENTITY), which
+    /// NCBI's `_PSIComputeFreqRatios` reaches with a null pointer and crashes (SIGSEGV); the
+    /// engine stops here and the caller refuses the run (`algorithm::psiblast::in_msa`).
+    NoMatrixFrequencyData,
+    /// The scaling's first `_PSIUpdateLambdaK` with a null `kbp_psi[0]` (the query's ungapped
+    /// Karlin-Altschul block could not be computed, [`PsiOptions::ungapped_block_missing`]),
+    /// where NCBI crashes (SIGSEGV) before any other error of the scaling.
+    NoUngappedKarlinBlock,
+}
+
+/// The `PSIBlastOptions` that the engine's stages read besides the pseudocount: the options of the
+/// rounds' PSSMs have neither (`PSIBlastOptionsNew`), those of `-in_msa` (`CPsiBlastInputClustalW`,
+/// `x_CreatePssmFromMsa`) set `ignore_unaligned_positions` and, with `-ignore_msa_master`,
+/// `nsg_compatibility_mode`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct PsiOptions {
+    pub(crate) ignore_unaligned_positions: bool,
+    pub(crate) nsg_compatibility_mode: bool,
+    /// The score block's `kbp_psi[0]` is null (the query's ungapped Karlin-Altschul parameters
+    /// could not be computed: `Blast_ScoreBlkKbpUngappedCalc`'s failure goes unreported,
+    /// blast_setup.c:353-370); the scaling then ends with [`PsiError::NoUngappedKarlinBlock`].
+    pub(crate) ungapped_block_missing: bool,
 }
 
 /// `PSICreatePssmWithDiagnostics` with psiblast's options (`PSIBlastOptionsNew`: no structure
@@ -184,6 +209,19 @@ pub(crate) fn create_pssm_with_diagnostics(
     sbp: &PsiScoreBlk,
     request: PsiDiagnosticsRequest,
 ) -> Result<PsiPssm, PsiError> {
+    create_pssm_with_options(msa, pseudo_count, PsiOptions::default(), Some(sbp), request)
+}
+
+/// `PSICreatePssmWithDiagnostics` with the options `options`; `sbp` is `None` for a matrix
+/// without frequency data (the engine then stops at the stage of the frequency ratios with
+/// [`PsiError::NoMatrixFrequencyData`], where NCBI crashes).
+pub(crate) fn create_pssm_with_options(
+    msa: &PsiMsa,
+    pseudo_count: i32,
+    options: PsiOptions,
+    sbp: Option<&PsiScoreBlk>,
+    request: PsiDiagnosticsRequest,
+) -> Result<PsiPssm, PsiError> {
     let mut packed = stages::PackedMsa::new(msa);
     stages::purge_biased_segments(&mut packed);
     let mut msa = stages::Msa::new(&packed);
@@ -191,19 +229,37 @@ pub(crate) fn create_pssm_with_diagnostics(
     let mut aligned_block = stages::AlignedBlock::new(query_length);
     let mut seq_weights = stages::SequenceWeights::new(msa.num_seqs, query_length);
     let mut internal = stages::InternalPssm::new(query_length);
-    stages::validate_msa(&msa)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:151-156
+    if options.nsg_compatibility_mode {
+        msa.structure_group_customization();
+        stages::validate_msa_structure_group(&msa)?;
+    } else {
+        stages::validate_msa(&msa, options.ignore_unaligned_positions)?;
+    }
     stages::compute_alignment_blocks(&mut msa, &mut aligned_block);
-    stages::compute_sequence_weights(&msa, &aligned_block, &mut seq_weights)?;
+    stages::compute_sequence_weights(
+        &msa,
+        &aligned_block,
+        options.nsg_compatibility_mode,
+        &mut seq_weights,
+    )?;
+    let Some(sbp) = sbp else {
+        return Err(PsiError::NoMatrixFrequencyData);
+    };
     stages::compute_freq_ratios(
         &msa,
         &mut seq_weights,
         sbp,
         &aligned_block,
         pseudo_count,
+        options.nsg_compatibility_mode,
         &mut internal,
-    );
+    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:385-414
     stages::convert_freq_ratios_to_pssm(&mut internal, &msa.query, sbp, &seq_weights.std_prob);
+    if options.ungapped_block_missing {
+        return Err(PsiError::NoUngappedKarlinBlock);
+    }
     let ungapped = stages::scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, sbp)?;
     let gapped = KarlinBlk {
         k: stages::gapped_psi_k(ungapped, sbp),

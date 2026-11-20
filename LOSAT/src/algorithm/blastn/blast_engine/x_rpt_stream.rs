@@ -83,8 +83,8 @@
 //!   with a hit that cannot be written, `blast_xml.rs`), made per report call; `-outfmt 5` is
 //!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the
 //!   query lengths that a later batch could meet keep the reports after the loop: scoring options
-//!   without Karlin-Altschul values or large greedy gap costs (`search_query_batch`, in
-//!   `context_statistics`), a negative
+//!   without Karlin-Altschul values, large greedy gap costs or matrix-only scoring with the
+//!   greedy extension (`search_query_batch`, in `context_statistics`), a negative
 //!   `CHUNK_SIZE` (`search_query_chunks`), a search space that could overflow (`SearchSpace`) and
 //!   an ungapped cutoff of a query too long (`UngappedCutoff`). With one batch (the first batch takes
 //!   every query record) nothing can come after it, so none of these checks is made and no
@@ -153,6 +153,7 @@ use super::{
     check_greedy_gap_costs, configure_task, record_title, x_debug_output, BlastnArgs,
     BlastnOutputFormat, QueryBatching, SubjectLetters, SubjectRanges, SubjectSource,
 };
+use crate::algorithm::blastn::scoring::check_greedy_matrix_only;
 
 // No NCBI counterpart: reads the switch once (LOSAT_X_RPTSTREAM is a strict-set switch since
 // 2026-10-17: on unless it is `0`). It chooses when LOSAT writes the same reports.
@@ -181,8 +182,8 @@ pub(super) enum Off {
     Xml,
     /// A negative `CHUNK_SIZE`.
     ChunkSize,
-    /// An ungapped (`-ungapped`) search with a query of 2^30 letters or more, which LOSAT refuses
-    /// in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
+    /// An ungapped (`-ungapped`) or matrix-only search with a query of 2^30 letters or more, which
+    /// LOSAT refuses in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
     /// later batch's refusal would come after the first batch's reports.
     UngappedCutoff,
     /// A database length times a query length that could overflow NCBI's 64-bit search space.
@@ -478,8 +479,8 @@ fn check(
     // the queries.
     let config = configure_task(args);
     let spec = NuclScoringSpec {
-        reward: config.reward,
-        penalty: config.penalty,
+        reward: config.score_reward,
+        penalty: config.score_penalty,
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
     };
@@ -487,13 +488,16 @@ fn check(
         .and_then(|values| values.check_gaps(&spec))
         .is_err()
         || check_greedy_gap_costs(args).is_err()
+        || check_greedy_matrix_only(args, args.ungapped).is_err()
     {
         return Err(Off::Scoring);
     }
     if batching.split.negative_chunk_size() {
         return Err(Off::ChunkSize);
     }
-    if args.ungapped
+    // The word cutoff of an ungapped search and of matrix-only scoring
+    // (`batch_setup::batch_cutoffs`).
+    if (args.ungapped || config.matrix_only)
         && !lengths.iter().all(|&length| {
             crate::algorithm::blastn::ungapped::cutoff_context_length_supported(length)
         })

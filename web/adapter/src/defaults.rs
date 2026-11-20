@@ -510,7 +510,13 @@ mod tests {
             |program| -> Vec<String> { defaults(program).unwrap().tasks.into_keys().collect() };
         assert_eq!(
             names(Program::Blastn),
-            ["blastn", "blastn-short", "dc-megablast", "megablast"]
+            [
+                "blastn",
+                "blastn-short",
+                "dc-megablast",
+                "megablast",
+                "rmblastn"
+            ]
         );
         assert_eq!(
             names(Program::Blastp),
@@ -526,20 +532,29 @@ mod tests {
     fn blastn_resolves_each_tasks_preset() {
         let blastn = defaults(Program::Blastn).unwrap();
         let row = |flag: &str| -> Vec<&str> {
-            ["megablast", "dc-megablast", "blastn", "blastn-short"]
-                .iter()
-                .map(|task| blastn.tasks[*task][flag].as_str())
-                .collect()
+            [
+                "megablast",
+                "dc-megablast",
+                "blastn",
+                "blastn-short",
+                "rmblastn",
+            ]
+            .iter()
+            .map(|task| blastn.tasks[*task][flag].as_str())
+            .collect()
         };
-        assert_eq!(row("-word_size"), ["28", "11", "11", "7"]);
-        assert_eq!(row("-reward"), ["1", "2", "2", "1"]);
-        assert_eq!(row("-penalty"), ["-2", "-3", "-3", "-3"]);
-        assert_eq!(row("-gapopen"), ["0", "5", "5", "5"]);
-        assert_eq!(row("-gapextend"), ["0", "2", "2", "2"]);
-        assert_eq!(row("-evalue"), ["10", "10", "10", "1000"]);
-        assert_eq!(row("-dust"), ["20 64 1", "20 64 1", "20 64 1", "no"]);
-        assert_eq!(row("-xdrop_gap"), ["25", "30", "30", "30"]);
-        assert_eq!(row("-window_size"), ["0", "40", "0", "0"]);
+        assert_eq!(row("-word_size"), ["28", "11", "11", "7", "11"]);
+        assert_eq!(row("-reward"), ["1", "2", "2", "1", "0"]);
+        assert_eq!(row("-penalty"), ["-2", "-3", "-3", "-3", "0"]);
+        assert_eq!(row("-gapopen"), ["0", "5", "5", "5", "5"]);
+        assert_eq!(row("-gapextend"), ["0", "2", "2", "2", "2"]);
+        assert_eq!(row("-evalue"), ["10", "10", "10", "1000", "10"]);
+        assert_eq!(
+            row("-dust"),
+            ["20 64 1", "20 64 1", "20 64 1", "no", "20 64 1"]
+        );
+        assert_eq!(row("-xdrop_gap"), ["25", "30", "30", "30", "30"]);
+        assert_eq!(row("-window_size"), ["0", "40", "0", "0", "0"]);
     }
 
     #[test]

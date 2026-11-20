@@ -114,36 +114,38 @@ const KEPT_TOKENS: usize = 24;
 /// fSplit_Truncate`, the same flags): how many there are, and the first [`KEPT_TOKENS`] of them, which are all the
 /// tests read by position (a test that reads every token goes through the line itself).
 #[derive(Clone, Copy)]
-struct Tokens<'a> {
+pub(crate) struct Tokens<'a> {
     kept: [&'a [u8]; KEPT_TOKENS],
     len: usize,
 }
 
 impl<'a> Tokens<'a> {
     /// `tokens.size()`.
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len
     }
 
     /// `tokens.empty()`.
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// `tokens[i]` of a token that exists (`i < len()`).
-    fn at(&self, i: usize) -> &'a [u8] {
+    pub(crate) fn at(&self, i: usize) -> &'a [u8] {
         assert!(i < self.len.min(KEPT_TOKENS), "token {i} of {}", self.len);
         self.kept[i]
     }
 
     /// `tokens[i]` when it exists.
-    fn get(&self, i: usize) -> Option<&'a [u8]> {
+    pub(crate) fn get(&self, i: usize) -> Option<&'a [u8]> {
         (i < self.len.min(KEPT_TOKENS)).then(|| self.kept[i])
     }
 }
 
-/// [`Tokens`] of `str` split at the bytes `delims`.
-fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Tokens<'a> {
+/// [`Tokens`] of `str` split at the bytes `delims`. The one port of `NStr::Split` with
+/// `fSplit_Tokenize`: the format guess's tests and the Clustal scanner of psiblast's `-in_msa`
+/// (`blastinput::aln_reader::clustal`) read their lines through it.
+pub(crate) fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Tokens<'a> {
     let mut tokens = Tokens {
         kept: [&[]; KEPT_TOKENS],
         len: 0,

@@ -328,7 +328,7 @@ impl RoundFiles {
                     let _ = std::fs::remove_file(&file.path);
                 }
                 anyhow::bail!(
-                    "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops with a serial-stream write error (after the report of the round before; with -in_pssm before round 1), is not supported by LOSAT's PSIBLAST",
+                    "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops with a serial-stream write error (after the report of the round before; with -in_pssm or -in_msa before round 1), is not supported by LOSAT's PSIBLAST",
                     file.path.display()
                 );
             }

@@ -10,8 +10,8 @@
 //! LOSAT_X_BNFEWSUBJ's serial chunks, on this thread; else the batch's jobs on the pool, a scratch
 //! per worker, each job's chunks in order), and each chunk's list merged into the subject's in
 //! chunk order (`merge_prelim_hit_lists`), then the subject best-hit filter; then the subject's
-//! list reaped by the preliminary e-value (`reap_prelim_by_evalue`) or, in an ungapped search,
-//! finished (`finish_ungapped_prelim`).
+//! list reaped by the preliminary e-value or, under matrix-only scoring, by raw score
+//! (`reap_prelim`), or, in an ungapped search, finished (`finish_ungapped_prelim`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-599 (the chunk loop of
 //! `s_BlastSearchEngineOneContext`, :422-602)
@@ -53,12 +53,12 @@ use super::{x_few_subj, MAX_DBSEQ_LEN};
 use super::{
     advance_diag_table_offset, build_subject_seq_ranges_from_masks,
     calculate_blastn_context_statistics, database, diag_hash_insert_window,
-    encode_iupac_to_blastna, hsp_survives_evalue_reap, merge_prelim_hit_lists, na_scan,
-    next_subject_chunk, prelim_hsp_list, prelim_subject_best_hit, read_db_seq_ranges,
-    two_stage_scan, ungapped_subject_stage, x_diag_lv, x_pair_seed, BlastnSubjectRef, BlastnTiming,
-    ContextKarlin, DiagStruct, GapAlignScratch, HspListSplit, PrelimHit, QueryContext,
-    QueryContextIndex, SubjectChunk, SubjectChunkStatus, SubjectCtx, SubjectScratch,
-    SubjectSplitState, COMPRESSION_RATIO, DBSEQ_CHUNK_OVERLAP,
+    encode_iupac_to_blastna, merge_prelim_hit_lists, na_scan, next_subject_chunk, prelim_hsp_list,
+    prelim_subject_best_hit, read_db_seq_ranges, two_stage_scan, ungapped_subject_stage, x_diag_lv,
+    x_pair_seed, BlastnSubjectRef, BlastnTiming, ContextKarlin, DiagStruct, GapAlignScratch,
+    HspListSplit, PrelimHit, PrelimReap, QueryContext, QueryContextIndex, SubjectChunk,
+    SubjectChunkStatus, SubjectCtx, SubjectScratch, SubjectSplitState, COMPRESSION_RATIO,
+    DBSEQ_CHUNK_OVERLAP,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::alignment::x_greedy_prelim::XPrelimSubject;
@@ -127,6 +127,9 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) nucl_score_table: &'a [i32; 256],
     pub(super) reward: i32,
     pub(super) penalty: i32,
+    /// NCBI's matrix-only scoring (`TaskConfig::matrix_only`): every ungapped extension is the
+    /// exact one, and the preliminary lists are reaped by raw score (`PrelimReap`).
+    pub(super) matrix_only: bool,
     pub(super) gap_open: i32,
     pub(super) gap_extend: i32,
     pub(super) use_dp: bool,
@@ -167,15 +170,15 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) lcase_masking: bool,
     pub(super) db_mask: Option<(&'a database::BlastnDatabase, i32, MaskKind)>,
     pub(super) db_mask_error: &'a std::sync::Mutex<Option<(u32, anyhow::Error)>>,
-    /// The subject's list after its chunks (the reap by the preliminary e-value, the `-ungapped`
-    /// finish): the concatenated query's letters without its masks (NCBI's `sequence_nomask`, as
+    /// The subject's list after its chunks (the reap, the `-ungapped` finish): the concatenated
+    /// query's letters without its masks (NCBI's `sequence_nomask`, as
     /// `encoded_query_concat_blastna` is laid out), the Karlin blocks by context, whether an
-    /// e-value is rounded down from its score, the e-value threshold and the minimum percent
-    /// identity.
+    /// e-value is rounded down from its score, the reap (by the e-value threshold, or by raw
+    /// score under matrix-only scoring) and the minimum percent identity.
     pub(super) encoded_query_concat_nomask: &'a [u8],
     pub(super) search_karlin_ref: &'a [ContextKarlin],
     pub(super) round_down_evalue_score: bool,
-    pub(super) evalue_threshold: f64,
+    pub(super) prelim_reap: PrelimReap,
     pub(super) percent_identity: f64,
     /// The diagnostics: BLEMIR_DEBUG, LOSAT_DEBUG_BLASTN, the trace lines (`blastn_trace`), the
     /// verbose lines and the debug window.
@@ -225,6 +228,13 @@ pub(super) struct ScanBatch<'a> {
     pub(super) reduced_cutoff_scores: &'a [i32],
     pub(super) score_matrix: &'a BlastnaMatrix,
     pub(super) nucl_score_table: &'a [i32; 256],
+    /// Whether the ungapped extension is the exact one (`s_NuclUngappedExtendExact`) rather than
+    /// the approximate one with its exact recomputation: under matrix-only scoring or for a word
+    /// shorter than 11 letters. One value of the batch, read by every word finder.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:740-742 (the same at
+    /// 910-912)
+    pub(super) exact_ungapped: bool,
     /// The words: the word size capped at 31 letters (`safe_k`, the na tables' word), the word and
     /// lookup word lengths (the two-stage table's, else `safe_k`), the scan step, the off-diagonal
     /// range, the window and whether it is a two-hit search, the size at which a batch of offset
@@ -289,6 +299,7 @@ impl<'a> ScanBatch<'a> {
         let window_size = batch.window_size;
         let two_hits = window_size > 0;
         let debug_enabled = batch.debug_mode || batch.blastn_debug;
+        let exact_ungapped = batch.matrix_only || word_length < 11;
         ScanBatch {
             batch,
             two_stage_lookup_ref,
@@ -304,6 +315,7 @@ impl<'a> ScanBatch<'a> {
             reduced_cutoff_scores: batch.reduced_cutoff_scores,
             score_matrix: batch.score_matrix,
             nucl_score_table: batch.nucl_score_table,
+            exact_ungapped,
             safe_k,
             word_length,
             lut_word_length,
@@ -606,6 +618,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     reduced_cutoff_scores: scan.reduced_cutoff_scores,
                     score_matrix: scan.score_matrix,
                     nucl_score_table: scan.nucl_score_table,
+                    exact_ungapped: scan.exact_ungapped,
                     diag_offset,
                     diag_hash_window: diag_hash_insert_window(
                         scan.window_size,
@@ -700,6 +713,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     reduced_cutoff_scores: scan.reduced_cutoff_scores,
                     score_matrix: scan.score_matrix,
                     nucl_score_table: scan.nucl_score_table,
+                    exact_ungapped: scan.exact_ungapped,
                     diag_offset,
                     diag_hash_window: diag_hash_insert_window(
                         scan.window_size,
@@ -1276,7 +1290,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
 /// one per byte for the greedy aligner, and the split state of its chunks; the debug line of its
 /// cutoffs; then its chunks searched and their lists merged (`collect_subject_prelim`), the soft
 /// ranges' buffer given back to the scratch, and the subject's list reaped by the preliminary
-/// e-value (`reap_prelim_by_evalue`) or, in an ungapped search, finished
+/// e-value or by raw score (`reap_prelim`) or, in an ungapped search, finished
 /// (`finish_ungapped_prelim`). Returns the list that the preliminary stage gives to the collector
 /// (empty after an early return). `subject_ctx` is what `search_subject` read of the call after
 /// its early return without a valid context.
@@ -1425,32 +1439,40 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     }
 
     if !UNGAPPED && !combined_prelim_hits.is_empty() {
-        reap_prelim_by_evalue(batch, &mut combined_prelim_hits);
+        reap_prelim(batch, &mut combined_prelim_hits);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1482-1541
     // An ungapped (`-ungapped`) search finishes each subject's HSP list here, in the
     // preliminary stage: the traceback only keeps what this leaves.
     if UNGAPPED && !combined_prelim_hits.is_empty() {
-        finish_ungapped_prelim(batch, subject, &mut combined_prelim_hits);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:891-895
+        // (`s_BlastSearchEngineCore`, for gapped and ungapped searches)
+        // Under matrix-only scoring the list is reaped by raw score before its finish (which
+        // reaps it again after the re-evaluation, blast_engine.c:1527-1535); the e-values that
+        // NCBI computes before this reap are computed again in the finish. The e-value reap of
+        // the core is not run for an ungapped search here.
+        if let PrelimReap::RawScore(cutoff) = batch.prelim_reap {
+            combined_prelim_hits.retain(|hit| hit.prelim_score >= cutoff);
+        }
+        if !combined_prelim_hits.is_empty() {
+            finish_ungapped_prelim(batch, subject, &mut combined_prelim_hits);
+        }
     }
     combined_prelim_hits
 }
 
-/// The reap of a gapped search's subject list by the preliminary e-value, after its chunks are
-/// merged: each HSP's e-value from its preliminary score, kept in the HSP, and the HSPs over the
-/// e-value threshold dropped, in place and in order.
+/// The reap of a gapped search's subject list, after its chunks are merged: each HSP's e-value
+/// from its preliminary score, kept in the HSP, and the HSPs over the e-value threshold (under
+/// matrix-only scoring: below the raw cutoff, `PrelimReap`) dropped, in place and in order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:885-888,897-899
 /// (`s_BlastSearchEngineCore`) and :654,662-664 (`s_Blast_HSPListReapByPrelimEvalue`, :642-674)
-pub(super) fn reap_prelim_by_evalue(
-    batch: &PrelimBatch<'_>,
-    combined_prelim_hits: &mut Vec<PrelimHit>,
-) {
+pub(super) fn reap_prelim(batch: &PrelimBatch<'_>, combined_prelim_hits: &mut Vec<PrelimHit>) {
     let &PrelimBatch {
         query_eff_searchsp,
         search_karlin_ref,
         round_down_evalue_score,
-        evalue_threshold,
+        prelim_reap,
         ..
     } = batch;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:885-899
@@ -1459,19 +1481,18 @@ pub(super) fn reap_prelim_by_evalue(
     // This reap happens after preliminary gapped scoring and before the
     // traceback stream is consumed, so low preliminary scores cannot survive
     // solely because traceback later finds a high-scoring alignment.
-    combined_prelim_hits.retain_mut(|prelim| {
+    prelim_reap.reap(combined_prelim_hits, |prelim| {
         let eff_searchsp = query_eff_searchsp
             .get(prelim.context_idx as usize)
             .copied()
             .unwrap_or(0);
-        let (_, prelim_evalue) = calculate_blastn_context_statistics(
+        calculate_blastn_context_statistics(
             prelim.prelim_score,
             &search_karlin_ref[prelim.context_idx as usize].gapped,
             eff_searchsp,
             round_down_evalue_score,
-        );
-        prelim.prelim_evalue = prelim_evalue;
-        hsp_survives_evalue_reap(prelim_evalue, evalue_threshold)
+        )
+        .1
     });
 }
 
@@ -1496,7 +1517,7 @@ pub(super) fn finish_ungapped_prelim(
         percent_identity,
         search_karlin_ref,
         round_down_evalue_score,
-        evalue_threshold,
+        prelim_reap,
         query_eff_searchsp,
         cutoff_scores,
         ..
@@ -1545,7 +1566,7 @@ pub(super) fn finish_ungapped_prelim(
                 )
                 .1
             },
-            evalue_threshold,
+            prelim_reap,
         );
     }
 }

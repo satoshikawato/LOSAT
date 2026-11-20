@@ -42,8 +42,8 @@ pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:120
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/ncbi_std.h:181
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1579
-///   `matrix[i][j] = BLAST_SCORE_MIN;`
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1579 (the NULLB row and
+/// column are set to `BLAST_SCORE_MIN`)
 pub const SENTINEL_BYTE: u8 = 0;
 
 #[cfg(test)]

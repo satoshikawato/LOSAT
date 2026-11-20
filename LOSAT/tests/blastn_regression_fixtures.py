@@ -588,6 +588,22 @@ def _ungapped_cases():
 
 
 _CASES += _ungapped_cases()
+# Line RG X6 (2026-11-20): BLASTN's matrix-only scoring, reward 0 and penalty 0 (-task rmblastn is
+# blastn's defaults with them, blast_options_handle.cpp:365-370; blast_setup.c:352-367): the option
+# checks that NCBI answers with an error (exit 1 or 3), -qcov_hsp_perc, and query batches.
+_RMW = f"-query {O}/multi_query.fasta -subject {O}/multi_subject.fasta -task rmblastn -word_size 7 -evalue 1000"
+_CASES += [
+    ("rm_reward1", f"{P} -task rmblastn -reward 1 -outfmt 6", ""),
+    ("rm_gaps3_1", f"{P} -task rmblastn -gapopen 3 -gapextend 1 -outfmt 6", ""),
+    ("rm_gaps0_0", f"{P} -task rmblastn -gapopen 0 -gapextend 0 -outfmt 6", ""),
+    ("rm_template", f"{P} -task rmblastn -template_type coding -template_length 16 -outfmt 6", ""),
+    ("rm_offdiag", f"{P} -task rmblastn -off_diagonal_range 10 -outfmt 6", ""),
+    ("rm_multi", f"{_RMW} -outfmt 6", ""),
+    ("rm_qcov30", f"{_RMW} -qcov_hsp_perc 30 -outfmt 6", ""),
+    ("rm_batches", f"{B} -task rmblastn -outfmt 6", ""),
+    ("rm_batches_fmt0", f"{B} -task rmblastn -outfmt 0", ""),
+    ("rm_batches_threads4", f"{B} -task rmblastn -outfmt 6", "-num_threads 4"),
+]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 # NCBI's arguments of the cases of an approved exception that is an argument (see above).
 ORACLE_ARGV = {

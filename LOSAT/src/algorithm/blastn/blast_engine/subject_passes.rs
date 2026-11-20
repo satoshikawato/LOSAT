@@ -430,7 +430,7 @@ impl SubjectPasses<'_> {
             score_matrix,
             search_karlin_ref,
             round_down_evalue_score,
-            evalue_threshold,
+            prelim_reap,
             percent_identity,
             query_eff_searchsp,
             cutoff_scores,
@@ -474,7 +474,7 @@ impl SubjectPasses<'_> {
                             )
                             .1
                         },
-                        evalue_threshold,
+                        prelim_reap,
                     );
                     self.x_ungapped_query_coverage(hits);
                 })

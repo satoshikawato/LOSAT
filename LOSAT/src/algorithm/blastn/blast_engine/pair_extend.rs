@@ -225,6 +225,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         reduced_cutoff_scores,
         score_matrix,
         nucl_score_table,
+        exact_ungapped,
         blastn_trace_enabled,
         debug_mode,
         min_ungapped_score,
@@ -700,7 +701,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         } else {
             None
         };
-        let ungapped = if word_length < 11 {
+        let ungapped = if exact_ungapped {
             extend_hit_ungapped_exact_ncbi(
                 encoded_query_concat_blastna,
                 search_seq_packed,

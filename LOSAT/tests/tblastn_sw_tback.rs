@@ -225,7 +225,7 @@ fn the_default_mode_with_a_database_reads_the_cutoff_of_1() {
 }
 
 // A PSSM query's Smith-Waterman redo is refused at its first match, after the prolog (NCBI 2.17.0
-// fails its traceback, stops with an exception or crashes there, by the input;
+// fails, crashes, does not end or writes rows that differ from run to run, by the input;
 // `match_redo::sw_pssm_refusal`); a search without hits ends as NCBI's (exit 0, rows
 // db.x4b.pssm.*).
 #[test]

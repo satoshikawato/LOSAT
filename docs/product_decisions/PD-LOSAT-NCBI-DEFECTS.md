@@ -1666,7 +1666,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   LOSAT refuses (exit 1, "... with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by
   LOSAT's TBLASTN"). Both refusals come after the reports of the query batches before, as in 1.53.
   A match whose subject NCBI's fetch excludes (`check_oid_exclusion`: a subject that a
-  `-negative_seqidlist` keeps without a line, `seqsrc_seqdb.cpp:305-313`) and that passes the
+  `-negative_seqidlist` keeps without a line, `seqsrc_seqdb.cpp:306-314`) and that passes the
   early termination test sets the batch's status back to 0 (`blast_kappa.c:3560-3575`), so a
   failure before it neither fails the batch nor crashes its clean-up: LOSAT keeps such a list in
   the redo's stream as a marker that clears the status (`FetchMarks`,

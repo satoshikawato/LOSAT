@@ -228,7 +228,7 @@ pub struct TblastnArgs {
     pub lcase_masking: bool,
     // NCBI's flag, off by default: the Smith-Waterman redo of each match
     // (`match_redo::SmithWatermanRedo`).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:803-806
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     #[arg(long)]
     pub use_sw_tback: bool,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:339-342
@@ -1479,7 +1479,7 @@ mod tests {
                 "{extra:?}: {error}"
             );
         }
-        // NCBI blast_args.cpp:803-806, 885: `-use_sw_tback` is a flag that sets the Smith-Waterman
+        // NCBI blast_args.cpp:804-806, 885: `-use_sw_tback` is a flag that sets the Smith-Waterman
         // traceback, with every `-comp_based_stats` (the redo runs with mode 0 too,
         // blast_traceback.c:1486-1487).
         for cbs in ["0", "1", "2", "3"] {

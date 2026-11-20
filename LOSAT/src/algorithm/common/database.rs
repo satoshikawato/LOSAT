@@ -1287,11 +1287,10 @@ impl<'a> FetchExcluded<'a> {
 /// Smith-Waterman redo before it no longer fails the batch (`SwBatchStatus::excluded_at_fetch`).
 /// Where the test stops the list, nothing changes. The X-drop redo has no status, so a marker
 /// there is a list skipped. One owner of the question "was this list excluded at fetch" for
-/// every program's redo loop (TBLASTN's `stage_d_pipeline`; BLASTP's and BLASTX's loops read it
-/// the same way).
+/// every program's redo loop; TBLASTN's `stage_d_pipeline` reads it now.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:305-313
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
 #[derive(Debug, Default)]
 pub(crate) struct FetchMarks(Vec<bool>);
 

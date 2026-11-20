@@ -1,0 +1,103 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/x4/sw_zero_subjects.faa).
+           7 sequences; 1,544 total letters
+
+
+
+Query= tks_W
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63534.1 wsv294-like protein [Pasiphaea japonica whispovirus]       16.9    0.009
+BDT63520.1 wsv025-like protein [Pasiphaea japonica whispovirus]       15.0    0.028
+BDT63537.1 hypothetical protein [Pasiphaea japonica whispovirus]      14.2    0.047
+BDT63498.1 wsv343-like protein [Pasiphaea japonica whispovirus]       13.1    0.10 
+
+
+> BDT63534.1 wsv294-like protein [Pasiphaea japonica whispovirus]
+Length=211
+
+ Score = 16.9 bits (32),  Expect = 0.009, Method: Compositional matrix adjust.
+ Identities = 5/15 (33%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+
+Query  32   NIYQQENGGNKHCLF  46
+            N+ ++EN  N  C+ 
+Sbjct  88   NLDEKENPDNGACVL  102
+
+
+> BDT63520.1 wsv025-like protein [Pasiphaea japonica whispovirus]
+Length=187
+
+ Score = 15.0 bits (27),  Expect = 0.028, Method: Compositional matrix adjust.
+ Identities = 5/14 (36%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+
+Query  24  AGKSTYLKNIYQQE  37
+           A +    +NI QQ+
+Sbjct  20  ASRKKQQRNIQQQD  33
+
+
+> BDT63537.1 hypothetical protein [Pasiphaea japonica whispovirus]
+Length=319
+
+ Score = 14.2 bits (25),  Expect = 0.047, Method: Composition-based stats.
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+
+Query  61   TIVTHAGEVIEG  72
+            T++T +G  I G
+Sbjct  166  TMITFSGPDING  177
+
+
+> BDT63498.1 wsv343-like protein [Pasiphaea japonica whispovirus]
+Length=87
+
+ Score = 13.1 bits (22),  Expect = 0.10, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+
+Query  62  IVTHAGEVIEGC  73
+           +V   G+   GC
+Sbjct  1   MVEENGKYFNGC  12
+
+
+
+Lambda      K        H
+   0.320    0.135    0.418 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/x4/sw_zero_subjects.faa).
+    Posted date:  Unknown
+  Number of letters in database: 1,544
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

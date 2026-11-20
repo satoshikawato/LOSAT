@@ -1222,7 +1222,7 @@ pub fn failed_database_subject(
     match thrown {
         Some(exception) => format!(
             "database sequence {oid} has a Seq-align id whose lookup throws '{}' in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one",
-            exception.get_msg()
+            String::from_utf8_lossy(exception.get_msg())
         ),
         None => failed_database_title(oid),
     }
@@ -3797,9 +3797,9 @@ mod tests {
         let native = error.downcast::<crate::cli::NativeError>().unwrap();
         assert_eq!(native.exit, 2);
         assert!(
-            native.message.contains("DB contains no accession info."),
+            String::from_utf8_lossy(&native.message).contains("DB contains no accession info."),
             "{}",
-            native.message
+            String::from_utf8_lossy(&native.message)
         );
     }
 

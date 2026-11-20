@@ -59,7 +59,7 @@ pub(super) fn run(
         Ok(()) => 0,
         Err(failure) => match report(failure) {
             Report::Posts { lines, status } => {
-                diag.write_text(lines.as_bytes());
+                diag.write_text(&lines);
                 status
             }
             Report::Refused(reason) => diag.refuse(&reason),

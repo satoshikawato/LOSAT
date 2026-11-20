@@ -498,11 +498,14 @@ pub(super) fn index_exists(index: &Path, data: &Path) -> bool {
 /// ([`DbFile::open`]: no regular file, or one that `open` refuses).
 pub(super) fn open_files(index: &Path, data: &Path) -> Result<(DbFile, DbFile), SeqDbError> {
     let message = || {
-        SeqDbError::NotFound(format!(
-            "Error: Could not open input file ({}/{})",
-            index.display(),
-            data.display()
-        ))
+        SeqDbError::NotFound(
+            format!(
+                "Error: Could not open input file ({}/{})",
+                index.display(),
+                data.display()
+            )
+            .into(),
+        )
     };
     let index_file = DbFile::open(index).map_err(|_| message())?;
     let data_file = DbFile::open(data).map_err(|_| message())?;
@@ -602,7 +605,7 @@ impl StringIsam {
     pub fn file_names(dbname: &str, protein: bool) -> Result<(PathBuf, PathBuf), SeqDbError> {
         if dbname.is_empty() {
             return Err(SeqDbError::NotFound(
-                "Error: argument not valid".to_string(),
+                "Error: argument not valid".to_string().into(),
             ));
         }
         let mut index = format!("{dbname}.{}s", if protein { 'p' } else { 'n' });
@@ -2675,7 +2678,11 @@ impl ScanChunk {
 
 /// NCBI's `CSeqDBException(eArgErr, "Error: Unable to use ISAM index in batch mode.")`.
 fn batch_mode_error() -> SeqDbError {
-    SeqDbError::NotFound("Error: Unable to use ISAM index in batch mode.".to_string())
+    SeqDbError::NotFound(
+        "Error: Unable to use ISAM index in batch mode."
+            .to_string()
+            .into(),
+    )
 }
 
 /// One entry of a list of string ids (`CSeqDBGiList::SSiOid`): the id and its OID, set by
@@ -3263,14 +3270,14 @@ pub enum SimplifyError {
     SeqId(SeqIdError),
     /// Another exception, with its message: a string tag read as a number, an integer read from
     /// a string tag.
-    Exception(String),
+    Exception(Vec<u8>),
 }
 
 impl std::fmt::Display for SimplifyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SimplifyError::SeqId(error) => f.write_str(&error.what()),
-            SimplifyError::Exception(message) => f.write_str(message),
+            SimplifyError::SeqId(error) => f.write_str(&String::from_utf8_lossy(&error.what())),
+            SimplifyError::Exception(message) => f.write_str(&String::from_utf8_lossy(message)),
         }
     }
 }
@@ -3283,8 +3290,7 @@ fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
     match tag {
         ObjectId::Id(n) => Ok(i64::from(*n)),
         ObjectId::Str(_) => Err(SimplifyError::Exception(
-            "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str"
-                .to_string(),
+            b"CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str".to_vec(),
         )),
     }
 }
@@ -3501,7 +3507,7 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
                 out.simpler = true;
                 out.num_id = match &dbt.tag {
                     ObjectId::Str(text) => string_to_int8(text, 0)
-                        .map_err(|error| SimplifyError::Exception(error.get_msg().to_string()))?,
+                        .map_err(|error| SimplifyError::Exception(error.get_msg().to_vec()))?,
                     ObjectId::Id(n) => i64::from(*n),
                 };
                 out.id_type = SeqDbIdType::Ti;

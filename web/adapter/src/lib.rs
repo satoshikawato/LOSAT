@@ -71,16 +71,18 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 6 since a run of `-db`, which takes no subject
-/// handle and reads the database from the run's working directory that the host preopens as `.`
-/// (line WQA D12a, 2026-11-20; 5 is taken by open branches); 4 since
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 9 since a run of `-db`, which takes no subject
+/// handle and reads the database from the run's working directory, which the host preopens as
+/// `/work` (line WQA D12a, 2026-11-20; 8 is taken by an open branch); 7 since a run that fails keeps
+/// the output of the argv up to its error and drops the other outputs with the signal of stream 9
+/// (line WQA's sweep, D15, 2026-11-20; versions 5 and 6 were taken by other open branches); 4 since
 /// `losat_web2_register_inputs`, which reads the inputs of a run with `-parse_deflines`, and the
 /// signal of stream 9 for every output stream that failed (line WQA's sweep, D7, 2026-11-19); 3
 /// since the signal of stream 9, which makes the host discard a stream that failed alone after a
 /// chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    6
+    9
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {

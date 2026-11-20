@@ -906,7 +906,7 @@ fn read_batches(
             stop_error = Some(
                 crate::cli::NativeError {
                     exit: 3,
-                    message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+                    message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
                 }
                 .into(),
             );
@@ -973,7 +973,13 @@ fn no_data_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
         message.push(' ');
     }
     message.push('\n');
-    Some(crate::cli::NativeError { exit: 3, message }.into())
+    Some(
+        crate::cli::NativeError {
+            exit: 3,
+            message: message.into(),
+        }
+        .into(),
+    )
 }
 
 /// The error of a psiblast batch that `CPsiBlast` does not take (`read_psiblast_query_batches`).
@@ -987,7 +993,7 @@ fn psiblast_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
             crate::cli::NativeError {
                 exit: 3,
                 message: "BLAST engine error: PSI-BLAST only accepts one protein sequence as query\n"
-                    .to_string(),
+                    .to_string().into(),
             }
             .into(),
         ),
@@ -1293,7 +1299,7 @@ mod tests {
         assert_eq!(native.exit, 3);
         assert_eq!(
             native.message,
-            "BLAST engine error: PSI-BLAST only accepts one protein sequence as query\n"
+            b"BLAST engine error: PSI-BLAST only accepts one protein sequence as query\n"
         );
         for lengths in [&[4, 0][..], &[0][..]] {
             let alone = records(lengths);
@@ -1368,10 +1374,10 @@ mod tests {
         ] {
             let error = get_query_batch_size(Some(OsStr::new(text))).unwrap_err();
             assert_eq!(error.site().line, line, "{text:?}");
+            let what = String::from_utf8(error.what()).unwrap();
             assert!(
-                error.what().ends_with(&format!("(position {pos})\n")),
-                "{text:?}: {}",
-                error.what()
+                what.ends_with(&format!("(position {pos})\n")),
+                "{text:?}: {what}"
             );
         }
         assert_eq!(get_query_batch_size(None), Ok(0));

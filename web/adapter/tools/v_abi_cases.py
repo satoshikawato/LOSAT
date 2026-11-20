@@ -430,8 +430,16 @@ def own_search() -> list[dict]:
     The application start's error without a line end (review r2 L2): `-conffile` of a file that is
     not registered (NCBI's `Critical: (106.23) Registry file "x.ini" not found, aborting.`).
 
+    Runs whose own `-outfmt` is structured (5, 8, 11, 13; BLASTN's 17), with a query whose first
+    record has no residues (review r3 M2): the CLI's run of the structured format does not write
+    the query's `Sequence contains no data` warning, which those of outfmt 0, 6 and 7 write, so
+    stream 3 adds it after the argv's standard error; once, also in a run of two searches
+    (`-outfmt 5 -num_descriptions 5`), whose outfmt 0 writes it in the other search (review of
+    line WQA-LW, r2 L3, 2026-11-20).
+
     TBLASTX runs whose messages go nowhere (`-logfile /dev/null`, `-logfile ""`; review r3 M1):
-    stream 3 is empty, as the CLI's standard error for every format."""
+    stream 3 is empty, as the CLI's standard error for every format, also where the other formats
+    would add a query's warning to it (`-outfmt 5`, the query with an empty first record)."""
     inputs = {
         "blastp": ["-query", "tests/fasta/outfmt0/e2e_many_query.faa",
                    "-subject", "tests/fasta/outfmt0/e2e_many_subject.faa"],
@@ -498,10 +506,61 @@ def own_search() -> list[dict]:
             add(f"handler.{program}.line_length.sorthsps.warned{'.outfmt' + outfmt if outfmt else ''}", program,
                 [*handler["line_length"], *handler["sorthsps"]], outfmt, failure=False, given=warned)
     add("start.blastp.conffile_missing", "blastp", ["-conffile", "x.ini"], prolog=False)
+    arch = "tests/fasta/outfmt11"
+    empty_first = {
+        "blastn": ["-query", f"{arch}/arch_tbx_emptyfirst.fna", "-subject", f"{arch}/arch_tbx_s.fna"],
+        "tblastx": ["-query", f"{arch}/arch_tbx_emptyfirst.fna", "-subject", f"{arch}/arch_tbx_s.fna"],
+        "blastp": ["-query", f"{arch}/arch_bp_emptyfirst.faa", "-subject", f"{arch}/arch_bp_s.faa"],
+        "tblastn": ["-query", f"{arch}/arch_tbn_emptyfirst.faa", "-subject", f"{arch}/arch_tbn_s.fna"],
+        "blastx": ["-query", f"{arch}/arch_bx_emptyfirst.fna", "-subject", f"{arch}/arch_bx_s.faa"],
+    }
+    for program in FORMATS:
+        for outfmt in ("5", "8", "11", "13", *(("17",) if program == "blastn" else ())):
+            add(f"query_warnings.{program}.outfmt{outfmt}", program, [], outfmt, failure=False, given=empty_first)
+            searches[-1].update({"files": True} if outfmt == "13" else {"sam": True} if outfmt == "17" else {})
+        # A run of two searches (review r2 of 2026-11-20, L3): outfmt 6 and 7 of the argv's search
+        # add the warning, and outfmt 0's search, which writes it too, does not add it again.
+        add(f"query_warnings.{program}.outfmt5.nd5", program, ["-num_descriptions", "5"], "5", failure=False,
+            given=empty_first)
+    for name, logfile in (("devnull", "/dev/null"), ("empty", "")):
+        add(f"query_warnings.tblastx.outfmt5.logfile.{name}", "tblastx", ["-logfile", logfile], "5", failure=False,
+            given=empty_first)
     for name, logfile in (("devnull", "/dev/null"), ("empty", "")):
         add(f"logfile.tblastx.na0.{name}", "tblastx", ["-num_alignments", "0", "-logfile", logfile], failure=False)
         add(f"logfile.tblastx.line_length.warned.{name}", "tblastx", [*handler["line_length"], "-logfile", logfile],
             failure=False, given=warned)
+    return searches
+
+
+def failed_outputs() -> list[dict]:
+    """Runs that fail after the CLI wrote part of its output (line WQA's sweep, D15, 2026-11-20): the
+    run sends what the output of the argv's own `-outfmt` held, so that it is the CLI's file byte for
+    byte, and drops the other outputs (abi_v2.md §5). BLASTP with a query of two batches whose second
+    has no residues (`tests/fixtures/failed_outputs`): the CLI writes the first batch's hits, then
+    NCBI's `Sequence contains no data` ends the run, in outfmt 0, 6, 7, and 5 and `6 qseqid sseqid`
+    (the output of the argv's own, stream 4); and BLASTN with `-parse_deflines` on a record that is
+    both a query and a subject and has masks, whose outfmt 0 LOSAT refuses after its prolog, where the
+    CLI's outfmt 6 and 7 complete (their streams are dropped with the failed run's)."""
+    batch = "web/adapter/tests/fixtures/failed_outputs"
+    searches = []
+    # The archives of outfmt 13 and 14: the CLI leaves `results` empty (no side file, the first batch's report
+    # is not written before the error), and the run's archive holds that master file as an empty entry.
+    for outfmt, name in ((None, "outfmt0"), ("6", "outfmt6"), ("7", "outfmt7"), ("5", "outfmt5"),
+                         ("6 qseqid sseqid", "outfmt6_fields"), ("13", "outfmt13"), ("14", "outfmt14")):
+        searches.append({"program": "blastp",
+                         "argv": ["blastp", "-query", f"{batch}/later_batch.q.faa", "-subject", f"{batch}/later_batch.s.faa"],
+                         "cwd": str(REPO), "cases": [f"failed_outputs.blastp.later_batch.{name}"], "frozen": {},
+                         "expect": "failure", **({"outfmt": outfmt} if outfmt else {}),
+                         **({"files": True} if outfmt in ("13", "14") else {})})
+    searches.append({"program": "blastn",
+                     "argv": ["blastn", "-query", f"{batch}/later_batch.q.fna", "-subject", f"{batch}/later_batch.s.fna"],
+                     "cwd": str(REPO), "cases": ["failed_outputs.blastn.later_batch.outfmt13"], "frozen": {},
+                     "expect": "failure", "outfmt": "13", "files": True})
+    searches.append({"program": "blastn",
+                     "argv": ["blastn", "-query", "tests/fasta/outfmt0/pd_self_n.fna", "-subject", "tests/fasta/outfmt0/pd_self_n.fna",
+                              "-parse_deflines", "-dust", "yes"],
+                     "cwd": str(REPO / "LOSAT"), "cases": ["failed_outputs.blastn.pd_self.outfmt0"], "frozen": {},
+                     "expect": "failure"})
     return searches
 
 
@@ -582,6 +641,7 @@ def main() -> int:
         searches += window_masker()
         searches += own_search()
         searches += database()
+        searches += failed_outputs()
     args.out.write_text(json.dumps(searches, indent=2) + "\n")
     print(f"{len(searches)} searches -> {args.out}")
     return 0

@@ -1334,7 +1334,9 @@ mod tests {
     #[test]
     fn choice_selection_messages() {
         let message = |error| match error {
-            ProcessError::Exception(exception) => exception.get_msg().to_string(),
+            ProcessError::Exception(exception) => {
+                String::from_utf8(exception.get_msg().to_vec()).unwrap()
+            }
             ProcessError::Unsupported(message) | ProcessError::Std(message) => {
                 panic!("{message}")
             }
@@ -1375,7 +1377,7 @@ mod tests {
         assert_eq!(exception.site().kind, "CUnassignedMember::eGet");
         assert_eq!(
             exception.get_msg(),
-            "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length"
+            b"CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length"
         );
     }
 

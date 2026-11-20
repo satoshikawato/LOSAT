@@ -6,8 +6,8 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev 1c76366d1 with line PS's PS11c-3 (2026-11-15): 217 IDs cited in the tree, 131 of them in
-`CHANGELOG.md`, `changelog.d/` and `docs/`; 181 rows below. State: 151 done, 30 in progress, 0 stopped.
+As of dev be6456f32 with line PS's PS6 (2026-11-20): 224 IDs cited in the tree, 135 of them in
+`CHANGELOG.md`, `changelog.d/` and `docs/`; 183 rows below. State: 151 done, 32 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -158,6 +158,7 @@ As of dev 1c76366d1 with line PS's PS11c-3 (2026-11-15): 217 IDs cited in the tr
 | `PS5a` | PS stage 5a: psiblast's rounds of FASTA queries (-num_iterations N, convergence, the two-part description table, the PSSM files of every round) and -comp_based_stats 0, with -subject or -db, for outfmt 0, 6, 7, 10 and 20, byte for byte as NCBI BLAST+ 2.17.0. | done | #936 | changelog entry `feature-ps-ps5` |
 | `PS5b` | PS stage 5b: psiblast -in_pssm with -num_iterations other than 1 and with the PSSM files (the input PSSM written back as NCBI's object holds it, the K/A write-back, the short and long ASCII PSSM of a file), byte for byte as NCBI BLAST+ 2.17.0. | done | #973 | changelog entry `feature-ps-ps5b` |
 | `PS5c` | PS stage 5c: psiblast -searchsp and the environment variable OLD_FSC in every round (round 1, -in_pssm and the later rounds: the cutoffs and E-values without the Gumbel block), byte for byte as NCBI BLAST+ 2.17.0. | done | #1007 | changelog entry `feature-ps-ps5c` |
+| `PS6` | PS stage 6: psiblast -in_msa, -msa_master_idx and -ignore_msa_master: the PSSM that NCBI makes from a Clustal alignment (its format guess, scanner, master choice and PSSM engine options), searched as -in_pssm is, byte for byte as NCBI BLAST+ 2.17.0; the other alignment formats are refused by name (PS6b). | in progress | none | changelog entry `feature-ps-ps6` |
 | `PS7` | PS stage 7: tblastn -in_pssm (PSI-TBLASTN): tblastn's search with the PSSM's scores and Karlin-Altschul values (composition-based statistics 0, no sum statistics unless -sum_stats true, genetic code 1), -subject and -db, outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps7` |
 | `PS11` | PS stage 11 (series PR): `losat rpsblast`, NCBI BLAST+ 2.17.0 rpsblast against profile databases (makeprofiledb -dbtype rps); split into PS11a and PS11b. | in progress | none | changelog entry `feature-ps-ps11` |
 | `PS11a` | PS stage 11a: `losat rpsblast` without composition-based statistics (-comp_based_stats 0, F, f, D, d; any mode on a database without frequency ratios, as NCBI runs it) on one-volume profile databases (version 4 and 5, 26 and 28 columns, any whole scale), outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | done | #941 | changelog entry `feature-ps-ps11` |
@@ -198,6 +199,15 @@ As of dev 1c76366d1 with line PS's PS11c-3 (2026-11-15): 217 IDs cited in the tr
 | `SW` | Line SW (Nov 2026): the revision of LOSAT after its SWEBOK audit, in stages SW1-SW11: CI and configuration, records and decision registries, unsafe code, lints, duplication and cycles, large functions, test adequacy, dependencies and release integrity, engine documents. | in progress | #825, #853, #857, #865, #873, #914, #960, #885, #950, #967 | [docs/decisions/OWNER_DECISIONS.md](../../docs/decisions/OWNER_DECISIONS.md) |
 | `SW SW7` | Stage SW7: the split of the large functions (BLASTN's and TBLASTX's `search_query_batch`, then BLASTP's `run_call`) into functions in new files, one phase per PR, with the output unchanged and instruction counts within 0.1 % of dev (or the cause found and written). | in progress | #960, #968, #981, #992, #996, #1005, #1006, #1020, #1023, #1042, #1043, #1113, #1115, #1130 | [docs/architecture/engine.md](../../docs/architecture/engine.md) |
 | `SW SW8` | Stage SW8: test adequacy (damaged-input tests, coverage in the nightly run, orphan tests, the NCBI unit-case ledger) and the checkout prefix of frozen outputs replaced when comparing; follow-ups such as `losat blastdbcmd` reading a column's big-endian data file as NCBI does (DECISIONS 40), searches of databases with column files and LOSAT Web inflating compressed sources with the engine's decoders (D2, DECISIONS 44). | in progress | #885, #886, #888, #897, #925, #931, #934, #935, #945, #947, #953, #954, #965, #972, #975, #977, #980, #997, #1008 | [docs/evidence/ncbi_unit_cases/LEDGER.tsv](../../docs/evidence/ncbi_unit_cases/LEDGER.tsv) |
+
+### RG: the remaining gaps to NCBI BLAST+
+
+| ID | Meaning | State | Main pull requests | Record in this repository |
+| --- | --- | --- | --- | --- |
+| `RG` | Line RG (from 2026-11-12): the gaps that remain between LOSAT and NCBI BLAST+ 2.17.0 (options LOSAT refused, outputs, refusals), closed item by item (items X1-X13, T, D, F and others). | in progress | #1366, #1367, #1374 | external |
+| `X4` | Item X4 of line RG: `blastp -use_sw_tback` with composition-based statistics, NCBI's Smith-Waterman redo at every `-num_threads`, as NCBI's `-num_threads 1` gives it. | done | #1367 | [LOSAT/src/algorithm/blastp/blast_engine/redo_run.rs](../../LOSAT/src/algorithm/blastp/blast_engine/redo_run.rs) |
+| `X4-mt` | Item X4-mt of line RG: the speed of `-use_sw_tback`, in two parts: the redo on the search's threads, and faster Smith-Waterman score-only and start scans (the gap along the row carried alone, `pmaxsd` cells on CPUs with AVX2, forbidden cells read through one letter), every value unchanged. | in progress | #1407 (scans; the threads part on `feature/rg-x4mt`) | [LOSAT/src/core/composition_adjustment/smith_waterman.rs](../../LOSAT/src/core/composition_adjustment/smith_waterman.rs) |
+| `X4-mt K1` | Stage K1 of X4-mt: the scans' cell carries the gap along the row alone; the tests' module `before_k1` keeps the cell before it as the reference that every value is compared with. | in progress | #1407 | [LOSAT/src/core/composition_adjustment/smith_waterman_tests.rs](../../LOSAT/src/core/composition_adjustment/smith_waterman_tests.rs) |
 
 ### Plan v4 (speed and memory lines)
 

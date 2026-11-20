@@ -470,6 +470,10 @@ pub struct BlastpArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
+    /// Return only the best HSP for each non overlapping query region
+    #[arg(long)]
+    pub subject_besthit: bool,
     #[arg(long)]
     pub ungapped: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229, 276-286
@@ -844,6 +848,8 @@ pub struct ResolvedBlastpArgs {
     pub query_cov_hsp_perc: f64,
     /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
     pub culling_limit: i32,
+    /// Whether -subject_besthit was given.
+    pub subject_besthit: bool,
     pub ungapped: bool,
     /// The X-drops in bits (`word_options->x_dropoff`, `ext_options->gap_x_dropoff` and
     /// `gap_x_dropoff_final`): `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or the defaults
@@ -974,6 +980,28 @@ impl ResolvedBlastpArgs {
     /// positive (`validate_requested_blastp_support`).
     pub fn traceback_hitlist_size(&self) -> usize {
         self.traceback_hitlist
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3288-3292
+    // ```c
+    //             BlastCompo_HeapInitialize(&redoneMatches_tld[i][query_index],
+    //                                       hitParams->options->hitlist_size,
+    //                                       inclusion_ethresh);
+    // ```
+    /// The heap of one query's redone matches as the composition-based redo starts.
+    ///
+    /// With unified P-values (BLASTP's `-comp_based_stats 1u`, `2u`, `3u`) the redo ends no match
+    /// early ([`super::hsp::BlastCompoHeap::without_early_end`]): the only query whose matches NCBI's test can
+    /// end is the last one of a query batch, whose result LOSAT defines by NCBI's search with a
+    /// copy of it after it, where NCBI redoes every match of it.
+    pub(crate) fn redone_match_heap(&self) -> super::hsp::BlastCompoHeap {
+        let heap =
+            super::hsp::BlastCompoHeap::new(self.traceback_hitlist_size(), self.inclusion_ethresh);
+        if self.comp_based_stats.unified_p {
+            heap.without_early_end()
+        } else {
+            heap
+        }
     }
 
     fn compute_traceback_hitlist_size(&self) -> usize {
@@ -1268,27 +1296,69 @@ impl BlastpArgs {
         // files (`algorithm::psiblast::in_pssm`); the file as read goes to the rounds' plan
         // (`in_pssm_files`), and to the search strategy's request with `-db` (`PssmReader::strategy`).
         let mut in_pssm_file = None;
-        let psi_search = match self
+        let pssm_reader = crate::algorithm::pssm_search::in_pssm::PssmReader {
+            // The PSSM engine makes the scores of a PSSM of frequency ratios only with
+            // the options' matrix, as tblastn's (`opts.GetMatrixName()`; NCBI BLAST+
+            // 2.17.0 `-matrix BLOSUM45 -gapopen 15 -gapextend 2`: the engine's error,
+            // line RG D3-1 review 4c `out_m/` m13-m15).
+            matrix_name: &options.matrix_name,
+            strategy: self.export_search_strategy.is_some(),
+            database: self.db.is_some(),
+            archive: self.archive.as_ref(),
+            ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1319-1328
+        // ```c++
+        //         if (args.Exist(kArgMSAInputFile) && args[kArgMSAInputFile]) {
+        //             CNcbiIstream& in = args[kArgMSAInputFile].AsInputFile();
+        //             unsigned int msa_master_idx = 0;
+        //             if (args[kArgMSAMasterIndex]) {
+        //                 msa_master_idx = args[kArgMSAMasterIndex].AsInteger() - 1;
+        //             }
+        //             m_Pssm = x_CreatePssmFromMsa(in, opt, kSaveAsciiPssm,
+        //                                          msa_master_idx,
+        //                                          args[kArgIgnoreMsaMaster]);
+        //         }
+        // ```
+        // `-in_msa`'s PSSM is made first, with the matrix and gap costs that the generic search
+        // handler has set by then (`algorithm::psiblast::in_msa`); the search of it is `-in_pssm`'s.
+        let msa_read = match self
             .psiblast_pssm
             .as_ref()
-            .and_then(|pssm| pssm.in_pssm.as_deref())
+            .and_then(|pssm| pssm.in_msa.as_ref())
         {
-            Some(path) => {
-                let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
+            Some(input) => Some(crate::algorithm::psiblast::in_msa::read_in_msa(
+                input,
+                &crate::algorithm::psiblast::in_msa::MsaScoring {
+                    matrix_name: &options.matrix_name,
+                    gap_open: options.gap_open,
+                    gap_extend: options.gap_extend,
+                    save_ascii_pssm: self
+                        .psiblast_pssm
+                        .as_ref()
+                        .is_some_and(|pssm| pssm.out_ascii_pssm.is_some()),
+                },
+                pssm_reader,
+            )?),
+            None => None,
+        };
+        let pssm_read = match msa_read {
+            Some(read) => Some(read),
+            None => match self
+                .psiblast_pssm
+                .as_ref()
+                .and_then(|pssm| pssm.in_pssm.as_deref())
+            {
+                Some(path) => Some(crate::algorithm::pssm_search::in_pssm::read_in_pssm(
                     path,
-                    crate::algorithm::pssm_search::in_pssm::PssmReader {
-                        // The PSSM engine makes the scores of a PSSM of frequency ratios only with
-                        // the options' matrix, as tblastn's (`opts.GetMatrixName()`; NCBI BLAST+
-                        // 2.17.0 `-matrix BLOSUM45 -gapopen 15 -gapextend 2`: the engine's error,
-                        // line RG D3-1 review 4c `out_m/` m13-m15).
-                        matrix_name: &options.matrix_name,
-                        strategy: self.export_search_strategy.is_some(),
-                        database: self.db.is_some(),
-                        archive: self.archive.as_ref(),
-                        ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
-                    },
+                    pssm_reader,
                     diagnostics,
-                )?;
+                )?),
+                None => None,
+            },
+        };
+        let psi_search = match pssm_read {
+            Some((mut search, file)) => {
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,
@@ -1462,6 +1532,7 @@ impl BlastpArgs {
             // opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit_value(),
+            subject_besthit: self.subject_besthit,
             ungapped: self.ungapped,
             x_drop_ungapped_bits: self
                 .xdrop_ungap

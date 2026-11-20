@@ -916,6 +916,7 @@ mod tests {
                 s_len: 999,
                 failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
                 passed: None,
+                subject_besthit: false,
             };
             let mut scratch = XScratch::new(false);
             for (f, s_frame) in s_frames.iter().enumerate() {

@@ -171,12 +171,6 @@ impl TblastnDatabase {
         shared::PsiSearchReadFailure::of(&self.db)
     }
 
-    /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block
-    /// (`shared::check_statistics_count`).
-    pub(super) fn check_statistics_count(&self) -> Result<()> {
-        shared::check_statistics_count(&self.db, PROGRAM)
-    }
-
     /// What the `Database:` lines of the pairwise report show
     /// (`algorithm::common::database::pairwise_database`).
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {

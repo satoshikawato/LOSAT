@@ -460,12 +460,24 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     } = run;
     // Whether every format is the archive, which NCBI writes without the prefetch (`render`).
     let only_archive = outputs.only_archive();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+    // ```c++
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
+    // Whether the queries' warnings that a structured first format does not write go to the
+    // caller's receivers of the later formats that write them, each format's to its own
+    // (`ReportOutputs::later_warnings`).
+    let keeps_later = outputs.keeps_later_query_warnings();
     let ReportOutputs {
         formats,
         diagnostics,
+        later_warnings,
         hits: hits_sink,
         observer,
     } = outputs;
+    let mut later = later_warnings.as_deref_mut().filter(|_| keeps_later);
     // The caller's receivers of the side files of outfmt 13 and 14.
     let side_sinks: Vec<_> = formats
         .iter()
@@ -534,6 +546,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         wants_hits,
         only_archive,
         diagnostics,
+        &mut later,
         observer,
     );
     // What the hold kept. A run that ends: every format, in order. A run that stops with an
@@ -561,12 +574,38 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     Ok(())
 }
 
+/// The run's diagnostics as the writer of a query batch's shared warnings for one format
+/// (`write_run`): it tells whether the format wrote any text there, which marks the batch as
+/// warned whatever became of the format's report afterwards. No NCBI counterpart: NCBI's
+/// command line writes one format. It counts any text, not only the queries' warnings: the
+/// formats that share the diagnostics in LOSAT Web (outfmt 6 and 7 of the other search) run the
+/// same checks and stop at the same row (review r3 of 2026-11-20, L1).
+struct SharedWarnings<'a> {
+    diagnostics: &'a mut dyn Write,
+    wrote: bool,
+}
+
+impl Write for SharedWarnings<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let written = self.diagnostics.write(bytes)?;
+        self.wrote |= written > 0;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.diagnostics.flush()
+    }
+}
+
 /// `report_batches` from the prologs to the epilogs, into `writers` (each format's, behind the
 /// hold of a run that holds its formats) and `documents` (the writer of each XML2 or JSON
 /// document): whatever ends it, `report_batches` then ends the hold. `refusals` say what a
 /// refusal of each format's checks does (`FormatRefusal`): a format that fails alone writes
 /// nothing after it, and the first format that is still written writes the warnings that the
 /// formats share. `only_archive`: every format is the archive (`ReportOutputs::only_archive`).
+/// `later`: by format, the receivers of the queries' warnings that the first format does not write
+/// (a structured format): each later format that writes them writes its own there, as the
+/// command line's run of it writes them to standard error (`ReportOutputs::later_warnings`).
 /// Returns the run's hit list (`wants_hits`) and the database sequences it names.
 #[allow(clippy::too_many_arguments)]
 fn write_run(
@@ -577,6 +616,7 @@ fn write_run(
     wants_hits: bool,
     only_archive: bool,
     diagnostics: &mut &mut (dyn Write + Send),
+    later: &mut Option<&mut [Vec<u8>]>,
     observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
 ) -> Result<(
     Vec<crate::report::pairwise::PairwiseHit>,
@@ -799,7 +839,15 @@ fn write_run(
         //             	ITERATE(CSearchResultSet, result, *results) {
         //                	    formatter.PrintOneResultSet(**result, query_batch);
         // ```
-        // Whether a format of the batch wrote the warnings that the formats share.
+        // Whether a format of the batch wrote the warnings that the formats share. This is
+        // LOSAT's own: NCBI's command line writes one format. The first format that is written
+        // writes them, and the diagnostics hold that format's standard error of the batch. The
+        // batch is warned once a format wrote its report of the batch whole or wrote any text to
+        // the diagnostics, also where its report then stopped (it failed alone after a query's
+        // warning: the formats after it do not write that warning again). A format that its
+        // checks refused before its first text there leaves the warnings to the next
+        // (`SharedWarnings`; line WQA, 2026-11-20: the flag was read off the refusal, so a format
+        // that stopped after a warning left the next one to write the same warning again).
         let mut warned = false;
         for (index, ((writer, options), refusal)) in writers
             .iter_mut()
@@ -816,14 +864,29 @@ fn write_run(
             // 9; the only text that their writer writes to it, `seqalign::write_blastx_seqalign`)
             // at every format, as the other programs write them.
             let mut quiet = io::sink();
-            let seq_annot = app::ReportFormat::from_number(i32::from(options.outfmt))
+            let report_format = app::ReportFormat::from_number(i32::from(options.outfmt));
+            let seq_annot = report_format
                 .and_then(crate::report::serial::SerialFormat::of)
                 .is_some();
+            let writes = report_format.is_none_or(app::ReportFormat::writes_query_warnings);
             let warns = !warned;
-            let warnings: &mut dyn Write = if warns || seq_annot {
-                &mut *diagnostics
-            } else {
-                &mut quiet
+            // A later format that writes the queries' warnings where the first, a structured
+            // one, does not, writes its standard error of the batch's reports to its own
+            // receiver (`later`): one whose report stops has given what it wrote until then, and
+            // the caller keeps each line of the formats' texts once (line WQA's sweep, D3 review
+            // r3, 2026-11-19).
+            let own_later = later
+                .as_deref_mut()
+                .and_then(|later| later.get_mut(index))
+                .filter(|_| writes);
+            let mut shared = SharedWarnings {
+                diagnostics: &mut *diagnostics,
+                wrote: false,
+            };
+            let warnings: &mut dyn Write = match (warns || seq_annot, own_later) {
+                (true, _) => &mut shared,
+                (false, Some(later)) => later,
+                _ => &mut quiet,
             };
             // The values of a custom tabular field list are each format's (`reported_batch`
             // read the first format's).
@@ -864,16 +927,15 @@ fn write_run(
                         names,
                     },
                     writer,
-                    &mut *diagnostics,
+                    &mut shared,
                 )
                 .map_err(archive_error)
                 .and_then(|()| writer.flush().map_err(output_error));
                 // An error of the format's report of the batch fails the call, or this format
                 // alone (`FormatRefusal`), which writes nothing in the later batches. The
                 // archive, as the first format, takes the place of the warnings' writer.
-                if refusal.check(archived)? {
-                    warned |= warns;
-                }
+                let written = refusal.check(archived)?;
+                warned |= warns && (written || shared.wrote);
                 continue;
             }
             let mut probe = observer
@@ -905,10 +967,11 @@ fn write_run(
             .and_then(|()| writer.flush().map_err(output_error));
             // An error of the format's report of the batch fails the call, or this format alone
             // (`FormatRefusal`), which writes nothing in the later batches.
-            refusal.check(rendered)?;
+            let written = refusal.check(rendered)?;
             // A format refused by its checks wrote no warning (they come before its warnings and
-            // rows, `report::render_queries_with`).
-            warned |= warns && !refusal.refused();
+            // rows, `report::render_queries_with`); one whose report stopped after a warning
+            // wrote it.
+            warned |= warns && (written || shared.wrote);
         }
         first_hsp += match &hits {
             Some(hits) => hits.len(),

@@ -440,11 +440,14 @@ fn the_records_of_ncbis_reader_search_as_blastxs_reader_reads_them() {
             let (ok, output, stderr) = inputs.cli("6", extra);
             let run = inputs.write(&["6"], extra);
             // The api reads the files before any report: a reader error comes with no output.
-            if let Err(Error::Input(error)) = &run.result {
+            if let Err(error @ Error::Input(_)) = &run.result {
                 // A first line that NCBI may fetch as a Seq-id: LOSAT Web's `register` refuses
                 // it (NCBI's reader with its data loaders); BLASTX's reader reads the line.
                 if query.contains("/seqid3.") || subject.contains("/seqid3.") {
-                    assert!(error.contains("data loader"), "{query} {subject}: {error}");
+                    assert!(
+                        error.to_string().contains("data loader"),
+                        "{query} {subject}: {error}"
+                    );
                     continue;
                 }
                 if ok {
@@ -466,14 +469,14 @@ fn the_records_of_ncbis_reader_search_as_blastxs_reader_reads_them() {
                 Ok(()) => ok && outputs[0] == output && diagnostics == stderr,
                 Err(error) => {
                     !ok && diagnostics == stderr[..diagnostics.len().min(stderr.len())]
-                        && error_is_in_stderr(error.message(), &stderr)
+                        && error_is_in_stderr(&error.to_string(), &stderr)
                 }
             };
             if !same {
                 differences.push(format!(
                     "{query} {subject} {extra:?}: CLI ok={ok} stderr={:?}; the api {:?} diagnostics={:?}",
                     String::from_utf8_lossy(&stderr),
-                    result.as_ref().map_err(|e| e.message()),
+                    result.as_ref().map_err(|e| e.to_string()),
                     String::from_utf8_lossy(&diagnostics),
                 ));
             }
@@ -803,7 +806,7 @@ fn errors_of_the_ranges_follow_the_command_line() {
             } = inputs.write(&FORMATS, &extra);
             let error = result.expect_err(&context);
             assert!(
-                matches!(error, Error::Search(_)) && error.message().contains(message),
+                matches!(error, Error::Search(_)) && error.to_string().contains(message),
                 "{context}: {error}"
             );
             for (index, outfmt) in FORMATS.iter().enumerate() {
@@ -814,9 +817,7 @@ fn errors_of_the_ranges_follow_the_command_line() {
                     "{context}: outfmt {outfmt} differs from the CLI"
                 );
                 assert_eq!(
-                    String::from_utf8_lossy(
-                        &[&diagnostics[..], error.message().as_bytes()].concat()
-                    ),
+                    String::from_utf8_lossy(&[&diagnostics[..], error.message()].concat()),
                     String::from_utf8_lossy(&stderr),
                     "{context}: outfmt {outfmt}'s warnings and error"
                 );

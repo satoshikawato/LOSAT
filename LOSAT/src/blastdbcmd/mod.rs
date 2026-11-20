@@ -334,12 +334,12 @@ fn open_database(
 /// refusal.
 fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
     if let Some(exception) = error.ncbi_exception() {
-        diag.post(&format!("Error: {}", exception.what()));
+        diag.post_bytes(&[b"Error: ".as_slice(), &exception.what()].concat());
         return 255;
     }
     match error.ncbi_message() {
         Some(text) => {
-            diag.post(&format!("BLAST Database error: {text}"));
+            diag.post_bytes(&[b"BLAST Database error: ".as_slice(), &text].concat());
             2
         }
         None => diag.refuse(&refusal(&error.to_string())),

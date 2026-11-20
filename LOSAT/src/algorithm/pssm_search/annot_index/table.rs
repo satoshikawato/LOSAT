@@ -5,10 +5,12 @@
 
 use std::collections::HashMap;
 
+use super::bitmagic::{self, BitVector, Fail};
 use super::range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use super::view::V;
 use super::{Event, Indexer, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
+use crate::utils::lower_bound::lower_bound_by;
 
 /// A good feature table's `num-rows` above which NCBI's index depends on the machine's memory
 /// (`x_InitFeatTable` makes an annotation object of about 135 bytes per row: 10,000,000 rows take
@@ -182,6 +184,8 @@ pub(super) struct Caches {
     size: HashMap<usize, u64>,
     /// `GetIntSize()` of each `int-delta`'s data asked (`Index::int_size`).
     int_size: HashMap<usize, u64>,
+    /// The vector of each `BVector-data` decoded (`Indexer::bit_vector`), or why it was not.
+    bvector: HashMap<usize, Result<BitVector, Fail>>,
 }
 
 fn address(value: V<'_>) -> usize {
@@ -726,6 +730,7 @@ impl Indexer<'_> {
                     Err(Stop::Exception(e)) => {
                         self.ncbi_catch(&e, "Bad 'Seq-table location' column")
                     }
+                    Err(Stop::Std(what)) => self.std_catch(what, "Bad 'Seq-table location' column"),
                     Err(other) => return Err(other),
                 }
             }
@@ -824,6 +829,9 @@ impl Indexer<'_> {
                         Err(Stop::Exception(e)) => {
                             self.ncbi_catch(&e, "Bad 'Sorted, max length' column")
                         }
+                        Err(Stop::Std(what)) => {
+                            self.std_catch(what, "Bad 'Sorted, max length' column")
+                        }
                         Err(other) => return Err(other),
                     }
                 }
@@ -861,6 +869,33 @@ impl Indexer<'_> {
         for line in lines.split_inclusive(|&byte| byte == b'\n') {
             self.posts.post(crate::report::diag_log::ERROR, line);
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:560-565, 580-584
+    // ```c++
+    // #define STD_CATCH(message)                                    \
+    //     catch (NCBI_NS_STD::exception& e) {                       \
+    //         NCBI_NS_NCBI::CNcbiDiag()                             \
+    //             << NCBI_NS_NCBI::Error                            \
+    //             << "[" << message << "] Exception: " << e.what(); \
+    //     }
+    // ...
+    // #define NCBI_CATCH(message)                                   \
+    //     catch (NCBI_NS_NCBI::CException& e) {                     \
+    //         NCBI_REPORT_EXCEPTION(message, e);                    \
+    //     }                                                         \
+    //     STD_CATCH(message)
+    // ```
+    /// `NCBI_CATCH(title)` of a `std::exception` whose `what()` is `what`: `Error: [<program>]
+    /// [<title>] Exception: <what>` (line RG D3-1 `bm/` cases m12, m13: BitMagic's
+    /// `BM::Invalid serialization format`).
+    fn std_catch(&mut self, what: &str, title: &str) {
+        let line = crate::ncbi_exception::error_post_line(
+            None,
+            Some(self.program),
+            format!("[{title}] Exception: {what}").as_bytes(),
+        );
+        self.posts.post(crate::report::diag_log::ERROR, line);
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1028-1170 (`x_InitFeatTableKeys`)
@@ -1440,9 +1475,22 @@ impl Indexer<'_> {
     //     return true;
     // }
     // ```
-    // A bit-bvector is BitMagic's serialized vector, which `GetBitVector()` decodes from the raw
-    // bytes without a check (BVector_data.cpp:64-72): refused. An `int-scaled` value that leaves
-    // `Int8` is a signed overflow: refused.
+    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:474-484
+    // ```c++
+    // template<class Arr, class Row, class Int>
+    // static inline
+    // bool sx_TryGet(const Arr& arr, Row row, Int& v)
+    // {
+    //     if ( row >= arr.size() ) {
+    //         return false;
+    //     }
+    //     v = arr[row];
+    //     return true;
+    // }
+    // ```
+    // A bit-bvector is BitMagic's serialized vector, which `GetBitVector()` decodes at its first
+    // value (`Indexer::bit_vector`); its row is cast to BitMagic's 32-bit `size_type` first. An
+    // `int-scaled` value that leaves `Int8` is a signed overflow: refused.
     /// `x_TryGetInt8(row, v, type_name)` of the multi-data `data`, one level: its value, or the
     /// multi-data inside it to read first (`Get`).
     fn x_try_get_int8<'v>(
@@ -1462,7 +1510,15 @@ impl Indexer<'_> {
                 let shifted = u32::from(byte) << (row % 8);
                 Some(i64::from(shifted & 0x80 != 0))
             }
-            "bit-bvector" => return Err(Stop::Refuse(Refusal::BitVector)),
+            "bit-bvector" => {
+                let vector = self.bit_vector(value)?;
+                let row = row as u32;
+                if row < vector.size() {
+                    Some(i64::from(vector.get_bit(row).map_err(query_stop)?))
+                } else {
+                    None
+                }
+            }
             "int1" => usize::try_from(row)
                 .ok()
                 .and_then(|row| value.octets().get(row))
@@ -1728,7 +1784,7 @@ impl Indexer<'_> {
         DeltaNext::Sum(value)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-581
+    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-580
     // ```c++
     // size_t CSeqTable_sparse_index::GetIndexAt(size_t row) const
     // {
@@ -1768,75 +1824,144 @@ impl Indexer<'_> {
     //     case e_Bit_set_bvector:
     //     {
     //         const bm::bvector<>& bv = GetBit_set_bvector().GetBitVector();
-    //         ...
+    //         auto bv_row = static_cast<bm::bvector<>::size_type>(row);
+    //         if ( row >= bv.size()  ||  !bv.get_bit(bv_row) ) {
+    //             return kSkipped;
+    //         }
+    //         return row == 0 ? 0 : bv.count_range(0, bv_row - 1);
     //     }
+    //     default:
+    //         return kSkipped;
+    //     }
+    // }
     // ```
-    // `x_GetBitSetCache(byte_index)` counts the set bits of the bytes before it (in blocks of
-    // 256, :180-224); `x_FindDeltaSum(row)` (`USE_DELTA_CACHE` not defined, :232, 292-426) finds
-    // the first `indexes-delta` element whose prefix sum reaches `row`: that element when the sum
-    // is `row`, else none (`kInvalidRow`, `kSkipped`). `lower_bound` is libstdc++'s halving search,
-    // also on indexes that are not sorted. A `bit-set-bvector` is BitMagic data (refused).
-    /// `GetIndexAt(row)`: the data index of `row`, `None` for `kSkipped`.
+    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:377-405
+    // (`CIndexDeltaSumCache::FindDeltaSum`), 306-360 (`x_FindDeltaSum2`; `USE_DELTA_CACHE` is not
+    // defined, line 232), 180-225 (`x_GetBitSetCache`); include/objects/seqtable/
+    // SeqTable_sparse_index.hpp:96-97 (`kSkipped` and `kInvalidRow` are both `size_t(0)-1`).
+    // `x_FindDeltaSum(row)` is the first index whose sum of the deltas up to it reaches `row`, when
+    // that sum is `row`, else `kInvalidRow`. The deltas are `unsigned` (`TIndexes_delta`), so the
+    // sums never decrease, and the blocks that NCBI's cache fills give that index whatever rows
+    // were asked before. `x_GetBitSetCache(b)` is the number of set bits in the bytes before byte
+    // `b`. The `indexes` are `unsigned` in the order of the data, which nothing checks: the index
+    // found is the one NCBI's `lower_bound` finds (`utils::lower_bound`).
+    // A `bit-set-bvector` is BitMagic data, decoded at its first index (`Indexer::bit_vector`).
+    /// `CSeqTable_sparse_index::GetIndexAt(row)`: the index in the column's data of the row's
+    /// value, `None` for a row without one (`kSkipped`).
     fn sparse_index_at(&mut self, sparse: V<'_>, row: u64) -> Result<Option<u64>, Stop> {
         let (variant, value) = sparse.choice();
-        match variant {
+        Ok(match variant {
             "indexes" => {
+                // The `unsigned` elements compared with the `size_t` row.
                 let len = value.len();
-                let (mut first, mut count) = (0usize, len);
-                while count > 0 {
-                    let half = count >> 1;
-                    let middle = first + half;
-                    if (value.int_in(middle) as u64) < row {
-                        first = middle + 1;
-                        count = count - half - 1;
-                    } else {
-                        count = half;
-                    }
-                }
-                Ok((first < len && value.int_in(first) as u64 == row).then_some(first as u64))
+                let at = lower_bound_by(0, len, |i| (value.int_in(i) as u64) < row);
+                (at < len && value.int_in(at) as u64 == row).then_some(at as u64)
             }
             "indexes-delta" => {
-                let key = address(value);
-                let sums = self.caches.index_delta.entry(key).or_insert_with(|| {
-                    let mut sum = 0u64;
-                    (0..value.len())
-                        .map(|i| {
-                            sum = sum.wrapping_add(value.int_in(i) as u64);
-                            sum
-                        })
-                        .collect()
-                });
-                let at = sums.partition_point(|&sum| sum < row);
-                Ok((sums.get(at) == Some(&row)).then_some(at as u64))
+                let sums = self
+                    .caches
+                    .index_delta
+                    .entry(address(value))
+                    .or_insert_with(|| {
+                        let mut sum = 0u64;
+                        value
+                            .ints()
+                            .map(|delta| {
+                                sum = sum.wrapping_add(delta as u64);
+                                sum
+                            })
+                            .collect()
+                    });
+                let at = lower_bound_by(0, sums.len(), |i| sums[i] < row);
+                (at < sums.len() && sums[at] == row).then_some(at as u64)
             }
             "bit-set" => {
                 let bytes = value.octets();
-                let Some((byte_index, &byte)) = usize::try_from(row / 8)
-                    .ok()
-                    .and_then(|i| bytes.get(i).map(|byte| (i, byte)))
+                let Some(byte_index) = usize::try_from(row / 8).ok().filter(|&i| i < bytes.len())
                 else {
                     return Ok(None);
                 };
-                let bit_index = (row % 8) as u32;
-                if (u32::from(byte) << bit_index) & 0x80 == 0 {
+                let byte = u32::from(bytes[byte_index]);
+                // The most significant bit is row 0 of the byte.
+                let bit = (row % 8) as u32;
+                if (byte << bit) & 0x80 == 0 {
                     return Ok(None);
                 }
-                let key = address(value);
-                let before = self.caches.bit_set.entry(key).or_insert_with(|| {
-                    let mut count = 0u64;
-                    std::iter::once(0)
-                        .chain(bytes.iter().map(|byte| {
-                            count += u64::from(byte.count_ones());
-                            count
-                        }))
-                        .collect()
-                });
-                let in_byte = (u32::from(byte) >> (8 - bit_index)).count_ones();
-                let before = before.get(byte_index).copied().unwrap_or_default();
-                Ok(Some(before + u64::from(in_byte)))
+                let before = self
+                    .caches
+                    .bit_set
+                    .entry(address(value))
+                    .or_insert_with(|| {
+                        let mut count = 0u64;
+                        bytes
+                            .iter()
+                            .map(|&b| {
+                                let before = count;
+                                count += u64::from(b.count_ones());
+                                before
+                            })
+                            .collect()
+                    });
+                Some(before[byte_index] + u64::from((byte >> (8 - bit)).count_ones()))
             }
-            _ => Err(Stop::Refuse(Refusal::BitVector)),
+            "bit-set-bvector" => {
+                let vector = self.bit_vector(value)?;
+                if row >= u64::from(vector.size())
+                    || !vector.get_bit(row as u32).map_err(query_stop)?
+                {
+                    return Ok(None);
+                }
+                Some(match row {
+                    0 => 0,
+                    _ => vector.count_to(row as u32 - 1).map_err(query_stop)?,
+                })
+            }
+            _ => None,
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/include/objects/seqtable/BVector_data.hpp:74-80
+    // ```c++
+    //     // return bvector object, create it if necessary from serialized data
+    //     const bm::bvector<>& GetBitVector(void) const {
+    //         if ( !m_BitVector ) {
+    //             x_CreateBitVector();
+    //         }
+    //         return *m_BitVector;
+    //     }
+    // ```
+    // `x_CreateBitVector` (BVector_data.cpp:73-82, quoted in `bitmagic`) decodes the data into a
+    // vector of the `size` member; a throw leaves no vector, and the next value decodes the data
+    // again and throws again (`bm/SPEC.md` §0), as the cached failure here does.
+    /// `GetBitVector()` of the `BVector-data` `value`: its vector (`bitmagic::decode`, once per
+    /// `BVector-data`), NCBI's `std::logic_error` (`BM::Invalid serialization format`), or LOSAT's
+    /// refusal of data that NCBI decodes outside BitMagic's checked form.
+    fn bit_vector(&mut self, value: V<'_>) -> Result<&BitVector, Stop> {
+        let decoded = self
+            .caches
+            .bvector
+            .entry(address(value))
+            .or_insert_with(|| {
+                bitmagic::decode(
+                    value.field("size").int() as u32,
+                    value.field("data").octets(),
+                )
+            });
+        match decoded {
+            Ok(vector) => Ok(vector),
+            Err(Fail::Invalid) => Err(Stop::std_exception(bitmagic::INVALID)),
+            Err(Fail::Refuse(_)) => Err(Stop::Refuse(Refusal::BitVector)),
         }
+    }
+}
+
+/// The refusal of a query (`BitVector::get_bit`, `count_to`) that reaches a block that NCBI keeps
+/// as a GAP block that is not one, at the row that NCBI's index asks: NCBI reads such a block only
+/// there, and its answer may depend on the build of BitMagic (`bitmagic::Rule::GapSearch`).
+fn query_stop(fail: Fail) -> Stop {
+    match fail {
+        Fail::Invalid => Stop::std_exception(bitmagic::INVALID),
+        Fail::Refuse(_) => Stop::Refuse(Refusal::BitVector),
     }
 }
 

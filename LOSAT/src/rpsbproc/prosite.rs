@@ -66,244 +66,12 @@ pub(crate) const HOST_DEPENDENT_BYTES: u64 = 1 << 30;
 /// fails on every host and throws `std::bad_alloc`.
 pub(crate) const USER_SPACE_BYTES: u64 = 1 << 47;
 
-/// How NCBI's `GetMinimalXMap` (or the `push_back` of the text into its string) ends instead of
-/// returning.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MapEnd {
-    /// An exception of libstdc++, by its `what()`: `LENGTH_ERROR` or `BAD_ALLOC`.
-    Throw(&'static str),
-    /// An allocation below `USER_SPACE_BYTES` while NCBI holds this many bytes for the string
-    /// (its old buffer and the new one), `HOST_DEPENDENT_BYTES` or more.
-    HostDependent(u64),
-}
-
-/// `what()` of the `std::length_error` of `_M_check_length` in `append` (the length passes
-/// `max_size()`).
-pub(crate) const LENGTH_ERROR: &str = "basic_string::_M_replace_aux";
-
-/// `what()` of `std::bad_alloc` (an allocation of `USER_SPACE_BYTES` or more).
-pub(crate) const BAD_ALLOC: &str = "std::bad_alloc";
-
-/// `operator new(bytes)` of NCBI's for a string while `held` bytes of its old buffer live: one
-/// allocation of `USER_SPACE_BYTES` or more throws on every host (DECISIONS 37); below it, a total
-/// of `HOST_DEPENDENT_BYTES` or more is the host's (DECISIONS 40).
-fn allocate_string(held: u64, bytes: u64) -> Result<(), MapEnd> {
-    if bytes >= USER_SPACE_BYTES {
-        Err(MapEnd::Throw(BAD_ALLOC))
-    } else if held.saturating_add(bytes) >= HOST_DEPENDENT_BYTES {
-        Err(MapEnd::HostDependent(held.saturating_add(bytes)))
-    } else {
-        Ok(())
-    }
-}
-
-/// The length and capacity of a `std::string` of libstdc++ (the C++11 ABI) whose bytes LOSAT
-/// does not need: `GetMinimalXMap`'s `minMap` and the text that `MotifCheck` builds in it.
-/// `max_size()` is 2^63 - 1: NCBI's rpsbproc 0.5.1 is C++20 code built by GCC 13 (the
-/// distributed binary 13.2.0, Bioconda's 13.4.0; review 2 oracle O1), and in C++20 libstdc++ does
-/// not declare `basic_string<char>` an extern template, so `append` and its `max_size()` are
-/// compiled into the binary from the headers below, whatever `libstdc++.so` it loads (review 2
-/// oracle O2: map lengths of 2^62 to 2^63 - 1 throw `std::bad_alloc`; R20, 2^63, throws
-/// `length_error`).
-// libstdc++ (GCC 13): bits/basic_string.tcc:962-969
-// ```c++
-//   // The explicit instantiation definitions in src/c++11/string-inst.cc and
-//   // src/c++17/string-inst.cc only instantiate the members required for C++17
-//   // and earlier standards (so not C++20's starts_with and ends_with).
-//   // Suppress the explicit instantiation declarations for C++20, so C++20
-//   // code will implicitly instantiate std::string and std::wstring as needed.
-// # if __cplusplus <= 201703L && _GLIBCXX_EXTERN_TEMPLATE > 0
-//   extern template class basic_string<char>;
-// ```
-// libstdc++ (GCC 13): bits/alloc_traits.h:571-578
-// ```c++
-//       max_size(const allocator_type& __a __attribute__((__unused__))) noexcept
-//       {
-// #if __cplusplus <= 201703L
-// 	return __a.max_size();
-// #else
-// 	return size_t(-1) / sizeof(value_type);
-// #endif
-//       }
-// ```
-// (`basic_string::max_size()` is `(_Alloc_traits::max_size(...) - 1) / 2`, below: (2^64 - 2) / 2.)
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CxxString {
-    pub(crate) len: u64,
-    /// `capacity()`: the bytes `0..=capacity` are NCBI's buffer (`_M_local_buf[16]` while it
-    /// is 15).
-    pub(crate) capacity: u64,
-}
-
-impl CxxString {
-    const LOCAL_CAPACITY: u64 = 15;
-    const MAX_SIZE: u64 = (1 << 63) - 1;
-
-    /// An empty string (`string minMap(k_strEmptyString)`).
-    pub(crate) fn new() -> Self {
-        CxxString {
-            len: 0,
-            capacity: Self::LOCAL_CAPACITY,
-        }
-    }
-
-    // libstdc++ (GCC 13): bits/basic_string.tcc:139-160
-    // ```c++
-    //   _M_create(size_type& __capacity, size_type __old_capacity)
-    //   {
-    //     // _GLIBCXX_RESOLVE_LIB_DEFECTS
-    //     // 83.  String::npos vs. string::max_size()
-    //     if (__capacity > max_size())
-    // 	std::__throw_length_error(__N("basic_string::_M_create"));
-    //
-    //     // The below implements an exponential growth policy, necessary to
-    //     // meet amortized linear time requirements of the library: see
-    //     // http://gcc.gnu.org/ml/libstdc++/2001-07/msg00085.html.
-    //     if (__capacity > __old_capacity && __capacity < 2 * __old_capacity)
-    // 	{
-    // 	  __capacity = 2 * __old_capacity;
-    // 	  // Never allocate a string bigger than max_size.
-    // 	  if (__capacity > max_size())
-    // 	    __capacity = max_size();
-    // 	}
-    //
-    //     // NB: Need an array of char_type[__capacity], plus a terminating
-    //     // null char_type() element.
-    //     return _S_allocate(_M_get_allocator(), __capacity + 1);
-    //   }
-    // ```
-    // (The callers never ask for more than `max_size()`: `append` checks the length first.) The
-    // callers (`reserve`, `_M_mutate`) free the old buffer after the copy into the new one, so
-    // both live at the allocation.
-    fn create(&mut self, mut capacity: u64) -> Result<(), MapEnd> {
-        if capacity > self.capacity && capacity < 2 * self.capacity {
-            capacity = (2 * self.capacity).min(Self::MAX_SIZE);
-        }
-        allocate_string(self.heap_bytes(), capacity + 1)?;
-        self.capacity = capacity;
-        Ok(())
-    }
-
-    /// The bytes of the string's buffer on the heap: none while it is the local buffer.
-    pub(crate) fn heap_bytes(&self) -> u64 {
-        if self.capacity > Self::LOCAL_CAPACITY {
-            self.capacity + 1
-        } else {
-            0
-        }
-    }
-
-    // libstdc++ (GCC 13): bits/basic_string.tcc:305-320
-    // ```c++
-    //     reserve(size_type __res)
-    //     {
-    //       const size_type __capacity = capacity();
-    //       // _GLIBCXX_RESOLVE_LIB_DEFECTS
-    //       // 2968. Inconsistencies between basic_string reserve and
-    //       // vector/unordered_map/unordered_set reserve functions
-    //       // P0966 reserve should not shrink
-    //       if (__res <= __capacity)
-    // 	return;
-    //
-    //       pointer __tmp = _M_create(__res, __capacity);
-    //       this->_S_copy(__tmp, _M_data(), length() + 1);
-    //       _M_dispose();
-    //       _M_data(__tmp);
-    //       _M_capacity(__res);
-    //     }
-    // ```
-    // (GCC before 11 also shrinks; `minMap` is empty and local when `GetMinimalXMap` reserves,
-    // so both give this.)
-    fn reserve(&mut self, res: u64) -> Result<(), MapEnd> {
-        if res <= self.capacity {
-            return Ok(());
-        }
-        self.create(res)
-    }
-
-    // libstdc++ (GCC 13): bits/basic_string.tcc:451-468
-    // ```c++
-    //     _M_replace_aux(size_type __pos1, size_type __n1, size_type __n2,
-    // 		   _CharT __c)
-    //     {
-    //       _M_check_length(__n1, __n2, "basic_string::_M_replace_aux");
-    //
-    //       const size_type __old_size = this->size();
-    //       const size_type __new_size = __old_size + __n2 - __n1;
-    //
-    //       if (__new_size <= this->capacity())
-    // 	{
-    // 	  ...
-    // 	}
-    //       else
-    // 	this->_M_mutate(__pos1, __n1, 0, __n2);
-    // ```
-    // libstdc++ (GCC 13): bits/basic_string.h:397-401,1084-1085,1487-1488
-    // ```c++
-    //       _M_check_length(size_type __n1, size_type __n2, const char* __s) const
-    //       {
-    // 	if (this->max_size() - (this->size() - __n1) < __n2)
-    // 	  __throw_length_error(__N(__s));
-    //       }
-    //       ...
-    //       max_size() const _GLIBCXX_NOEXCEPT
-    //       { return (_Alloc_traits::max_size(_M_get_allocator()) - 1) / 2; }
-    //       ...
-    //       append(size_type __n, _CharT __c)
-    //       { return _M_replace_aux(this->size(), size_type(0), __n, __c); }
-    // ```
-    // libstdc++ (GCC 13): bits/basic_string.tcc:326-345
-    // ```c++
-    //     _M_mutate(size_type __pos, size_type __len1, const _CharT* __s,
-    // 	      size_type __len2)
-    //     {
-    //       const size_type __how_much = length() - __pos - __len1;
-    //
-    //       size_type __new_capacity = length() + __len2 - __len1;
-    //       pointer __r = _M_create(__new_capacity, capacity());
-    //       ...
-    //       _M_dispose();
-    //       _M_data(__r);
-    //       _M_capacity(__new_capacity);
-    //     }
-    // ```
-    /// `append(n, c)`.
-    pub(crate) fn append(&mut self, n: u64) -> Result<(), MapEnd> {
-        if Self::MAX_SIZE - self.len < n {
-            return Err(MapEnd::Throw(LENGTH_ERROR));
-        }
-        let len = self.len + n;
-        if len > self.capacity {
-            self.create(len)?;
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    // libstdc++ (GCC 13): bits/basic_string.h:1561-1568
-    // ```c++
-    //       push_back(_CharT __c)
-    //       {
-    // 	const size_type __size = this->size();
-    // 	if (__size + 1 > this->capacity())
-    // 	  this->_M_mutate(__size, size_type(0), 0, size_type(1));
-    // 	traits_type::assign(this->_M_data()[__size], __c);
-    // 	this->_M_set_length(__size + 1);
-    //       }
-    // ```
-    pub(crate) fn push_back(&mut self) -> Result<(), MapEnd> {
-        if self.len + 1 > self.capacity {
-            self.create(self.len + 1)?;
-        }
-        self.len += 1;
-        Ok(())
-    }
-
-    /// `clear()`: the capacity stays.
-    pub(crate) fn clear(&mut self) {
-        self.len = 0;
-    }
-}
+// The growth of the C++ library's string and vector in NCBI's motif check (`CxxString`, `Live::grow`).
+#[path = "prosite_growth.rs"]
+mod growth;
+#[cfg(test)]
+pub(crate) use growth::{events as growth_events, BAD_ALLOC, LENGTH_ERROR};
+pub(crate) use growth::{CxxString, MapEnd};
 
 /// `CProSite::EParseError` without `eNoError`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -536,105 +304,6 @@ impl Live {
         } else {
             Ok(())
         }
-    }
-
-    /// `push_back` of records into `curr.flex` until it holds `len`: libstdc++ makes room for
-    /// twice the records it holds when it is full (one when it is empty), and frees the old
-    /// buffer after the move into the new one.
-    // libstdc++ (GCC 13): bits/stl_vector.h:1281-1293,1896-1903
-    // ```c++
-    //       push_back(const value_type& __x)
-    //       {
-    // 	if (this->_M_impl._M_finish != this->_M_impl._M_end_of_storage)
-    // 	  {
-    // 	    ...
-    // 	  }
-    // 	else
-    // 	  _M_realloc_insert(end(), __x);
-    //       }
-    //       ...
-    //       _M_check_len(size_type __n, const char* __s) const
-    //       {
-    // 	if (max_size() - size() < __n)
-    // 	  __throw_length_error(__N(__s));
-    //
-    // 	const size_type __len = size() + (std::max)(size(), __n);
-    // 	return (__len < size() || __len > max_size()) ? max_size() : __len;
-    //       }
-    // ```
-    // libstdc++ (GCC 13): bits/vector.tcc:453-459,517-518
-    // ```c++
-    //     {
-    //       const size_type __len =
-    // 	_M_check_len(size_type(1), "vector::_M_realloc_insert");
-    //       pointer __old_start = this->_M_impl._M_start;
-    //       pointer __old_finish = this->_M_impl._M_finish;
-    //       const size_type __elems_before = __position - begin();
-    //       pointer __new_start(this->_M_allocate(__len));
-    //       ...
-    //       _M_deallocate(__old_start,
-    // 		    this->_M_impl._M_end_of_storage - __old_start);
-    // ```
-    // (`max_size()` is 2^60 - 1 records; 1 GiB stops the growth long before.)
-    fn grow(&mut self, len: u64) -> Result<(), MatchError> {
-        while self.capacity < len {
-            let new = if self.capacity == 0 {
-                1
-            } else {
-                2 * self.capacity
-            };
-            self.hold(self.capacity + new + self.stacked)?;
-            self.capacity = new;
-        }
-        Ok(())
-    }
-
-    /// `stkFlexStack.push(curr)`: the copy constructor allocates the `len` records it copies.
-    // libstdc++ (GCC 13): bits/stl_vector.h:601-609
-    // ```c++
-    //       vector(const vector& __x)
-    //       : _Base(__x.size(),
-    // 	_Alloc_traits::_S_select_on_copy(__x._M_get_Tp_allocator()))
-    //       {
-    // 	this->_M_impl._M_finish =
-    // 	  std::__uninitialized_copy_a(__x.begin(), __x.end(),
-    // 				      this->_M_impl._M_start,
-    // 				      _M_get_Tp_allocator());
-    //       }
-    // ```
-    fn push(&mut self, len: u64) -> Result<(), MatchError> {
-        self.hold(self.capacity + self.stacked + len)?;
-        self.stacked += len;
-        Ok(())
-    }
-
-    /// `curr = stkFlexStack.top(); stkFlexStack.pop();` of a copy of `len` records: the
-    /// assignment allocates only when they do not fit, while the old buffer and the copy on the
-    /// stack live. (NCBI's `curr.flex` never shrinks and each copy was made from it, so its
-    /// copies always fit; this follows libstdc++ all the same.)
-    // libstdc++ (GCC 13): bits/vector.tcc:235-246
-    // ```c++
-    // 	  const size_type __xlen = __x.size();
-    // 	  if (__xlen > capacity())
-    // 	    {
-    // 	      pointer __tmp = _M_allocate_and_copy(__xlen, __x.begin(),
-    // 						   __x.end());
-    // 	      std::_Destroy(this->_M_impl._M_start, this->_M_impl._M_finish,
-    // 			    _M_get_Tp_allocator());
-    // 	      _M_deallocate(this->_M_impl._M_start,
-    // 			    this->_M_impl._M_end_of_storage
-    // 			    - this->_M_impl._M_start);
-    // 	      this->_M_impl._M_start = __tmp;
-    // 	      this->_M_impl._M_end_of_storage = this->_M_impl._M_start + __xlen;
-    // 	    }
-    // ```
-    fn pop(&mut self, len: u64) -> Result<(), MatchError> {
-        if len > self.capacity {
-            self.hold(self.capacity + len + self.stacked)?;
-            self.capacity = len;
-        }
-        self.stacked -= len;
-        Ok(())
     }
 
     /// A revisit of NCBI's that LOSAT does not make (`PatternPos::match_at`): the rest of the
@@ -1593,6 +1262,10 @@ impl ProSite {
         if start_pos >= tlen {
             return (Ok(None), false);
         }
+        #[cfg(test)]
+        if past == Past::Fail {
+            growth::events::match_starts();
+        }
         let matcher = Matcher {
             text,
             tlen,
@@ -1708,7 +1381,12 @@ impl ProSite {
         if let Ok(Some(_)) = result {
             return Ok(true);
         }
-        match self.run(text, tlen, start_pos, Past::Pass, text_heap).0 {
+        #[cfg(test)]
+        growth::events::pause(true);
+        let second = self.run(text, tlen, start_pos, Past::Pass, text_heap).0;
+        #[cfg(test)]
+        growth::events::pause(false);
+        match second {
             Ok(None) => Ok(false),
             _ => Err(MatchError::ReadPast),
         }

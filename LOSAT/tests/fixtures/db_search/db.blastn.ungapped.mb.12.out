@@ -1,0 +1,834 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "blastn"
+              },
+              "data": {
+                "int": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "nucleotide slices of two viruses"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "diags",
+          "segs": {
+            "dendiag": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "starts": [
+                  0,
+                  2000
+                ],
+                "len": 1500,
+                "strands": [
+                  "plus",
+                  "plus"
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1500
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1500
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 0
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 2884.71934794788
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 1500
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 100
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "diags",
+          "segs": {
+            "dendiag": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "starts": [
+                  0,
+                  2001
+                ],
+                "len": 1106,
+                "strands": [
+                  "plus",
+                  "plus"
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 827
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 827
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 0
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 1590.75032731957
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 1013
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 74.2333333333333
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "starts": [
+                  1106,
+                  3109
+                ],
+                "len": 345,
+                "strands": [
+                  "plus",
+                  "plus"
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 264
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 264
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 4.01042878282651e-146
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 508.276986140164
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 318
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 23.5
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "diags",
+          "segs": {
+            "dendiag": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 2
+                      }
+                    }
+                  }
+                ],
+                "starts": [
+                  773,
+                  2018
+                ],
+                "len": 627,
+                "strands": [
+                  "plus",
+                  "plus"
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 519
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 519
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 0
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 998.562424862631
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 591
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 42.3
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 2
+                      }
+                    }
+                  }
+                ],
+                "starts": [
+                  1442,
+                  2688
+                ],
+                "len": 58,
+                "strands": [
+                  "plus",
+                  "plus"
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 49
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 49
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 1.10241204442026e-21
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 94.8990672173002
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 55
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 4.36666666666667
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "blastn"
+              },
+              "data": {
+                "int": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "nucleotide slices of two viruses"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "diags",
+          "segs": {
+            "dendiag": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_2"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 3
+                      }
+                    }
+                  }
+                ],
+                "starts": [
+                  0,
+                  100
+                ],
+                "len": 800,
+                "strands": [
+                  "plus",
+                  "plus"
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 676
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 676
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 0
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 1307.46893934112
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 766
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 57.6428571428571
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_2"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 3
+                      }
+                    }
+                  }
+                ],
+                "starts": [
+                  860,
+                  960
+                ],
+                "len": 540,
+                "strands": [
+                  "plus",
+                  "plus"
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 480
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 480
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 0
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 928.578308310466
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 520
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 39.0714285714286
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "blastn"
+              },
+              "data": {
+                "int": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "nucleotide slices of two viruses"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "diags",
+          "segs": {
+            "dendiag": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_3"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 4
+                      }
+                    }
+                  }
+                ],
+                "starts": [
+                  4,
+                  500
+                ],
+                "len": 1996,
+                "strands": [
+                  "minus",
+                  "plus"
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1255
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1255
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 0
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 2413.66078917532
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 1749
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 99.8
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

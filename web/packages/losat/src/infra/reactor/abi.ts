@@ -11,7 +11,7 @@ import { FileReadError, type StartResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 6;
+export const ABI_VERSION = 9;
 /** Stream 2: the JSON response of describe, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -36,15 +36,22 @@ export const DISCARD_STREAM = 9;
 export const MESSAGES_STREAM = 10;
 /** The place "nowhere" in the signals of streams 9 and 10 (ABI v2 §5): TBLASTX's `-logfile ""` or `-logfile /dev/null`. */
 export const PLACE_NOWHERE = 0xffff_ffff;
+/**
+ * The place "the error that ended the run" in the signals of stream 9 (ABI v2 §5, version 7; line WQA's sweep, D15,
+ * 2026-11-20): an output that a run which failed does not keep, because the CLI's run of the argv does not write it.
+ */
+export const PLACE_RUN = 0xffff_fffe;
 
 /**
  * A signal of stream 9 (ABI v2 §5): the output stream that failed, and the stream that holds its
  * error (3, the diagnostics; 8, the run's files: the file of -logfile), or `undefined` where the
- * run wrote it nowhere (`PLACE_NOWHERE`).
+ * run wrote it nowhere (`PLACE_NOWHERE`); `ended` where it is the error that ended the run (`PLACE_RUN`), which no stream
+ * holds.
  */
 export interface DiscardSignal {
   readonly stream: number;
   readonly errorStream: number | undefined;
+  readonly ended: boolean;
 }
 
 /** Reads a signal of stream 9: its 8 bytes, the stream and the place of its error, each an unsigned 32-bit little-endian number. */
@@ -52,7 +59,8 @@ export function discardSignal(bytes: Uint8Array): DiscardSignal {
   if (bytes.length !== 8) throw new Error(`a signal of stream ${DISCARD_STREAM} has ${bytes.length} bytes, not 8`);
   const view = new DataView(bytes.buffer, bytes.byteOffset, 8);
   const place = view.getUint32(4, true);
-  return { stream: view.getUint32(0, true), errorStream: place === PLACE_NOWHERE ? undefined : place };
+  const ended = place === PLACE_RUN;
+  return { stream: view.getUint32(0, true), errorStream: place === PLACE_NOWHERE || ended ? undefined : place, ended };
 }
 
 /** The output stream that a signal of stream 9 discards (`discardSignal`). */

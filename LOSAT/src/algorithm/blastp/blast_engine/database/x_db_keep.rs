@@ -150,10 +150,10 @@ fn x_read_search_block_into(
     kept: &mut Vec<u8>,
     program: &str,
 ) -> Result<SequenceBlock> {
-    let mut block = db
+    let block = db
         .x_read_block_into(range, kept)
         .map_err(|error| crate::algorithm::common::database::search_read_error(error, program))?;
-    prepare_search_block(&mut block, db.oid_map(), program)?;
+    prepare_search_block(&block, db.oid_map(), program)?;
     Ok(block)
 }
 

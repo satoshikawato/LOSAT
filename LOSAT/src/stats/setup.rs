@@ -387,6 +387,11 @@ impl SubjectSpaceOverflow {
 //     case BLASTERR_SUBJECT_LENGTH_INVALID:
 //         new_msg->message = strdup("The average subject length is too short");
 // ```
+/// NCBI's error of a setup whose `min_subject_length` is 0 (`setup_subject_length`): the one
+/// text of blastp's, psiblast's, rpsblast's, rpstblastn's, blastx's, tblastn's, blastn's and
+/// tblastx's error (review C of line RG D1a-4, N1; reviews D and E, N1).
+pub(crate) const SUBJECT_LENGTH_TOO_SHORT: &str = "The average subject length is too short";
+
 // `min_subject_length` is a `Uint4`, so `<= 0` is `== 0`: a negative quotient (a negative
 // `NSEQ`) passes, as does one of 2^31, while one that is a multiple of 2^32 fails (an `NSEQ` of
 // 2^31 as NCBI's `int`, or a `LENGTH` of 2^32 times the count; probes p5_ns_*, p5_avg_* of line
@@ -396,7 +401,7 @@ impl SubjectSpaceOverflow {
 /// too short`: with the Gumbel block (`gumbel_min`: `GetMinLength`, and whether the subject is
 /// translated) the shortest length (divided by 3 for a translated subject), else the statistics'
 /// total `total_length` over their number `num_seqs` as NCBI's `Int4`. A `num_seqs` of 0 (NCBI
-/// divides by 0: LOSAT refuses it before, `common::database::check_statistics_count`) gives `None`
+/// divides by 0: LOSAT refuses it before, `common::database::check_setup_count`) gives `None`
 /// here too, so that no input reaches a division by 0.
 pub(crate) fn setup_subject_length(
     total_length: i64,

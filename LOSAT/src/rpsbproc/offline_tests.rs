@@ -29,7 +29,9 @@ fn query(length: i32) -> OfflineQuery {
 
 fn message(error: &ProcessError) -> String {
     match error {
-        ProcessError::Exception(exception) => exception.get_msg().to_string(),
+        ProcessError::Exception(exception) => {
+            String::from_utf8(exception.get_msg().to_vec()).unwrap()
+        }
         ProcessError::Std(what) | ProcessError::Unsupported(what) => what.clone(),
     }
 }

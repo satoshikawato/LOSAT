@@ -86,7 +86,7 @@ pub(super) fn on() -> bool {
 pub(super) enum Kind {
     /// A discontiguous table (dc-megablast).
     Disc,
-    /// A contiguous table of `-task blastn`.
+    /// A contiguous table of `-task blastn` (or `-task rmblastn`, the same table and stages).
     Blastn,
     /// Any other contiguous table (megablast; the lowest row).
     Other,
@@ -97,7 +97,7 @@ impl Kind {
     pub(super) fn of(disc: bool, task: &str) -> Kind {
         if disc {
             Kind::Disc
-        } else if task == "blastn" {
+        } else if matches!(task, "blastn" | "rmblastn") {
             Kind::Blastn
         } else {
             Kind::Other
@@ -194,6 +194,7 @@ mod tests {
         assert_eq!(speedup_tenths(Kind::Other, 128), 27);
         assert_eq!(Kind::of(true, "dc-megablast"), Kind::Disc);
         assert_eq!(Kind::of(false, "blastn"), Kind::Blastn);
+        assert_eq!(Kind::of(false, "rmblastn"), Kind::Blastn);
         assert_eq!(Kind::of(false, "megablast"), Kind::Other);
         assert_eq!(Kind::of(false, "blastn-short"), Kind::Other);
     }

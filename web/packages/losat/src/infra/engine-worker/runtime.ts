@@ -20,7 +20,7 @@
 // files of the instance's working directory for that run (run-directory.ts), which the engine
 // opens by name and reads in place; a run of -db takes no subject (line WQA D12a, 2026-11-20).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
-import { readStoredZip, type MessagePlace, type RunFile } from '../../domain/run-files.js';
+import { readStoredZip, type MessagePlace, type OutputPlace, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase } from '../../ports/engine.js';
 import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
@@ -495,12 +495,13 @@ function messageOf(error: unknown): string {
 /**
  * The output that the engine's signal of stream 9 names (ABI v2 §5), an output stream of the run
  * that failed, and where its error is: stream 3 (the diagnostics), stream 8 (the run's files: the
- * file of -logfile) or nowhere. Another number breaks the ABI.
+ * file of -logfile), nowhere, or the error that ended the run (an output that a failed run does not keep, version 7). Another
+ * number breaks the ABI.
  */
-function discardedOutput(bytes: Uint8Array): [RunOutput, MessagePlace] {
-  const { stream, errorStream } = discardSignal(bytes);
+function discardedOutput(bytes: Uint8Array): [RunOutput, OutputPlace] {
+  const { stream, errorStream, ended } = discardSignal(bytes);
   if (!isRunOutput(stream)) throw new Error(`the engine discarded stream ${stream}, which is not an output of a run`);
-  const error = errorStream === undefined ? 'nowhere' : PLACES.get(errorStream);
+  const error: OutputPlace | undefined = ended ? 'run' : errorStream === undefined ? 'nowhere' : PLACES.get(errorStream);
   if (error === undefined) throw new Error(`the engine put the error of output stream ${stream} on stream ${errorStream}, which holds no error`);
   return [stream, error];
 }

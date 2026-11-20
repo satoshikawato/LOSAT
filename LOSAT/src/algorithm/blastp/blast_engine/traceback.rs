@@ -929,8 +929,8 @@ mod tests {
     // query, with no gap.
     #[test]
     fn ungapped_hsp_counts_identities_and_positives_of_one_run() {
-        // NCBIstdaa S is 16 (BLOSUM62: A/S 1, W/C -2).
-        const S: u8 = 16;
+        // NCBIstdaa S is 17 (BLOSUM62: A/S 1, W/C -2).
+        const S: u8 = 17;
         let query = [W, A, C, A, W];
         let subject = [C, W, A, W, S, A];
         let mut prelim = hsp((0, 4), (1, 5));

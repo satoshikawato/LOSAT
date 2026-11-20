@@ -360,10 +360,21 @@ class RepositoryTests(unittest.TestCase):
 
     def test_every_linked_license_text_is_present(self) -> None:
         text = (REPO_ROOT / tpl.GENERATED).read_text(encoding="utf-8")
-        for needle in ("1. CRATES", "2. THE RUST STANDARD LIBRARY", "3. WASI-LIBC", "5. APACHE LICENSE, VERSION 2.0",
+        for needle in ("1. CRATES", "2. THE RUST STANDARD LIBRARY", "3. WASI-LIBC",
+                       "4. WHAT ZIG LINKS INTO THE LINUX WHEELS OF PYLOSAT", "6. APACHE LICENSE, VERSION 2.0",
                        "NOTICE 1", "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION",
-                       "libc-top-half/musl/COPYRIGHT", "libc-bottom-half/cloudlibc/LICENSE"):
+                       "libc-top-half/musl/COPYRIGHT", "libc-bottom-half/cloudlibc/LICENSE",
+                       "--- lib/libunwind/LICENSE.TXT ---", "Copyright (c) Zig contributors"):
             self.assertIn(needle, text)
+
+    def test_the_zig_input_is_the_zig_that_links_the_linux_wheels(self) -> None:
+        # python-wheels.yml installs ziglang==ZIG_VERSION and links the Linux wheels with --zig.
+        workflow = (REPO_ROOT / ".github" / "workflows" / "python-wheels.yml").read_text(encoding="utf-8")
+        pins = sorted(set(re.findall(r"ziglang==([0-9][^\s\"']*)", workflow)))
+        self.assertEqual(pins, [tpl.ZIG_VERSION])
+        self.assertIn("--zig --compatibility manylinux2014", workflow)
+        meta = tpl.read_bundle(tpl.INPUTS / tpl.ZIG_BUNDLE)[0][0]
+        self.assertEqual(meta["version"], tpl.ZIG_VERSION)
 
     def test_pointers_into_the_notices_name_their_section(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1807,6 +1807,7 @@ fn search(
                     culling_limit: resolved.culling_limit,
                     pssm: None,
                     fetch_excluded: None,
+                    max_intron_length: resolved.max_intron_length,
                 };
                 let setup = super::stage_d_pipeline::set_up_batch(
                     &letters,

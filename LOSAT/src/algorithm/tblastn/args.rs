@@ -226,6 +226,15 @@ pub struct TblastnArgs {
     // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
     #[arg(long)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:803-806
+    // ```c++
+    //     arg_desc.AddFlag(kArgUseSWTraceback,
+    //                      "Compute locally optimal Smith-Waterman alignments?",
+    //                      true);
+    // ```
+    // The Smith-Waterman redo of each match (`match_redo::SmithWatermanRedo`).
+    #[arg(long)]
+    pub use_sw_tback: bool,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:339-342
     // ```c++
     //     arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
@@ -403,6 +412,8 @@ pub struct ResolvedTblastnArgs {
     pub seg: SegSpec,
     pub soft_masking: bool,
     pub lcase_masking: bool,
+    /// `-use_sw_tback` (NCBI's `SetSmithWatermanMode`, blast_args.cpp:885).
+    pub use_sw_tback: bool,
     /// The matrix name as typed (the report prints it so).
     pub matrix_name: String,
     pub threshold: f64,
@@ -833,6 +844,7 @@ impl TblastnArgs {
             seg,
             soft_masking,
             lcase_masking: self.lcase_masking,
+            use_sw_tback: self.use_sw_tback,
             matrix_name,
             threshold,
             window_size,
@@ -1028,6 +1040,10 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             gap_xdrop_bits: args.xdrop_gap,
             final_xdrop_bits: args.xdrop_gap_final,
             word_xdrop_bits: args.xdrop_ungap,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+            // (quoted above): `-use_sw_tback` runs the redo with or without composition-based
+            // statistics.
+            smith_waterman: args.use_sw_tback,
         },
     })
 }
@@ -1460,17 +1476,24 @@ mod tests {
         ] {
             assert!(parse(extra).is_err(), "{extra:?}");
         }
-        for extra in [
-            &["-db_soft_mask", "1"][..],
-            &["-remote"],
-            &["-use_sw_tback"],
-        ] {
+        for extra in [&["-db_soft_mask", "1"][..], &["-remote"]] {
             let error = crate::cli::render_message(&parse(extra).unwrap_err());
             assert!(
                 error.contains("is not supported by LOSAT's TBLASTN"),
                 "{extra:?}: {error}"
             );
         }
+        // NCBI blast_args.cpp:803-806, 885: `-use_sw_tback` is a flag that sets the Smith-Waterman
+        // traceback, with every `-comp_based_stats` (the redo runs with mode 0 too,
+        // blast_traceback.c:1486-1487).
+        for cbs in ["0", "1", "2", "3"] {
+            let args = parse(&["-use_sw_tback", "-comp_based_stats", cbs]).unwrap();
+            check_options(&args).unwrap();
+            let resolved = args.resolve().unwrap();
+            assert!(resolved.use_sw_tback, "{cbs}");
+        }
+        assert!(!parse(&[]).unwrap().resolve().unwrap().use_sw_tback);
+        assert!(parse(&["-use_sw_tback", "true"]).is_err());
     }
 
     /// The tblastn arguments `-in_pssm <psiblast's frozen PSSM> -subject s.fna <extra>`.

@@ -24,12 +24,18 @@ use crate::report::tabular::SubjectFetch;
 /// read of the database (`common::x_db_stream::XReadError`), as the check's error fails the first
 /// batch with a valid context, when the reader's error is NCBI's own, and the batch's setup
 /// (`stage_d_pipeline::SetupEngineError`: a PSSM query whose `kbp_psi` is not valid, the average
-/// subject length). LOSAT's refusal (and any other
-/// error) is returned as `Err` to stop the run.
+/// subject length); and an error of the batch's search that comes after the reports of the batches
+/// before (`app::ErrorAfterBatchReports`: the failed or endless Smith-Waterman redo of
+/// `-use_sw_tback`, `match_redo`), as it is. LOSAT's refusal (and any other error) is returned as
+/// `Err` to stop the run.
 fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
     if let Some(SetupEngineError(text)) = error.downcast_ref::<SetupEngineError>() {
         return Ok(crate::blastinput::app::engine_error(text));
     }
+    let error = match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+        Ok(crate::blastinput::app::ErrorAfterBatchReports(error)) => return Ok(error),
+        Err(error) => error,
+    };
     let error = match error.downcast::<XReadError>() {
         Ok(XReadError(read)) => read,
         Err(error) => return Err(error),
@@ -1947,9 +1953,10 @@ fn search(
                 .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
                 .collect(),
         };
-        // A read of the database that failed while the batches were searched ahead, or a batch
-        // whose setup failed (`SetupEngineError`): they are searched again one at a time below, so
-        // that the batch that fails does after the reports of the batches before.
+        // A read of the database that failed while the batches were searched ahead, a batch
+        // whose setup failed (`SetupEngineError`) or whose search fails after the reports of the
+        // batches before (`ErrorAfterBatchReports`): they are searched again one at a time below,
+        // so that the batch that fails does after the reports of the batches before.
         let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,
@@ -1976,7 +1983,13 @@ fn search(
         );
         let mut x_searched = match x_searched_ahead {
             Ok(searched) => searched.map(Vec::into_iter),
-            Err(error) if error.is::<XReadError>() || error.is::<SetupEngineError>() => None,
+            Err(error)
+                if error.is::<XReadError>()
+                    || error.is::<SetupEngineError>()
+                    || error.is::<app::ErrorAfterBatchReports>() =>
+            {
+                None
+            }
             Err(error) => return Err(error),
         };
         for range in query_input

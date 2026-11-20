@@ -147,6 +147,22 @@ pub(super) fn check_limits(
             "-mt_mode 1 with -num_threads above 1, -db and -in_pssm, with which NCBI BLAST+ 2.17.0's tblastn aborts, is not supported by LOSAT's TBLASTN"
         );
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3360-3361 (the
+    // Smith-Waterman redo of a PSSM query reads the PSSM's rows; `-use_sw_tback` sets the mode
+    // after `SetPSITblastnDefaults`, blast_args.cpp:885)
+    // ```c
+    //         if (positionBased) {
+    //             matrix_tld[i] = sbp_tld[i]->psi_matrix->pssm->data;
+    // ```
+    // The Smith-Waterman redo of a PSSM query is not ported (`smith_waterman_match`): NCBI BLAST+
+    // 2.17.0 aborts in it with `-db` (`free(): invalid pointer`) and fails it with `-subject`
+    // (`Traceback failed`; probes `tbn.inpssm.*` of line RG X4b's survey). Refused as before
+    // this item, where every `-use_sw_tback` of tblastn was.
+    if args.use_sw_tback {
+        bail!(
+            "-use_sw_tback with -in_pssm, with which NCBI BLAST+ 2.17.0's tblastn aborts (-db) or fails its traceback (-subject), is not supported by LOSAT's TBLASTN"
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:791-796 (the tabular
     // formats of tblastn; the pairwise report, `PrintOneResultSet`)
     // ```c++

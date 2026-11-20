@@ -1476,7 +1476,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "negative_gilist",
     "remote",
     "subject_besthit",
-    "use_sw_tback",
 ];
 
 fn is_unported_tblastn_arg(name: &str) -> bool {

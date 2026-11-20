@@ -863,6 +863,13 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &["-ungapped"],
             &[At("UngappedMode", "Boolean(true)")],
         ),
+        // `SetSmithWatermanMode` after `SetPSITblastnDefaults` (blast_args.cpp:885); the run
+        // refuses it with a PSSM query (`tblastn::in_pssm::check_limits`).
+        (
+            "use_sw_tback",
+            &["-use_sw_tback"],
+            &[At("SmithWatermanMode", "Boolean(true)")],
+        ),
     ];
     walk(&App {
         program: "tblastn",

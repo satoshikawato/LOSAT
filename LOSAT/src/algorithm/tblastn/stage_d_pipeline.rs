@@ -12,10 +12,10 @@ use rayon::prelude::*;
 
 use super::kappa::{
     convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats_with_matrix,
-    postredo_engine_positives, reap_contained_postredo_hsps, redo_preliminary_match,
-    ConvertedKappaHsp,
+    postredo_engine_positives, reap_contained_postredo_hsps, ConvertedKappaHsp,
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
+use super::match_redo::{match_outcome, sw_batch_failed, MatchRedo, SmithWatermanRedo, XDropRedo};
 use super::search_gapped::{
     full_translation_traceback_with_matrix_and_events_with_mask_mode_owned, GappedHsp,
     PreliminaryProfile, TargetTranslation, TracebackOwnedHsp,
@@ -36,7 +36,6 @@ use crate::algorithm::blastn::query_split::SplitSizes;
 use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
-use crate::algorithm::blastp::gapalign::GapAlignScratch;
 use crate::algorithm::blastp::protein_query_split::{
     protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     ProteinQueryChunk,
@@ -48,7 +47,7 @@ use crate::core::composition_adjustment::adjust_scores::{
 };
 use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, BlastCompoAdjustMode, BlastCompoQueryInfo, BlastCompoSequenceData,
-    EMatrixAdjustRule,
+    BlastRedoAlignParams, EMatrixAdjustRule,
 };
 use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::spouge::{blast_spouge_stoe, lookup_protein_gumbel_params, BlastGumbelBlk};
@@ -312,6 +311,9 @@ pub(super) struct LocalStageDScoring {
     pub final_xdrop_bits: f64,
     /// The ungapped X-drop in bits (`word_options->x_dropoff`): `-xdrop_ungap` or 7.
     pub word_xdrop_bits: f64,
+    /// `-use_sw_tback`: NCBI's extension option `eTbackExt == eSmithWatermanTbck`, the
+    /// Smith-Waterman redo of each match (`match_redo::SmithWatermanRedo`).
+    pub smith_waterman: bool,
 }
 
 impl Default for LocalStageDScoring {
@@ -326,6 +328,7 @@ impl Default for LocalStageDScoring {
             gap_xdrop_bits: 15.0,
             final_xdrop_bits: 25.0,
             word_xdrop_bits: 7.0,
+            smith_waterman: false,
         }
     }
 }
@@ -1167,7 +1170,55 @@ impl Drop for XSearchTimer {
 // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
 // BLAST_LinkHsps(...); s_Blast_HSPListReapByPrelimEvalue(...);
 // Preliminary work uses one immutable subject; linking and stream writes follow OID order.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039 (quoted at
+// `match_redo`)
+// Dispatch point: the redo of a match is chosen once per query batch, by NCBI's `eTbackExt`
+// (`-use_sw_tback`): the Smith-Waterman redo (`match_redo::SmithWatermanRedo`) or the X-drop redo
+// of composition-based statistics (`match_redo::XDropRedo`); each is its own instance of the
+// batch's search (`run_local_search_with_redo`).
+#[allow(clippy::too_many_arguments)]
 fn run_local_search_with_pool(
+    queries: &[Vec<u8>],
+    subjects: SubjectLetters<'_>,
+    profile: LocalStageDProfile<'_>,
+    compo_adjust_mode: BlastCompoAdjustMode,
+    do_sum_stats: bool,
+    scoring: LocalStageDScoring,
+    setup: &mut Option<LocalBatchSetup>,
+    observer: Option<&mut StageDBoundaryTrace>,
+    pool: Option<&SearchPool<'_>>,
+) -> Result<Vec<KappaResultHitList>> {
+    if scoring.smith_waterman {
+        return run_local_search_with_redo(
+            queries,
+            subjects,
+            profile,
+            compo_adjust_mode,
+            do_sum_stats,
+            scoring,
+            setup,
+            observer,
+            pool,
+            &SmithWatermanRedo::new(scoring.matrix, compo_adjust_mode, profile.expect_value),
+        );
+    }
+    run_local_search_with_redo(
+        queries,
+        subjects,
+        profile,
+        compo_adjust_mode,
+        do_sum_stats,
+        scoring,
+        setup,
+        observer,
+        pool,
+        &XDropRedo,
+    )
+}
+
+/// The search of one query batch (`run_local_search_with_pool`) with the redo of a match `R`.
+#[allow(clippy::too_many_arguments)]
+fn run_local_search_with_redo<R: MatchRedo>(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
@@ -1177,6 +1228,7 @@ fn run_local_search_with_pool(
     setup: &mut Option<LocalBatchSetup>,
     mut observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
+    match_redo: &R,
 ) -> Result<Vec<KappaResultHitList>> {
     ensure!(
         !queries.is_empty(),
@@ -1557,6 +1609,15 @@ fn run_local_search_with_pool(
     // OID, then each batch reads from the end; equal-OID query lists were
     // inserted in query order and are consumed in reverse query order.
     // Composition redo uses the score-sorted stream at lines 289-319.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:674-681 (the score sort
+    // only with composition-based statistics: the Smith-Waterman redo of `-comp_based_stats 0`
+    // reads the stream in this OID order too)
+    // ```c
+    //     if ((Blast_QueryIsProtein(program) || Blast_QueryIsPssm(program)) &&
+    //         extn_opts->compositionBasedStats != 0) {
+    //         hsp_stream->sort_by_score =
+    //             (SSortByScoreStruct*)calloc(1, sizeof(SSortByScoreStruct));
+    // ```
     if compo_adjust_mode.is_enabled() {
         preliminary_lists.sort_by(|(qa, oa, a), (qb, ob, b)| {
             qa.cmp(qb)
@@ -1566,7 +1627,9 @@ fn run_local_search_with_pool(
         preliminary_lists.sort_by(|(qa, oa, _), (qb, ob, _)| oa.cmp(ob).then_with(|| qb.cmp(qa)));
     }
 
-    if !compo_adjust_mode.is_enabled() {
+    // NCBI blast_traceback.c:1486-1498 (quoted at `match_redo`): the Smith-Waterman redo runs
+    // without composition-based statistics too.
+    if !compo_adjust_mode.is_enabled() && !R::SMITH_WATERMAN {
         // NCBI c++/src/algo/blast/core/blast_traceback.c:1481-1501,
         // 1644-1707,1763-1776: the control path performs ordinary
         // traceback and posttraceback statistics, then result post-pipes.
@@ -1637,25 +1700,31 @@ fn run_local_search_with_pool(
     // do_link_hsps and cutoff_s follow the sum statistics of the hit-saving parameters
     // (`hitParams->do_sum_stats`: the search's linking parameters, `parameters.link`).
     let gumbel = gumbel.as_ref();
-    let redo_params = local_kappa_redo_params(
-        scoring.matrix,
-        scoring.gap_open,
-        scoring.gap_extend,
-        &gapped_by_context,
-        &valid_contexts,
-        &parameters,
-        *query_lengths.iter().max().unwrap(),
-        compo_adjust_mode,
-        false,
-        scoring.final_xdrop_bits,
-        local_extension_final_xdrop(
-            scoring.gap_xdrop_bits,
+    // NCBI blast_kappa.c:3038-3039 (quoted at `match_redo`): the redo's `smithWaterman`.
+    let redo_params = BlastRedoAlignParams {
+        smith_waterman: R::SMITH_WATERMAN,
+        ..local_kappa_redo_params(
+            scoring.matrix,
+            scoring.gap_open,
+            scoring.gap_extend,
+            &gapped_by_context,
+            &valid_contexts,
+            &parameters,
+            *query_lengths.iter().max().unwrap(),
+            compo_adjust_mode,
+            false,
             scoring.final_xdrop_bits,
-            gapped.lambda,
-        )?,
-    )?;
+            local_extension_final_xdrop(
+                scoring.gap_xdrop_bits,
+                scoring.final_xdrop_bits,
+                gapped.lambda,
+            )?,
+        )?
+    };
+    // NCBI blast_kappa.c:3100-3108 (`localScalingFactor`, `match_redo::MatchRedo::scale`).
+    let scale = match_redo.scale(compo_adjust_mode);
     let scaled = KarlinParams {
-        lambda: gapped.lambda / 32.0,
+        lambda: gapped.lambda / scale,
         ..gapped
     };
     let scaled_by_context = vec![scaled; queries.len()];
@@ -1670,7 +1739,7 @@ fn run_local_search_with_pool(
         .map(|_| CompoHeap::new(profile.max_target_seqs, 0.002))
         .collect::<Result<_>>()?;
     let mut owned_lists = HashMap::new();
-    let mut scratch = GapAlignScratch::new();
+    let mut scratch = match_redo.scratch();
     let mut workspace = BlastCompositionWorkspace::new_blosum62();
     if scoring.matrix != ScoringMatrix::Blosum62 {
         use_matrix_workspace(&mut workspace, scoring.matrix)?;
@@ -1697,9 +1766,10 @@ fn run_local_search_with_pool(
     let redo_item = |context: usize,
                      oid: usize,
                      list: &LinkedHspList,
-                     redo_params: &crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams,
-                     scratch: &mut GapAlignScratch,
-                     workspace: &mut BlastCompositionWorkspace|
+                     redo_params: &BlastRedoAlignParams,
+                     scratch: &mut R::Scratch,
+                     workspace: &mut BlastCompositionWorkspace,
+                     heaps: Option<&mut [CompoHeap]>|
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
         // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
         // the translations below read windows of it, as NCBI's do. A
@@ -1712,7 +1782,7 @@ fn run_local_search_with_pool(
         // The matrix that the match's adjustments leave, for the engine positives
         // (`postredo_engine_positives`).
         let mut matrix_state = None;
-        let mut redo = redo_preliminary_match(
+        let mut redo = match_redo.redo(
             &incoming,
             i32::try_from(context)?,
             &query_infos,
@@ -1720,7 +1790,10 @@ fn run_local_search_with_pool(
             profile.genetic_code,
             redo_params,
             scaled.lambda,
+            gapped.k.glibc_ln(),
             scoring.matrix,
+            oid,
+            heaps,
             scratch,
             workspace,
             &mut matrix_state,
@@ -1772,7 +1845,8 @@ fn run_local_search_with_pool(
             best_evalue: postredo.best_evalue,
             best_score: postredo.hsps[0].hsp.score,
         };
-        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
+        let bits =
+            normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), scale);
         let mut target = TargetTranslation::of(subject, &code);
         let mut owned: Vec<_> = survivors.into_iter().map(Some).collect();
         let payloads = postredo
@@ -1881,8 +1955,16 @@ fn run_local_search_with_pool(
     // NCBI redoes the matches in this omp loop. The matches of a batch are
     // redone on the pool by redo_item and then applied in list order (early termination is tested
     // again in order). A match depends only on its own preliminary list.
+    // NCBI's status of the last match that the Smith-Waterman redo reached (`status_code_tld`,
+    // `match_redo::match_outcome`); the X-drop redo has none.
+    let mut sw_last_failed = false;
+    // The Smith-Waterman redo of e-value mode reads the heaps (`match_redo::MatchRedo::
+    // reads_heaps`): its matches are redone in stream order on this thread, as NCBI's
+    // `-num_threads 1` redoes them.
     #[cfg(feature = "parallel")]
-    let parallel_redo = pool.is_some_and(SearchPool::enabled) && preliminary_lists.len() > 1;
+    let parallel_redo = pool.is_some_and(SearchPool::enabled)
+        && preliminary_lists.len() > 1
+        && !match_redo.reads_heaps(&redo_params);
     #[cfg(not(feature = "parallel"))]
     let parallel_redo = false;
     // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
@@ -1919,8 +2001,11 @@ fn run_local_search_with_pool(
             let states = (0..pool.threads())
                 .map(|_| {
                     let mut worker = XRedoWorker {
-                        params: make_params()?,
-                        scratch: GapAlignScratch::new(),
+                        params: BlastRedoAlignParams {
+                            smith_waterman: R::SMITH_WATERMAN,
+                            ..make_params()?
+                        },
+                        scratch: match_redo.scratch(),
                         workspace: BlastCompositionWorkspace::new_blosum62(),
                     };
                     if scoring.matrix != ScoringMatrix::Blosum62 {
@@ -1954,6 +2039,7 @@ fn run_local_search_with_pool(
                             &worker.params,
                             &mut worker.scratch,
                             &mut worker.workspace,
+                            None,
                         )
                     })
                 } else {
@@ -1977,6 +2063,7 @@ fn run_local_search_with_pool(
                                     &worker.params,
                                     &mut worker.scratch,
                                     &mut worker.workspace,
+                                    None,
                                 ))
                             })
                             .collect()
@@ -1998,7 +2085,7 @@ fn run_local_search_with_pool(
                         ));
                     }
                     let item = match result {
-                        Some(result) => result?,
+                        Some(result) => result,
                         None => redo_item(
                             *context,
                             *oid,
@@ -2006,8 +2093,11 @@ fn run_local_search_with_pool(
                             &redo_params,
                             &mut scratch,
                             &mut workspace,
-                        )?,
+                            None,
+                        ),
                     };
+                    let item =
+                        match_outcome::<R, _>(item, &mut sw_last_failed, redo_params.do_link_hsps)?;
                     keep_item(*context, &mut heaps, item);
                 }
             }
@@ -2040,9 +2130,21 @@ fn run_local_search_with_pool(
                 &redo_params,
                 &mut scratch,
                 &mut workspace,
-            )?;
+                match_redo
+                    .reads_heaps(&redo_params)
+                    .then_some(&mut heaps[..]),
+            );
+            let item = match_outcome::<R, _>(item, &mut sw_last_failed, redo_params.do_link_hsps)?;
             keep_item(context, &mut heaps, item);
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778 (quoted at
+    // `match_redo::sw_batch_failed`)
+    // The status of the last match the Smith-Waterman redo reached fails the batch.
+    if R::SMITH_WATERMAN && sw_last_failed {
+        return Err(sw_batch_failed(
+            heaps.first().is_some_and(|heap| heap.len() > 0),
+        ));
     }
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2494-2515;
@@ -2283,10 +2385,12 @@ fn x_flow_window(threads: usize) -> usize {
 // (NRrecord_tld, redo_align_params_tld, and the gap_align and matrix of the thread).
 // One pool slot's redo state.  NCBI c++/src/algo/blast/core/blast_kappa.c:3290-3340
 // allocates the same per thread (redo_align_params_tld, gap_align_tld, NRrecord_tld).
+// `S` is the redo's memory (`match_redo::MatchRedo::Scratch`: NCBI's `gap_align`, or the
+// Smith-Waterman redo's forbidden ranges and windows).
 #[cfg(feature = "parallel")]
-struct XRedoWorker {
-    params: crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams,
-    scratch: GapAlignScratch,
+struct XRedoWorker<S> {
+    params: BlastRedoAlignParams,
+    scratch: S,
     workspace: BlastCompositionWorkspace,
 }
 
@@ -2295,7 +2399,7 @@ struct XRedoWorker {
 // synchronous call and restores before it returns; the state is only reached
 // through its mutex, so it is never observed mid-call by another thread.
 #[cfg(feature = "parallel")]
-unsafe impl Send for XRedoWorker {}
+unsafe impl<S: Send> Send for XRedoWorker<S> {}
 
 // No NCBI counterpart: reads the LOSAT_X_TBNREDOLPT variable once; it does not change any value
 // NCBI computes.
@@ -5516,6 +5620,7 @@ mod tests {
                 gap_xdrop_bits: 15.0,
                 final_xdrop_bits: 25.0,
                 word_xdrop_bits: 7.0,
+                smith_waterman: false,
             },
             Some(&mut boundary),
         )

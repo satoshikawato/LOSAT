@@ -1975,16 +1975,23 @@ mod tests {
 // The native app catches this category after stream extraction. Product scope
 // refusals retain the separate registered CLI-v2 boundary.
 #[derive(Debug)]
-pub(crate) struct SemanticOptionsError(pub std::borrow::Cow<'static, str>);
+pub(crate) struct SemanticOptionsError(pub std::borrow::Cow<'static, [u8]>);
 
 impl From<&'static str> for SemanticOptionsError {
     fn from(message: &'static str) -> Self {
-        Self(std::borrow::Cow::Borrowed(message))
+        Self(std::borrow::Cow::Borrowed(message.as_bytes()))
     }
 }
 
 impl From<String> for SemanticOptionsError {
     fn from(message: String) -> Self {
+        Self(std::borrow::Cow::Owned(message.into_bytes()))
+    }
+}
+
+/// A message's bytes (`stats::protein_options::print_matrix_message`).
+impl From<Vec<u8>> for SemanticOptionsError {
+    fn from(message: Vec<u8>) -> Self {
         Self(std::borrow::Cow::Owned(message))
     }
 }
@@ -1995,9 +2002,10 @@ impl From<String> for SemanticOptionsError {
 //         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
 //         exit_code = BLAST_INPUT_ERROR;                                      \
 // ```
+/// The text of the message; a byte that is not UTF-8 reads as U+FFFD (the error keeps it).
 impl std::fmt::Display for SemanticOptionsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&String::from_utf8_lossy(&self.0))
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3638-3638

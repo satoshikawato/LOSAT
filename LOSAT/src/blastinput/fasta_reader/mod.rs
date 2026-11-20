@@ -579,7 +579,7 @@ impl ReadError {
         match self {
             ReadError::Parse { message, .. } => crate::cli::NativeError {
                 exit: 1,
-                message: format!("BLAST query error: {message}\n"),
+                message: format!("BLAST query error: {message}\n").into(),
             }
             .into(),
             ReadError::Unsupported(error) => error,

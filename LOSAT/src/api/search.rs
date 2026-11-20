@@ -514,6 +514,7 @@ mod tests {
         let query = crate::api::read_fasta(
             Program::Psiblast,
             Role::Query,
+            // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
             b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n",
         )
         .unwrap();

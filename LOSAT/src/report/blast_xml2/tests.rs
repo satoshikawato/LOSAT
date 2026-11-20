@@ -1044,7 +1044,7 @@ fn a_side_file_that_cannot_be_opened_is_ncbis_argument_error_and_earlier_files_s
     assert_eq!(native.exit, 1);
     assert_eq!(
         native.message,
-        "Command line argument error: Cannot open output file\n"
+        b"Command line argument error: Cannot open output file\n"
     );
     assert_eq!(stored.borrow().len(), 1);
     assert!(master.is_empty());
@@ -1161,8 +1161,8 @@ fn a_receiver_that_fails_is_the_side_file_write_error() {
     let error = put(&mut document, b"q2\n", &mut master).unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
     assert_eq!(
-        (native.exit, native.message.as_str()),
-        (6, "BLAST failed to write output\n")
+        (native.exit, native.message.as_slice()),
+        (6, b"BLAST failed to write output\n".as_slice())
     );
     assert_eq!(received.files.lock().unwrap().len(), 1);
     assert!(master.is_empty());

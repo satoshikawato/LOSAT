@@ -882,12 +882,12 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // refuses `-outfmt 11`).
     // (An exception report, `Error: ` and NCBI's `what()` in LOSAT's words, has exit status 255:
     // `catch_all` below, `cli::NativeError::exception`.)
-    const PREFIXES: [&str; 5] = [
-        "BLAST query error:",
-        "BLAST Database error:",
-        "BLAST engine error:",
-        "BLAST options error:",
-        "BLAST query/options error:",
+    const PREFIXES: [&[u8]; 5] = [
+        b"BLAST query error:",
+        b"BLAST Database error:",
+        b"BLAST engine error:",
+        b"BLAST options error:",
+        b"BLAST query/options error:",
     ];
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
     // ```c++
@@ -903,12 +903,12 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // failed the main thread's diagnostic stream, that report is its line feed alone
     // (`cli::catch_all_text`).
     let catch_all = native.exit == 255
-        && (native.message.starts_with("Error: ") || crate::ncbi_exception::main_diag_failbit());
+        && (native.message.starts_with(b"Error: ") || crate::ncbi_exception::main_diag_failbit());
     let known = catch_all
         || PREFIXES
             .iter()
             .any(|prefix| native.message.starts_with(prefix))
-        || (subject_file && native.message.starts_with("Command line argument error:"));
+        || (subject_file && native.message.starts_with(b"Command line argument error:"));
     if !known {
         return None;
     }
@@ -920,28 +920,37 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // D3-1 `k02_failed_then_choice_exc`: `message ""`).
     if crate::ncbi_exception::main_diag_failbit() {
         let written = crate::cli::catch_all_text(&native.message);
-        return Some(
+        // One post per line feed (`split_terminator('\n')`: a final empty piece is not one).
+        let pieces = if written.is_empty() {
+            0
+        } else {
             written
-                .split_terminator('\n')
-                .map(|_| (ERROR, Vec::new()))
-                .collect(),
-        );
+                .strip_suffix(b"\n")
+                .unwrap_or(written)
+                .split(|&byte| byte == b'\n')
+                .count()
+        };
+        return Some((0..pieces).map(|_| (ERROR, Vec::new())).collect());
     }
     // One diagnostic per `ERR_POST`: the text of an error is one message even when it has
     // several lines (an exception's chain), and the macro of an invalid input posts the user
     // manual footer (`USER_MANUAL_FOOTER`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) as a
     // second one.
-    let refer_line = crate::wording::USER_MANUAL_FOOTER;
-    let text = native.message.trim_end_matches('\n');
+    let refer_line = crate::wording::USER_MANUAL_FOOTER.as_bytes();
+    let text = &native.message[..native
+        .message
+        .iter()
+        .rposition(|&byte| byte != b'\n')
+        .map_or(0, |last| last + 1)];
     let (first, refer) = match text.strip_suffix(refer_line) {
-        Some(head) if head.ends_with('\n') => (head, Some(refer_line)),
+        Some(head) if head.ends_with(b"\n") => (head, Some(refer_line)),
         _ => (text, None),
     };
     Some(
         std::iter::once(first)
             .chain(refer)
             .filter_map(|part| {
-                let text = crate::report::diag_log::sanitize(part.as_bytes());
+                let text = crate::report::diag_log::sanitize(part);
                 (!text.is_empty()).then_some((ERROR, text))
             })
             .collect(),

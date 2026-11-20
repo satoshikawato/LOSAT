@@ -168,7 +168,8 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
                 message: format!(
                     "BLAST engine error: {}\n",
                     crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
-                ),
+                )
+                .into(),
             }
             .into(),
         )

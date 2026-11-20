@@ -181,8 +181,10 @@ impl SeqType {
 #[derive(Debug)]
 pub enum SeqDbError {
     /// A database, volume or file was not found, or no database was named.
-    /// The message is the text of NCBI's exception.
-    NotFound(String),
+    /// The message is the text of NCBI's exception, as bytes: a name it holds keeps the bytes
+    /// of NCBI's `std::string` (a seqid list's word, an LMDB file's name that is not UTF-8:
+    /// probes R3 and R8 of line LIB-B).
+    NotFound(Vec<u8>),
     /// A file that exists could not be opened.
     Open {
         path: PathBuf,
@@ -220,7 +222,8 @@ pub enum SeqDbError {
 impl std::fmt::Display for SeqDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SeqDbError::NotFound(message) | SeqDbError::Range(message) => f.write_str(message),
+            SeqDbError::NotFound(message) => f.write_str(&String::from_utf8_lossy(message)),
+            SeqDbError::Range(message) => f.write_str(message),
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
@@ -366,8 +369,8 @@ impl SeqDbError {
     /// own: a search program prints `BLAST Database error: <text>` and ends
     /// with exit status 2. `None`: the error is LOSAT's (a database that
     /// LOSAT refuses, a damaged file, a failed read), to be reported in
-    /// LOSAT's words.
-    pub fn ncbi_message(&self) -> Option<String> {
+    /// LOSAT's words. The text is bytes ([`SeqDbError::NotFound`]).
+    pub fn ncbi_message(&self) -> Option<Vec<u8>> {
         match self {
             SeqDbError::NotFound(message) => Some(message.clone()),
             SeqDbError::Format { message, .. } => (NCBI_FORMAT_MESSAGES
@@ -376,19 +379,24 @@ impl SeqDbError {
                 || NCBI_COLUMN_MESSAGE_PREFIXES
                     .iter()
                     .any(|prefix| message.starts_with(prefix)))
-            .then(|| message.clone()),
+            .then(|| message.clone().into_bytes()),
             SeqDbError::Open { path, source } => {
                 let code = source.raw_os_error()?;
                 let text = source.to_string();
                 let strerror = text.strip_suffix(&format!(" (os error {code})"))?;
                 if strerror.contains("Too many open files") {
-                    Some("Too many open files, please raise the open file limit".to_string())
+                    Some(b"Too many open files, please raise the open file limit".to_vec())
                 } else if cfg!(unix) {
-                    Some(format!(
-                        "Database memory map file error - CMemoryFile: Cannot memory map file \
-                         '{}':{strerror}",
-                        path.display()
-                    ))
+                    Some(
+                        [
+                            b"Database memory map file error - CMemoryFile: Cannot memory map file '"
+                                .as_slice(),
+                            &crate::utils::os_bytes::path_bytes(path),
+                            b"':",
+                            strerror.as_bytes(),
+                        ]
+                        .concat(),
+                    )
                 } else {
                     None
                 }
@@ -460,7 +468,7 @@ impl SeqDbError {
             return Some("Database memory map file error");
         }
         match self.ncbi_message()? {
-            message if message == TOO_MANY => Some(TOO_MANY),
+            message if message == TOO_MANY.as_bytes() => Some(TOO_MANY),
             _ => Some("Database memory map file error"),
         }
     }
@@ -663,10 +671,10 @@ const fn seqdb_site(file: &'static str, line: u32, function: &'static str) -> Th
 /// `eTooManyOpenFiles` and `eMemoryMappingFailure`, which are the texts of the programs'
 /// `CATCH_ALL` and not the exception's own message, and `DB contains no ...`, which NCBI's reader
 /// never throws (it throws lmdb's error first, `InitDbi` quoted above).
-pub(crate) fn throw_site(message: &str) -> Option<ThrowSite> {
+pub(crate) fn throw_site(message: &[u8]) -> Option<ThrowSite> {
     DATABASE_ERROR_SITES
         .iter()
-        .find(|(start, _)| message.starts_with(start))
+        .find(|(start, _)| message.starts_with(start.as_bytes()))
         .map(|&(_, site)| site)
 }
 
@@ -685,8 +693,8 @@ pub(crate) fn throw_site(message: &str) -> Option<ThrowSite> {
 /// `GetDbi`, "DB contains no accession info.": blastp 2.17.0's outfmt 15 at a lookup of a list of
 /// version 5 databases with and without the table, DECISIONS 62 (1) and (2) of line DBID). `None`
 /// for every other text, also those of [`throw_site`], which no lookup was seen to throw.
-pub(crate) fn lookup_throw_site(message: &str) -> Option<ThrowSite> {
-    (message == tax_files::NO_ACCESSION_INFO).then_some(GET_DBI_SITE)
+pub(crate) fn lookup_throw_site(message: &[u8]) -> Option<ThrowSite> {
+    (message == tax_files::NO_ACCESSION_INFO.as_bytes()).then_some(GET_DBI_SITE)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
@@ -1451,17 +1459,23 @@ impl SeqDb {
             if !names_lmdb(volume) {
                 continue;
             }
+            // The name's bytes, as the volume's header holds them (probe R8 of line LIB-B: a
+            // name that is not UTF-8).
             let lmdb_name = volume.index().lmdb_file.as_deref().unwrap_or_default();
             let lmdb_path = volume
                 .base()
-                .with_file_name(String::from_utf8_lossy(lmdb_name).as_ref());
+                .with_file_name(crate::utils::os_bytes::path_from_bytes(lmdb_name));
             if !std::fs::metadata(&lmdb_path).is_ok_and(|meta| meta.is_file()) {
-                return Err(SeqDbError::NotFound(format!(
-                    "File {} not found. If you renamed any BLAST database files, please use \
-                     original file names, and makeblastdb to rename the database. If you deleted \
-                     any BLAST database files, you need to recreate the database.",
-                    lmdb_path.display()
-                )));
+                return Err(SeqDbError::NotFound(
+                    [
+                        b"File ".as_slice(),
+                        &crate::utils::os_bytes::path_bytes(&lmdb_path),
+                        b" not found. If you renamed any BLAST database files, please use \
+                          original file names, and makeblastdb to rename the database. If you \
+                          deleted any BLAST database files, you need to recreate the database.",
+                    ]
+                    .concat(),
+                ));
             }
         }
 

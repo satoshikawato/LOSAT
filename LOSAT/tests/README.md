@@ -24,7 +24,8 @@ cd tests
 
 Requirements: Bash 4+, a current Node.js release with WASI support (the current
 frozen snapshot used Node 26.8.2), NCBI BLAST+ (`blastn`, `blastp`,
-`tblastx`, `makeblastdb`), Python 3 with `matplotlib`, `pandas` and `seaborn>=0.12`.
+`tblastx`, `makeblastdb`), Python 3 with `matplotlib`, `pandas` and `seaborn>=0.12`
+(`requirements-wasm-threading.txt` holds the versions CI installs, with their hashes).
 `--bin losat` builds the command artifact with `_start`; library Wasm artifacts
 cannot run these CLI comparisons. Missing or incorrect artifacts fail explicitly.
 

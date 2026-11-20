@@ -104,7 +104,14 @@
   that the host's memory decides, and its review the same day read NCBI's pointer syntax in mask
   files (`NULL` for an optional member, `@n` with NCBI's report, `:Type value` of the declared
   type), refusing a `:Type` of another type and a list element stated as `NULL` that makeblastdb
-  dereferences (Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07))
+  dereferences; on 2026-11-20 line LIB read the local time of the creation date with the crate
+  jiff (the maintainer's 「TZ=A」 of that day), which gives glibc's time in zone files with leap
+  seconds, where version 1.3 listed a time 27 seconds later, and gives UTC for the forms of `TZ`
+  that glibc reads outside POSIX and jiff's time for rules whose change falls in another year in
+  UTC (tables of them; daylight time without a rule followed glibc's `posixrules`), which wait for
+  the maintainer's decision on its pull request; the rest of this history under the
+  maintainer's standing delegation (Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07))
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -687,17 +694,70 @@ Undefined behaviour of NCBI that is not reproduced:
   computation overflows and it writes a shorter file).
 - The test whether an input looks like FASTA does not read past the bytes it sampled.
 
-The creation date is the local time, found without the C library: the zone comes from `TZ`,
-`TZDIR` and `/etc/localtime` as glibc reads them, under WASI from the environment and the
-directories that the host gives the module, and on Windows from `TZ` and the system zone as
-Microsoft's C runtime (UCRT) reads them for NCBI's Windows build. A `TZ` offset beyond 596,523
-hours overflows UCRT's 32-bit arithmetic (undefined in C++); LOSAT takes the mathematical value.
-When no zone can be read, the date is UTC; so it is on Windows where UCRT's `localtime` fails (a
-`TZ` offset that puts the local time before 1969-12-31 12:00 or after 3001-01-19 21:59:59, where
-NCBI's `CTime` throws).
-Zone files with leap-second records give a time 27 seconds later than the C library's, and a
-`TZ` value with a daylight-saving name but no rule follows the United States rules unless
-`posixrules` says otherwise.
+The creation date is the local time, found without the C library. On Linux, macOS and WASI the
+zone is the one that glibc finds for NCBI's Linux build (observed with glibc 2.39): with `TZ`
+unset, the zone file `/etc/localtime`; otherwise `TZ` less one leading `:` (UTC where nothing is
+left) names the zone file itself when it starts with `/`, else the file of that name under
+`TZDIR` (`/usr/share/zoneinfo` when `TZDIR` is unset or empty), and where that is no zone file it
+is a POSIX rule. Under WASI the environment and the files are those that the host gives the
+module. The crate jiff reads the zone file and the rule (line LIB, 2026-11-20, on the
+maintainer's 「TZ=A」 of that day); LOSAT reads the leap-second records of a zone file itself, so
+that tzdata's `right/` zones give glibc's time, second 60 included. On Windows the zone comes
+from `TZ` and the system zone as Microsoft's C runtime (UCRT) reads them for NCBI's Windows
+build. A `TZ` offset beyond 596,523 hours overflows UCRT's 32-bit arithmetic (undefined in C++);
+LOSAT takes the mathematical value. When no zone can be read, the date is UTC; so it is on
+Windows where UCRT's `localtime` fails (a `TZ` offset that puts the local time before 1969-12-31
+12:00 or after 3001-01-19 21:59:59, where NCBI's `CTime` throws).
+
+Where glibc reads a `TZ` that POSIX does not write, or a zone file that jiff rejects, the date of
+NCBI's Linux build is glibc's reading and LOSAT's is UTC (8,588 rules and every zone of tzdata
+2026e in four builds compared with glibc, 1970 to 2100; the forms below are in
+LOSAT/tests/unit/local_time_glibc_vectors.tsv, which CI compares with LOSAT and with glibc). The
+local time at 2026-01-01 00:00 UTC and at 2026-07-25 17:20 UTC, as glibc gives it and as LOSAT
+does:
+
+| `TZ` | glibc | LOSAT |
+| --- | --- | --- |
+| `XXX+25` (hours past 24) | UTC-24:00, UTC-24:00 | UTC |
+| `XXX-168` | UTC+24:00, UTC+24:00 | UTC |
+| `XXX99999` | UTC-24:00, UTC-24:00 | UTC |
+| `XXX5:70` (minutes past 59) | UTC-05:59, UTC-05:59 | UTC |
+| `EST5EDT,M13.2.0,M11.1.0` (a month past 12) | UTC-04:00, UTC-05:00 | UTC |
+| `EST5EDT,M3.6.0,M11.1.0` (a week past 5) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT,M3.2.7,M11.1.0` (a weekday past 6) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT,J0,J300` (a Julian day 0) | UTC-04:00, UTC-05:00 | UTC |
+| `EST5EDT,366,300` (a day past 365) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT,M3.2.0/168,M11.1.0` (a rule time of 168 hours) | UTC-05:00, UTC-04:00 | UTC |
+| `AAA--8`, `JST--9` (two signs) | UTC+24:00, UTC+24:00 | UTC |
+| `JST+-9` | UTC-24:00, UTC-24:00 | UTC |
+| `EST5EDT,M3.2.0` (one date of the rule) | UTC-05:00, UTC-04:00 | UTC |
+| `EST5EDT,` (an empty rule) | UTC-05:00, UTC-04:00 | UTC |
+| `EST5EDT,M3,M11.1.0`, `EST5EDT,M3.2,M11.1.0`, `EST5EDT,,M11.1.0` (a date cut short) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT,m3.2.0,m11.1.0` (a lowercase `m`) | UTC-04:00, UTC-04:00 | UTC |
+| `EST5EDT4`, `XXX5YYY`, `XXX5YYY4` (daylight time without a rule: glibc takes the rules of the zone file `posixrules` under `TZDIR`, New York's on Debian and Ubuntu, or without it the United States' since 2007) | UTC-05:00, UTC-04:00 | UTC |
+| `XXX-9YYY`, `JST-9junk` | UTC+09:00, UTC+10:00 | UTC |
+| `XXX1:2` (minutes of one digit) | UTC-01:02, UTC-01:02 | UTC |
+| `XXX-5:3` | UTC+05:03, UTC+05:03 | UTC |
+| `XXX5YYY4:3,M3.2.0,M11.1.0` | UTC-05:00, UTC-04:03 | UTC |
+| `JST-9 `, `JST-9:` (text after the rule) | UTC+09:00, UTC+09:00 | UTC |
+| `JST-9,` | UTC+09:00, UTC+00:00 | UTC |
+| `EST5EDT,M3.2.0,M11.1.0 `, `EST5EDT,M3.2.0,M11.1.0,M12.1.0` | UTC-05:00, UTC-04:00 | UTC |
+| `America/Ojinaga` of a zone file built with `zic -b slim` (its footer disagrees with its last transition; the distributions' fat file is read) | UTC-06:00, UTC-05:00 | UTC |
+
+A rule whose change falls in another year in UTC than in local time (a valid POSIX rule) gives
+LOSAT another local time than glibc's for up to a day at the turn of the year: jiff keeps the
+change in its year in UTC, and glibc puts it where the rule says (231 of 5,000 such rules
+generated differ; no zone of tzdata 2026e does). The local time at 2025-12-31 23:59:59 UTC:
+
+| `TZ` | glibc | LOSAT |
+| --- | --- | --- |
+| `AAA-9BBB,0,365`, `AAA-9BBB,0/0,J365/25`, `AAA-9BBB,J60,365` | UTC+09:00 | UTC+10:00 |
+| `AAA1BBB,J60,365/-3` | UTC-01:00 | UTC+00:00 |
+| `XXX-24YYY,0/0,J365/25` | UTC+24:00 | UTC+25:00 |
+
+A zone file that breaks RFC 8536 (transitions or leap seconds out of order, a leap-second step
+other than one second, a footer that disagrees with the only local time type of a file without
+transitions) can give another time than glibc's, or UTC; zic writes no such file.
 
 A database of 1,000 volumes or more is not in FASTA order when it is read, with makeblastdb
 and with `losat makeblastdb` alike: NCBI opens volumes in the sorted order of their names, and

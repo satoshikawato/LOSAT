@@ -369,7 +369,8 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                 message: format!(
                     "BLAST engine error: {}\n",
                     crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
-                ),
+                )
+                .into(),
             });
             // A batch after the first: the batches before had no valid query (one with a
             // valid query would have raised the error), and NCBI has written their reports

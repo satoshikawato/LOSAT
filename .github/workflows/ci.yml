@@ -82,6 +82,14 @@ jobs:
         run: python3 LOSAT/tests/check_manifest_sizes.py --root .
       - name: Manifest size check tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_manifest_sizes.py'
+      # No NCBI counterpart: the source files that only unit tests read (`#[cfg(test)] mod x_tests;`,
+      # a table a test `include!`s) stay out of the published crate (`exclude` in LOSAT/Cargo.toml),
+      # and every file the build reads stays in. Without cargo: the package list is Git's file list
+      # less what `exclude` matches, as Cargo computes it (`cargo package --list` needs the registry).
+      - name: Crate test files
+        run: python3 LOSAT/tests/check_crate_test_files.py --root .
+      - name: Crate test-file check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_crate_test_files.py'
       # No NCBI counterpart: crates.io refuses a .crate file over 10 MiB, and publish-crate.yml uploads
       # the release's crate there. `cargo package --no-verify` packs what `cargo publish` would,
       # without the build.
@@ -93,6 +101,7 @@ jobs:
           crate=$(ls target/package/losat-*.crate)
           bytes=$(stat -c %s "$crate")
           echo "$(basename "$crate"): $bytes bytes, $((bytes * 100 / 10485760)) % of the 10 MiB that crates.io takes" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$bytes" -le 8912896 ] || echo "::warning::the crate is over 85 % of the 10 MiB that crates.io takes ($bytes bytes)"
           if [ "$bytes" -gt 10485760 ]; then
             echo "::error::the crate is over the 10 MiB that crates.io takes; see .github/workflows/publish-crate.yml"
             exit 1
@@ -173,6 +182,12 @@ jobs:
         run: python3 LOSAT/tests/ncbi_unit_case_ledger.py check --root .
       - name: Ledger checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ncbi_unit_case_ledger.py'
+      # NCBI's Linux build: makeblastdb's dates come from glibc's localtime. The unit tests of
+      # LOSAT/src/writedb/local_offset.rs compare LOSAT's local time with the fixture
+      # LOSAT/tests/unit/local_time_glibc_vectors.tsv; this compares the fixture with this runner's
+      # glibc (every form of TZ and TZDIR of the fixture, under a second, 2026-11-20).
+      - name: Local time is glibc's
+        run: python3 -I scripts/local_time_glibc_vectors.py --check
       # No NCBI counterpart: release bookkeeping. Pending CHANGELOG entries are one file per pull
       # request (changelog.d/README.md), so two pull requests never conflict in CHANGELOG.md.
       - name: Changelog fragments

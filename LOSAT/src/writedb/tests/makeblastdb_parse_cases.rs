@@ -29,6 +29,7 @@ pub(super) struct ParseCase {
 
 pub(super) const PARSE_CASES: &[ParseCase] = &[
     ParseCase {
+        // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
         name: "P_keys",
         input: b"\
             >pir||S12345 pir\nMKTAYIAKQRQISFVKSHFSRQ\n>prf||1234567A prf\nMKTAYIAKQRQISFVKSHFSRQ\n>p\

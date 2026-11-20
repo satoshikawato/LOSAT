@@ -183,11 +183,16 @@ fn apply_list(
     let mut warnings = Vec::new();
     let restricted = db.restrict(list, &mut warnings);
     let prefix = program.to_ascii_lowercase();
+    // The lines keep the bytes of a seqid list's words (probe R3 of line LIB-B).
     for warning in warnings {
         let line = match warning {
             crate::seqdb::ListWarning::Log(text) => text,
-            crate::seqdb::ListWarning::Posted(text) => format!("Warning: [{prefix}] {text}"),
-            crate::seqdb::ListWarning::Error(text) => format!("Error: [{prefix}] {text}"),
+            crate::seqdb::ListWarning::Posted(text) => {
+                format!("Warning: [{prefix}] {text}").into_bytes()
+            }
+            crate::seqdb::ListWarning::Error(text) => {
+                [format!("Error: [{prefix}] ").as_bytes(), &text].concat()
+            }
             crate::seqdb::ListWarning::SeqId(warning) => {
                 let mut line = Vec::new();
                 crate::writedb::fasta_source::defline_ids::post_seq_id_warning_of(
@@ -195,10 +200,10 @@ fn apply_list(
                     warning,
                     &mut |text| line.extend_from_slice(text),
                 );
-                String::from_utf8_lossy(&line).into_owned()
+                line
             }
         };
-        diagnostics.write_all(line.as_bytes())?;
+        diagnostics.write_all(&line)?;
         diagnostics.write_all(b"\n")?;
     }
     restricted.map_err(|error| database_error(error, program))
@@ -405,7 +410,7 @@ impl PsiSearchReadFailure {
         match self {
             PsiSearchReadFailure::EmptyDatabase => NativeError {
                 exit: 2,
-                message: "BLAST Database error: OID not found\n".to_string(),
+                message: "BLAST Database error: OID not found\n".into(),
             }
             .into(),
             PsiSearchReadFailure::Unopenable(error) => database_error(error, program),
@@ -438,7 +443,7 @@ pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Er
     match error.ncbi_message() {
         Some(text) => NativeError {
             exit: 2,
-            message: format!("BLAST Database error: {text}\n"),
+            message: [b"BLAST Database error: ".as_slice(), &text, b"\n"].concat(),
         }
         .into(),
         None => refusal(&error.to_string(), program),
@@ -2190,9 +2195,13 @@ impl<'a> HeaderReader<'a> {
             (
                 Some(FoundInstead::HoldersUnknown {
                     instead,
+                    // `why` is only written in LOSAT's own refusal text (`db_subject`).
                     why: format!(
                         "{why} ({})",
-                        error.ncbi_message().unwrap_or_else(|| error.to_string())
+                        error.ncbi_message().map_or_else(
+                            || error.to_string(),
+                            |text| String::from_utf8_lossy(&text).into_owned()
+                        )
                     ),
                 }),
                 None,
@@ -2295,7 +2304,11 @@ impl<'a> HeaderReader<'a> {
             self.weakly_held(lookup, subject, ordinal, &oids)
                 .unwrap_or_else(|error| {
                     Some(crate::report::db_subject::WeakMatch::Failed(
-                        error.ncbi_message().unwrap_or_else(|| error.to_string()),
+                        // Written only in LOSAT's own refusal text (`db_subject`).
+                        error.ncbi_message().map_or_else(
+                            || error.to_string(),
+                            |text| String::from_utf8_lossy(&text).into_owned(),
+                        ),
                     ))
                 })
         } else {
@@ -7243,8 +7256,10 @@ fn prefetch_stop(
         parsed_refusal(
             db.oid(ordinal),
             &format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error), but which NCBI's prefetch may not look up: {why}",
+                "has the Seq-align id {}, whose lookup in the database fails ({}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error), but which NCBI's prefetch may not look up: {why}",
                 String::from_utf8_lossy(&parsed.alignment_fasta()),
+                // LOSAT's own refusal text.
+                String::from_utf8_lossy(message),
             ),
             program,
         )
@@ -7307,8 +7322,10 @@ fn prefetch_stop(
         parsed_refusal(
             db.oid(subjects[deciding].ordinal),
             &format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error), in a batch of which LOSAT does not know what that prefetch writes before it: {what}",
-                String::from_utf8_lossy(&parsed.alignment_fasta())
+                "has the Seq-align id {}, whose lookup in the database fails ({}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error), in a batch of which LOSAT does not know what that prefetch writes before it: {what}",
+                String::from_utf8_lossy(&parsed.alignment_fasta()),
+                // LOSAT's own refusal text.
+                String::from_utf8_lossy(message)
             ),
             program,
         )
@@ -7316,8 +7333,10 @@ fn prefetch_stop(
     if let Some(&other) = ends.iter().find(|&&index| stopping(index).2 != message) {
         let (_, other_parsed, other_message) = stopping(other);
         return refuse(&format!(
-            "the prefetch may also end at the lookup of {}, which fails with another message ({other_message}), as NCBI makes it or not",
-            String::from_utf8_lossy(&other_parsed.alignment_fasta())
+            "the prefetch may also end at the lookup of {}, which fails with another message ({}), as NCBI makes it or not",
+            String::from_utf8_lossy(&other_parsed.alignment_fasta()),
+            // LOSAT's own refusal text.
+            String::from_utf8_lossy(other_message)
         ));
     }
     let before = order.before(first, last);
@@ -7425,14 +7444,14 @@ fn prefetch_stop(
             "the load of another of its subjects, which LOSAT does not know NCBI's prefetch to make before the stop ({why}), asks the taxonomy database for what a BLAST XML report before it did not (NCBI's XML stream cut its Iteration at a query title or id outside US-ASCII, so it made none of its loads), and NCBI writes there the texts of those asks where it makes it"
         ));
     }
-    let mut text = String::new();
+    let mut text = Vec::new();
     for read in &reads {
         match whys[read.subject as usize] {
             Some(why) if !read.text.is_empty() => {
                 unknown.get_or_insert(why);
             }
             Some(_) => {}
-            None => text.push_str(&String::from_utf8_lossy(&read.text)),
+            None => text.extend_from_slice(&read.text),
         }
     }
     if let Some(why) = unknown {
@@ -7444,7 +7463,7 @@ fn prefetch_stop(
         query: queries.error_query,
         error: NativeError {
             exit: 2,
-            message: format!("{text}BLAST Database error: {message}\n"),
+            message: [text.as_slice(), b"BLAST Database error: ", message, b"\n"].concat(),
         }
         .into(),
     })
@@ -8449,7 +8468,7 @@ mod taxdb_prepass_tests {
             if stops {
                 assert!(
                     subject.prefetch_stops().is_some_and(
-                        |message| message.starts_with("Error: Could not open input file (")
+                        |message| message.starts_with(b"Error: Could not open input file (")
                     ),
                     "{list} {ordinal}: {:?}",
                     subject.found()
@@ -9425,7 +9444,7 @@ mod taxdb_prepass_tests {
             let failure = result.unwrap_err().downcast::<HeaderReadError>().unwrap();
             let native = failure.error.downcast::<NativeError>().unwrap();
             assert_eq!(native.exit, 2);
-            (failure.query, native.message)
+            (failure.query, String::from_utf8(native.message).unwrap())
         };
         let refused = |result: Result<crate::report::diag_log::Posts>| -> String {
             let refusal = result.unwrap_err();
@@ -9648,7 +9667,7 @@ mod taxdb_prepass_tests {
             let failure = result.unwrap_err().downcast::<HeaderReadError>().unwrap();
             let native = failure.error.downcast::<NativeError>().unwrap();
             assert_eq!(native.exit, 2);
-            (failure.query, native.message)
+            (failure.query, String::from_utf8(native.message).unwrap())
         };
         let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
         // The model of the cut report of query 0 in `run`: its reads of `read` (each sequence's
@@ -9940,7 +9959,7 @@ mod taxdb_prepass_tests {
             let failure = error.downcast::<HeaderReadError>().unwrap();
             let native = failure.error.downcast::<NativeError>().unwrap();
             assert_eq!(native.exit, 2);
-            (failure.query, native.message)
+            (failure.query, String::from_utf8(native.message).unwrap())
         };
         let refused = |error: anyhow::Error| {
             assert!(!error.is::<HeaderReadError>(), "{error}");
@@ -10060,7 +10079,7 @@ mod taxdb_prepass_tests {
             let failure = result.unwrap_err().downcast::<HeaderReadError>().unwrap();
             let native = failure.error.downcast::<NativeError>().unwrap();
             assert_eq!(native.exit, 2);
-            (failure.query, native.message)
+            (failure.query, String::from_utf8(native.message).unwrap())
         };
         let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
         let names = [

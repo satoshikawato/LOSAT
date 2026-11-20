@@ -275,6 +275,7 @@ watch(verdict, (now) => {
         {{ NO_SEQUENCE_TEXT[noSequence] }}
       </p>
       <p v-else-if="source.check?.state === 'ok'" class="ok" :data-testid="`${testid}-check`" data-check="ok">
+        <!-- heroicons 1.0.6: outline/check.svg (MIT License: THIRD_PARTY_NOTICES, section 9 (Heroicons)). -->
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7" /></svg>
         <span class="visually-hidden">Accepted by the {{ programLabel }} engine: {{ formatCount(source.check.records) }} {{ source.check.records === 1 ? 'record' : 'records' }}</span>
       </p>

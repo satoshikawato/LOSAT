@@ -1490,8 +1490,8 @@ fn open_new_database(
         Some(off) => &new_db[off + 1..],
         None => new_db,
     };
-    let lmdb: Vec<String> = (version == DbVersion::V5)
-        .then(|| build_lmdb_file_name(new_db, is_protein))
+    let lmdb: Vec<std::path::PathBuf> = (version == DbVersion::V5)
+        .then(|| build_lmdb_file_name(new_db, is_protein).into())
         .into_iter()
         .collect();
     let (bytes_total, bytes_to_cache, files) = db_files_metadata(

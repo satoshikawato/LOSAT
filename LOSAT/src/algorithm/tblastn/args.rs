@@ -862,16 +862,34 @@ impl TblastnArgs {
 /// psiblast's `validate_requested_blastp_support`).
 pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
     use crate::blastinput::app::CompositionMode;
-    if !args.gapped {
-        anyhow::bail!("{}", crate::cli::run_refusal("TBLASTN", "ungapped"));
+    // An ungapped search of a PSSM query: NCBI BLAST+ 2.17.0's tblastn dies with SIGSEGV
+    // (fixture `db.tbn.inpssm.rej.ungapped`, line PS7), so no result is defined.
+    if !args.gapped && args.pssm.is_some() {
+        anyhow::bail!("{}", ungapped_pssm_refusal());
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:449-464
+    // ```c
+    //    /* Set gapped X-dropoffs only if it is a gapped search. */
+    // ...
+    //    if (sbp->kbp_gap) {
+    //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
+    //       params->gap_x_dropoff = (Int4)
+    //           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
+    // ```
+    // An ungapped search has no gapped Karlin block (blast_setup.c:517-527), so it reads neither
+    // gapped X-drop nor the gap costs.
     // The gapped X-drops that NCBI's kernels cannot size are refused where the search starts
     // (`core::x_drop::check_gapped_x_dropoffs`), at the search's gapped Lambda: the matrix's, or a
     // PSSM query's `kbp_gap_psi` (`PsiSearch::gapped_karlin`, whose Lambda NCBI's X-drops read,
     // blast_parameters.c:455-458). A PSI-TBLASTN run that NCBI's object manager ends as its query
     // joins the scope never gets here (NCBI BLAST+ 2.17.0 writes that stop with any -xdrop_gap,
     // line RG D3-1 fix 4). (A name that LOSAT has no matrix for is refused below.)
-    if let Ok(matrix) = args.matrix_name.parse::<ScoringMatrix>() {
+    if let Some(matrix) = args
+        .matrix_name
+        .parse::<ScoringMatrix>()
+        .ok()
+        .filter(|_| args.gapped)
+    {
         let gapped = crate::stats::lookup_protein_params(&crate::config::ProteinScoringSpec {
             matrix,
             gap_open: args.gap_open,
@@ -919,10 +937,15 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
         args.hitlist_size,
         args.max_target_seqs_given,
         compo_adjust_mode.is_enabled(),
-        true,
+        args.gapped,
         "TBLASTN",
     )?;
     Ok(())
+}
+
+/// The refusal of `-ungapped` with `-in_pssm` (`check_search_limits`).
+pub(super) fn ungapped_pssm_refusal() -> &'static str {
+    "-ungapped with -in_pssm (an ungapped search of a PSSM query, which crashes NCBI BLAST+ 2.17.0's tblastn) is not supported by LOSAT's TBLASTN"
 }
 
 /// The search's composition mode, and IDENTITY's reset (IDENTITY with a mode above 0, which NCBI
@@ -1028,6 +1051,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             gap_xdrop_bits: args.xdrop_gap,
             final_xdrop_bits: args.xdrop_gap_final,
             word_xdrop_bits: args.xdrop_ungap,
+            gapped: args.gapped,
         },
     })
 }

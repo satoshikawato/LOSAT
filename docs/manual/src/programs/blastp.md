@@ -46,7 +46,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-gapopen`, `-gapextend` | 11, 1 (the matrix's best values) | Gap costs; the pairs NCBI allows for the matrix |
 | `-word_size` | 3 (2 for `blastp-short`, 5 for `blastp-fast`) | Length of the word that starts an alignment |
 | `-threshold` | 11 (by word size and task) | Minimum score of a neighbouring word |
-| `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3 |
+| `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3. A `u` after 1, 2 or 3 (`2u`) also combines each e-value with a P-value of the two sequences' compositions (unified P-values) |
 | `-seg` | `no` | Low-complexity filter |
 | `-window_size` | 40 (15 for `blastp-short`) | Two-hit window; 0 selects the one-hit method |
 | `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |
@@ -78,6 +78,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 ## Differences from NCBI BLAST+
 
 - With `-window_size 0` and a low `-threshold`, NCBI BLAST+ 2.17.0 can read memory past the end of a sequence and crash. LOSAT reads the letters past the end as the end marker, which gives NCBI BLAST+'s own output where its stray bytes are zero. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- With unified P-values (`-comp_based_stats 1u`, `2u` or `3u`), NCBI BLAST+ 2.17.0 adjusts the e-values of a query with the length and the search space of the query that follows it in the same batch of queries. LOSAT does the same. For the last query of a batch, which includes a search with one query, NCBI BLAST+ reads past the end of its data, and its report can change from run to run. There LOSAT uses the query's own length and search space, which gives the report NCBI BLAST+ writes for that query when a copy of it follows. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## What LOSAT refuses
 
@@ -85,7 +86,6 @@ LOSAT stops with an error for these `blastp` settings instead of running somethi
 
 - `-ungapped` and `-use_sw_tback`.
 - `-subject_besthit`, `-best_hit_overhang` and `-best_hit_score_edge`.
-- `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.

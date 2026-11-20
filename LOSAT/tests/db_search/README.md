@@ -1516,7 +1516,10 @@ most 9 in BLOSUM62).
   ends in `.gz`), `BLASTDB` set
   to that directory and `-db "NAME NAME2"`; with `@ALIAS` the alias file `rps/ALIAS.pal` is copied beside them and the
   run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
-  `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
+  `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path); the directory's path then has
+  the `db_dir_len.txt` characters (the name's prefix is lengthened, `db_search_fixtures.py` `temp_dir_of_length`), because
+  the wraps of an archive's message that holds it (`message "..."`) depend on its length, and `{db_dir}` stands for
+  that length in `wording::tests::archive_messages_are_wrapped_again_as_ncbi_wraps_them`.
 - Alias files (line RG, D1a-3 review 7 S1, rows `db.rps.rej.l0`, `db.rps.rej.l2p63p1`, `db.rpstbn.rej.l0`,
   `db.rpstbn.rej.l2p63p1`), written by hand: `rps/l0rps.pal` (`TITLE t`, `DBLIST rps_mini`, `LENGTH 0`) and
   `rps/l2p63p1rps3v.pal` (`TITLE t`, `DBLIST rps_mini3v`, `LENGTH 9223372036854775809`, 2^63 + 1: negative as NCBI's

@@ -8,5 +8,7 @@
   `-xmlhelp`, `-dryrun`, `-logfile` and `-conffile`), with NCBI's help, argument errors, messages and
   exit statuses. It reads archives in ASN.1 text, the default of `-outfmt 11`; it refuses `-outfmt`
   0 to 7, 10, 11, 13 to 18 and 20, an archive in ASN.1 binary or XML, a database of the archive that is
-  not found as NCBI finds a database, and `-rid`. The library API runs it as `run_blast_formatter`
+  not found as NCBI finds a database, `-rid`, `PRE_FETCH_SEQS_LIMIT=2147483647`, archives of PHI-BLAST,
+  archives with a stored message of severity Fatal and archives on which NCBI BLAST+ has no defined
+  result. The library API runs it as `run_blast_formatter`
   (pylosat: `blast_formatter`), and `losat --install-shims` links `blast_formatter` too.

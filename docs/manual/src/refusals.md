@@ -572,14 +572,16 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 
 ## windowmasker
 
-`windowmasker` masks with a counts file (`-ustat`) and runs every option of its `-help` for that (`-xmlhelp` on the command line only). The options that only make or convert counts files (`-checkdup`, `-fa_list`, `-mem`, `-unit`, `-genome_size`, `-sformat`, `-smem`) are refused with `-ustat` by NCBI's own argument check, as in NCBI's; `-meta` is accepted and does nothing, as in NCBI's.
+`windowmasker` runs NCBI's three modes, making counts files (`-mk_counts`, with `-checkdup`), converting them (`-convert`) and masking with them (`-ustat`), and every option of its `-help` (`-xmlhelp` on the command line only). Options of another mode are refused by NCBI's own argument check, as in NCBI's; `-meta` is accepted with `-ustat` and does nothing, as in NCBI's.
 
 | Option or input | What happens |
 | :--- | :--- |
-| `-mk_counts`, `-convert` | Refused. LOSAT does not make or convert counts files yet. |
+| `-mk_counts` of an input without a unit of unambiguous letters (all `N`, or an empty file with `-unit`) | Refused. NCBI writes the percentages of the file as its C runtime prints 0/0 (`-nan` on Linux). |
+| `-mk_counts -infmt seqids` | Refused. NCBI fetches each sequence from NCBI's servers. |
+| `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536 | Refused. NCBI keeps the low 16 bits of `-smem` (0 megabytes); its search for a hash table is then undefined. With units of 4 letters or more NCBI's error is written as NCBI writes it. |
 | `-ids` or `-exclude_ids` with `-text_match F` (and `-infmt blastdb`) | Refused. LOSAT does not match ids as Seq-ids yet. |
 | An `-ids` or `-exclude_ids` file with an empty id (a line that starts with a space or a tab, `>`, `\|` or `>\|`) | Refused. NCBI writes outside its list of ids and crashes. |
-| A counts file whose `##pct:` line holds a word that NCBI reads as a number with the C++ runtime, such as `inf` or `0x10`, with a `-t_*_pct` option | Refused. Plain decimal numbers are read as NCBI reads them. |
+| A counts file whose `##pct:` line holds a word that NCBI reads as a number with the C++ runtime, such as `inf` or `0x10`, with a `-t_*_pct` option or `-convert` | Refused. Plain decimal numbers are read as NCBI reads them. |
 | An `ascii` counts file with units of 17 letters or more | Refused. NCBI's result is undefined. |
 | A FASTA record or database sequence of 4,294,967,296 letters or more | Refused. NCBI counts positions in 32 bits. |
 
@@ -588,6 +590,8 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 
 - An optimized ascii counts file is refused when the third line, which holds the hash parameters, leaves a value unread that NCBI then checks uninitialised.
 - An `obinary` counts file with units of 1 or 2 letters is refused: NCBI reads past an empty array.
+- `-mk_counts` is refused when its counters cannot be allocated on the computer (a large `-mem` with long units), and an `oascii` or `obinary` output when its cache bit array cannot: NCBI's result then depends on the computer's memory.
+- `-convert` of an `ascii` counts file with units of 17 letters or more is refused, as masking with it is.
 - `-ids` or `-exclude_ids` with a database sequence that has no title and a tax id is refused. NCBI matches the ids against a title made from the taxonomy names.
 - The database and serial-writer refusals of `dustmasker` apply to `windowmasker` too.
 
@@ -633,7 +637,6 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 ## On the list for a later release
 
 - The programs `deltablast`, `makeprofiledb` and `blast_formatter`.
-- `windowmasker -mk_counts` and `-convert`, which make and convert counts files.
 - `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
 - The `rpsblast` output formats other than `0`, `6`, `7` and `10`, and the `rpstblastn` ones other than `0` to `4`, `6`, `7` and `10`. Until then, `rpsbproc` reads the `-outfmt 11` archives that NCBI's `rpsblast` and `rpstblastn` write.

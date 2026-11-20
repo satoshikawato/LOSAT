@@ -527,9 +527,9 @@ fn memory_exception(line: u32) -> FinalizeError {
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_opt.cpp:212-332
 ///
 /// The key size is a `Uint1` and the bound `2u-7` an `int`: with units of 1 to 3 letters and
-/// no memory (`-smem` a multiple of 65536), the first loop takes `k` below 0, where it wraps to
-/// 255, and stops when the halved estimate reaches 0; the second loop then allocates 8 GiB and
-/// reads before its arrays of offsets (undefined behaviour in C++): LOSAT refuses that case.
+/// no memory (`-smem` a multiple of 65536), the first loop takes `k` below 0, where it wraps,
+/// and stops when the halved estimate reaches 0, at 253; the second loop then allocates 8 GiB
+/// and shifts by 253 bits (undefined behaviour in C++): LOSAT refuses that case.
 fn optimize(
     unit_size: u8,
     units: &[u32],
@@ -541,12 +541,17 @@ fn optimize(
     let limit = u64::from(size_requested) * MB;
     if ubs < 7 && limit == 0 {
         return Err(FinalizeError::Refused(format!(
-            "-smem {size_requested} (a multiple of 65536) for units of {unit_size} letters, where NCBI BLAST+ allocates 8 GiB and reads before its arrays (undefined behaviour in C++)"
+            "-smem of a multiple of 65536 (whose low 16 bits, 0, NCBI BLAST+ keeps) for units of {unit_size} letters, where NCBI BLAST+ sizes its hash table for a key of 253 bits, allocates 8 GiB and shifts past the width of its integers (undefined behaviour in C++)"
         )));
     }
+    // NCBI makes the array for the optimized ascii format too, which does not write it: LOSAT
+    // only checks that it could be allocated.
     let cba = match cba_textend {
         Some(textend) => Some(cache_bit_array(unit_size, units, counts, textend)?),
-        None => None,
+        None => {
+            cache_bit_array_space(unit_size)?;
+            None
+        }
     };
     let mut k = ubs - 1;
     let mut emem: u64 = 1 << (k + 2);
@@ -596,8 +601,7 @@ fn optimize(
 }
 
 /// `createCacheBitArray`: one bit per unit, set for each unit whose count is at least `textend`
-/// and for its reverse complement. NCBI posts a warning and writes no array when the array
-/// cannot be allocated, which depends on the memory of the host: LOSAT refuses that case.
+/// and for its reverse complement.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_opt.cpp:120-160
 fn cache_bit_array(
@@ -606,6 +610,25 @@ fn cache_bit_array(
     counts: &[u16],
     textend: u32,
 ) -> Result<Vec<u32>, FinalizeError> {
+    let (mut cba, size) = cache_bit_array_space(unit_size)?;
+    cba.resize(size, 0u32);
+    for (&unit, &count) in units.iter().zip(counts) {
+        if u32::from(count) >= textend {
+            let rcunit = reverse_complement(unit, unit_size);
+            cba[(unit / 32) as usize] |= 1 << (unit % 32);
+            cba[(rcunit / 32) as usize] |= 1 << (rcunit % 32);
+        }
+    }
+    Ok(cba)
+}
+
+/// Room for the cache bit array of units of `unit_size` letters, and its number of words
+/// (`4^unit_size / 32`, none for units of 1 or 2 letters). NCBI posts a warning and writes no
+/// array when the array cannot be allocated, which depends on the memory of the host: LOSAT
+/// refuses that case.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_opt.cpp:122-139
+fn cache_bit_array_space(unit_size: u8) -> Result<(Vec<u32>, usize), FinalizeError> {
     let total: u64 = 1 << (2 * u32::from(unit_size));
     let size = (total / 32) as usize;
     let mut cba = Vec::new();
@@ -614,17 +637,7 @@ fn cache_bit_array(
             "a cache bit array of {size} words that cannot be allocated here (NCBI BLAST+ then writes the file without one, which depends on the memory of the host)"
         )));
     }
-    cba.resize(size, 0u32);
-    if size > 0 {
-        for (&unit, &count) in units.iter().zip(counts) {
-            if u32::from(count) >= textend {
-                let rcunit = reverse_complement(unit, unit_size);
-                cba[(unit / 32) as usize] |= 1 << (unit % 32);
-                cba[(rcunit / 32) as usize] |= 1 << (rcunit % 32);
-            }
-        }
-    }
-    Ok(cba)
+    Ok((cba, size))
 }
 
 /// `findBestRoff( k, ... )` for units of `ubs` bits: for each right offset from 0 to `ubs - k`,

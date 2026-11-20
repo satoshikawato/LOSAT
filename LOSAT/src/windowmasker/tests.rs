@@ -50,27 +50,72 @@ fn the_library_refuses_xmlhelp_as_blastdbcmd_does() {
     );
 }
 
-// The making and the conversion of counts are refused after the arguments are read.
+// What the counts modes refuse (line NP item M5b): the percentages of an input without a unit
+// of unambiguous letters (NCBI prints 0/0 as its C runtime does), `-infmt seqids` (sequences
+// fetched over the network), and the optimizer's search without memory for units of up to 3
+// letters (undefined behaviour in C++). Each after NCBI's messages of what came before.
 #[test]
-fn mk_counts_and_convert_are_refused() {
-    for (word, what) in [
+fn the_counts_modes_refuse_what_ncbi_gives_no_one_result_for() {
+    let refusal = |what: &str| format!("Error: {what} is not supported by LOSAT's WINDOWMASKER\n");
+    let nan = refusal(
+        "-mk_counts of an input without a unit of unambiguous letters, whose percentages NCBI \
+         BLAST+ prints as the C runtime prints 0/0 (-nan on x86-64 Linux)",
+    );
+    assert_eq!(
+        run_words(&["-mk_counts", "-in", "tests/windowmasker/in/alln.fa"]),
         (
+            1,
+            String::new(),
+            format!("computing the genome length\npass 1\n{nan}")
+        )
+    );
+    assert_eq!(
+        run_words(&[
             "-mk_counts",
-            "-mk_counts (the making of a unit counts file)",
-        ),
+            "-in",
+            "tests/windowmasker/in/empty.fa",
+            "-unit",
+            "3",
+            "-sformat",
+            "binary"
+        ]),
+        (1, String::new(), format!("pass 1\n{nan}"))
+    );
+    assert_eq!(
+        run_words(&["-mk_counts", "-infmt", "seqids", "-in", "ids.txt"]),
         (
-            "-convert",
-            "-convert (the conversion of a unit counts file)",
-        ),
-    ] {
+            1,
+            String::new(),
+            refusal(
+                "-mk_counts with -infmt seqids (NCBI BLAST+ fetches each sequence from NCBI over \
+                 the network)"
+            )
+        )
+    );
+    let smem = refusal(
+        "-smem of a multiple of 65536 (whose low 16 bits, 0, NCBI BLAST+ keeps) for units of 3 \
+         letters, where NCBI BLAST+ sizes its hash table for a key of 253 bits, allocates 8 GiB \
+         and shifts past the width of its integers (undefined behaviour in C++)",
+    );
+    for sformat in ["obinary", "oascii"] {
         assert_eq!(
-            run_words(&[word]),
+            run_words(&[
+                "-mk_counts",
+                "-in",
+                "tests/winmask/fasta/dm2L_3k.fa",
+                "-unit",
+                "3",
+                "-smem",
+                "65536",
+                "-sformat",
+                sformat
+            ]),
             (
                 1,
                 String::new(),
-                format!("Error: {what} is not supported by LOSAT's WINDOWMASKER\n")
+                format!("pass 1\npass 2\noptimizing the data structure\n{smem}")
             ),
-            "{word}"
+            "{sformat}"
         );
     }
 }

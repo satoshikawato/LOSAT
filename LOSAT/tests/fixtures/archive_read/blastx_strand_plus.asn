@@ -1,0 +1,358 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">m_fam MelaMJNV 26001-31000"
+                  }
+                }
+              },
+              title "m_fam MelaMJNV 26001-31000"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 5000,
+              seq-data ncbi2na '0C902BC311E3E4FF4E432340E2010FF4D30F2C4E394BF4
+C33CD448B397EF7D0830C0F3451DE3CF4CEBF38C0231DEDDF36FFCCD7AC44DFCD000C21FCCBCB3
+8D3332EFE13FC00008348B6FF5DD0CF3E7708008348B6FF5DD0CF3E7708008348B6FF5DD0CF3E7
+70007F22AC3C90CDE630ED6305A7DCDB18373310C6BA028CD3A97F0D76D7F1FD8E30D8DD0ECD16
+C22CFBBFC7E8CE8CF7FD453CE0CD3E1BF130DD632C33EDFFFB11DD55F18CB3CFF46BFADC3F73DC
+164A00FCB2B0D24F23F1D0BF12F315FF73430D70E64B30EF010225DF68E4EA10CD1D4F345338A3
+D0CF377FC80ADBFF63360C149F7BCB93D0405553E3830CCCFD4CF774FBF2C07FF0C5CFCFCDDF0F
+3F4CB3C3FC4C733BFC21CCEEE3CF11370EF40CCFCDC37F8F028400CFC723E3020303F0CCCCFE3C
+EE000033DC4D0CC1D07F3CC3BC4397214313333330040CCFF3300F3C7FCC4F0FC031342330CADC
+144C3E337FD840EA108750A422C435D1090D33BB11A02C4711B9F6F1D3131FC4CE637D313BBD3B
+8FBFC88EC86DDA4F7F9F6AC0C8FDF88EE0AFD6CF379F6AC43F7EE3B88BF533CDE7DAB02FFF88CC
+B3EDAC57712CB23823921D9F32300B8FD3DFD1F1C0EDE38F8EBAFEA0C3DC12B77F0CD3FAFCED0B
+133AF731F233A505ADD2C13BFFE20C4FC934F0E8315CC7C73137843350F53C3035374D038F4CCB
+BBFDE33FD2F83BCD0C03FF17FFC233232F93BE8C33FE4EF4E51ACCD3F7754BF00C517D12C804A4
+13AD1F214430C03527DA6237EEBFFB108CF4A50DFC0A39CB7FFD03B346FC05812180CF33D00316
+330DC302B8FFB7BFE8AFCCF4EE10FDD803BDF7D1A6A8CF13BFCD557C40A64D4A809BBF3BFF77C7
+33454FD022150CF5C4402111304E37EFFF400300D4D249C3D8CA22100D3BA52DA40EFDC3639E74
+CCF02EDDE933F8E02DF3B3F8AE9F12C7CF08DF42A0CC0FFB90131152A71DF7EE0D3CC334DE3BDC
+2ADF44D0DEC3F10402427344DFFF4EC020D49FE94305EC3A3AB21FDB433FDFE0F8FCC0EDD0771B
+EF423833BF2840DD1DD744ECBEFB213CC1EB3E3FB3FFC0301FBB8D0CCFDFF2C63051FFF3187AC9
+2F8727DEF75266BCFBF53C333C3933331339DD04C0B0CFDBCCCCCCCCCCCCCCF4FFCDC12BCC400E
+C73EFB4C8FF3D0CFD4B7FB84233333303EF13EFB7CAFF3F0CFD4B7F0838E337FB01DE3B50B0EFB
+BBBBBBB334FCFCC4F33CFD3CCF304BE02003C370C04FD00F037B030EDB37B2F007120C130D41CC
+AC3043F34320C3B632F83B7D4DCEF413D7804D701BB0FA7D33CF3CFFFCE83C8000E0FD9F3F3B33
+F8CFC1DC100333FD3155532E038CFF343333333B330FC3F3EC304FCCF3D0E30C70FF2B33CC3801
+F333CF94333CF943AE0FF4B3BCC5C83C4F07EC7C1CCCCC133DE3F10C4EFF401334F33842FDFCFF
+52031FFCD3FE84FF18BE006423D1032F0B84D0FD48D4FFF13FE84B7F621889109F4409139712A0
+31E710B9B5B8D393FFC4FFA3B80CF0CF1FD4EBFFBF48409F7123BE8FF4BBFDC3FF45AC7F4836EE
+B334B0D32F823F21D8F763E0987A33391356FD3F30063F28FBEBA743FE0C0A3DFFD043F3D334D0
+CCF4D0F7C00E9417F77D04E4F188807F2431F3A8C1531F1C44FC10CD40D4D083D2F00F0EC74CE1
+D13C83F3D5E52B38CC3FF473DFF4C6FDF8F3F730302DE45FDFC8284CAE43FA394FF9B933D42B33
+7DFDD50F0233E5A04B8012604834F68574C020D49F6988DFBA7FEC4250E29457F027F72DFFF733
+5030EF4EFD8ACE3BD40314C3CF3CBCC6AA3B'H
+            }
+          }
+        }
+      },
+      subject database "db/bx",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 22502727
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 39,
+              to 69,
+              id local str "Query_1"
+            },
+            {
+              from 129,
+              to 153,
+              id local str "Query_1"
+            },
+            {
+              from 270,
+              to 300,
+              id local str "Query_1"
+            },
+            {
+              from 1044,
+              to 1086,
+              id local str "Query_1"
+            },
+            {
+              from 1275,
+              to 1332,
+              id local str "Query_1"
+            },
+            {
+              from 2949,
+              to 2973,
+              id local str "Query_1"
+            },
+            {
+              from 3135,
+              to 3207,
+              id local str "Query_1"
+            },
+            {
+              from 3363,
+              to 3420,
+              id local str "Query_1"
+            },
+            {
+              from 3435,
+              to 3474,
+              id local str "Query_1"
+            },
+            {
+              from 3486,
+              to 3522,
+              id local str "Query_1"
+            },
+            {
+              from 3735,
+              to 3795,
+              id local str "Query_1"
+            },
+            {
+              from 4428,
+              to 4470,
+              id local str "Query_1"
+            },
+            {
+              from 4647,
+              to 4692,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 343,
+              to 388,
+              id local str "Query_1"
+            },
+            {
+              from 952,
+              to 973,
+              id local str "Query_1"
+            },
+            {
+              from 1147,
+              to 1180,
+              id local str "Query_1"
+            },
+            {
+              from 1987,
+              to 2029,
+              id local str "Query_1"
+            },
+            {
+              from 3127,
+              to 3190,
+              id local str "Query_1"
+            },
+            {
+              from 3214,
+              to 3250,
+              id local str "Query_1"
+            },
+            {
+              from 3412,
+              to 3445,
+              id local str "Query_1"
+            },
+            {
+              from 3733,
+              to 3766,
+              id local str "Query_1"
+            },
+            {
+              from 3787,
+              to 3844,
+              id local str "Query_1"
+            },
+            {
+              from 3886,
+              to 3931,
+              id local str "Query_1"
+            },
+            {
+              from 4312,
+              to 4360,
+              id local str "Query_1"
+            },
+            {
+              from 4654,
+              to 4693,
+              id local str "Query_1"
+            },
+            {
+              from 4903,
+              to 4945,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 164,
+              to 197,
+              id local str "Query_1"
+            },
+            {
+              from 299,
+              to 344,
+              id local str "Query_1"
+            },
+            {
+              from 998,
+              to 1082,
+              id local str "Query_1"
+            },
+            {
+              from 1250,
+              to 1319,
+              id local str "Query_1"
+            },
+            {
+              from 1739,
+              to 1790,
+              id local str "Query_1"
+            },
+            {
+              from 1916,
+              to 1961,
+              id local str "Query_1"
+            },
+            {
+              from 2714,
+              to 2732,
+              id local str "Query_1"
+            },
+            {
+              from 3152,
+              to 3179,
+              id local str "Query_1"
+            },
+            {
+              from 3422,
+              to 3449,
+              id local str "Query_1"
+            },
+            {
+              from 3464,
+              to 3500,
+              id local str "Query_1"
+            },
+            {
+              from 3734,
+              to 3806,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 22502727",
+      "Effective search space used: 22502727",
+      "Length adjustment: 67"
+    }
+  }
+}

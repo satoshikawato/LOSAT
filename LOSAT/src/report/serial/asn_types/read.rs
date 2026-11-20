@@ -287,8 +287,21 @@ const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
 /// `CObjectIStream::Read`: its file header, then the value; what follows it is not read), with
 /// the messages posted.
 pub(crate) fn read_document(text: &[u8], root: u16) -> Read<Value> {
+    read_object(
+        &mut Reader::new(SliceSource::new(text), "PSSM", "PSSM reader"),
+        root,
+    )
+}
+
+/// Reads one object of the root type `root` from where `r` stands (`in >> object`:
+/// `CObjectIStream::Read`, its file header, then the value), with the messages posted. The
+/// reader stands after the object's last byte when it is read (a stream of objects reads the
+/// next one from there, `stream::ObjectStream`).
+pub(crate) fn read_object<S: AsnSource>(r: &mut Reader<S>, root: u16) -> Read<Value> {
+    r.hold(None);
+    r.release();
     let mut reader = TypedReader {
-        r: Reader::new(SliceSource::new(text), "PSSM", "PSSM reader"),
+        r,
         frames: Vec::new(),
         posts: Vec::new(),
         open: Vec::new(),
@@ -297,8 +310,8 @@ pub(crate) fn read_document(text: &[u8], root: u16) -> Read<Value> {
     (value, reader.posts)
 }
 
-struct TypedReader<'a> {
-    r: Reader<SliceSource<'a>>,
+struct TypedReader<'r, S: AsnSource> {
+    r: &'r mut Reader<S>,
     frames: Vec<Frame>,
     posts: Vec<Post>,
     /// The values being read, outermost first (`Open`): NCBI's recursion of `ReadObject` as a list
@@ -339,7 +352,7 @@ enum Step {
     Done(Value),
 }
 
-impl TypedReader<'_> {
+impl<S: AsnSource> TypedReader<'_, S> {
     fn push(&mut self, kind: FrameKind, type_name: Option<&'static str>, skip: bool) {
         self.frames.push(Frame {
             kind,
@@ -566,9 +579,11 @@ impl TypedReader<'_> {
                 }
                 self.next_element(element, skip, values, block_start)
             }
-            Open::Delayed { start } => Ok(Step::Done(Value::Delayed(
-                self.r.bytes(start..self.r.pos).to_vec(),
-            ))),
+            Open::Delayed { start } => {
+                let text = self.r.bytes(start..self.r.pos).to_vec();
+                self.r.hold(None);
+                Ok(Step::Done(Value::Delayed(text)))
+            }
         }
     }
 
@@ -731,8 +746,10 @@ impl TypedReader<'_> {
     // ```
     // (psiblast and tblastn set no hook on their stream: `ShouldParseDelayBuffer` is false,
     // objistr.cpp:745-760.)
+    // (A stream keeps the text from its start until the value ends: `Reader::hold`.)
     fn delay_start(&mut self) -> R<usize> {
         self.r.skip_white_space()?;
+        self.r.hold(Some(self.r.pos));
         Ok(self.r.pos)
     }
 

@@ -1,0 +1,106 @@
+Blast4-request ::= {
+  body queue-search {
+    program "blastn",
+    service "megablast",
+    queries bioseq-set {
+      seq-set {
+        seq {
+          id {
+            local str "Query_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">mq1 query matching several subjects"
+                }
+              }
+            },
+            title "mq1 query matching several subjects"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 600,
+            seq-data ncbi2na 'F554B376D760EC8D8DC95D407CC639D1EDB1701975B62482
+7EFE12F6625ECF8ADBB6F798A5B7B049DBE4203A93DB97F69BDF470B222E53099CD4DA858150D9
+62D91C71C5EA3252A3C26A394BD7164C1589D0F16DC974D5D6457C6AD03249A261B69C2532B501
+5A0CCBFA89068A5F230BF92D2F801DC094396727C2A602F6DBA7965874B0CF01191A5086E3B992
+5F660970A988B513FE'H
+          }
+        },
+        seq {
+          id {
+            local str "Query_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">mq2 query with no significant hit"
+                }
+              }
+            },
+            title "mq2 query with no significant hit"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 300,
+            seq-data ncbi2na 'A3FED327601C48897AFB23382BAFF4E09467FB5DA88D735D
+CE24BA21EBAA0DF7246555D30D0ED17912936A142D0AF6243451AE6840DFEFFB7AF643C50FEA39
+139B71FF9C0E26CC192CAFFC'H
+          }
+        },
+        seq {
+          id {
+            local str "Query_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">mq3 query matching msF on the minus strand"
+                }
+              }
+            },
+            title "mq3 query matching msF on the minus strand"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 300,
+            seq-data ncbi2na 'FFBBF1BBE1B6210A906EF1B995B85EFA125E1BA47BCF6855
+56D3DDCC14952ECD9544BAAEF76ABCEB431E33042024A50B460FED8A2BE51388E6442E58456BA7
+B1431925E584BDF4A2BB08EF'H
+          }
+        }
+      }
+    },
+    subject database "db/bn",
+    algorithm-options {
+      {
+        name "EvalueThreshold",
+        value cutoff e-value { 1, 10, 1 }
+      },
+      {
+        name "MaskAtHash",
+        value boolean TRUE
+      },
+      {
+        name "UngappedMode",
+        value boolean FALSE
+      },
+      {
+        name "HitlistSize",
+        value integer 500
+      }
+    }
+  }
+}

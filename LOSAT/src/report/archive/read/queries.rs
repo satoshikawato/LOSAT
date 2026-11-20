@@ -64,15 +64,17 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::algorithm::pssm_search::annot_index::view::V;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::db_subject::bioseq_facts;
 use crate::report::defline::generate_bioseq_defline;
+use crate::report::serial::asn_types::view::V;
 use crate::seqid::label::{bioseq_fasta, fasta};
 use crate::seqid::mask_handle::{handle_fasta_is_own, mask_handle_key};
 use crate::seqid::model::ParsedSeqId;
 use crate::sequence::stdaa_letters::protein_fasta_letters;
 use crate::sequence::write_fasta_lines;
+
+use super::request::{self, Bioseq};
 
 /// Why the queries are not written.
 #[derive(Debug)]
@@ -188,16 +190,12 @@ impl FastaOstream {
     }
 
     /// `Write(handle)`: `WriteTitle` (the ids, the title), then `WriteSequence`.
-    fn write_bioseq(&mut self, bioseq: V<'_>) -> Result<(), RenderError> {
-        let ids: Vec<ParsedSeqId> = bioseq
-            .field("id")
-            .items()
-            .map(|id| id.seq_id().clone())
-            .collect();
-        let inst = bioseq.field("inst");
-        let protein = inst.field("mol").int() == MOL_AA;
+    fn write_bioseq(&mut self, bioseq: Bioseq<'_>) -> Result<(), RenderError> {
+        let ids: Vec<ParsedSeqId> = bioseq.ids().cloned().collect();
+        let inst = bioseq.value().field("inst");
+        let protein = bioseq.molecule() == MOL_AA;
         self.write_seq_ids(bioseq, &ids, protein)?;
-        let Some(length) = inst.get("length") else {
+        let Some(length) = bioseq.length() else {
             return Err(RenderError::Exception(NcbiException::new(
                 UNASSIGNED_LENGTH,
                 "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length",
@@ -213,7 +211,7 @@ impl FastaOstream {
         }
         self.write_seq_title(title, &ids, protein)?;
         // The reader reads a `TSeqPos` without a sign.
-        let length = u32::try_from(length.int()).expect("a Seq-inst length of 32 bits");
+        let length = u32::try_from(length).expect("a Seq-inst length of 32 bits");
         let letters = letters(inst, length, protein)?;
         write_fasta_lines(&letters, WIDTH, &mut self.text);
         Ok(())
@@ -240,7 +238,7 @@ impl FastaOstream {
     /// same text whether or not the stream hides a prefix, as `fEnableGI` keeps them all).
     fn write_seq_ids(
         &mut self,
-        bioseq: V<'_>,
+        bioseq: Bioseq<'_>,
         ids: &[ParsedSeqId],
         protein: bool,
     ) -> Result<(), RenderError> {
@@ -346,14 +344,13 @@ fn handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, RenderError> {
     mask_handle_key(id).map_err(|_| RenderError::Unsupported("a giim Seq-id in the queries".into()))
 }
 
-/// The Bioseqs of an entry in the order of `CBioseq_CI` (depth first: `n_nested`,
-/// `n_nested_deep`). A nested set's own descriptors are refused: what the title generator takes
+/// The Bioseqs of an entry in the order of `CBioseq_CI` (depth first, as the request's model
+/// walks them: `n_nested`, `n_nested_deep`). A nested set's own descriptors are refused: what the title generator takes
 /// of them is not probed past one case (`t_set_title`: a set's title is not its Bioseq's). So are
 /// annotations, of a set or a Bioseq: the generator names a Bioseq without a title from the
 /// features of its entry (a BioSource or Prot-ref feature, the CDS of a protein:
 /// create_defline.cpp:1410, 1977, 2055), which `report::defline` does not model.
-fn entry_bioseqs(entry: V<'_>) -> Result<Vec<V<'_>>, RenderError> {
-    let mut out = Vec::new();
+fn entry_bioseqs(entry: V<'_>) -> Result<Vec<Bioseq<'_>>, RenderError> {
     let mut todo = vec![entry];
     while let Some(entry) = todo.pop() {
         match entry.choice() {
@@ -363,7 +360,6 @@ fn entry_bioseqs(entry: V<'_>) -> Result<Vec<V<'_>>, RenderError> {
                         "a query Bioseq with annotations".into(),
                     ));
                 }
-                out.push(bioseq);
             }
             (_, set) => {
                 if set.get("descr").is_some() || set.get("annot").is_some() {
@@ -371,13 +367,13 @@ fn entry_bioseqs(entry: V<'_>) -> Result<Vec<V<'_>>, RenderError> {
                         "a nested Bioseq-set with descriptors or annotations in the queries".into(),
                     ));
                 }
-                let at = todo.len();
                 todo.extend(set.field("seq-set").items());
-                todo[at..].reverse();
             }
         }
     }
-    Ok(out)
+    let mut bioseqs = Vec::new();
+    request::entry_bioseqs(entry, &mut bioseqs);
+    Ok(bioseqs)
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:891-904
@@ -425,10 +421,10 @@ const DUPLICATE_BIOSEQ_ID: ThrowSite = ThrowSite {
 /// an id already indexed throws, its message spelling each id as its handle's `AsString()`. That is
 /// the id's own FASTA text where [`handle_fasta_is_own`] says so (`d_set_dup`: `lcl|query_2` after
 /// `lcl|Query_2`); elsewhere it can come from an id of another entry: refused.
-fn check_entry_ids(bioseqs: &[V<'_>]) -> Result<(), RenderError> {
+fn check_entry_ids(bioseqs: &[Bioseq<'_>]) -> Result<(), RenderError> {
     let ids: Vec<Vec<&ParsedSeqId>> = bioseqs
         .iter()
-        .map(|bioseq| bioseq.field("id").items().map(|id| id.seq_id()).collect())
+        .map(|bioseq| bioseq.ids().collect())
         .collect();
     let mut seen: HashMap<Vec<u8>, usize> = HashMap::new();
     for (index, own) in ids.iter().enumerate() {
@@ -539,7 +535,7 @@ fn id_string(ids: &[&ParsedSeqId]) -> String {
 /// `OrginalID`) user object with a `LocalId` string field, for a Bioseq whose ids are all local or
 /// of the general databases TMSMART, BankIt and NCBIFILE (probes `n_orig_*`); none when it is
 /// blank (`NStr::IsBlank`: white space only).
-fn original_id<'a>(bioseq: V<'a>, ids: &[ParsedSeqId]) -> Option<&'a [u8]> {
+fn original_id<'a>(bioseq: Bioseq<'a>, ids: &[ParsedSeqId]) -> Option<&'a [u8]> {
     let should_use = ids.iter().all(|id| match id {
         ParsedSeqId::Local(_) => true,
         ParsedSeqId::General(dbtag) => [&b"TMSMART"[..], b"BankIt", b"NCBIFILE"]
@@ -550,7 +546,8 @@ fn original_id<'a>(bioseq: V<'a>, ids: &[ParsedSeqId]) -> Option<&'a [u8]> {
     if !should_use {
         return None;
     }
-    let found = descriptors(bioseq)
+    let found = bioseq
+        .descriptors()
         .filter_map(|(variant, user)| (variant == "user").then_some(user))
         .filter(|user| {
             matches!(user.field("type").choice(), ("str", kind)
@@ -580,15 +577,6 @@ fn is_original_id_type(kind: &[u8]) -> bool {
     kind.eq_ignore_ascii_case(b"OriginalID") || kind.eq_ignore_ascii_case(b"OrginalID")
 }
 
-/// The Bioseq's descriptors in order: their variant and value.
-fn descriptors<'a>(bioseq: V<'a>) -> impl Iterator<Item = (&'static str, V<'a>)> {
-    bioseq
-        .get("descr")
-        .into_iter()
-        .flat_map(|descr| descr.items())
-        .map(|desc| desc.choice())
-}
-
 /// The first `title` descriptor, which the title generator takes (`n_title_two`), after the
 /// refusal of the descriptors that would change the generated title in ways `report::defline`
 /// does not model: the generator reads `molinfo` (tech prefixes and suffixes: `n_molinfo_tsa`
@@ -597,13 +585,9 @@ fn descriptors<'a>(bioseq: V<'a>) -> impl Iterator<Item = (&'static str, V<'a>)>
 /// (create_defline.cpp:840-1135). A user object whose type is a string other than `CFastaReader`
 /// (the reader's own, which NCBI's exports carry) or an original id is refused with them; one
 /// typed by a number is read by neither. The other descriptors are read by neither.
-fn title_descriptor(bioseq: V<'_>) -> Result<Option<&[u8]>, RenderError> {
-    let mut title = None;
-    for (variant, desc) in descriptors(bioseq) {
+fn title_descriptor(bioseq: Bioseq<'_>) -> Result<Option<&[u8]>, RenderError> {
+    for (variant, desc) in bioseq.descriptors() {
         match variant {
-            "title" => {
-                title.get_or_insert(desc.str());
-            }
             "user" => {
                 if let ("str", kind) = desc.field("type").choice() {
                     let kind = kind.str();
@@ -623,7 +607,7 @@ fn title_descriptor(bioseq: V<'_>) -> Result<Option<&[u8]>, RenderError> {
             _ => {}
         }
     }
-    Ok(title)
+    Ok(bioseq.title())
 }
 
 /// A segment of the sequence map: a Seq-data and its length, or a gap.

@@ -27,13 +27,13 @@ mod align;
 mod entry;
 mod range;
 mod table;
-pub(crate) mod view;
 
 use range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use view::V;
 
 use crate::ncbi_exception::{post_line_in, NcbiException, Severity};
 use crate::report::diag_log::Posts;
+use crate::report::serial::asn_types::view;
 use crate::report::serial::asn_types::{resolved, table::named, write::failed_stream_text};
 use crate::report::serial::pssm::SeqEntry;
 

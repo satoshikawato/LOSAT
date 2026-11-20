@@ -1,12 +1,13 @@
 //! Typed access to the generic reader's values (`report::serial::asn_types::Value`) by the
-//! member and variant names of NCBI's ASN.1 modules: what the object manager's C++ getters
-//! (`GetLocation()`, `GetSegs().GetDenseg()`, ...) read of the query's annotations.
+//! member and variant names of NCBI's ASN.1 modules: what NCBI's C++ getters (`GetLocation()`,
+//! `GetSegs().GetDenseg()`, ...) read of a value (the query's annotations of `-in_pssm`, the
+//! Blast4-archive of `blast_formatter -archive`).
 //!
 //! No NCBI counterpart of its own: the generic value keeps the members of a SEQUENCE by their
 //! position in the module and the variant of a CHOICE by its position (`asn_types::Value`), and
 //! the type table names them (`asn_types::members`).
 
-use crate::report::serial::asn_types::{member_index, members, resolved, Kind, Value};
+use super::{member_index, members, resolved, Kind, Value};
 use crate::seqid::ParsedSeqId;
 
 /// A value of the type `ty` of the table.

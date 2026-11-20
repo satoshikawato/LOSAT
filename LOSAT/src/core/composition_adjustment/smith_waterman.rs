@@ -308,29 +308,102 @@ pub(crate) struct SwStart {
     pub(crate) query_start: usize,
 }
 
+/// The values of a scan's cells (`cell`): `i32`, whose maxima are `cmov_max`, or, in the scans
+/// compiled for AVX2 (`score_only_avx2`, `find_start_avx2`), `Lane0`, whose maxima are `pmaxsd`.
+/// Both compute the same integers: an addition wraps as `i32`'s does in the release build, and
+/// `larger` is the signed maximum.
+trait CellValue: Copy {
+    fn of(value: i32) -> Self;
+    fn get(self) -> i32;
+    fn plus(self, other: Self) -> Self;
+    fn larger(self, other: Self) -> Self;
+}
+
+impl CellValue for i32 {
+    #[inline(always)]
+    fn of(value: i32) -> Self {
+        value
+    }
+
+    #[inline(always)]
+    fn get(self) -> i32 {
+        self
+    }
+
+    #[inline(always)]
+    fn plus(self, other: Self) -> Self {
+        self + other
+    }
+
+    #[inline(always)]
+    fn larger(self, other: Self) -> Self {
+        cmov_max(self, other)
+    }
+}
+
+/// A cell's value in lane 0 of an SSE register, in the scans compiled for AVX2: each maximum is one
+/// `pmaxsd` (ports 0 and 1) where `cmov_max` takes a `cmp` and a `cmovl` (`cmovl` on ports 0 and 6
+/// only), so the cells' operations share the ALU ports less. The scalar cell is bound by its ALU
+/// operations (ws, X4-mt kernel benchmark, 230.7 million cells: about 2.85 of them a cycle in every
+/// form of the cell tried), and this one takes 1.090 G cycles where `i32`'s takes 1.387 G. Made
+/// only in `score_only_avx2` and `find_start_avx2`, which run where the CPU has AVX2.
+#[cfg(target_arch = "x86_64")]
+#[derive(Debug, Clone, Copy)]
+struct Lane0(core::arch::x86_64::__m128i);
+
+#[cfg(target_arch = "x86_64")]
+impl CellValue for Lane0 {
+    #[inline(always)]
+    fn of(value: i32) -> Self {
+        // SAFETY: SSE2, which every x86-64 CPU has (the target's baseline).
+        Self(unsafe { core::arch::x86_64::_mm_cvtsi32_si128(value) })
+    }
+
+    #[inline(always)]
+    fn get(self) -> i32 {
+        // SAFETY: SSE2, which every x86-64 CPU has (the target's baseline).
+        unsafe { core::arch::x86_64::_mm_cvtsi128_si32(self.0) }
+    }
+
+    #[inline(always)]
+    fn plus(self, other: Self) -> Self {
+        // SAFETY: SSE2, which every x86-64 CPU has (the target's baseline).
+        Self(unsafe { core::arch::x86_64::_mm_add_epi32(self.0, other.0) })
+    }
+
+    #[inline(always)]
+    fn larger(self, other: Self) -> Self {
+        // SAFETY: `pmaxsd` is SSE4.1, which AVX2 includes; `Lane0` values are made only in
+        // `score_only_avx2` and `find_start_avx2`, which run only where
+        // `is_x86_feature_detected!("avx2")` holds (`smith_waterman_score_only`,
+        // `smith_waterman_find_start`).
+        Self(unsafe { core::arch::x86_64::_mm_max_epi32(self.0, other.0) })
+    }
+}
+
 /// The gap costs as the scans' cells use them (`cell`), from NCBI's `gapOpen` (`open` below) and
 /// `gapExtend` (`extend`), negated, so that a cell adds them (`opaque`).
 #[derive(Debug, Clone, Copy)]
-struct CellCosts {
+struct CellCosts<V> {
     /// `-(open + extend)`: NCBI's `newGapCost`, negated.
-    open_extend: i32,
+    open_extend: V,
     /// `-extend`.
-    extend: i32,
+    extend: V,
     /// `-(extend + min(open, 0))`: what the gap along the row takes from one cell to the next in
     /// the form that `cell` computes it.
-    row_extend: i32,
+    row_extend: V,
     /// `-max(open, 0)`: the gap along the row before a row's first cell in that form.
-    row_start: i32,
+    row_start: V,
 }
 
-impl CellCosts {
+impl<V: CellValue> CellCosts<V> {
     #[inline(always)]
     fn new(gap_open: i32, gap_extend: i32) -> Self {
         Self {
-            open_extend: opaque(-(gap_open + gap_extend)),
-            extend: opaque(-gap_extend),
-            row_extend: opaque(-(gap_extend + gap_open.min(0))),
-            row_start: -gap_open.max(0),
+            open_extend: V::of(opaque(-(gap_open + gap_extend))),
+            extend: V::of(opaque(-gap_extend)),
+            row_extend: V::of(opaque(-(gap_extend + gap_open.min(0)))),
+            row_start: V::of(-gap_open.max(0)),
         }
     }
 }
@@ -366,23 +439,23 @@ fn opaque(value: i32) -> i32 {
 
 /// What a cell of the scans passes on to the next cell of its row (`cell`).
 #[derive(Debug, Clone, Copy)]
-struct RowCarry {
+struct RowCarry<V> {
     /// The cell's gap along the row (`G` at `cell`; NCBI's `prevScoreGapMatchSeq`).
-    gap_row: i32,
+    gap_row: V,
     /// The cell's score without the gap along the row (`D` at `cell`).
-    no_row_gap: i32,
+    no_row_gap: V,
     /// The cell's column in the row before (NCBI's `prevScoreNoGapMatchSeq`).
-    prev_no_gap: i32,
+    prev_no_gap: V,
 }
 
-impl RowCarry {
+impl<V: CellValue> RowCarry<V> {
     /// Before the row's first cell (`D(-1) = 0` and `G(-1) = -max(open, 0)` at `cell`).
     #[inline(always)]
-    fn start(costs: CellCosts) -> Self {
+    fn start(costs: CellCosts<V>) -> Self {
         Self {
             gap_row: costs.row_start,
-            no_row_gap: 0,
-            prev_no_gap: 0,
+            no_row_gap: V::of(0),
+            prev_no_gap: V::of(0),
         }
     }
 }
@@ -415,30 +488,30 @@ impl RowCarry {
 /// sum is NCBI's `-(open + extend)` and `-max(open, 0)` is `-open` or 0. The negated costs are
 /// representable (each cost is above `i32::MIN`), and `x + (-c)` overflows where `x - c` does.
 #[inline(always)]
-fn cell(
-    carry: &mut RowCarry,
+fn cell<V: CellValue>(
+    carry: &mut RowCarry<V>,
     column: &mut SwGapInfo,
     substitution: Option<i32>,
-    costs: CellCosts,
+    costs: CellCosts<V>,
 ) -> i32 {
-    carry.gap_row = cmov_max(
-        carry.gap_row + costs.row_extend,
-        carry.no_row_gap + costs.open_extend,
-    );
-    let continue_gap_score = cmov_max(
-        column.gap_exists + costs.extend,
-        column.no_gap + costs.open_extend,
-    );
+    carry.gap_row = carry
+        .gap_row
+        .plus(costs.row_extend)
+        .larger(carry.no_row_gap.plus(costs.open_extend));
+    let no_gap = V::of(column.no_gap);
+    let continue_gap_score = V::of(column.gap_exists)
+        .plus(costs.extend)
+        .larger(no_gap.plus(costs.open_extend));
     let diagonal = match substitution {
-        None => COMPO_SCORE_MIN,
-        Some(substitution) => carry.prev_no_gap + substitution,
+        None => V::of(COMPO_SCORE_MIN),
+        Some(substitution) => carry.prev_no_gap.plus(V::of(substitution)),
     };
-    let no_row_gap = cmov_max(cmov_max(diagonal, 0), continue_gap_score);
-    let score = cmov_max(no_row_gap, carry.gap_row);
+    let no_row_gap = diagonal.larger(V::of(0)).larger(continue_gap_score);
+    let score = no_row_gap.larger(carry.gap_row).get();
     carry.no_row_gap = no_row_gap;
-    carry.prev_no_gap = column.no_gap;
+    carry.prev_no_gap = no_gap;
     column.no_gap = score;
-    column.gap_exists = continue_gap_score;
+    column.gap_exists = continue_gap_score.get();
     score
 }
 
@@ -452,8 +525,9 @@ fn cell(
 /// against 7.0 s, NCBI 23.2 s; rpstest_le 67.7 s against 18.9 s, NCBI 24.7 s; WSSV x prof_rps
 /// 21.5 s against 6.3 s, NCBI 6.5 s). With the cell of X4-mt (`cell`), `max` still made more
 /// instructions and cycles (ws, X4-mt kernel benchmark: 7.86 G instructions and 1.67 G cycles
-/// against 7.40 G and 1.58 G). NCBI's build keeps conditional moves and `pmaxsd`. Other targets
-/// take `max`. The value is `max(a, b)` on every target.
+/// against 7.40 G and 1.58 G). NCBI's build keeps conditional moves and `pmaxsd`; on a CPU with
+/// AVX2 the scans take `pmaxsd` too (`Lane0`), and this serves the other x86-64 CPUs. Other
+/// targets take `max`. The value is `max(a, b)` on every target.
 #[inline(always)]
 fn cmov_max(a: i32, b: i32) -> i32 {
     #[cfg(target_arch = "x86_64")]
@@ -501,12 +575,12 @@ fn substitution<const CHECKED: bool>(
 /// between registers, come once for two cells (ws, X4-mt kernel benchmark: 6.25 G instructions
 /// and 1.42 G cycles against 7.17 G and 1.52 G for one cell a pass).
 #[inline(always)]
-fn score_only_row<const CHECKED: bool>(
+fn score_only_row<V: CellValue, const CHECKED: bool>(
     subject: &[u8],
     row: &[i32; ROW_SLOTS],
     blocked: &[bool],
     score_vector: &mut [SwGapInfo],
-    costs: CellCosts,
+    costs: CellCosts<V>,
     mut best: i32,
 ) -> Option<(i32, usize)> {
     let mut found = None;
@@ -564,13 +638,13 @@ fn score_only_row<const CHECKED: bool>(
 /// as `score_only_row`.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-fn find_start_row<const CHECKED: bool>(
+fn find_start_row<V: CellValue, const CHECKED: bool>(
     subject: &[u8],
     row: &[i32; ROW_SLOTS],
     blocked: &[bool],
     score_vector: &mut [SwGapInfo],
     match_end: usize,
-    costs: CellCosts,
+    costs: CellCosts<V>,
     mut best: i32,
     score_in: i32,
 ) -> (Option<(i32, usize)>, bool) {
@@ -671,7 +745,8 @@ fn find_start_row<const CHECKED: bool>(
 ///     *queryEnd = bestQueryPos;
 ///     *score = bestScore;
 /// ```
-// One call per scan, out of line: the row loop keeps its values in registers.
+// One call per scan, out of line: the row loop keeps its values in registers. On a CPU with AVX2
+// the scan compiled for it runs (`score_only_avx2`); both compute the same values.
 #[inline(never)]
 pub(crate) fn smith_waterman_score_only<'r, F>(
     subject: &[u8],
@@ -685,8 +760,74 @@ pub(crate) fn smith_waterman_score_only<'r, F>(
 where
     F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
 {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        // SAFETY: the CPU has AVX2, which `score_only_avx2`'s `#[target_feature]` needs.
+        return unsafe {
+            score_only_avx2(
+                subject,
+                query_length,
+                rows,
+                gap_open,
+                gap_extend,
+                forbidden,
+                scratch,
+            )
+        };
+    }
+    score_only_scan::<i32, F>(
+        subject,
+        query_length,
+        rows,
+        gap_open,
+        gap_extend,
+        forbidden,
+        scratch,
+    )
+}
+
+/// `smith_waterman_score_only` compiled for AVX2, its cells in `Lane0`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+fn score_only_avx2<'r, F>(
+    subject: &[u8],
+    query_length: usize,
+    rows: F,
+    gap_open: i32,
+    gap_extend: i32,
+    forbidden: &ForbiddenRanges,
+    scratch: &mut SwScratch,
+) -> SwEnd
+where
+    F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
+{
+    score_only_scan::<Lane0, F>(
+        subject,
+        query_length,
+        rows,
+        gap_open,
+        gap_extend,
+        forbidden,
+        scratch,
+    )
+}
+
+/// The score-only scan (`smith_waterman_score_only`) with its cells in `V`.
+#[inline(always)]
+fn score_only_scan<'r, V: CellValue, F>(
+    subject: &[u8],
+    query_length: usize,
+    rows: F,
+    gap_open: i32,
+    gap_extend: i32,
+    forbidden: &ForbiddenRanges,
+    scratch: &mut SwScratch,
+) -> SwEnd
+where
+    F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
+{
     let (subject, score_vector, blocked) = scratch.scan(subject, gap_open);
-    let costs = CellCosts::new(gap_open, gap_extend);
+    let costs = CellCosts::<V>::new(gap_open, gap_extend);
     let mut scan_row = ScanRow::new();
     let mut best_score = 0;
     let mut best_query_pos = 0;
@@ -695,11 +836,11 @@ where
         let row = scan_row.load(rows(query_pos));
         let ranges = forbidden.at(query_pos);
         let found = if ranges.is_empty() {
-            score_only_row::<false>(subject, row, blocked, score_vector, costs, best_score)
+            score_only_row::<V, false>(subject, row, blocked, score_vector, costs, best_score)
         } else {
             blocked_row(blocked, ranges, true);
             let found =
-                score_only_row::<true>(subject, row, blocked, score_vector, costs, best_score);
+                score_only_row::<V, true>(subject, row, blocked, score_vector, costs, best_score);
             blocked_row(blocked, ranges, false);
             found
         };
@@ -756,10 +897,64 @@ where
 ///     *queryStart = bestQueryPos;
 ///     *score_out = bestScore;
 /// ```
-// One call per scan, out of line: the row loop keeps its values in registers.
+// One call per scan, out of line: the row loop keeps its values in registers. On a CPU with AVX2
+// the scan compiled for it runs (`find_start_avx2`); both compute the same values.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn smith_waterman_find_start<'r, F>(
+    subject: &[u8],
+    rows: F,
+    gap_open: i32,
+    gap_extend: i32,
+    match_end: usize,
+    query_end: usize,
+    score_in: i32,
+    forbidden: &ForbiddenRanges,
+    scratch: &mut SwScratch,
+) -> SwStart
+where
+    F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
+{
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        // SAFETY: the CPU has AVX2, which `find_start_avx2`'s `#[target_feature]` needs.
+        return unsafe {
+            find_start_avx2(
+                subject, rows, gap_open, gap_extend, match_end, query_end, score_in, forbidden,
+                scratch,
+            )
+        };
+    }
+    find_start_scan::<i32, F>(
+        subject, rows, gap_open, gap_extend, match_end, query_end, score_in, forbidden, scratch,
+    )
+}
+
+/// `smith_waterman_find_start` compiled for AVX2, its cells in `Lane0`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+fn find_start_avx2<'r, F>(
+    subject: &[u8],
+    rows: F,
+    gap_open: i32,
+    gap_extend: i32,
+    match_end: usize,
+    query_end: usize,
+    score_in: i32,
+    forbidden: &ForbiddenRanges,
+    scratch: &mut SwScratch,
+) -> SwStart
+where
+    F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
+{
+    find_start_scan::<Lane0, F>(
+        subject, rows, gap_open, gap_extend, match_end, query_end, score_in, forbidden, scratch,
+    )
+}
+
+/// The find-start scan (`smith_waterman_find_start`) with its cells in `V`.
+#[inline(always)]
+fn find_start_scan<'r, V: CellValue, F>(
     subject: &[u8],
     rows: F,
     gap_open: i32,
@@ -783,7 +978,7 @@ where
         };
     }
     let (subject, score_vector, blocked) = scratch.scan(subject, gap_open);
-    let costs = CellCosts::new(gap_open, gap_extend);
+    let costs = CellCosts::<V>::new(gap_open, gap_extend);
     let mut scan_row = ScanRow::new();
     let mut best_score = 0;
     let mut best_query_pos = 0;
@@ -792,7 +987,7 @@ where
         let row = scan_row.load(rows(query_pos));
         let ranges = forbidden.at(query_pos);
         let (found, reached) = if ranges.is_empty() {
-            find_start_row::<false>(
+            find_start_row::<V, false>(
                 subject,
                 row,
                 blocked,
@@ -804,7 +999,7 @@ where
             )
         } else {
             blocked_row(blocked, ranges, true);
-            let outcome = find_start_row::<true>(
+            let outcome = find_start_row::<V, true>(
                 subject,
                 row,
                 blocked,

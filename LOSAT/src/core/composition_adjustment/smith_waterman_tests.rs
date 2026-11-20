@@ -667,7 +667,9 @@ fn random_ranges(random: &mut XorShift, m: usize, n: usize) -> ForbiddenRanges {
 
 /// Compares both scans with `before_k1` on one window: the score-only scan's
 /// `(score, query_end, match_end)`, then the find-start scan from that end for its score, for half
-/// of it and for one more (a score not reached: the scan runs to its last row).
+/// of it and for one more (a score not reached: the scan runs to its last row). Each scan runs as
+/// the search runs it (on a CPU with AVX2, compiled for it with its cells in `Lane0`) and with its
+/// cells in `i32`, the scans of every other CPU.
 fn assert_same_as_before_k1(
     subject: &[u8],
     rows: &[[i32; BLASTAA_SIZE]],
@@ -688,6 +690,16 @@ fn assert_same_as_before_k1(
         scratch,
     );
     assert_eq!(end, before, "score-only scan, {case}");
+    let plain = score_only_scan::<i32, _>(
+        subject,
+        m,
+        pssm(rows),
+        gap_open,
+        gap_extend,
+        forbidden,
+        scratch,
+    );
+    assert_eq!(plain, before, "score-only scan in i32, {case}");
     if m == 0 {
         return;
     }
@@ -714,6 +726,21 @@ fn assert_same_as_before_k1(
             scratch,
         );
         assert_eq!(start, before, "find-start scan to {score_in}, {case}");
+        let plain = find_start_scan::<i32, _>(
+            subject,
+            pssm(rows),
+            gap_open,
+            gap_extend,
+            end.match_end,
+            end.query_end,
+            score_in,
+            forbidden,
+            scratch,
+        );
+        assert_eq!(
+            plain, before,
+            "find-start scan in i32 to {score_in}, {case}"
+        );
     }
 }
 
@@ -810,7 +837,7 @@ fn tied_best_cells_stay_where_they_were() {
 #[test]
 fn the_cells_costs_are_the_gap_costs() {
     for (open, extend) in GAP_COSTS {
-        let costs = CellCosts::new(open, extend);
+        let costs = CellCosts::<i32>::new(open, extend);
         assert_eq!(costs.open_extend, -(open + extend));
         assert_eq!(costs.extend, -extend);
         assert_eq!(costs.row_extend, -(extend + open.min(0)));
@@ -837,6 +864,39 @@ fn the_conditional_move_is_the_maximum() {
     for &a in &values {
         for &b in &values {
             assert_eq!(cmov_max(a, b), a.max(b), "{a} {b}");
+        }
+    }
+}
+
+// `Lane0`'s operations are `i32`'s (an addition that wraps, the signed maximum), at the ends of the
+// range too, where the CPU has AVX2 (the scans that use `Lane0` run only there).
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn the_lane_operations_are_the_integer_operations() {
+    if !std::is_x86_feature_detected!("avx2") {
+        return;
+    }
+    let values = [
+        i32::MIN,
+        i32::MIN + 1,
+        -32768,
+        -385,
+        -1,
+        0,
+        1,
+        384,
+        i32::MAX - 1,
+        i32::MAX,
+    ];
+    for &a in &values {
+        assert_eq!(Lane0::of(a).get(), a);
+        for &b in &values {
+            assert_eq!(Lane0::of(a).larger(Lane0::of(b)).get(), a.max(b), "{a} {b}");
+            assert_eq!(
+                Lane0::of(a).plus(Lane0::of(b)).get(),
+                a.wrapping_add(b),
+                "{a} {b}"
+            );
         }
     }
 }

@@ -2784,6 +2784,22 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
             bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
+        // ```c
+        //     for (i = 0;  i < searchParams->num_queries;  i++) {
+        //         if (sbp->kbp_gap[i] != NULL) {
+        // ```
+        // An ungapped search has no `kbp_gap` array (blast_setup.c:517-527, quoted at
+        // `call_setup::gapped_block`), and its traceback runs the Smith-Waterman redo all the
+        // same (blast_traceback.c:1486-1487 above), which reads it: NCBI BLAST+ 2.17.0's
+        // `blastp -ungapped -comp_based_stats 0 -use_sw_tback` ends with a segmentation fault
+        // (exit 139, task O4b). Refused by name before the refusal of `-comp_based_stats 0` below,
+        // which a later item lifts (X4-c0) while this one stays.
+        if args.ungapped {
+            bail!(
+                "-use_sw_tback with -ungapped (an ungapped search), with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's {program}"
+            );
+        }
         if !args.comp_based_stats.is_enabled() {
             bail!(
                 "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"

@@ -214,6 +214,47 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074 (quoted at the
+// refusal in `blastp::blast_engine`)
+// ```c
+//     for (i = 0;  i < searchParams->num_queries;  i++) {
+//         if (sbp->kbp_gap[i] != NULL) {
+// ```
+// NCBI BLAST+ 2.17.0's `blastp -ungapped -comp_based_stats 0 -use_sw_tback` reads the gapped
+// Karlin blocks that an ungapped search does not have and ends with a segmentation fault: LOSAT
+// refuses the combination by name, before (and apart from) the refusal of `-use_sw_tback` without
+// composition-based statistics above, and writes nothing.
+#[test]
+fn blastp_ungapped_smith_waterman_traceback_is_refused_by_name() {
+    let query = temp_path("ungapped_swtback_query", "faa");
+    let subject = temp_path("ungapped_swtback_subject", "faa");
+    std::fs::write(&query, ">q\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
+    std::fs::write(&subject, ">s\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
+    let output = clean_losat_command()
+        .args(["blastp", "-query"])
+        .arg(&query)
+        .arg("-subject")
+        .arg(&subject)
+        .args(["-ungapped", "-comp_based_stats", "0", "-use_sw_tback"])
+        .output()
+        .expect("run blastp -ungapped -use_sw_tback");
+    let _ = std::fs::remove_file(&query);
+    let _ = std::fs::remove_file(&subject);
+    assert!(!output.status.success(), "the combination is refused");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "-use_sw_tback with -ungapped (an ungapped search), with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's BLASTP"
+        ),
+        "the refusal names both options and NCBI's crash: {stderr}"
+    );
+    assert!(
+        !stderr.contains("without composition-based statistics"),
+        "this refusal comes first: {stderr}"
+    );
+    assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
 // ```c
 // CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));

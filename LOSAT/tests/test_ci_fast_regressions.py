@@ -505,13 +505,27 @@ class CopyRowTests(unittest.TestCase):
                     db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only=""))
                 self.assertEqual((frozen / "db.x.c.6.copies.out").read_bytes(),
                                  whole if kept else b"A\ts1\tnone\nB\ts1\tnone\nCOPY\ts1\tnone\n")
-            # NCBI's oracle run must exit 0 with an empty stderr.
-            script.write_text("#!/bin/sh\necho warning >&2\n")
+            # A stderr that names no copy (a warning of the arguments) is the row's own and is frozen; NCBI's oracle
+            # run must exit 0 with a stderr that names no copy.
+            script.write_text(script.read_text() + "echo 'Warning: [blastp] Examining 5 or more matches is "
+                                                   "recommended' >&2\n")
             with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
                     unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: None), \
                     unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
-                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                    contextlib.redirect_stdout(io.StringIO()):
                 db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only=""))
+                self.assertEqual(db_fixtures.copy_row_problems(row), [])
+            warning = b"Warning: [blastp] Examining 5 or more matches is recommended\n"
+            self.assertEqual((frozen / "db.x.c.6.err").read_bytes(), warning)
+            self.assertEqual(row["stderr_sha256"], db_fixtures.sha256(warning))
+            for stand_in in ("#!/bin/sh\necho 'Warning: [blastp] Query_3 COPY: an invalid query' >&2\n",
+                             "#!/bin/sh\nexit 3\n"):
+                script.write_text(stand_in)
+                with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                        unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: None), \
+                        unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                        contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                    db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only=""))
 
 
 def fake_search(directory: Path, master: bytes, sides: list[bytes], stdout: bytes = b"", extra: str = "") -> list[str]:

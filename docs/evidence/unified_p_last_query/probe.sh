@@ -6,7 +6,7 @@
 #   NCBI_BIN  the directory of NCBI BLAST+ 2.17.0's blastp and makeblastdb
 #   REPO      a checkout of this repository (the inputs are LOSAT/tests/fasta/*.faa)
 #   WORK      a directory for the runs (made if missing)
-#   LOSAT     optional: a losat binary, compared with NCBI's reports (cases E)
+#   LOSAT     optional: a losat binary, compared with NCBI's reports (cases E and G)
 # Writes WORK/results.tsv: case, run, threads, sha256 (12 digits) of the rows of the named
 # query, number of those rows. Every run is capped in address space and time.
 set -u
@@ -94,8 +94,24 @@ printf 'F.next_has_no_search_space.QS\te-values\t1\t%s\t-\n' \
     "$(rows_of F.allx.out $QS | cut -f11 | sort -u | tr '\n' ',' )" >> results.tsv
 ncbi F.ssp.out 1 QS_allx.fa $U -searchsp 100000000; record F.next_has_no_search_space.searchsp_1e8.QS r1 1 F.ssp.out $QS
 
+# G. A full hit list against tests/db_search/paja: C = BDT63114.1 (86 residues, tests/fasta/x5/c.faa)
+#    with -max_target_seqs 1 has one match with an e-value of at most 0.002 and, after it, matches
+#    with a preliminary e-value above 0.01, which NCBI's redo ends early once every list of the
+#    batch is full (BlastCompo_EarlyTermination). With a copy after it (c_c.faa) the copy's list is
+#    empty while C's matches are redone, none is ended early, and C's report is the same in every
+#    run; alone, C is the batch's last query and its report changes from run to run.
+GD=$R/LOSAT/tests/db_search/paja; QC=BDT63114.1; GU="-max_target_seqs 1 -comp_based_stats 2u"
+paja() {  # out query-file: NCBI -num_threads 1 against tests/db_search/paja
+    cap "$B/blastp" -db "$GD" -query "$2" -outfmt 6 -num_threads 1 $GU > "$1" 2> "$1.err"
+    echo $? > "$1.rc"
+}
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    paja G.copy.r$i.out "$F/x5/c_c.faa";  record G.full_list_with_copy.QC r$i 1 G.copy.r$i.out $QC
+    paja G.alone.r$i.out "$F/x5/c.faa";   record G.full_list_last_query.QC r$i 1 G.alone.r$i.out $QC
+done
+
 # E. LOSAT: the last query of a batch as NCBI's report with a copy; a query with a next query
-#    as NCBI's.
+#    as NCBI's; in case G's search, C as NCBI's report with the copy.
 if [ -n "$L" ]; then
     losat() {  # out threads query-file options...
         local out=$1 t=$2 q=$3; shift 3
@@ -113,6 +129,11 @@ if [ -n "$L" ]; then
     losat E.allx.out 1 QS_allx.fa $U
     printf 'E.losat.next_has_no_search_space\texit status\t1\t%s\t%s\n' "$(cat E.allx.out.rc)" "$(wc -l < E.allx.out)" >> results.tsv
     losat E.ssp.out 1 QS_allx.fa $U -searchsp 100000000; record E.losat.next_has_no_search_space.searchsp_1e8.QS r1 1 E.ssp.out $QS
+    for t in 1 8; do
+        cap "$L" blastp -db "$GD" -query "$F/x5/c.faa" -outfmt 6 -num_threads "$t" $GU > G.losat.t$t.out 2> G.losat.t$t.out.err
+        echo $? > G.losat.t$t.out.rc
+        record G.losat.full_list.QC r1 $t G.losat.t$t.out $QC
+    done
 fi
 bad=$(cat ./*.rc | grep -vc '^0$' || true)
 echo "runs with a non-zero exit status: $bad (LOSAT's refusal in case E is one)"

@@ -38,9 +38,11 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   environment in place of the row's words of those names (BATCH_SIZE). Each batch of both runs is searched in one
   chunk: NCBI splits a batch of L residues into L / (CHUNK_SIZE - OVERLAP_CHUNK_SIZE) chunks when that is 2 or more
   (10000 and 100 by default, so from 19,800 residues), the copy would move the split, and the split can change the
-  preliminary hits. The loader checks both files (`copy_oracle_problems`). `freeze` runs NCBI `-num_threads 1` on PATH (exit 0 and an empty stderr, or it stops), keeps
-  the whole stdout unchanged as `<row_id>.copies.out` and writes as `<row_id>.out` (and the row's cells; rc 0, no
-  stderr) the cut of it by a fixed rule (`cut_copies`):
+  preliminary hits. The loader checks both files (`copy_oracle_problems`). `freeze` runs NCBI `-num_threads 1` on PATH
+  (exit 0 and a stderr that names no copy, or it stops; such a stderr is a warning of the arguments that NCBI writes for
+  the row's own query file too, for example the advice to examine 5 or more matches under `-max_target_seqs 1`, and
+  is frozen as `<row_id>.err`), keeps the whole stdout unchanged as `<row_id>.copies.out` and writes as `<row_id>.out`
+  (and the row's cells; rc 0) the cut of it by a fixed rule (`cut_copies`):
   - outfmt 6: the lines whose first field (the query id) starts with `COPY` are left out;
   - outfmt 7: each copy's block (its `# BLASTP 2.17.0+` line up to the next such line or the final line) is left out,
     and the final line `# BLAST processed N queries` gets N lowered by the number of copies: **the one place where a

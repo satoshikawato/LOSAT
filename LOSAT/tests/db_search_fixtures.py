@@ -57,9 +57,10 @@ LOSAT/tests/db_search (README.md there says how they were built).
   query. The `NAME=VALUE` words (names of `ENV_NAMES`, BATCH_SIZE in practice) are the oracle run's environment in
   place of the row's own words of those names. Each batch of both runs is searched in one chunk (`query_chunks`: the
   copy would move the split of a longer batch, and the split can change the preliminary hits). `freeze` runs NCBI
-  `-num_threads 1` on PATH, which must exit 0 with an
-  empty stderr, keeps its whole stdout unchanged as <row_id>.copies.out (the evidence) and writes as <row_id>.out
-  (with the row's hash and size cells; rc 0, no stderr) the cut of it by a fixed rule per output format
+  `-num_threads 1` on PATH, which must exit 0 with a stderr that names no copy (`COPY`: a warning of the arguments,
+  such as NCBI's advice to examine 5 or more matches under a smaller hit list, is the row's own and is frozen as
+  <row_id>.err), keeps its whole stdout unchanged as <row_id>.copies.out (the evidence) and writes as <row_id>.out
+  (with the row's hash and size cells; rc 0) the cut of it by a fixed rule per output format
   (`cut_copies`): outfmt 6, the lines whose first field starts with `COPY`; outfmt 7, each copy's block (its `# BLASTP
   2.17.0+` line up to the next such line or the final line), and the number of the final line `# BLAST processed N
   queries` lowered by the copies (the one NCBI byte that the rule rewrites); outfmt 0, each copy's report (its `Query=
@@ -811,19 +812,21 @@ def copy_row_problems(row: dict[str, str]) -> list[str]:
 
 
 def freeze_copies(row: dict[str, str], ncbi_bin: str, env: dict[str, str]) -> None:
-    """`freeze` of a copy row: NCBI `-num_threads 1` on the oracle file with the oracle's variables (exit 0 and no
-    stderr, else the freeze stops), its whole stdout as <row_id>.copies.out and its cut (`cut_copies`) as
-    <row_id>.out with the row's cells (rc 0, no stderr); it prints the number of subjects of each query of the whole
-    output (`subjects_per_query`, the copies' included), which shows a full hit list."""
+    """`freeze` of a copy row: NCBI `-num_threads 1` on the oracle file with the oracle's variables (exit 0 and a
+    stderr that names no copy, else the freeze stops), its whole stdout as <row_id>.copies.out, its cut
+    (`cut_copies`) as <row_id>.out and its stderr, a warning of the arguments that NCBI writes for the row's own
+    query file too, as <row_id>.err, with the row's cells (rc 0); it prints the number of subjects of each query of
+    the whole output (`subjects_per_query`, the copies' included), which shows a full hit list."""
     problems = copy_oracle_problems(row)
     if problems:
         raise SystemExit(f"{row['row_id']}: " + "; ".join(problems))
     oracle_path, words = copies_cell(row)
     command = [str(Path(ncbi_bin) / row["program"]), *search_argv({**row, "query": oracle_path}), "-num_threads", "1"]
     run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env={**row_env(row, env), **words})
-    if run.returncode != 0 or run.stderr:
+    if run.returncode != 0 or COPY_PREFIX.encode() in run.stderr:
         raise SystemExit(f"{row['row_id']}: NCBI's oracle run exited {run.returncode} with stderr "
-                         f"{run.stderr.decode(errors='replace')[:200]!r}; a copy row needs exit 0 and no stderr")
+                         f"{run.stderr.decode(errors='replace')[:200]!r}; a copy row needs exit 0 and a stderr that "
+                         f"names no copy")
     try:
         out = cut_copies(run.stdout, row["outfmt"], copy_count(row))
     except ValueError as error:
@@ -838,8 +841,12 @@ def freeze_copies(row: dict[str, str], ncbi_bin: str, env: dict[str, str]) -> No
     if not kept:
         whole.write_bytes(run.stdout)
     (FROZEN / f"{row['row_id']}.out").write_bytes(out)
-    (FROZEN / f"{row['row_id']}.err").unlink(missing_ok=True)
-    row.update(rc="0", stdout_sha256=sha256(out), stdout_bytes=str(len(out)), stderr_sha256="")
+    if run.stderr:
+        (FROZEN / f"{row['row_id']}.err").write_bytes(run.stderr)
+    else:
+        (FROZEN / f"{row['row_id']}.err").unlink(missing_ok=True)
+    row.update(rc="0", stdout_sha256=sha256(out), stdout_bytes=str(len(out)),
+               stderr_sha256=sha256(run.stderr) if run.stderr else "")
     print(f"{row['row_id']}\tcopies={oracle_path}\twhole={len(run.stdout)}{' (frozen whole kept)' if kept else ''}"
           f"\tstdout={len(out)}\tsubjects={subjects_per_query(run.stdout, row['outfmt'])}")
 

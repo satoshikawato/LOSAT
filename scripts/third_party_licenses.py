@@ -18,7 +18,9 @@ source; this script writes the other half, `THIRD_PARTY_LICENSES`, from `Cargo.l
   of an `AND`; the full Apache License 2.0 once at the end;
 - the Rust standard library and its out-of-tree crates (scripts/third_party_licenses/
   rust-<version>-library.txt), and wasi-libc (wasi-libc-<commit>.txt) for the WASI builds, which are
-  committed inputs because Cargo does not list them and CI has no Rust toolchain documentation.
+  committed inputs because Cargo does not list them and CI has no Rust toolchain documentation;
+- what zig links into the Linux wheels of pylosat (zig-<version>.txt: LLVM's libunwind and zig's
+  own license, from the ziglang wheel that python-wheels.yml pins).
 
 A license text that the script cannot find or classify fails the run: nothing falls through.
 Trailing whitespace of every line is stripped and line ends are `\\n` in the output, so the bytes do
@@ -36,6 +38,8 @@ Usage:
   third_party_licenses.py --refresh-rust-inputs     rewrite the committed Rust standard library
                                       inputs from the installed toolchain (after a toolchain change)
   third_party_licenses.py --refresh-wasi-libc-input rewrite the wasi-libc input from GitHub
+  third_party_licenses.py --refresh-zig-input <ziglang wheel>   rewrite the zig input from the
+                                      ziglang wheel of ZIG_VERSION (any platform's: the files are the same)
 """
 from __future__ import annotations
 
@@ -120,11 +124,13 @@ INPUT_ORIGINS = {
     "rust-1.92.0-library.txt": "the toolchain's share/doc/rust/COPYRIGHT-library.html and licenses/, "
     "the registry crates of STD_CRATES, rust-lang/rust 1.92.0 LICENSE-MIT",
     "wasi-libc-3f7eb4c7.txt": "https://github.com/WebAssembly/wasi-libc at 3f7eb4c7d6ede4dde3c4bffa6ed14e8d656fe93f",
+    "zig-0.17.1.txt": "the ziglang 0.17.1 wheel of PyPI (ziglang/LICENSE, ziglang/lib/libunwind/LICENSE.TXT)",
 }
 INPUT_SHA256 = {
     APACHE_FILE: "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
     "rust-1.92.0-library.txt": "c4753b80113bb9b7d9c50126b440940103d089b5d1aa4ccd7d22a6c20b342a55",
     "wasi-libc-3f7eb4c7.txt": "d2e4a63c223afff5387e10e067c5eb6d592c05f422d968d1473c0450afe9d419",
+    "zig-0.17.1.txt": "156e39e3ff406b5ed3654c2da5c9a3c70d150542324e5b2c07120d0000e659f0",
 }
 RUST_VERSION = "1.92.0"
 RUST_BUNDLE = f"rust-{RUST_VERSION}-library.txt"
@@ -137,6 +143,22 @@ RUST_TAG_URL = f"https://raw.githubusercontent.com/rust-lang/rust/{RUST_VERSION}
 WASI_LIBC_COMMIT = "3f7eb4c7d6ede4dde3c4bffa6ed14e8d656fe93f"
 WASI_LIBC_BUNDLE = f"wasi-libc-{WASI_LIBC_COMMIT[:8]}.txt"
 WASI_LIBC_RAW = f"https://raw.githubusercontent.com/WebAssembly/wasi-libc/{WASI_LIBC_COMMIT}"
+# python-wheels.yml links the Linux wheels with zig (`maturin build --zig`, the pip package
+# ziglang==ZIG_VERSION; tests/test_third_party_licenses.py ties the two). zig links in LLVM's
+# libunwind (its lib/libunwind) in place of libgcc_s, and may link functions of its own
+# compiler_rt; the glibc files it compiles (the libc_nonshared parts, such as stat64) carry glibc's
+# exception for linking and need no notice.
+ZIG_VERSION = "0.17.1"
+ZIG_BUNDLE = f"zig-{ZIG_VERSION}.txt"
+ZIG_FILES = (
+    # (path in the wheel, title, license, repository, notes)
+    ("ziglang/lib/libunwind/LICENSE.TXT", "LLVM libunwind (zig's lib/libunwind)", "Apache-2.0 WITH LLVM-exception",
+     "https://github.com/llvm/llvm-project (libunwind/)",
+     ["zig links it into the Linux wheels in place of libgcc_s (Rust's panics and backtraces call it); "
+      "the file also holds the legacy University of Illinois/NCSA and MIT licenses of the code "
+      "contributed before 2019."]),
+    ("ziglang/LICENSE", "zig (compiler_rt and the other code zig links)", "MIT", "https://ziglang.org", []),
+)
 
 # The out-of-tree crates of the standard library that a binary can link, from the `dependencies`
 # of library/std/Cargo.toml and library/Cargo.lock at 1.92.0 (the toolchain's COPYRIGHT-library.html
@@ -623,8 +645,9 @@ def head(builds_text: list[str]) -> list[str]:
         "  1. Crates (Cargo dependencies)",
         "  2. The Rust standard library, linked into every build",
         "  3. wasi-libc, linked into the WASI builds and LOSAT Web",
-        "  4. NOTICE files of Apache-2.0 crates",
-        "  5. Apache License, Version 2.0",
+        "  4. What zig links into the Linux wheels of pylosat",
+        "  5. NOTICE files of Apache-2.0 crates",
+        "  6. Apache License, Version 2.0",
         "",
     ]
 
@@ -638,7 +661,8 @@ def builds_lines() -> list[str]:
 
 
 def render(linked: dict[tuple[str, str], set[Build]], metadata: dict[tuple[str, str], dict],
-           standard_apache: str, rust_blocks: list[tuple[dict, str]], wasi_blocks: list[tuple[dict, str]]) -> str:
+           standard_apache: str, rust_blocks: list[tuple[dict, str]], wasi_blocks: list[tuple[dict, str]],
+           zig_blocks: list[tuple[dict, str]]) -> str:
     # Gather the texts of every crate first: the NOTICE files are printed once, by text.
     crates = []
     notice_groups: dict[str, dict] = {}
@@ -656,7 +680,7 @@ def render(linked: dict[tuple[str, str], set[Build]], metadata: dict[tuple[str, 
             group["crates"].append(f"{key[0]} {key[1]}")
         crates.append((key, package, expr, texts))
     notice_numbers = {flat: n for n, flat in enumerate(sorted(notice_groups), 1)}
-    notice_refs = {flat: f"see section 4, NOTICE {notice_numbers[flat]} (shared by {len(group['crates'])} crate"
+    notice_refs = {flat: f"see section 5, NOTICE {notice_numbers[flat]} (shared by {len(group['crates'])} crate"
                          f"{'s' if len(group['crates']) != 1 else ''})" for flat, group in notice_groups.items()}
 
     out = head(builds_lines())
@@ -670,8 +694,10 @@ def render(linked: dict[tuple[str, str], set[Build]], metadata: dict[tuple[str, 
     out += render_rust(rust_blocks)
     out += ["", "3. WASI-LIBC", ""]
     out += render_wasi(wasi_blocks)
+    out += ["", "4. WHAT ZIG LINKS INTO THE LINUX WHEELS OF PYLOSAT", ""]
+    out += render_zig(zig_blocks)
 
-    out += ["", "4. NOTICE FILES OF APACHE-2.0 CRATES (Apache License 2.0, section 4(d))", ""]
+    out += ["", "5. NOTICE FILES OF APACHE-2.0 CRATES (Apache License 2.0, section 4(d))", ""]
     for flat, number in sorted(notice_numbers.items(), key=lambda item: item[1]):
         group = notice_groups[flat]
         out += [RULE, f"NOTICE {number}: the NOTICE file of {', '.join(group['crates'])}"]
@@ -680,7 +706,7 @@ def render(linked: dict[tuple[str, str], set[Build]], metadata: dict[tuple[str, 
     if not notice_groups:
         out += ["(none)", ""]
 
-    out += ["", "5. APACHE LICENSE, VERSION 2.0", "", RULE, "Apache License, Version 2.0 (the text the entries above refer to)"]
+    out += ["", "6. APACHE LICENSE, VERSION 2.0", "", RULE, "Apache License, Version 2.0 (the text the entries above refer to)"]
     wrap(out, standard_apache, None)
     out.append("")
     return "\n".join(out)
@@ -764,6 +790,25 @@ def render_wasi(blocks: list[tuple[dict, str]]) -> list[str]:
     return lines
 
 
+def render_zig(blocks: list[tuple[dict, str]]) -> list[str]:
+    meta = next(h for h, _ in blocks if h["kind"] == "meta")
+    lines = [
+        f"The Linux wheels of pylosat are linked by zig {meta['version']} (`maturin build --zig`), so that they",
+        "run on glibc 2.17 and later. zig links in LLVM's libunwind, and can link functions of its own",
+        "compiler_rt. It also compiles glibc's small static parts (stat64, fstat64, lstat64, atexit and",
+        "the like, which a shared libc leaves to libc_nonshared.a); their files carry glibc's exception that",
+        "permits linking them into any program and distributing it without restriction, so they need no",
+        "notice.",
+        "",
+    ]
+    linked = linked_into([b for b in BUILDS if b.group == WHEEL and "linux" in b.triple])
+    for header, text in blocks:
+        if header["kind"] == "text":
+            lines += entry(header["title"], header["license"], repository=header["repository"],
+                           linked=linked, notes=header.get("notes", []), extra_texts=[(header["file"], text)])
+    return lines
+
+
 def apache_standard_text() -> str:
     return normalize((INPUTS / APACHE_FILE).read_text(encoding="utf-8"))
 
@@ -774,7 +819,7 @@ def generate() -> dict[str, bytes]:
         raise LicenseError("\n".join(problems))
     linked, metadata = linked_crates()
     text = render(linked, metadata, apache_standard_text(), read_bundle(INPUTS / RUST_BUNDLE),
-                  read_bundle(INPUTS / WASI_LIBC_BUNDLE))
+                  read_bundle(INPUTS / WASI_LIBC_BUNDLE), read_bundle(INPUTS / ZIG_BUNDLE))
     files = {GENERATED: text.encode("utf-8")}
     return with_copies(files)
 
@@ -914,17 +959,38 @@ def refresh_wasi_libc_input() -> int:
     return 0
 
 
+def refresh_zig_input(wheel: Path) -> int:
+    import zipfile
+    name = wheel.name
+    if not name.startswith(f"ziglang-{ZIG_VERSION}-"):
+        raise LicenseError(f"{name} is not a ziglang {ZIG_VERSION} wheel")
+    blocks: list[tuple[dict, str]] = [({"kind": "meta", "version": ZIG_VERSION, "wheel": name,
+                                       "wheel_sha256": sha256_of(wheel)}, "")]
+    with zipfile.ZipFile(wheel) as archive:
+        for path, title, license_id, repository, notes in ZIG_FILES:
+            raw = archive.read(path)
+            blocks.append(({"kind": "text", "title": title, "license": license_id, "notes": notes, "repository": repository,
+                            "file": path.removeprefix("ziglang/"), "origin_sha256": hashlib.sha256(raw).hexdigest()},
+                           normalize(raw.decode("utf-8"))))
+    write_bundle(INPUTS / ZIG_BUNDLE, blocks)
+    print(f"{ZIG_BUNDLE}: sha256 {sha256_of(INPUTS / ZIG_BUNDLE)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="fail if a generated file or a copy is stale; write nothing")
     parser.add_argument("--refresh-rust-inputs", action="store_true")
     parser.add_argument("--refresh-wasi-libc-input", action="store_true")
+    parser.add_argument("--refresh-zig-input", type=Path, metavar="WHEEL")
     args = parser.parse_args(argv)
     try:
         if args.refresh_rust_inputs:
             return refresh_rust_inputs()
         if args.refresh_wasi_libc_input:
             return refresh_wasi_libc_input()
+        if args.refresh_zig_input:
+            return refresh_zig_input(args.refresh_zig_input)
         expected = generate()
     except LicenseError as error:
         print(f"third_party_licenses.py: {error}", file=sys.stderr)

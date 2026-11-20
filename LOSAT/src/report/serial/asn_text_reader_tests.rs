@@ -35,18 +35,28 @@ fn show(bytes: &[u8]) -> String {
     format!("{:?}", String::from_utf8_lossy(bytes))
 }
 
+/// Values nested deeper than this (in blocks or after names) are skipped whole (`skip_value`
+/// keeps no stack), so that the walk of the deeply nested fixtures fits a test thread's stack.
+const WALK_DEPTH: usize = 48;
+
 /// Reads one value of any type with the lexical readers, choosing among the readers of a kind
 /// by `step` so that each is used: blocks element by element (or skipped whole), strings, octet
 /// strings, numbers, REALs after the names that hold one, booleans, NULL, and the names of
-/// members, variants and enumerated values.
+/// members, variants and enumerated values. `depth` counts the blocks and names around the value.
 fn value<S: AsnSource>(
     r: &mut Reader<S>,
     log: &mut Vec<String>,
     name: &[u8],
     step: &mut usize,
+    depth: usize,
 ) -> Result<()> {
     *step += 1;
     let c = r.skip_white_space()?;
+    if depth >= WALK_DEPTH {
+        r.skip_value()?;
+        note(r, log, "skipped deep".into());
+        return Ok(());
+    }
     match c {
         b'{' if matches!(name, b"real" | b"lambda" | b"k" | b"h") => {
             let v = r.real()?;
@@ -59,7 +69,7 @@ fn value<S: AsnSource>(
         b'{' => {
             let mut block_start = r.start_block()?;
             while r.next_element(&mut block_start)? {
-                value(r, log, b"", step)?;
+                value(r, log, b"", step, depth + 1)?;
             }
             r.end_block()?;
             note(r, log, "}".into());
@@ -113,7 +123,7 @@ fn value<S: AsnSource>(
             };
             note(r, log, format!("id {}", show(&id)));
             if !matches!(r.skip_white_space()?, b',' | b'}') {
-                value(r, log, &id, step)?;
+                value(r, log, &id, step, depth + 1)?;
             }
         }
         _ if matches!(name, b"real" | b"lambda" | b"k" | b"h") => {
@@ -135,7 +145,7 @@ fn objects<S: AsnSource>(r: &mut Reader<S>, log: &mut Vec<String>) -> Result<()>
         let id = r.file_header()?;
         let name = r.bytes(id).to_vec();
         note(r, log, format!("header {}", show(&name)));
-        value(r, log, &name, &mut step)?;
+        value(r, log, &name, &mut step, 0)?;
     }
 }
 

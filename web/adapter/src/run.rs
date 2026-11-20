@@ -5209,6 +5209,17 @@ mod tests {
         )
     }
 
+    /// Whether the bytes are the CLI's prolog of a pairwise report (outfmt 0 to 4, 11, and the program's name and
+    /// version on its first line) and nothing after it but blank lines and the reference.
+    fn prolog_only(bytes: &[u8]) -> bool {
+        let text = String::from_utf8_lossy(bytes);
+        let first = text.lines().next().unwrap_or("");
+        first.contains("BLAST")
+            && first.contains(" 2.")
+            && !text.contains("Query=")
+            && !text.contains('\t')
+    }
+
     /// A failed run sent no hits and no output with rows: what it keeps of its outputs is the CLI's file before the
     /// error (outfmt 0's prolog, `a_failed_run_sends_the_output_of_its_argv_and_drops_the_others`), and the records
     /// (each fits in one chunk) are none.
@@ -5216,7 +5227,7 @@ mod tests {
         for stream in [0, 6, 7, STREAM_CUSTOM, STREAM_HITS] {
             let bytes = streams.get(&stream).map_or(&[][..], Vec::as_slice);
             assert!(
-                bytes.is_empty() || (stream == 0 && bytes.starts_with(b"BLAST")),
+                bytes.is_empty() || ([0, STREAM_CUSTOM].contains(&stream) && prolog_only(bytes)),
                 "{label}: stream {stream}"
             );
         }

@@ -64,7 +64,7 @@ for (const [outfmt, tab] of [
     await paste(page, 'subject', SUBJECT);
     if (outfmt !== undefined) {
       await openParameters(page);
-      await page.getByTestId('param-extra').fill(`-outfmt ${outfmt}`);
+      await page.getByTestId('param-extra').fill(outfmt.includes(' ') ? `-outfmt "${outfmt}"` : `-outfmt ${outfmt}`);
     }
     await submit(page);
     await waitStatus(page, 1, 'failed');

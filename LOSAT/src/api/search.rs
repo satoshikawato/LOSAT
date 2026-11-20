@@ -297,7 +297,7 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
         if alignment_options(program).contains(&name) {
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: the query is given as records or a PSSM (Inputs::pssm), and an alignment as the query is not supported"
-            )));
+            ).into()));
         }
         if API_OWNED.contains(&name) {
             return Err(Error::Argv(format!(
@@ -438,14 +438,14 @@ mod tests {
                 Err(Error::Argv(format!(
                     "{} is not accepted by the library API: the query is given as records or a PSSM (Inputs::pssm), and an alignment as the query is not supported",
                     key(word)
-                ))),
+                ).into())),
                 "{argv:?}"
             );
         }
         for program in [Program::Blastp, Program::Tblastn] {
             let error = validate(program, &["-in_msa", "m.aln"]).unwrap_err();
             assert!(
-                !error.message().contains("an alignment as the query"),
+                !error.to_string_lossy().contains("an alignment as the query"),
                 "{program}: {error}"
             );
         }

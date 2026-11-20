@@ -181,8 +181,9 @@ function exportPrefix(run: ExportedRun): string {
  * with a directory (`logs/run.log`, `/tmp/run.log`) is saved with each `/` as `_`
  * (`…logfile.logs_run.log`): a saved file has a name and no directory, and the page names it the
  * same in every browser, where browsers would each replace the `/` in their own way (line WQA's
- * sweep, D11, 2026-11-20).
+ * sweep, D11, 2026-11-20). The `/`s at the end go first: the command line makes the file `logs` for
+ * `-logfile logs/`, as NCBI reads the name (its round 2), so it is saved as `…logfile.logs`.
  */
 export function runFileName(run: ExportedRun, name: string): string {
-  return `${exportPrefix(run)}.logfile.${name.replaceAll('/', '_')}`;
+  return `${exportPrefix(run)}.logfile.${name.replace(/\/+$/, '').replaceAll('/', '_')}`;
 }

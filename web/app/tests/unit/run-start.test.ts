@@ -859,6 +859,8 @@ describe('the name of a downloaded file of a run', () => {
     expect(runFileName(run, 'logs/run.log')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.logs_run.log');
     expect(runFileName(run, '/tmp/run.log')).toBe('losat-run3-tblastx-20261104T111530Z.logfile._tmp_run.log');
     expect(runFileName(run, '/dev/stdout')).toBe('losat-run3-tblastx-20261104T111530Z.logfile._dev_stdout');
+    expect(runFileName(run, 'logs/')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.logs');
+    expect(runFileName(run, 'a/b//')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.a_b');
   });
 });
 

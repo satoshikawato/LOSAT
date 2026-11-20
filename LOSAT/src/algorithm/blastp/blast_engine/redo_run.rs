@@ -1481,7 +1481,8 @@ where
             .count();
         let (excluded_here, excluded_after) = fetch_excluded.split_at(excluded_here);
         fetch_excluded = excluded_after;
-        let mut excluded_here = excluded_here.iter().peekable();
+        // The place of the query's last list whose Smith-Waterman redo set the status.
+        let mut x_status_position = None;
         let redo_align_params = build_redo_align_params(q_idx)?;
 
         let ctx = &contexts[q_idx];
@@ -1544,10 +1545,6 @@ where
             .take(preliminary_hit_list.hsplist_count)
             .enumerate()
         {
-            // The excluded lists that the stream holds before this one.
-            while let Some(mark) = excluded_here.next_if(|mark| mark.position == x_match_position) {
-                fetch_excluded_reached(mark, &redone_matches[batch.clone()], &mut sw_last_failed);
-            }
             let s_idx = local_match.oid;
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3612-3619
             // ```c
@@ -1649,10 +1646,12 @@ where
                 ) {
                     Ok(postprocessed) => {
                         sw_last_failed = false;
+                        x_status_position = Some(x_match_position);
                         postprocessed
                     }
                     Err(error) if error.is::<kappa::smith_waterman::SwRedoFailed>() => {
                         sw_last_failed = true;
+                        x_status_position = Some(x_match_position);
                         continue;
                     }
                     Err(error) if error.is::<kappa::smith_waterman::SwRedoEndless>() => {
@@ -1687,8 +1686,15 @@ where
                 redone_match.insert(hsp_list, best_evalue, best_score, s_idx);
             }
         }
-        // The excluded lists after the query's last kept one.
-        for mark in excluded_here {
+        // The excluded lists of the query, read after its loop (none without `-use_sw_tback`, so
+        // the loop above has no test of them): one before the last list whose redo set the status
+        // changes nothing, and after that list no list of the query enters a heap, so each later
+        // one meets the heaps as they are now.
+        let after_status = x_status_position.map_or(0, |at| at + 1);
+        for mark in excluded_here
+            .iter()
+            .filter(|mark| mark.position >= after_status)
+        {
             fetch_excluded_reached(mark, &redone_matches[batch.clone()], &mut sw_last_failed);
         }
         // Nothing reads this query's preliminary list after its redo; it is freed here as NCBI

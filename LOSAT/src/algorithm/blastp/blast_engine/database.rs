@@ -1064,9 +1064,10 @@ impl ListedSubjects {
 // The redo's loop reaches such a list in its stream: when the early termination test holds it
 // frees the list and goes on, and otherwise the excluded fetch sets the status back to 0
 // (blast_kappa.c:3560-3575). With `-use_sw_tback` the status of the batch is the last reached
-// match's (`redo_run::one_thread_redo`), so the list's place counts: each removed list leaves a
-// mark (`FetchExcludedMatch`) with its place in its query's list, in the order the redo reads
-// them (the lists are sorted before they are listed). Shown on ws with NCBI 2.17.0 (rows
+// match's (`redo_run::one_thread_redo`), so the list's place counts: each list that the fetch
+// excludes (`shared::FetchMarks`) is removed and leaves a mark (`FetchExcludedMatch`) with its
+// place in its query's list, in the order the redo reads them (the lists are sorted before they
+// are listed). Shown on ws with NCBI 2.17.0 (rows
 // `db.x4excl.*`: an excluded match after a failed Smith-Waterman redo ends the batch with
 // status 0).
 /// The preliminary hit lists of a call (subjects named by ordinal id, each list in the redo's
@@ -1078,9 +1079,7 @@ fn exclude_fetched(
     hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
 ) -> Result<Vec<FetchExcludedMatch>> {
-    let Some(excluded) = shared::FetchExcluded::of(&database.db) else {
-        return Ok(Vec::new());
-    };
+    let excluded = shared::FetchExcluded::of(&database.db);
     let refused = |failed| shared::FetchExcluded::refusal(failed, database.program);
     let mut marks = Vec::new();
     for (query, hit_list) in hit_lists.iter_mut().enumerate() {
@@ -1091,47 +1090,62 @@ fn exclude_fetched(
         let read = x_compact_hit_lists
             .get(query)
             .is_none_or(|compact| compact.is_none());
-        hit_list.hsplist_array.truncate(hit_list.hsplist_count);
-        excluded
-            .retain_reached(
-                &mut hit_list.hsplist_array,
-                |list| Some(list.oid),
-                |position, list| {
-                    if read {
-                        marks.push(FetchExcludedMatch {
-                            query,
-                            position,
-                            best_evalue: list.best_evalue,
-                        });
-                    }
-                },
-            )
-            .map_err(refused)?;
-        hit_list.hsplist_count = hit_list.hsplist_array.len();
+        leave_fetched(
+            excluded.as_ref(),
+            query,
+            hit_list,
+            read.then_some(&mut marks),
+        )
+        .map_err(refused)?;
     }
     for (query, hit_list) in x_compact_hit_lists.iter_mut().enumerate() {
-        let Some(hit_list) = hit_list else {
-            continue;
-        };
-        hit_list.hsplist_array.truncate(hit_list.hsplist_count);
-        excluded
-            .retain_reached(
-                &mut hit_list.hsplist_array,
-                |list| Some(list.oid),
-                |position, list| {
-                    marks.push(FetchExcludedMatch {
-                        query,
-                        position,
-                        best_evalue: list.best_evalue,
-                    })
-                },
-            )
-            .map_err(refused)?;
-        hit_list.hsplist_count = hit_list.hsplist_array.len();
+        if let Some(hit_list) = hit_list {
+            leave_fetched(excluded.as_ref(), query, hit_list, Some(&mut marks)).map_err(refused)?;
+        }
     }
     // By query; the marks of a query are in place order already (a stable sort).
     marks.sort_by_key(|mark| mark.query);
     Ok(marks)
+}
+
+/// `hit_list` (query `query`'s) without the lists whose subject the fetch excludes
+/// (`shared::FetchMarks`), in their order, each removed list leaving its mark in `marks` (where
+/// the redo reads this list) with the number of kept lists before it; nothing changes where
+/// none is excluded.
+fn leave_fetched<H>(
+    excluded: Option<&shared::FetchExcluded<'_>>,
+    query: usize,
+    hit_list: &mut BlastpHitList<H>,
+    mut marks: Option<&mut Vec<FetchExcludedMatch>>,
+) -> std::result::Result<(), (u32, crate::seqdb::SeqDbError)> {
+    let lists = &hit_list.hsplist_array[..hit_list.hsplist_count];
+    let fetch = shared::FetchMarks::of(excluded, lists, |list| Some(list.oid))?;
+    let mut kept = 0;
+    let mut removed = false;
+    for (index, list) in lists.iter().enumerate() {
+        if !fetch.excluded(index) {
+            kept += 1;
+            continue;
+        }
+        removed = true;
+        if let Some(marks) = marks.as_deref_mut() {
+            marks.push(FetchExcludedMatch {
+                query,
+                position: kept,
+                best_evalue: list.best_evalue,
+            });
+        }
+    }
+    if removed {
+        hit_list.hsplist_array.truncate(hit_list.hsplist_count);
+        let mut index = 0;
+        hit_list.hsplist_array.retain(|_| {
+            index += 1;
+            !fetch.excluded(index - 1)
+        });
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
+    }
+    Ok(())
 }
 
 /// The ordinal ids of the subjects of `hit_lists` and `x_compact_hit_lists`, ascending, each once.
@@ -4018,10 +4032,14 @@ mod tests {
             file: crate::seqdb::seqidlist::read_si_list(b"XX999999.1\n", &mut warnings).unwrap(),
         });
         let settings = ApplicationSettings::default();
+        // The hit list takes a list's best e-value from its HSPs (`update_best_evalue`).
         let list = |oid: u32, raw_score: i32, best_evalue: f64| BlastpHspList {
             oid,
             query_index: 0,
-            hsps: vec![test_hsp(oid, raw_score)],
+            hsps: vec![BlastpHsp {
+                e_value: best_evalue,
+                ..test_hsp(oid, raw_score)
+            }],
             best_evalue,
         };
         // Query 0: sexact, sfail, sx_frag; query 2: sx_frag, sok1; query 1 has no list.

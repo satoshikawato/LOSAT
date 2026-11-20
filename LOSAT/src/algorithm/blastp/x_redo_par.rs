@@ -365,9 +365,7 @@ fn x_end_above(
             // The heaps after the query first: they are not filled unless the query is the
             // last one of its batch, so this ends the test at once for the other queries.
             let may_end = (q_idx + 1..batch.end).all(|other| heaps[other].filled_to_cutoff())
-                && (batch.start..=q_idx).all(|other| {
-                    heaps[other].n.saturating_add(matches[other]) >= heaps[other].heap_threshold
-                });
+                && (batch.start..=q_idx).all(|other| heaps[other].may_fill(matches[other]));
             may_end.then(|| {
                 batch
                     .map(|other| COMPO_HEAP_EVALUE_STRETCH * heaps[other].ecutoff)
@@ -517,7 +515,7 @@ fn x_window(
             let best_evalue = x_local_match(lists, matched).best_evalue;
             let may_end = batch_open
                 && end_above[q_idx].is_some_and(|above| best_evalue > above)
-                && heap.n.saturating_add(in_window + index) >= heap.heap_threshold;
+                && heap.may_fill(in_window + index);
             let ended = may_end
                 && blast_compo_early_termination(best_evalue, &heaps[query_batches[q_idx].clone()]);
             at_risk |= may_end && !ended;

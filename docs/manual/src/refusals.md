@@ -196,7 +196,7 @@ Error: a reward of 0 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of 
 | `-ungapped` | Refused. |
 | `-use_sw_tback` | Refused. |
 | `-subject_besthit` | Refused. |
-| `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`), when a query is followed in the same batch of queries by one with no residue that can be scored (all `X`, or empty) and `-searchsp` is not given | Refused. NCBI reports every e-value of the first of the two as 0. |
+| `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`), when a query with a residue that can be scored is followed in the same batch of queries by one with none (all `X`, empty, or masked whole by `-seg yes`) and `-searchsp` is not given or is 0 | Refused. NCBI reports every e-value of the first of the two as 0. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7; 5 is the default of `-task blastp-fast`) | Refused. NCBI crashes. |
 | `-threshold` with the compressed lookup table, when the neighboring words fill NCBI's 1024 overflow banks | Refused. NCBI corrupts its heap. |
 | A hit list size of 2^31 - 50 or more (2^30 - 25 or more with composition-based statistics) | Refused. NCBI crashes. |

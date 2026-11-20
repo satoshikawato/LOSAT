@@ -297,11 +297,23 @@ pub(crate) struct EvalueAdjustContext {
     pub eff_searchsp: f64,
 }
 
-/// LOSAT's refusal of unified P-values for a query whose E-values NCBI adjusts with a search
-/// space of 0 ([`evalue_adjust_contexts`]).
-fn unified_p_without_search_space(program: &str) -> anyhow::Error {
+/// What LOSAT's refusal of unified P-values names ([`evalue_adjust_contexts`]): the program
+/// ("... are not supported by LOSAT's BLASTP") and each query's id as the reports show it.
+#[derive(Clone, Copy)]
+pub(crate) struct UnifiedPRefusal<'a> {
+    pub program: &'a str,
+    pub query_ids: &'a [std::sync::Arc<[u8]>],
+}
+
+/// LOSAT's refusal of unified P-values for query `query`, whose E-values NCBI adjusts with the
+/// search space 0 of the query after it ([`evalue_adjust_contexts`]).
+fn unified_p_without_search_space(refusal: UnifiedPRefusal<'_>, query: usize) -> anyhow::Error {
+    let id = |q: usize| String::from_utf8_lossy(&refusal.query_ids[q]).into_owned();
     anyhow::anyhow!(
-        "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} for a query that is followed in its query batch by a query without a search space (a query with no residue that can be scored, when -searchsp is not given): NCBI BLAST+ 2.17.0 adjusts a query's e-values with the search space of the next query"
+        "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {} for query {}, which is followed in its query batch by a query without a search space ({}: no residue that can be scored, and -searchsp is not given or is 0): NCBI BLAST+ 2.17.0 adjusts a query's e-values with the search space of the next query",
+        refusal.program,
+        id(query),
+        id(query + 1)
     )
 }
 
@@ -355,21 +367,22 @@ fn unified_p_without_search_space(program: &str) -> anyhow::Error {
 ///
 /// For the last query of a batch NCBI reads past the batch's contexts (heap bytes: its reports
 /// differ from run to run). LOSAT reads the query's own context there, which is what NCBI
-/// computes for that query when a copy of it follows in the batch (the exception of
-/// PD-LOSAT-NCBI-DEFECTS for unified P-values).
+/// reads for that query when a copy of it follows in the same batch (the exception of
+/// PD-LOSAT-NCBI-DEFECTS for unified P-values; the redo also ends no match early then,
+/// `ResolvedBlastpArgs::redone_match_heap`).
 ///
 /// A next query whose effective search space is 0 makes NCBI's scale infinite: NCBI reports
 /// every E-value of the query before it as 0, an alignment whose E-value was 0 without an
 /// E-value (the product of 0 and infinity is not a number), and drops a match of such alignments
-/// only. With unified P-values that batch is refused (`refuse` is `Some` of the program's name;
-/// the error names the batch's first query, `HeaderReadError`: the reports of the batches before
-/// are written first).
+/// only. With unified P-values that batch is refused (`refuse` is `Some`; the error is a
+/// `HeaderReadError` of the batch's first query, so the reports of the batches before are
+/// written first, and its text names the two queries).
 pub(crate) fn evalue_adjust_contexts(
     contexts: &[QueryContext],
     search_spaces: &[SearchSpace],
     query_batches: &[std::ops::Range<usize>],
     options_searchsp: i64,
-    refuse: Option<&str>,
+    refuse: Option<UnifiedPRefusal<'_>>,
 ) -> Result<Vec<EvalueAdjustContext>> {
     let context_of = |q_idx: usize| {
         let ctx = &contexts[q_idx];
@@ -392,11 +405,11 @@ pub(crate) fn evalue_adjust_contexts(
         let batch = &query_batches[q_idx];
         if q_idx + 1 < batch.end {
             let next = context_of(q_idx + 1);
-            if let Some(program) = refuse {
+            if let Some(refusal) = refuse {
                 if ctx.is_valid && ctx.aa_len > 0 && next.eff_searchsp == 0.0 {
                     return Err(crate::algorithm::common::database::HeaderReadError {
                         query: batch.start,
-                        error: unified_p_without_search_space(program),
+                        error: unified_p_without_search_space(refusal, q_idx),
                     }
                     .into());
                 }
@@ -2751,6 +2764,12 @@ mod tests {
         }
     }
 
+    fn adjust_test_ids(count: usize) -> Vec<std::sync::Arc<[u8]>> {
+        (0..count)
+            .map(|q| std::sync::Arc::from(format!("id{q}").into_bytes()))
+            .collect()
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3543,3590-3592,3680
     // (quoted at `evalue_adjust_contexts`): two batches of two queries. The first query of a
     // batch reads the second's values, the last query of a batch its own.
@@ -2769,7 +2788,12 @@ mod tests {
             adjust_test_space(4000.0, 40),
         ];
         let batches = [0..2, 0..2, 2..4, 2..4];
-        for refuse in [None, Some("BLASTP")] {
+        let ids = adjust_test_ids(4);
+        let blastp = UnifiedPRefusal {
+            program: "BLASTP",
+            query_ids: &ids,
+        };
+        for refuse in [None, Some(blastp)] {
             let adjust = evalue_adjust_contexts(&contexts, &spaces, &batches, 0, refuse)
                 .expect("every next query has a search space");
             assert_eq!(
@@ -2787,8 +2811,8 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:773-784,846-847 (quoted at
     // `evalue_adjust_contexts`): a next query that is not valid keeps a length adjustment of 0
     // and the options' search space. With `-searchsp` that is the given space; without it the
-    // space is 0, which unified P-values refuse (the error names the batch's first query) and a
-    // search without them never reads.
+    // space is 0, which unified P-values refuse (the error is the batch's, and its text names
+    // the query and the one after it) and a search without them never reads.
     #[test]
     fn evalue_adjust_contexts_of_a_next_query_that_is_not_valid() {
         let contexts = [
@@ -2805,7 +2829,12 @@ mod tests {
             adjust_test_space(888.0, 8),
         ];
         let batches = [0..1, 1..4, 1..4, 1..4];
-        let given = evalue_adjust_contexts(&contexts, &spaces, &batches, 123_456, Some("BLASTP"))
+        let ids = adjust_test_ids(4);
+        let blastp = Some(UnifiedPRefusal {
+            program: "BLASTP",
+            query_ids: &ids,
+        });
+        let given = evalue_adjust_contexts(&contexts, &spaces, &batches, 123_456, blastp)
             .expect("-searchsp gives the next query a search space");
         assert_eq!(
             given,
@@ -2819,19 +2848,19 @@ mod tests {
         let plain = evalue_adjust_contexts(&contexts, &spaces, &batches, 0, None)
             .expect("no refusal without unified P-values");
         assert_eq!(plain[1], own_context(20, 0, 0.0));
-        let error = evalue_adjust_contexts(&contexts, &spaces, &batches, 0, Some("BLASTP"))
+        let error = evalue_adjust_contexts(&contexts, &spaces, &batches, 0, blastp)
             .expect_err("the valid query 1 is followed by a query without a search space");
         let failure = error
             .downcast::<crate::algorithm::common::database::HeaderReadError>()
             .expect("the batch's error");
         assert_eq!(failure.query, 1);
-        assert!(failure
-            .to_string()
-            .contains("are not supported by LOSAT's BLASTP"));
+        let text = failure.to_string();
+        assert!(text.contains("are not supported by LOSAT's BLASTP for query id1, which"));
+        assert!(text.contains("(id2: no residue that can be scored"));
         // A query that is not valid itself has no match to adjust: queries 2 and 3 alone in a
         // batch after query 1's batch are not refused.
         let batches = [0..1, 1..2, 2..4, 2..4];
-        evalue_adjust_contexts(&contexts, &spaces, &batches, 0, Some("BLASTP"))
+        evalue_adjust_contexts(&contexts, &spaces, &batches, 0, blastp)
             .expect("the query before the one without a search space has no match");
     }
 

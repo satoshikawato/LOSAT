@@ -232,6 +232,33 @@ impl RedoParamsBuilder<'_> {
     }
 }
 
+/// Each query's context of the E-value adjustment with a composition P-value, in query order
+/// (`kappa::evalue_adjust_contexts`): the next query's of its batch (`kappa_query_batches`), or
+/// its own. With unified P-values a batch whose adjustment NCBI makes with a search space of 0
+/// is refused here, by the ids the reports show (`query_ids`).
+pub(super) fn evalue_adjust_contexts(
+    args: &ResolvedBlastpArgs,
+    contexts: &[QueryContext],
+    search_spaces: &[SearchSpace],
+    kappa_query_batches: &[Range<usize>],
+    query_ids: &[std::sync::Arc<[u8]>],
+) -> Result<Vec<kappa::EvalueAdjustContext>> {
+    let refuse = args
+        .comp_based_stats
+        .unified_p
+        .then(|| kappa::UnifiedPRefusal {
+            program: args.app.name(),
+            query_ids,
+        });
+    kappa::evalue_adjust_contexts(
+        contexts,
+        search_spaces,
+        kappa_query_batches,
+        args.searchsp.unwrap_or(0),
+        refuse,
+    )
+}
+
 /// Each query's batch as a range of the queries, one range per query in query order
 /// (`query_count`): the heaps that the early termination test of the query's redo reads.
 pub(super) fn kappa_query_batches(
@@ -429,8 +456,7 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         // The query-parallel redo below relies on a heap that no match has reached not being
         // filled to its cutoff (hitlist_size >= 1); otherwise the one-thread loop is used.
         kappa_parallel_query_indices.len() > 1
-            && !BlastCompoHeap::new(args.traceback_hitlist_size(), args.inclusion_ethresh)
-                .filled_to_cutoff()
+            && !args.redone_match_heap().filled_to_cutoff()
             && blastp_should_parallelize_stage(
                 "kappa-query-redo",
                 args.num_threads,
@@ -977,8 +1003,7 @@ where
     // A heap that no match has reached, for the Newton lanes prefetch: the
     // prefetch leaves out the matches that the test ends for the heaps it is given, and
     // a query that does not test its own heap redoes every match.
-    let x_untouched_heap =
-        BlastCompoHeap::new(args.traceback_hitlist_size(), args.inclusion_ethresh);
+    let x_untouched_heap = args.redone_match_heap();
     // (query, its heap, the kept results of a batch's last query by match position)
     type KappaQueryRedo = (
         usize,
@@ -998,8 +1023,7 @@ where
                 // See XSharedSubjectRanges.
                 let mut kappa_subject_range_cache =
                     BlastpKappaSubjectRangeCache::new(x_shared_ranges.clone());
-                let mut redone_match =
-                    BlastCompoHeap::new(args.traceback_hitlist_size(), args.inclusion_ethresh);
+                let mut redone_match = args.redone_match_heap();
                 let mut kept_for_replay = Vec::new();
                 let batch = &kappa_query_batches[q_idx];
                 let alone_in_batch = batch.len() == 1;

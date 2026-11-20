@@ -1100,14 +1100,10 @@ fn blastp_local_scaling_factor(mode: BlastpCompositionMode, matrix: ScoringMatri
 //                               inclusion_ethresh);
 // }
 // ```
-fn build_redone_match_heaps(
-    num_queries: usize,
-    hitlist_size: usize,
-    inclusion_ethresh: f64,
-) -> Vec<BlastCompoHeap> {
-    (0..num_queries)
-        .map(|_| BlastCompoHeap::new(hitlist_size, inclusion_ethresh))
-        .collect()
+fn build_redone_match_heaps(num_queries: usize, heap: &BlastCompoHeap) -> Vec<BlastCompoHeap> {
+    // `heap`: one query's heap as BlastCompo_HeapInitialize leaves it
+    // (`ResolvedBlastpArgs::redone_match_heap`).
+    (0..num_queries).map(|_| heap.clone()).collect()
 }
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
 // ```c
@@ -8185,10 +8181,15 @@ fn x_query_block_plan(
     use super::x_query_blocks::XBlockReport;
     super::x_query_blocks::x_bp_qblock()?;
     // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries.
+    // Unified P-values without a search space given (`-searchsp`): the redo's set-up may refuse
+    // a query batch (`redo_run::evalue_adjust_contexts`: a query before one without a search
+    // space, known only once the queries are set up), after the reports of the batches before,
+    // which the search of all queries writes (`database::HeaderReadError`).
     if args.query_range.is_some()
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
         || args.rps_search.is_some()
+        || (args.comp_based_stats.unified_p && args.searchsp.unwrap_or(0) == 0)
         || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
@@ -11365,15 +11366,12 @@ fn run_call(
     // Each query's batch (`redo_run::kappa_query_batches`): the heaps that its redo's early
     // termination test reads.
     let kappa_query_batches = redo_run::kappa_query_batches(query_ids.len(), &query_batches);
-    // Each query's context of the E-value adjustment with a composition P-value: the next
-    // query's of its batch, or its own (`kappa::evalue_adjust_contexts`). With unified P-values a
-    // batch whose adjustment NCBI makes with a search space of 0 is refused there.
-    let evalue_adjust_contexts = super::kappa::evalue_adjust_contexts(
+    let evalue_adjust_contexts = redo_run::evalue_adjust_contexts(
+        &args,
         &contexts,
         &search_spaces,
         &kappa_query_batches,
-        args.searchsp.unwrap_or(0),
-        args.comp_based_stats.unified_p.then(|| args.app.name()),
+        &query_ids,
     )?;
     // What the redo's plan and its paths read (`redo_run::RedoInputs`).
     let redo = redo_run::RedoInputs {
@@ -14347,7 +14345,7 @@ mod tests {
     // ```
     #[test]
     fn test_redone_match_heaps_use_hitlist_size_not_prelim_hitlist_size() {
-        let heaps = build_redone_match_heaps(3, 7, PSI_INCLUSION_ETHRESH);
+        let heaps = build_redone_match_heaps(3, &BlastCompoHeap::new(7, PSI_INCLUSION_ETHRESH));
         assert_eq!(heaps.len(), 3);
         assert_eq!(heaps[0].heap_threshold, 7);
         assert!((heaps[0].ecutoff - PSI_INCLUSION_ETHRESH).abs() < f64::EPSILON);

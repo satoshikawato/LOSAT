@@ -88,6 +88,7 @@ LOSAT stops with an error for these `blastp` settings instead of running somethi
 
 - `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`), and with `-ungapped`.
 - With `-ungapped`: a subject of more than 5,000,000 residues, and a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`.
+- With `-ungapped -window_size 0` and a low `-threshold`: `-outfmt 1` to `4` with a one-hit alignment of length 0 among the alignments shown, where NCBI BLAST+ crashes.
 - `-subject_besthit`, `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.

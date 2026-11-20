@@ -485,14 +485,8 @@ fn compo_heapify_up(heap_array: &mut [BlastCompoHeapRecord], mut i: usize) {
 pub(crate) fn score_compare_hits(a: &Hit, b: &Hit) -> Ordering {
     let (a_q_offset, a_q_end) = (a.q_start.saturating_sub(1), a.q_end);
     let (b_q_offset, b_q_end) = (b.q_start.saturating_sub(1), b.q_end);
-    let (a_s_offset, a_s_end) = (
-        a.s_start.min(a.s_end).saturating_sub(1),
-        a.s_start.max(a.s_end),
-    );
-    let (b_s_offset, b_s_end) = (
-        b.s_start.min(b.s_end).saturating_sub(1),
-        b.s_start.max(b.s_end),
-    );
+    let (a_s_offset, a_s_end) = subject_offset_end(a.s_start, a.s_end);
+    let (b_s_offset, b_s_end) = subject_offset_end(b.s_start, b.s_end);
 
     match b.raw_score.cmp(&a.raw_score) {
         Ordering::Equal => {}
@@ -513,6 +507,17 @@ pub(crate) fn score_compare_hits(a: &Hit, b: &Hit) -> Ordering {
     b_q_end.cmp(&a_q_end)
 }
 
+/// Zero-based subject offset and end of an HSP given its one-based start and end.
+/// A protein subject has no reverse strand, so an end one before the start is an HSP
+/// of length 0 (offset equals end), not a reversed one.
+pub(crate) fn subject_offset_end(s_start: usize, s_end: usize) -> (usize, usize) {
+    if s_end + 1 == s_start {
+        (s_end, s_end)
+    } else {
+        (s_start.min(s_end).saturating_sub(1), s_start.max(s_end))
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
 // ```c
 // int ScoreCompareHSPs(const void* h1, const void* h2) {
@@ -524,14 +529,8 @@ pub(crate) fn score_compare_hsps<H: HitListHsp>(a: &H, b: &H) -> Ordering {
     let (b_q_start, b_q_end, b_s_start, b_s_end) = b.offsets();
     let a_q_offset = a_q_start.saturating_sub(1);
     let b_q_offset = b_q_start.saturating_sub(1);
-    let (a_s_offset, a_s_end) = (
-        a_s_start.min(a_s_end).saturating_sub(1),
-        a_s_start.max(a_s_end),
-    );
-    let (b_s_offset, b_s_end) = (
-        b_s_start.min(b_s_end).saturating_sub(1),
-        b_s_start.max(b_s_end),
-    );
+    let (a_s_offset, a_s_end) = subject_offset_end(a_s_start, a_s_end);
+    let (b_s_offset, b_s_end) = subject_offset_end(b_s_start, b_s_end);
 
     match b.raw_score().cmp(&a.raw_score()) {
         Ordering::Equal => {}
@@ -671,8 +670,8 @@ pub(crate) fn link_hsp_list<H: LinkedHspValues>(
                 context: 0,
                 query_offset: q_start as i32 - 1,
                 query_end: q_end as i32,
-                subject_offset: s_start.min(s_end) as i32 - 1,
-                subject_end: s_start.max(s_end) as i32,
+                subject_offset: subject_offset_end(s_start, s_end).0 as i32,
+                subject_end: subject_offset_end(s_start, s_end).1 as i32,
                 score: hsp.raw_score(),
             }
         },
@@ -1484,10 +1483,7 @@ fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_begin:
     };
 
     let (mut q_offset_0, mut q_end_0) = (hit.q_start.saturating_sub(1), hit.q_end);
-    let (mut s_offset_0, mut s_end_0) = (
-        hit.s_start.min(hit.s_end).saturating_sub(1),
-        hit.s_start.max(hit.s_end),
-    );
+    let (mut s_offset_0, mut s_end_0) = subject_offset_end(hit.s_start, hit.s_end);
 
     let q_cut_rel = q_cut.saturating_sub(q_offset_0);
     let s_cut_rel = s_cut.saturating_sub(s_offset_0);
@@ -1616,14 +1612,17 @@ fn hit_query_offset_compare(a: &Hit, b: &Hit) -> Ordering {
                 .cmp(&b.q_start.saturating_sub(1))
         })
         .then_with(|| {
-            a.s_start
-                .min(a.s_end)
-                .saturating_sub(1)
-                .cmp(&b.s_start.min(b.s_end).saturating_sub(1))
+            subject_offset_end(a.s_start, a.s_end)
+                .0
+                .cmp(&subject_offset_end(b.s_start, b.s_end).0)
         })
         .then_with(|| b.raw_score.cmp(&a.raw_score))
         .then_with(|| b.q_end.cmp(&a.q_end))
-        .then_with(|| b.s_start.max(b.s_end).cmp(&a.s_start.max(a.s_end)))
+        .then_with(|| {
+            subject_offset_end(b.s_start, b.s_end)
+                .1
+                .cmp(&subject_offset_end(a.s_start, a.s_end).1)
+        })
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2333-2379
@@ -1643,7 +1642,11 @@ fn hit_query_end_compare(a: &Hit, b: &Hit) -> Ordering {
     (a.q_idx, a.query_frame)
         .cmp(&(b.q_idx, b.query_frame))
         .then_with(|| a.q_end.cmp(&b.q_end))
-        .then_with(|| a.s_start.max(a.s_end).cmp(&b.s_start.max(b.s_end)))
+        .then_with(|| {
+            subject_offset_end(a.s_start, a.s_end)
+                .1
+                .cmp(&subject_offset_end(b.s_start, b.s_end).1)
+        })
         .then_with(|| b.raw_score.cmp(&a.raw_score))
         .then_with(|| {
             b.q_start
@@ -1651,10 +1654,9 @@ fn hit_query_end_compare(a: &Hit, b: &Hit) -> Ordering {
                 .cmp(&a.q_start.saturating_sub(1))
         })
         .then_with(|| {
-            b.s_start
-                .min(b.s_end)
-                .saturating_sub(1)
-                .cmp(&a.s_start.min(a.s_end).saturating_sub(1))
+            subject_offset_end(b.s_start, b.s_end)
+                .0
+                .cmp(&subject_offset_end(a.s_start, a.s_end).0)
         })
 }
 
@@ -1956,8 +1958,8 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
     let context = |h: &Hit| (h.q_idx, h.query_frame);
     let q_offset = |h: &Hit| h.q_start.saturating_sub(1);
     let q_end = |h: &Hit| h.q_end;
-    let s_offset = |h: &Hit| h.s_start.min(h.s_end).saturating_sub(1);
-    let s_end = |h: &Hit| h.s_start.max(h.s_end);
+    let s_offset = |h: &Hit| subject_offset_end(h.s_start, h.s_end).0;
+    let s_end = |h: &Hit| subject_offset_end(h.s_start, h.s_end).1;
 
     let mut trimmed_hits = Vec::new();
     let mut purged_count = 0usize;
@@ -2085,6 +2087,18 @@ pub(crate) fn collect_hits_and_methods_from_hit_lists(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_hsp_of_length_zero_sorts_after_a_longer_one_that_starts_alike() {
+        // Both start at subject offset 162; the longer one ends later and so comes first.
+        assert_eq!(subject_offset_end(163, 162), (162, 162));
+        assert_eq!(subject_offset_end(163, 169), (162, 169));
+        assert_eq!(subject_offset_end(1, 0), (0, 0));
+        let empty = make_hit(16, 26, 25, 163, 162);
+        let longer = make_hit(16, 26, 32, 163, 169);
+        assert_eq!(score_compare_hits(&longer, &empty), Ordering::Less);
+        assert_eq!(score_compare_hits(&empty, &longer), Ordering::Greater);
+    }
 
     fn make_hit(score: i32, q_start: usize, q_end: usize, s_start: usize, s_end: usize) -> Hit {
         Hit {

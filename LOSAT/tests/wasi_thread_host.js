@@ -4,7 +4,6 @@ const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const { inspectArtifact, prepareArtifact, createSharedMemory } = require("./wasi_artifact");
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates (wasi_shared_memory.js,
 // loaded when a module is guarded or checked for the build's guard here, not when the guard cache
 // has the guarded bytes).
@@ -39,14 +38,6 @@ const WORKER_START_TIMEOUT_MS = parsePositiveIntEnv(
 );
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
 //
 // This runner provides the WASI `thread-spawn` import needed by Rust's
 // wasm32-wasip1-threads target so LOSAT can execute its NCBI-style
@@ -65,14 +56,6 @@ function parsePositiveIntEnv(name, fallback) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3207-3222
-// ```c++
-//     if (args.Exist(kArgNumThreads) &&
-//         args[kArgNumThreads].HasValue()) {  // could be cancelled by the exclusion in CRemoteArgs
-//         ...
-//         int num_threads = args[kArgNumThreads].AsInteger();
-//         ...
-//             m_NumThreads = num_threads;
-// ```
 // Host-only (LOSAT_WASI_PRESPAWN; `auto` when unset since 2026-10-18, `0` boots none): the
 // number of thread workers to boot ahead of `_start`. `auto` reads the requested
 // -num_threads from argv (the caller is one of the N threads, so N-1 workers); a value the
@@ -119,7 +102,6 @@ function refillCount(argv) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
 // Host-only (LOSAT_WASI_GUARD_CACHE; on by default since 2026-10-19, `0` turns it off): reuse
 // the guarded bytes of an earlier run. The key is the SHA-256 of the input bytes and of the
 // guard's own source, so a changed artifact or guard never reuses an entry. A hit is used
@@ -322,7 +304,6 @@ function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
 // Host diagnostics only (LOSAT_WASI_THREADS_DEBUG): the guard counts of this run, or of the build.
 function guardSummary(guarded) {
   if (guarded.fill + guarded.copy + guarded.grow + guarded.atomic === 0 && guarded.record) {
@@ -332,7 +313,6 @@ function guardSummary(guarded) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
 // Host-only (LOSAT_WASI_GUARD_CACHE): the cache's index. An entry is named by the SHA-256 of the
 // input, so finding it reads and hashes the whole input before the compile can start, and the
 // hit then hashes the cached bytes too (the 9-10 MB command: about 40 ms on ws, where the compile
@@ -436,7 +416,6 @@ async function compileIndexedGuard(wasmPath, compileStarted) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
 // Apply the same shared-memory compatibility guard before main or worker
 // compilation. Workers normally receive this already compiled module.
 async function compileThreadedModule(wasmPath) {
@@ -446,11 +425,6 @@ async function compileThreadedModule(wasmPath) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
-// ```c++
-//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-//         (*thread)->Run();
-//     }
-// ```
 // Host-only (LOSAT_WASI_RECYCLE; `1` when unset, `0` turns it off): in a reactor, a thread
 // worker outlives its guest thread. When the thread returns, the worker instantiates the
 // module again on the shared memory (a new instance per guest thread, as before) and waits
@@ -485,7 +459,6 @@ async function terminateWorkers(workers) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
 // Host-owned lifecycle records count attempts, ready confirmations, and real exit
 // events separately. Test-only failure injection never changes search behavior.
 async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
@@ -528,7 +501,6 @@ function bootEarlyWorkers(count, fault) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// (*thread)->Run(); (*thread)->Join(&result);
 // Explicit module reuse for host measurements: each create still owns a fresh
 // instance/memory/worker set. There is no global cache or retained search pool
 // (LOSAT_WASI_GUARD_CACHE keeps only guarded bytes on disk); a reactor's
@@ -613,12 +585,6 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     event("ready", { tid }); return tid;
   };
   // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
-  // ```c++
-  //     // ... launch the threads ...
-  //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-  //         (*thread)->Run();
-  //     }
-  // ```
   // A standby worker becomes the guest's thread only here: it receives this tid and
   // startArg. The guest gets the tid after the start confirmation only from a worker that still
   // boots (the paragraph below).
@@ -673,11 +639,6 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     return slot;
   };
   // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
-  // ```c++
-  //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-  //         (*thread)->Run();
-  //     }
-  // ```
   // A recycled worker that waits receives this tid and startArg, and the guest gets the tid
   // after the same start confirmation as from a new worker.
   // A worker that waits, else one whose thread has returned and that instantiates the module
@@ -733,12 +694,6 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     return awaitThreadStart(view, tid);
   };
   // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:156-163
-  // ```c++
-  //     // Create the threads ...
-  //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
-  //         thread->Reset(new CPrelimSearchThread(internal_data,
-  //                                               opts_memento.get()));
-  // ```
   // LOSAT_WASI_PRESPAWN: boot the workers together, before the guest asks for them. Each
   // instantiates the module with the shared memory and waits for its start order; spawnThread
   // hands them out in order and, when none is left, boots the next set (refillCount) or creates

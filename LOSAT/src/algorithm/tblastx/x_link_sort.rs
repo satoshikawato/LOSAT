@@ -12,25 +12,8 @@
 //! first sort goes through `sort_dispatch` and so through this file.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
-//! ```c
-//! /* Sort by (reverse) position. */
-//! if (kTranslatedQuery) {
-//!    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//!          s_RevCompareHSPsTbx);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
-//! ```c
-//! if (kTranslatedQuery) {
-//!    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//!          s_RevCompareHSPsTransl);
-//!    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-//!          s_FwdCompareHSPsTransl);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-//! ```c
-//!         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//!               ScoreCompareHSPs);
-//! ```
 //! NCBI sorts with the C library's `qsort`, which is not stable: where its comparator returns 0
 //! the order is the library's. LOSAT's defined behaviour is the stable sorts of its reference
 //! forms (`sort_linked_hsp_references` in `linking.rs`, and the index sort of the in-place path),
@@ -168,16 +151,7 @@
 //! `[X_STATS] LINKSORT sorts= indices= parallel_sorts= parallel_indices= composite_sorts=`.
 
 use super::{fwd_compare_hsps_transl, rev_compare_hsps_transl, UngappedHit};
-// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-// ```c
-// CMTArgs(...)
-// {
-// #ifdef NCBI_NO_THREADS
-//     m_NumThreads = CThreadable::kMinNumThreads;
-//     m_MTMode = eNotSupported;
-// #endif
-// }
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1297
 // As in `linking.rs`: a build without threads has no pool.
 #[cfg(all(
     feature = "parallel",
@@ -201,20 +175,7 @@ static COMPOSITE_SORTS: AtomicU64 = AtomicU64::new(0);
 pub(super) const PARALLEL_MIN: usize = 32_768;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486,990-994
-// ```c
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTbx);
-// ...
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTransl);
-//    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_FwdCompareHSPsTransl);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-// ```c
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-// ```
 // No computation: names the index sort and carries what its caller allows.
 /// Which index sort of `x_hsp_inplace.rs`, with the linking call's `allow_parallel` where there
 /// is one.
@@ -261,9 +222,6 @@ fn count(indices: usize, parallel: bool, composite: bool) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
-// ```c
-// TBlastThreads the_threads(GetNumberOfThreads());
-// ```
 // Scheduling only: whether an index sort may run on the search pool (module doc, "The pool and
 // `-num_threads`"). A linking call's sorts follow its `allow_parallel`, as its per-group linking
 // does; a sort that no flag reaches follows the calling thread, which is a rayon worker exactly
@@ -387,10 +345,6 @@ fn x_board_sort<C>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-// ```c
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-// ```
 // The statement `x_hsp_inplace.rs` had here (and the reference bodies have): a stable sort of the
 // indices with the comparator applied to the records they name.
 /// Today's index sort.
@@ -402,10 +356,6 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
-// ```c
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTbx);
-// ```
 // The same stable sort of the same indices with the same comparator: rayon's stable parallel sort
 // when the call may use the pool and the list is long, today's statement otherwise. For a total
 // preorder both return the one stable order (module doc, (S) and item 2).
@@ -453,15 +403,7 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
-// ```c
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTbx);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-// ```c
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-// ```
 // The index sort of `x_hsp_inplace::sort_in_place`. The comparator is a type parameter down to
 // `sort_by`, so each comparator has its own sort with the comparison inlined. Passed as a function
 // pointer, it was an indirect call per comparison, which on wasm32 (LOSAT Web) is a `call_indirect`
@@ -481,13 +423,6 @@ pub(super) fn sort_indices<C>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
-// ```c
-// if (kTranslatedQuery) {
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTransl);
-//    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_FwdCompareHSPsTransl);
-// ```
 // The two final sorts of `x_hsp_inplace::replay_in_place_counted`: one stable sort with
 // `s_FwdCompareHSPsTransl`, ties by `s_RevCompareHSPsTransl` (module doc, item 1).
 /// Sorts `order` into the order of today's two final sorts over `records`.
@@ -503,12 +438,6 @@ pub(super) fn final_sort(order: &mut [usize], records: &[UngappedHit], site: Sit
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
-// ```c
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTransl);
-//    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_FwdCompareHSPsTransl);
-// ```
 // The body of `final_sort` for any two comparators: `first` and `second` are today's two sorts
 // in the order they run, so `second` decides and `first` breaks its ties.
 fn final_sort_as<B, A>(
@@ -614,16 +543,6 @@ mod tests {
     ));
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:359-366
-    // ```c
-    // 	if (h1->query.offset < h2->query.offset)
-    // 		return  1;
-    // 	if (h1->query.offset > h2->query.offset)
-    // 		return -1;
-    // 	if (h1->query.end < h2->query.end)
-    // 		return  1;
-    // 	if (h1->query.end > h2->query.end)
-    // 		return -1;
-    // ```
     // Module doc, "Terms" and item 3: each comparator, and the composite of the final sort, is a
     // total preorder on random records (reversal, and transitivity of `Less` and of `Equal`).
     #[test]
@@ -661,15 +580,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
-    // ```c
-    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //          s_RevCompareHSPsTbx);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-    // ```c
-    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //               ScoreCompareHSPs);
-    // ```
     // Module doc, item 2: this path's index order equals today's for each comparator, on and off
     // pools of 1, 2 and 8 threads, for lengths around rayon's insertion-sort limit (20) and chunk
     // length (2,000) with every list sent to the parallel sort, and for lengths below, at and
@@ -734,10 +645,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
-    // ```c
-    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //          s_RevCompareHSPsTbx);
-    // ```
     // (S) of the module doc does not need the indices to start as `0..n`: the same equality from
     // a shuffled index vector, where the stable order is "comparator, then position in the
     // vector".
@@ -763,12 +670,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
-    // ```c
-    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //          s_RevCompareHSPsTransl);
-    //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //          s_FwdCompareHSPsTransl);
-    // ```
     // Module doc, item 1: one stable sort with "second, ties by first" equals the two stable
     // sorts in sequence. The pair of the linking call, and pairs of comparators whose ties do
     // not coincide; the lists hold pairs of HSPs on which the two comparators disagree, on which
@@ -854,9 +755,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
-    // ```c
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // ```
     // Module doc, "The pool and `-num_threads`": a linking call's sorts follow its flag; a
     // dispatch sort follows the calling thread, which is not a rayon worker off a pool (the
     // thread of a `-num_threads 1` search) and is one inside `ThreadPool::install`, where the

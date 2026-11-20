@@ -42,8 +42,6 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
 
 impl TblastnArgs {
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288-301:
-    // results = lcl_blast.Run();
-    // formatter.PrintOneResultSet(**result, query);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1458:
     // PrintOneResultSet dispatches the complete result to outfmt 0/6/7.
     /// `settings` are the NCBI application settings that LOSAT reproduces
@@ -51,14 +49,6 @@ impl TblastnArgs {
     /// and of the queries (`fasta_reader`) use them.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72
-    /// ```c++
-    ///     CNcbiApplication* app = CNcbiApplication::Instance();
-    ///     if (app) {
-    ///         const CNcbiRegistry& registry = app->GetConfig();
-    ///         x_LoadDataLoadersConfig(registry);
-    ///         x_LoadBlastDbDataLoaderConfig(registry);
-    ///     }
-    /// ```
     pub fn run(
         self,
         settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -110,12 +100,6 @@ impl TblastnArgs {
         let mut args = self;
         args.id_scope = args.parse_deflines.then(Default::default);
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-        // ```c
-        //     if (GetExportSearchStrategyStream(args) ||
-        //            m_FormattingArgs->ArchiveFormatRequested(args)) {
-        //         locality = CBlastOptions::eBoth;
-        //     }
-        // ```
         // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
         // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
         // there too. `GetExportSearchStrategyStream` comes first: it creates the search strategy
@@ -185,19 +169,6 @@ impl TblastnArgs {
             None => None,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
-        // ```c
-        //         CRef<blast::CBlastQueryVector> subjects;
-        //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
-        //                                        subj_range, parse_deflines,
-        //                                        use_lcase_masks, subjects, m_IsMapper);
-        //         m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
-        //
-        //     } else if (!m_IsIgBlast){
-        //         // IgBlast permits use of germline database
-        //         NCBI_THROW(CInputException, eInvalidInput,
-        //            "Either a BLAST database or subject sequence(s) must be specified");
-        //     }
-        // ```
         // The handler of the database arguments reads the subjects (an empty subject set
         // fails there), before the query and the output are opened.
         // `-db`: the database is opened with the options (`search_cli`), as NCBI's
@@ -222,48 +193,13 @@ impl TblastnArgs {
                 RunIo::Memory { subject, .. } => Input::Bytes(subject),
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
-            // ```c++
-            //             subj_input_stream = &args[kArgSubject].AsInputFile();
-            //         }
-            //
-            //         TSeqRange subj_range;
-            //         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
-            //             subj_range =
-            //                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
-            //                             "Invalid specification of subject location");
-            //         }
-            // ```
             // The subject range is read after the subject file is opened, before it is read.
             let subject_range = seq_range::parse_optional_range(
                 args.subject_loc.as_deref(),
                 seq_range::RangeRole::Subject,
             )?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:230-246
-            // ```c++
-            //     SDataLoaderConfig dlconfig(read_proteins);
-            //     dlconfig.OptimizeForWholeLargeSequenceRetrieval();
-            //
-            //     CBlastInputSourceConfig iconfig(dlconfig);
-            //     iconfig.SetRange(range);
-            //     iconfig.SetBelieveDeflines(parse_deflines);
-            //     iconfig.SetLowercaseMask(use_lcase_masking);
-            //     iconfig.SetSubjectLocalIdMode();
-            //     if (!read_proteins && gaps_to_Ns) {
-            //         iconfig.SetConvertGapsToNs(true);
-            //     }
-            //
-            //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
-            //     CRef<CBlastInput> input(new CBlastInput(fasta));
-            //     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-            //     sequences = input->GetAllSeqs(*scope);
-            // ```
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2466-2470
-            // ```c++
-            //     EMoleculeType mol_type = Blast_SubjectIsNucleotide(opts.GetProgramType())
-            //         ? CSearchDatabase::eBlastDbIsNucleotide
-            //         : CSearchDatabase::eBlastDbIsProtein;
-            //     m_IsProtein = (mol_type == CSearchDatabase::eBlastDbIsProtein);
-            // ```
             // TBLASTN's subjects are nucleotide (`read_proteins` = `IsProtein()` is false, so the
             // reader assumes nucleotides, `fAssumeNuc`). NCBI reads the records one at a time, writes
             // each one's messages as it reads it, and checks each one's range after reading it: a
@@ -278,13 +214,6 @@ impl TblastnArgs {
             // (`x_read_subject_stores`), with a subject range after the record is cut to its
             // interval (the record `cut_subjects` makes).
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-            // ```c
-            //     virtual SBlastSequence GetCompressedPlusStrand() {
-            //         SBlastSequence retval(size());
-            //         string ncbi4na = kEmptyStr;
-            //         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-            //         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-            // ```
             // Dispatch point: NCBI keeps the subjects in its scope and makes each one's search forms
             // from it. With the switch the records keep their deflines and the letters are held packed,
             // made again when a subject is searched or reported; without it the records keep them.
@@ -332,14 +261,6 @@ impl TblastnArgs {
                 }
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-            // ```c
-            // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-            //     : m_QueryVector(& queries)
-            // {
-            //     if (queries.Empty()) {
-            //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-            //     }
-            // ```
             // `m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects))` (blast_args.cpp:2557)
             // fails for a subject input without records.
             if subjects.is_empty() {
@@ -358,19 +279,6 @@ impl TblastnArgs {
             }
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
-        // ```c
-        //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
-        //         m_InputStream == NULL) {
-        // ...
-        //         else {
-        //             m_InputStream = &args[kArgQuery].AsInputFile();
-        //         }
-        //     }
-        // ...
-        //     else {
-        //         m_OutputStream = &args[kArgOutput].AsOutputFile();
-        //     }
-        // ```
         // The query is opened and the output file created before the options are checked;
         // `-` is standard input and standard output. Web ABI v1's query is the call's bytes.
         let query_input = match &io {
@@ -456,12 +364,6 @@ impl TblastnArgs {
         }
         let flushed = std::io::Write::flush(&mut stream);
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-        // ```c
-        //     catch (const std::ios::failure&) {                                      \
-        //         LOG_POST(Error << "BLAST failed to write output");                  \
-        //         exit_code = BLAST_OUTPUT_ERROR;                                     \
-        //     }                                                                       \
-        // ```
         // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI
         // aborts and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
         if stream.failed && (pairwise || tax_report) {
@@ -644,13 +546,6 @@ fn open_search_database(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<Option<TblastnDatabase>> {
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
-    // ```c++
-    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-    //         CRef<CLocalDbAdapter> db_adapter;
-    //         CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-    //                          db_adapter, scope);
-    // ```
     // The database of `-db` is opened after the options are processed, before
     // `Query is Empty!` (as BLASTN's).
     let database = match args.database_name() {
@@ -691,14 +586,7 @@ fn open_search_database(
     if !joins_scope {
         return Ok(database);
     }
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
-    // ```c++
-    // void CBlastTabularInfo::x_CheckTaxDB()
-    // {
-    //    	if( x_IsFieldRequested(eSubjectSciNames) ||
-    //     ...
-    //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-133
     // A tabular field list that looks every taxid up (the plural names of the taxonomy database,
     // the organism report) asks whether `taxdb.bti` is on the search path: the plural names'
     // formatters warn without it (`tabular`), as BLASTN. A `-db` search asks its database, a
@@ -787,24 +675,7 @@ fn search_cli(
         .as_deref()
         .is_none_or(crate::algorithm::pssm_search::PsiSearch::joins_scope);
     let database = open_search_database(&mut args, list.as_ref(), &settings, joins_scope, outputs)?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:194-196,225-238
-    // ```c++
-    //         /*** Get the query sequence(s) or PSSM (these two options are mutually
-    //          * exclusive) ***/
-    //         CRef<CPssmWithParameters> pssm = m_CmdLineArgs->GetInputPssm();
-    // ...
-    //         } else {
-    //             _ASSERT(pssm->HasQuery());
-    //             _ASSERT(pssm->GetQuery().IsSeq());
-    //             query.Reset(new CBlastQueryVector());
-    //             scope->AddTopLevelSeqEntry(pssm->SetQuery());
-    //
-    //             CRef<CSeq_loc> sl(new CSeq_loc());
-    //             sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
-    //
-    //             CRef<CBlastSearchQuery> q(new CBlastSearchQuery(*sl, *scope));
-    //             query->AddQuery(q);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:194-238
     // `-in_pssm` (PSI-TBLASTN): the PSSM's Bioseq is the one query, read with the options; no
     // FASTA input, no `Query is Empty!` and no query batches (one search of the PSSM,
     // tblastn_app.cpp:305-327).
@@ -824,44 +695,9 @@ fn search_cli(
         );
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:200-221
-    // ```c++
-    //         SDataLoaderConfig dlconfig =
-    //             InitializeQueryDataLoaderConfiguration(query_opts->QueryIsProtein(),
-    //                                                    db_adapter);
-    // ...
-    //         if (pssm.Empty()) {
-    //             CBlastInputSourceConfig iconfig(dlconfig, query_opts->GetStrand(),
-    //                                          query_opts->UseLowercaseMasks(),
-    //                                          query_opts->GetParseDeflines(),
-    //                                          query_opts->GetRange());
-    //             if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
-    //                	ERR_POST(Warning << "Query is Empty!");
-    //                	return BLAST_EXIT_SUCCESS;
-    //             }
-    //             fasta.Reset(new CBlastFastaInputSource(
-    //                                          m_CmdLineArgs->GetInputStream(),
-    //                                          iconfig));
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:51,106
-    // ```c++
-    //     const bool kQueryIsProtein = true;
-    // ...
-    //     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:328-330
-    // ```c++
-    //     flags += (m_ReadProteins
-    //               ? CFastaReader::fAssumeProt
-    //               : CFastaReader::fAssumeNuc);
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-860
-    // ```c++
-    // 	char c;
-    // 	CNcbiStreampos orig_p = in.tellg();
-    // 	// Piped input
-    // 	if(orig_p < 0)
-    // 		return false;
-    // ```
     // The query of tblastn is a protein (`QueryIsProtein()`, `fAssumeProt`) and its data
     // loaders are those of the subjects (`SDataLoaderConfig`). The position is taken on the
     // opened file, before it is read (`stream_is_empty`). When the subjects were read from
@@ -904,20 +740,9 @@ fn search_cli(
     }
     let batch_size = before_prolog(subjects, x_subject_stores, outputs.diagnostics)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:267-270
-    // ```c
-    // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
-    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
-    //         }
-    //         formatter.PrintProlog();
-    // ```
     // The XInclude formats written to standard output fail after the formatter is made.
     crate::blastinput::app::xinclude_check_for(choice, args.out.as_deref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-277
-    // ```c++
-    //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    //
-    //                 query =  input->GetNextSeqBatch(*scope);
-    // ```
     // The records are read here, and their messages are written batch by batch
     // (`read_query_batches`). What ends the reading (the end of the input, an `eEOF`, a
     // reader error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads
@@ -989,7 +814,7 @@ fn search_pssm_query(
     let searches = psi.searches(args.strategy.is_some(), database.is_some());
     let records = vec![psi.query_record_in(args.parse_deflines, scope, "TBLASTN", searches)?];
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:222-226, 241-270 (the query's
-    // Bioseq joins the scope, quoted at `PsiSearch::write_annot_posts`, before the formatter is
+    // Bioseq joins the scope, cited at `PsiSearch::write_annot_posts`, before the formatter is
     // made and its prolog written)
     // The messages of NCBI's object manager about the query's annotations, after the database
     // and the subjects, before the formatter's warnings and anything on the standard output;
@@ -1030,35 +855,8 @@ fn search_pssm_query(
 /// shorter than a word). Returns the query batch size.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:217-221
-/// ```c
-///             fasta.Reset(new CBlastFastaInputSource(
-///                                          m_CmdLineArgs->GetInputStream(),
-///                                          iconfig));
-///             input.Reset(new CBlastInput(&*fasta,
-///                                         m_CmdLineArgs->GetQueryBatchSize()));
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-136
-/// ```c
-///     if(m_IsDbScan) {
-/// 	int num_seqs=0;
-///         int total_length=0;
-/// 	if (!is_remote_search)
-///         {
-///                 BlastSeqSrc* seqsrc = db_adapter.MakeSeqSrc();
-///                 num_seqs=BlastSeqSrcGetNumSeqs(seqsrc);
-///                 total_length=static_cast<int>(BlastSeqSrcGetTotLen(seqsrc));
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
-/// ```c
-///         catch(CBlastException & e ) {
-///         	// Skip bad subject sequence
-///         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-///         		seqblk_vec->push_back(subj);
-///         ...
-///         		warning += "Subject sequence contains no data";
-///         		ERR_POST(Warning << warning);
-///         		continue;
-/// ```
 /// NCBI's gapped tblastn with the Gumbel block never stops for the average subject length,
 /// also when every subject is without letters: its shortest subject is raised to
 /// `BLAST_SEQSRC_MINLENGTH` before the division by 3 (`run_local_search_with_pool` ports
@@ -1082,17 +880,7 @@ fn before_prolog(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288-301:
-// results = lcl_blast.Run();
-// formatter.PrintOneResultSet(**result, query);
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467:
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-//     ...
-// }
 // NCBI formats one result set without searching again; several requested formats
 // are several CBlastFormat printers over the same result set.
 /// Runs one TBLASTN search over already parsed records and writes every requested
@@ -1157,7 +945,7 @@ fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) ->
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:267-270 (quoted at `search_cli`)
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:267-270 (cited at `search_cli`)
 /// The XInclude formats written without a file fail after the formatter is made (after
 /// `Query is Empty!` and `before_prolog`), as the command line's `-outfmt` (`search_cli`).
 fn xinclude_checks(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
@@ -1184,9 +972,6 @@ fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> R
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
-        // ```c++
-        //     s_ValidateCustomDelim(m_CustomOutputFormatSpec,m_CustomDelim);
-        // ```
         // The formatting handler checks the custom delimiter of each format (the command line's
         // in `check_options`).
         app::formatting_handler_check(&choice, app::Program::Tblastn)?;
@@ -1196,13 +981,6 @@ fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> R
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
-// ```c++
-//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-//         CRef<CLocalDbAdapter> db_adapter;
-//         CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                          db_adapter, scope);
-// ```
 /// Runs one TBLASTN search of the records `query_records` against the database of `args` and
 /// writes every requested output format from the same result (the library API's entry; the
 /// command line's is `run`). `settings` are the NCBI application settings, which find the
@@ -1403,15 +1181,6 @@ fn write_first_batch_prologs(
         format!("User specified sequence set (Input: {})", path.display())
     });
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
-    // ```c++
-    //     if(dbscan_mode)
-    //     {
-    // 	ITERATE(vector<BLAST_SequenceBlk*>, iter, m_ivSeqBlkVec)
-    // 	{
-    //             m_iTotalLength += (Int8) (*iter)->length;
-    // 	}
-    //     }
-    // ```
     // The subject set's total as NCBI's `Int8`.
     let total: i64 = match database {
         Some(_) => 0,
@@ -1474,14 +1243,6 @@ fn search(
     use crate::blastinput::app;
     use crate::blastinput::seq_range;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
-    // ```c++
-    //         formatter.PrintProlog();
-    //         ...
-    //         /*** Process the input ***/
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    //         ...
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    // ```
     // What the run writes before its query batches ends here.
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.queries_begin();
@@ -1511,18 +1272,7 @@ fn search(
     // `-in_pssm` (PSI-TBLASTN): the query's PSSM, which the batch's search and reports read.
     let pssm = resolved.pssm.clone();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_memento_priv.hpp:64-74
-    // ```c++
-    //     CBlastOptionsMemento(CBlastOptionsLocal* local_opts)
-    //     {
-    //         m_ProgramType = local_opts->GetProgramType();
-    //         m_QueryOpts = local_opts->m_QueryOpts;
-    // ...
-    //         m_ExtnOpts = local_opts->m_ExtnOpts;
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288
-    // ```c++
-    //                 CLocalBlast lcl_blast(query_factory, opt_handle, db_adapter);
-    // ```
     // IDENTITY's reset (`search_settings`) writes through the memento's pointers into the options
     // that every query batch reuses: the first batch resets the mode and warns its queries, and
     // the later batches start in mode 0 without the warning. These are the searched queries of
@@ -1565,10 +1315,6 @@ fn search(
         dbsize: args.dbsize,
         searchsp: args.searchsp,
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
-        // ```c
-        //     use_old_fsc = getenv("OLD_FSC");
-        //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
-        // ```
         // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
         old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
     };
@@ -1587,39 +1333,16 @@ fn search(
         ),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-278
-    // ```c++
-    //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    //
-    //                 query =  input->GetNextSeqBatch(*scope);
-    //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-    // ```
     // NCBI reads the query batches one at a time after the outfmt 0 prolog. The run stops at
     // the first batch that NCBI fails (a reader error, a batch without a query, a batch of
     // queries without letters), after the reports of the batches before (without the
     // epilog) and the messages of that batch's records (`read_query_batches`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:59-68
-    // ```c++
-    // CPsiBlastImpl::CPsiBlastImpl(CRef<objects::CPssmWithParameters> pssm,
-    //                              CRef<CLocalDbAdapter> subject,
-    //                              CConstRef<CPSIBlastOptionsHandle> options)
-    // : m_Pssm(pssm), m_Query(0), m_Subject(subject), m_OptsHandle(options),
-    //     m_ResultType(eDatabaseSearch)
-    // {
-    //     x_Validate();
-    //     x_ExtractQueryFromPssm();
-    //     x_CreatePssmScoresFromFrequencyRatios();
-    // }
-    // ```
     // `-in_pssm`: NCBI's checks of the PSSM (`CPsiBlastValidate::Pssm`) and the PSSM engine's
     // scores of a PSSM of frequency ratios only (`PsiBlastComputePssmScores`) fail when the search
     // object is made, after the outfmt 0 prolog (tblastn_app.cpp:270, 322) and before any
     // subject is read.
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:307,324
-    // ```c++
-    //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
-    // ...
-    //                 CRef<CPsiBlast> psiblast(new CPsiBlast(pssm, db_adapter, psi_opts));
-    // ```
     // With `-export_search_strategy` the request is made first: with `-subject` it stops the run
     // ("Remote PSI-BL2SEQ is not supported", exit status 1, the strategy file empty; NCBI 2.17.0
     // `tbn.pssm.sub*` of line RG F1d probe 7) before the PSSM's check, which a request with `-db`
@@ -1650,11 +1373,6 @@ fn search(
             )
             .write(strategy, 0, input_records, None)?;
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270,307
-            // ```c++
-            //         formatter.PrintProlog();
-            // ...
-            //             SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl, pssm);
-            // ```
             // NCBI's posts of the bytes replaced in that request (the `-db` name; NCBI 2.17.0
             // probe RG K/k4b/agent7/probe4 `tbn_dbe_m45_f0`: the prolog, the posts, the error),
             // saved in the error archive with outfmt 11 (`tbn_dbe_m45_f11`). The PSSM's own strings
@@ -1730,14 +1448,6 @@ fn search(
             )?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-        // ```c
-        // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-        //     : m_QueryVector(& queries)
-        // {
-        //     if (queries.Empty()) {
-        //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-        //     }
-        // ```
         // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`).
         write_first_batch_prologs(
             outputs,
@@ -1750,17 +1460,6 @@ fn search(
         )?;
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
-        // ```c
-        //     db_length = BlastSeqSrcGetTotLen(seq_src);
-        //
-        //     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-        //
-        //     /* iterate over all subject sequences */
-        //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-        //            != BLAST_SEQSRC_EOF) {
-        //        ...
-        //        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-        // ```
         // `-db`: the database's sequences, checked once for every batch (`XDbStream::new`)
         // where NCBI reads them first, in the preliminary search of the first batch with a
         // valid context (a batch without one is not searched, `CheckInternalData`). A database
@@ -1772,22 +1471,7 @@ fn search(
         // sequence is read where it is searched (`common/x_db_stream.rs`).
         let mut x_stream = None;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-        // ```c
-        //    if (sbp->gbp) {
-        //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-        //        if (Blast_SubjectIsTranslated(program_number)) {
-        //            min_subject_length/=3;
-        //        }
-        //    ...
-        //    if(min_subject_length <=0) {
-        // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-        //    }
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
-        // ```c
-        //     case BLASTERR_SUBJECT_LENGTH_INVALID:
-        //         new_msg->message = strdup("The average subject length is too short");
-        // ```
         // With the Gumbel block a database's `GetMinLength` below 3 (an alias file's
         // `MIN_SEQ_LENGTH` 1 or 2, a list's shortest sequence) leaves no residue
         // (`min_subject_length` is NCBI's `Uint4`): the setup of the first batch with a valid
@@ -1852,14 +1536,6 @@ fn search(
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the BLAST
         // XML report data of the first result NCBI formats: the matrix of its formatting table,
         // found by the name as typed)
-        // ```c++
-        //     else {
-        //         string prog_name = Blast_ProgramNameFromType(
-        //                                            m_Options.GetProgramType());
-        //         if (prog_name != "blastn" && prog_name != "megablast") {
-        //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-        //                         "unsupported score matrix");
-        // ```
         // NCBI fails when it formats a batch in BLAST XML with a matrix name its XML data does not
         // know (`stage_e_report::xml_matrix_failure`, the decision of `stage_e_report::render`):
         // the batch of the run's first searched query, or of its second where the report is held
@@ -1893,19 +1569,11 @@ fn search(
         let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
         let seg = resolved.seg.params();
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-188:
-        // (*thread)->Run(); (*thread)->Join(&result);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1417:
-        // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
         //                         CConstRef<blast::CBlastQueryVector> queries,
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:251-252,275-301:
-        // input.Reset(new CBlastInput(&*fasta, GetQueryBatchSize()));
-        // for (; !input->End(); ...) {
-        //     query = input->GetNextSeqBatch(*scope);
         //     CLocalBlast lcl_blast(query_factory, ..., db_adapter);
-        //     results = lcl_blast.Run();
-        // }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:70-127:
-        // case eTblastn: retval = 20000;
         // Search each accumulated batch independently; preliminary linking
         // and sum-statistics depend on its concatenated query contexts.
         let mut results = Vec::with_capacity(queries.len());
@@ -1924,16 +1592,6 @@ fn search(
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-291
-        // ```c
-        //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-        // ...
-        //                 query =  input->GetNextSeqBatch(*scope);
-        //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-        // ...
-        //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-        //                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-        //                     results = lcl_blast.Run();
-        // ```
         // Dispatch point: NCBI searches the query batches one after another (one CLocalBlast per
         // batch). x_search_batches searches them ahead (on one shared pool, or side by side) and
         // returns the reports in batch order; the loop below takes them from it.
@@ -1986,12 +1644,6 @@ fn search(
             .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
         {
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-280
-            // ```c++
-            //                 query =  input->GetNextSeqBatch(*scope);
-            //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-            //
-            //                 SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl);
-            // ```
             // The batch's search strategy request (`-export_search_strategy`): once its query
             // factory is made, before any error of the batch is acted on (`x_search_batches` may
             // have searched it ahead; only the order of the file and of what the run writes
@@ -2009,14 +1661,6 @@ fn search(
             }
             let (mut batch_results, batch_lengths, batch_karlin, batch_validity) = {
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-291
-                // ```c
-                //                 query =  input->GetNextSeqBatch(*scope);
-                //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-                // ...
-                //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-                //                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-                //                     results = lcl_blast.Run();
-                // ```
                 // Dispatch point: a report searched ahead for this very range is used; otherwise
                 // run_local_for_report_threads searches the batch here, which is the port of
                 // CLocalBlast::Run for one batch.
@@ -2110,26 +1754,7 @@ fn search(
                 }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
-            // ```c++
-            //     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,
-            //                                                   m_InternalData,
-            //                                                   m_Opts,
-            //                                                   seqinfo_src,
-            //                                                   search_msgs));
-            // ```
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
-            // ```c++
-            //     if(hit_params->options->query_cov_hsp_perc > 0 || hit_params->options->max_hsps_per_subject > 0 ||
-            //        (hit_params->options->hsp_filt_opt != NULL && hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
-            //     	s_FilterBlastResults(results, hit_params->options, query_info, program_number);
-            //     }
-            //
-            //     /* Re-sort the hit lists according to their best e-values, because they
-            //        could have changed. Only do this for a database search. */
-            //     if (BlastSeqSrcGetTotLen(seq_src) > 0) {
-            //         Blast_HSPResultsSortByEvalue(results);
-            //     }
-            // ```
             // `-max_hsps` and `-qcov_hsp_perc` filter the batch's final hit lists (each query's
             // context is its searched letters), which the search has sorted by e-value where NCBI
             // sorts the results (a positive `BlastSeqSrcGetTotLen`); the sort is a total order
@@ -2177,14 +1802,6 @@ fn search(
                 }
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:294-299
-            // ```c++
-            //                 if (fmt_args->ArchiveFormatRequested(args)) {
-            //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-            //                     m_Bah.ResetMessages();
-            //                 } else {
-            //                     BlastFormatter_PreFetchSequenceData(*results, scope,
-            //                     		                            fmt_args->GetFormattedOutputChoice());
-            // ```
             // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the
             // batch's search and the read of its titles: a value that NCBI cannot convert fails
             // the first batch here, before its reports (`app::check_prefetch_environment`).
@@ -2229,12 +1846,6 @@ fn search(
             query_validity.extend(batch_validity);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2777-2792
-        // ```c
-        //       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-        //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-        //       if (loop_status) {
-        //           contexts[context].is_valid = FALSE;
-        // ```
         // A PSSM query whose letters give no Karlin-Altschul parameters (one that `-seg` masks
         // completely) makes NCBI BLAST+ 2.17.0's tblastn crash (SIGSEGV, probe `gs.masked`): LOSAT
         // refuses it (DECISIONS 35 Q5 of line PS, as psiblast's, DECISIONS 12 S4), before
@@ -2274,7 +1885,7 @@ fn search(
         // query of `-in_pssm` (`PsiSearch::query_scope`), else the input records that NCBI's
         // reader added for the batch (`RangedBatch::input`: the records that `-query_loc` drops
         // included, numbered in the run, `FastaRecord::local_id`), and in outfmt 5, whose scope
-        // the formatter keeps (`ResetScopeHistory`, quoted at `shared::stop_lookup_unsure`), those
+        // the formatter keeps (`ResetScopeHistory`, cited at `shared::stop_lookup_unsure`), those
         // of the batches before.
         let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
             outputs.formats.iter().map(|format| format.outfmt),
@@ -2331,17 +1942,7 @@ fn search(
             None => queries,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1443-1451:
-        // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
-        // ```c
-        //         } catch (const CException& e) {
-        //             ...
-        //             CRef<CSearchMessage> m
-        //                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-        //             messages[index].push_back(m);
-        //             s_InvalidateQueryContexts(qinfo, index);
-        //         }
-        // ```
         // The warnings of each query are written before its report, once (`QueryWarnings`):
         // the reader's messages of the query's batch (before its first query,
         // `read_query_batches`), then the query's own, on one line in NCBI's order
@@ -2349,20 +1950,6 @@ fn search(
         // query without letters) or of its Karlin-Altschul parameters (an invalid query
         // with letters).
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
-        // ```c++
-        //     if (m_FormatType == CFormattingArgs::eAsnText
-        //       ...
-        //       || m_FormatType == CFormattingArgs::eJsonSeqalign
-        //       || m_FormatType == CFormattingArgs::eSAM)
-        //     {
-        //         x_PrintStructuredReport(results, queries);
-        //         return;
-        //     }
-        //     ...
-        //     if (results.HasWarnings()) {
-        //         ERR_POST(Warning << results.GetWarningStrings());
-        //     }
-        // ```
         // A structured format (outfmt 8, 12) writes none of a query's own warnings
         // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
         let result_warnings = outputs
@@ -2472,13 +2059,6 @@ fn search(
         }
         drop(database_stores);
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:298-302
-        // ```c++
-        //                     BlastFormatter_PreFetchSequenceData(*results, scope,
-        //                     		                            fmt_args->GetFormattedOutputChoice());
-        //                     ITERATE(CSearchResultSet, result, *results) {
-        //                         formatter.PrintOneResultSet(**result, query);
-        //                     }
-        // ```
         // Before the reports of a batch NCBI fetches every subject that the batch reports, and
         // with `taxdb.bti` on the search path the taxonomy database writes its messages there
         // (`TblastnDatabase::prefetch_messages`: the texts of opening it at the run's first
@@ -2504,17 +2084,6 @@ fn search(
             });
         if let (Some(reported), Some(database)) = (&reported, database) {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
-            // ```c++
-            // s_IsPrefetchFormat(blast::CFormattingArgs::EOutputFormat format_type)
-            // {
-            // 	if ((format_type == CFormattingArgs::eAsnText) ||
-            // 	    (format_type == CFormattingArgs::eAsnBinary) ||
-            // 	    (format_type == CFormattingArgs::eArchiveFormat)||
-            // 	    (format_type == CFormattingArgs::eJsonSeqalign)) {
-            // 		return false;
-            // 	}
-            // 	return true;
-            // ```
             // Outfmt 10 and 20 prefetch as the tabular 6 and 7 do (a name of the taxonomy
             // database that the prefetch would look up is LOSAT's refusal, `tabular`).
             // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning
@@ -2605,13 +2174,6 @@ fn search(
                         continue;
                     }
                     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
-                    // ```c++
-                    //        CScope::TIds ids;
-                    //        vector<TSeqRange> ranges;
-                    //        s_ExtractSeqidsAndRanges(results, ids, ranges);
-                    //        _TRACE("Prefetching " << ids.size() << " sequence lengths");
-                    //        LoadSequencesToScope(ids, ranges, scope);
-                    // ```
                     // A batch without Seq-aligns prefetches no sequence.
                     if seq_aligns == 0 {
                         continue;
@@ -2834,9 +2396,6 @@ fn search(
                 queries: &query_input.placements,
                 subjects: subject_placements,
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:342
-                // ```c++
-                //         formatter.PrintEpilog(opt);
-                // ```
                 // A run that stops at a query batch writes no epilog.
                 epilog: batches.stop.is_none() && failed.is_none(),
             },

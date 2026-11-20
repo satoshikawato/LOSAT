@@ -24,17 +24,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:52-60
-/// ```c
-/// typedef struct LinkedHSP {
-///     BlastHSP * hsp;
-///     Int4 cid;    /* context id for hsp */
-///     Int4 sid;    /* OID for hsp*/
-///     Int4 begin;  /* query offset in plus strand */
-///     Int4 end;    /* query end in plus strand */
-///     Int4 merit;  /* how many other hsps in the tree dominates me? */
-///     struct LinkedHSP *next;
-/// } LinkedHSP;
-/// ```
 /// `hsp` is the index of the payload in the forest's arena; `next` is the order of the
 /// node's list (`CTreeNode::hsplist`). `score` and `subject_offset` are those of
 /// `hsp->score` and `hsp->subject.offset`, which `s_DominateTest` reads. `merit` is an
@@ -64,15 +53,6 @@ pub(crate) struct CullKey {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:200-207
-/// ```c
-/// typedef struct CTreeNode {
-///     Int4 begin;                /* left endpoint */
-///     Int4 end;                  /* right endpoint */
-///     struct CTreeNode *left;    /* left child */
-///     struct CTreeNode *right;   /* right child */
-///     LinkedHSP *hsplist;        /* hsps belong to this node, start with low merits */
-/// } CTreeNode;
-/// ```
 /// `left` and `right` are node indices; a freed node is unlinked from its parent.
 struct CTreeNode {
     begin: i32,
@@ -83,9 +63,6 @@ struct CTreeNode {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:435
-/// ```c
-///    Int4 kNumHSPtoFork = 20;  /** number of HSP to trig forking children */
-/// ```
 const K_NUM_HSP_TO_FORK: i32 = 20;
 
 /// The HSPs that a forest keeps for one query: one list per subject, in the order of the
@@ -115,15 +92,6 @@ pub(crate) struct CullingForest<H> {
 
 impl<H> CullingForest<H> {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:487-493
-    /// ```c
-    /// static int
-    /// s_BlastHSPCullingInit(void* data, void* results)
-    /// {
-    ///     BlastHSPCullingData * cull_data = data;
-    ///     cull_data->c_tree = calloc(cull_data->num_contexts, sizeof(CTreeNode *));
-    ///     return 0;
-    /// }
-    /// ```
     pub(crate) fn new(culling_max: i64) -> Self {
         Self {
             culling_max,
@@ -161,11 +129,6 @@ impl<H> CullingForest<H> {
     /// reproduction of NCBI's undefined behaviour), so every limit above 1 is three more.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:338-340
-    /// ```c
-    ///             if(params->culling_max > 1){
-    ///             	params->culling_max += 3;
-    ///             }
-    /// ```
     pub(crate) fn prelim_max(limit: i32) -> i64 {
         let limit = i64::from(limit);
         if limit > 1 {
@@ -179,19 +142,7 @@ impl<H> CullingForest<H> {
     /// into the tree `cid` (made with the length `qlen` on first use) unless `culling_max`
     /// HSPs already dominate it; an HSP that is not saved is freed.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:612-633
-    /// ```c
-    ///       A.sid   = hsp_list->oid;
-    ///       A.merit = params->culling_max;
-    /// ...
-    ///       if (! c_tree[A.cid]) {
-    ///          c_tree[A.cid] = s_CTreeNew(qlen);
-    ///       }
-    ///
-    ///       if(s_SaveHSP(c_tree[A.cid], &A)){
-    ///     	 hsp_list->hsp_array[i] = NULL;
-    ///       }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:612-636
     pub(crate) fn save(&mut self, cid: usize, qlen: i32, sid: u32, key: CullKey, hsp: H) {
         let index = match self.free_hsps.pop() {
             Some(index) => {
@@ -237,37 +188,6 @@ impl<H> CullingForest<H> {
     /// tree, in query order.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581
-    /// ```c
-    ///    for (cid=0; cid < cull_data->num_contexts; ++cid) {
-    ///       if (c_tree[cid]) {
-    ///         qid = Blast_GetQueryIndexFromContext(cid, params->program);
-    ///         if (!results->hitlist_array[qid]) {
-    ///             results->hitlist_array[qid] = Blast_HitListNew(params->prelim_hitlist_size);
-    ///         }
-    ///         hitlist = results->hitlist_array[qid];
-    /// ...
-    ///          cull_list = s_RipHSPOffCTree(c_tree[cid]);
-    /// ...
-    ///          while (cull_list) {
-    ///             p = cull_list;
-    ///             /* test to see if new hsplist has already been allocated */
-    ///             allocated = FALSE;
-    ///             for (sid=0; sid<hitlist->hsplist_count; ++sid) {
-    ///                 list = hitlist->hsplist_array[sid];
-    ///                 if (p->sid == list->oid) {
-    ///                    allocated = TRUE;
-    ///                    break;
-    ///                 }
-    ///             }
-    /// ...
-    ///             list->hsp_array[id] = p->hsp;
-    ///             list->hspcnt++;
-    /// ...
-    ///          for (sid=0; sid < hitlist->hsplist_count; ++sid) {
-    ///             list = hitlist->hsplist_array[sid];
-    /// ...
-    ///             Blast_HSPListSortByScore(list);
-    /// ```
     pub(crate) fn finalize(
         mut self,
         query_of: impl Fn(usize) -> usize,
@@ -308,47 +228,6 @@ impl<H> CullingForest<H> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:79-120
-    /// ```c
-    /// static Boolean s_DominateTest(LinkedHSP *p, LinkedHSP *y) {
-    ///     Int8 b1 = p->begin;
-    ///     Int8 b2 = y->begin;
-    ///     Int8 e1 = p->end;
-    ///     Int8 e2 = y->end;
-    ///     Int8 s1 = p->hsp->score;
-    ///     Int8 s2 = y->hsp->score;
-    ///     Int8 l1 = e1 - b1;
-    ///     Int8 l2 = e2 - b2;
-    ///     Int8 overlap = MIN(e1,e2) - MAX(b1,b2);
-    ///     Int8 d = 0;
-    ///
-    ///     // If not overlap by more than 50%
-    ///     if(2 *overlap < l2) {
-    ///     	return FALSE;
-    ///     }
-    /// ...
-    ///     d  = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2;
-    ///     // If identical, use oid as tie breaker
-    ///     if(((s1 == s2) && (b1==b2) && (l1 == l2)) || (d == 0)) {
-    ///     	if(s1 != s2) {
-    ///     		return (s1>s2);
-    ///     	}
-    ///     	if(p->sid != y->sid) {
-    ///     		return (p->sid < y->sid);
-    ///     	}
-    ///
-    ///     	if(p->hsp->subject.offset > y->hsp->subject.offset) {
-    ///     		return FALSE;
-    ///     	}
-    ///     	return TRUE;
-    ///     }
-    ///
-    ///    	if (d < 0) {
-    ///    		return FALSE;
-    ///     }
-    ///
-    ///     return TRUE;
-    /// }
-    /// ```
     fn dominate_test(&self, p: &LinkedHsp, y: &LinkedHsp) -> bool {
         let (b1, b2) = (i64::from(p.begin), i64::from(y.begin));
         let (e1, e2) = (i64::from(p.end), i64::from(y.end));
@@ -376,19 +255,6 @@ impl<H> CullingForest<H> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:123-133
-    /// ```c
-    /// static Boolean s_FullPass(LinkedHSP *list, LinkedHSP *y) {
-    ///     LinkedHSP *p = list;
-    ///     while (p) {
-    ///        if (s_DominateTest(p, y)) {
-    ///           (y->merit)--;
-    ///           if (y->merit <= 0) return FALSE;
-    ///        }
-    ///        p = p->next;
-    ///     }
-    ///     return TRUE;
-    /// }
-    /// ```
     /// `merit` is an `i64` (see `LinkedHsp`).
     fn full_pass(&self, node: usize, y: &mut LinkedHsp) -> bool {
         for &p in &self.nodes[node].hsplist {
@@ -403,31 +269,6 @@ impl<H> CullingForest<H> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:136-163
-    /// ```c
-    /// static Int4 s_ProcessHSPList(LinkedHSP **list, LinkedHSP *y) {
-    ///     Int4 num = 0;
-    ///     LinkedHSP *p = *list, *q, *r;
-    ///     q = p;
-    ///     while (p) {
-    ///        ++num;
-    ///        r = p;
-    ///        p = p->next;
-    ///        if (r != y && s_DominateTest(y, r)) {
-    ///           (r->merit)--;
-    ///           if (r->merit <= 0) {
-    /// ...
-    ///              --num;
-    ///              s_HSPFree(r);
-    ///           } else {
-    ///              q = r;
-    ///           }
-    ///        } else {
-    ///           q = r;
-    ///        }
-    ///     }
-    ///     return num;
-    /// }
-    /// ```
     /// `y` is the index of the new HSP's entry (`x` of `s_SaveHSP`).
     fn process_hsp_list(&mut self, node: usize, y: usize) -> i32 {
         // The list is unlinked in place (`retain_mut` visits from the front, as NCBI's `p`).
@@ -453,27 +294,6 @@ impl<H> CullingForest<H> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:166-189
-    /// ```c
-    /// static Int4 s_MarkDownHSPList(LinkedHSP **list) {
-    ///     Int4 num = 0;
-    ///     LinkedHSP *p = *list, *q, *r;
-    ///     q = p;
-    ///     while (p) {
-    ///        ++num;
-    ///        r = p;
-    ///        p = p->next;
-    ///        (r->merit)--;
-    ///        if (r->merit <= 0) {
-    /// ...
-    ///           --num;
-    ///           s_HSPFree(r);
-    ///        } else {
-    ///           q = r;
-    ///        }
-    ///     }
-    ///     return num;
-    /// }
-    /// ```
     fn mark_down_hsp_list(&mut self, node: usize) -> i32 {
         let mut list = std::mem::take(&mut self.nodes[node].hsplist);
         let mut num = 0;
@@ -494,28 +314,6 @@ impl<H> CullingForest<H> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:228-247
-    /// ```c
-    /// static CTreeNode * s_CTreeNodeNew(CTreeNode * parent, ECTreeChild dir) {
-    ///     Int4 midpt;
-    ///     CTreeNode * node = s_GetNode();
-    ///
-    ///     node->left    = NULL;
-    ///     node->right   = NULL;
-    ///     node->hsplist = NULL;
-    ///
-    ///     if (!parent) return node;
-    ///
-    ///     midpt = (parent->begin + parent->end) / 2;
-    ///     if (dir == eLeft) {
-    ///        node->begin = parent->begin;
-    ///        node->end   = midpt;
-    ///     } else {
-    ///        node->begin = midpt;
-    ///        node->end   = parent->end;
-    ///     }
-    ///     return node;
-    /// }
-    /// ```
     fn ctree_node_new(&mut self, parent: Option<usize>, left: bool) -> usize {
         let (begin, end) = match parent {
             None => (0, 0),
@@ -549,14 +347,6 @@ impl<H> CullingForest<H> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:376-381
-    /// ```c
-    /// static CTreeNode * s_CTreeNew(Int4 qlen) {
-    ///     CTreeNode * tree = s_CTreeNodeNew(NULL, eLeft);
-    ///     tree->begin = 0;
-    ///     tree->end   = qlen;
-    ///     return tree;
-    /// }
-    /// ```
     fn ctree_new(&mut self, qlen: i32) -> usize {
         let tree = self.ctree_node_new(None, true);
         self.nodes[tree].begin = 0;
@@ -565,43 +355,7 @@ impl<H> CullingForest<H> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:258-299
-    /// ```c
-    ///     p = node->hsplist;
-    ///     q = p;  /* q is predecessor of p */
-    ///     midpt = (node->begin + node->end) /2;
-    ///     while(p) {
-    ///       child = NULL;
-    ///       r = p;
-    ///       if (p->end < midpt) {
-    ///          if (!node->left) {
-    ///             node->left = s_CTreeNodeNew(node, eLeft);
-    ///          }
-    ///          child = node->left;
-    ///       } else if (p->begin > midpt) {
-    ///          if (!node->right) {
-    ///             node->right = s_CTreeNodeNew(node, eRight);
-    ///          }
-    ///          child = node->right;
-    ///       }
-    ///       p = p->next;
-    ///       if (child) {
-    ///          /* remove r from parent list */
-    /// ...
-    ///          /* and put it on the child */
-    ///          s_AddHSPtoList(&(child->hsplist), r);
-    ///       } else {
-    ///          q = r;
-    ///       }
-    ///    }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:193-197
-    /// ```c
-    /// static void s_AddHSPtoList(LinkedHSP **list, LinkedHSP *y) {
-    ///     y->next = *list;
-    ///     *list = y;
-    ///     return;
-    /// }
-    /// ```
     fn fork_children(&mut self, node: usize) {
         let midpt = (self.nodes[node].begin + self.nodes[node].end) / 2;
         let mut list = std::mem::take(&mut self.nodes[node].hsplist);
@@ -643,20 +397,6 @@ impl<H> CullingForest<H> {
     /// Returns whether the node is freed (NCBI sets `*node = NULL`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:319-330
-    /// ```c
-    /// static void s_MarkDownCTree(CTreeNode ** node) {
-    ///    if (! (*node)) return;
-    ///
-    ///    s_MarkDownCTree(&((*node)->left));
-    ///    s_MarkDownCTree(&((*node)->right));
-    ///    if ( s_MarkDownHSPList(&((*node)->hsplist)) <= 0
-    ///      && !(*node)->left && !(*node)->right) {
-    ///         s_CTreeNodeFree(*node);
-    ///         *node = NULL;
-    ///    }
-    ///    return;
-    /// }
-    /// ```
     fn mark_down_ctree(&mut self, node: usize) -> bool {
         if let Some(left) = self.nodes[node].left {
             if self.mark_down_ctree(left) {
@@ -678,45 +418,6 @@ impl<H> CullingForest<H> {
     /// Returns whether the node is freed (NCBI sets `*node = NULL`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:334-370
-    /// ```c
-    /// static void s_ProcessCTree(CTreeNode ** node, LinkedHSP *x) {
-    ///    Int4 midpt;
-    ///
-    ///    if (! (*node)) return;
-    ///
-    ///    /* first test if x includes the full range covered by node */
-    ///    if (x->begin <= (*node)->begin && x->end >= (*node)->end) {
-    ///       s_MarkDownCTree(node);
-    ///       return;
-    ///    }
-    ///
-    ///    /* if node reaches the leaves*/
-    ///    if (!(*node)->left && !(*node)->right) {
-    ///       if (s_ProcessHSPList(&((*node)->hsplist), x) <= 0) {
-    ///           s_CTreeNodeFree(*node);
-    ///           *node = NULL;
-    ///       }
-    ///       return;
-    ///    }
-    ///
-    ///    /* recursive case */
-    ///    midpt = ((*node)->begin + (*node)->end) / 2;
-    ///    if (x->end < midpt) {
-    ///       s_ProcessCTree(&((*node)->left), x);
-    ///    } else if (x->begin > midpt) {
-    ///       s_ProcessCTree(&((*node)->right), x);
-    ///    } else {
-    ///       s_ProcessCTree(&((*node)->left), x);
-    ///       s_ProcessCTree(&((*node)->right), x);
-    ///       if (s_ProcessHSPList(&((*node)->hsplist), x) <= 0
-    ///        && !(*node)->left && !(*node)->right) {
-    ///           s_CTreeNodeFree(*node);
-    ///           *node = NULL;
-    ///       }
-    ///    }
-    ///    return;
-    /// }
-    /// ```
     fn process_ctree(&mut self, node: usize, x: usize) -> bool {
         let LinkedHsp { begin, end, .. } = self.entries[x];
         if begin <= self.nodes[node].begin && end >= self.nodes[node].end {
@@ -758,27 +459,6 @@ impl<H> CullingForest<H> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:396-423
-    /// ```c
-    /// static LinkedHSP * s_RipHSPOffCTree(CTreeNode *tree) {
-    ///     LinkedHSP *q, *p;
-    ///
-    ///     if (!tree) return NULL;
-    ///
-    ///     q = tree->hsplist;
-    ///     tree->hsplist = NULL;
-    ///
-    ///     /* grab left child */
-    /// ...
-    ///        p->next = s_RipHSPOffCTree(tree->left);
-    /// ...
-    ///     /* grab right child */
-    /// ...
-    ///        p->next = s_RipHSPOffCTree(tree->right);
-    ///     }
-    ///
-    ///     return q;
-    /// }
-    /// ```
     fn rip_hsp_off_ctree(&mut self, tree: Option<usize>, out: &mut Vec<usize>) {
         let Some(tree) = tree else {
             return;
@@ -790,43 +470,6 @@ impl<H> CullingForest<H> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:430-470
-    /// ```c
-    /// static Boolean s_SaveHSP(CTreeNode *tree, LinkedHSP *A) {
-    /// ...
-    ///    /* Descend the tree */
-    ///    while (tree) {
-    ///       ASSERT(tree->begin <= A->begin);
-    ///       ASSERT(tree->end   >= A->end);
-    ///
-    ///       if (! s_FullPass(tree->hsplist, A)) return FALSE;
-    ///       midpt = (tree->begin + tree->end) /2;
-    ///       node = tree;  /* record the last valid position */
-    ///       if      (A->end   < midpt) tree = tree->left;
-    ///       else if (A->begin > midpt) tree = tree->right;
-    ///       else break;
-    ///    }
-    ///
-    ///    /* if we get here, A is valid. copy and insert A at node */
-    ///    x = s_HSPCopy(A);
-    ///    s_AddHSPtoList(&(node->hsplist), x);
-    ///
-    ///    /* if this is the leaf, calculate update hsp number */
-    ///    if (!node->left && !node->right) {
-    ///        /* check for domination */
-    ///        if (s_ProcessHSPList(&(node->hsplist), x) >= kNumHSPtoFork) {
-    ///            /* fork this node into sub trees */
-    ///            s_ForkChildren(node);
-    ///        }
-    ///        return TRUE;
-    ///    }
-    ///
-    ///    /* check domination */
-    ///    s_ProcessHSPList(&(node->hsplist), x);
-    ///    s_ProcessCTree(&(node->left), x);
-    ///    s_ProcessCTree(&(node->right), x);
-    ///    return TRUE;
-    /// }
-    /// ```
     fn save_hsp(&mut self, tree: usize, a: &mut LinkedHsp) -> bool {
         let mut current = Some(tree);
         let mut node = tree;

@@ -114,25 +114,7 @@ impl Default for ReportContext {
 /// Format scientific notation with NCBI-style exponent padding.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-988
-/// ```c
-/// if (evalue < 1.0e-99) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
-/// } else if (evalue < 0.0009) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
-/// }
-/// if (bit_score > 99999){
-///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2389-2402
-/// ```c
-/// switch (flags & fDoubleGeneral) {
-///     case fDoubleScientific:
-///         format = "%.*e";
-///         break;
-/// }
-/// n = ::snprintf(buffer, kMaxDoubleStringSize, format, (int)precision, value);
-/// ```
 fn format_scientific_ncbi(value: f64, precision: usize) -> String {
     let mut raw = format!("{:.*e}", precision, value);
     let exp_pos = match raw.find('e').or_else(|| raw.find('E')) {
@@ -168,16 +150,6 @@ fn format_scientific_ncbi(value: f64, precision: usize) -> String {
 /// Write scientific notation with NCBI-style exponent padding.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-988
-/// ```c
-/// if (evalue < 1.0e-99) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
-/// } else if (evalue < 0.0009) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
-/// }
-/// if (bit_score > 99999){
-///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
-/// }
-/// ```
 fn write_scientific_ncbi<W: Write + ?Sized>(
     writer: &mut W,
     value: f64,
@@ -190,23 +162,6 @@ fn write_scientific_ncbi<W: Write + ?Sized>(
 /// Format E-value exactly as NCBI BLAST does (base GetScoreString logic).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-983
-/// ```c
-/// if (evalue < 1.0e-180) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "0.0");
-/// } else if (evalue < 1.0e-99) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
-/// } else if (evalue < 0.0009) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
-/// } else if (evalue < 0.1) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%4.3lf", evalue);
-/// } else if (evalue < 1.0) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.2lf", evalue);
-/// } else if (evalue < 10.0) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.1lf", evalue);
-/// } else {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0lf", evalue);
-/// }
-/// ```
 pub fn format_evalue_ncbi(e_value: f64) -> String {
     if e_value == 0.0 || e_value < 1.0e-180 {
         // NCBI: snprintf(evalue_buf, sizeof(evalue_buf), "0.0");
@@ -235,12 +190,6 @@ pub fn format_evalue_ncbi(e_value: f64) -> String {
 /// Format E-value exactly as NCBI BLAST does for tabular output.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1332-1337
-/// ```c
-/// CAlignFormatUtil::GetScoreString(evalue, bit_score, 0, score, m_Evalue, ...);
-/// if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
-///     m_Evalue = NStr::DoubleToString(evalue, 2, NStr::fDoubleScientific);
-/// }
-/// ```
 pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
     if e_value == 0.0 || e_value < 1.0e-180 {
         "0.0".to_string()
@@ -254,16 +203,6 @@ pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
 /// Format bit score exactly as NCBI BLAST does
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-994
-/// ```c
-/// if (bit_score > 99999){
-///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
-/// } else if (bit_score > 99.9){
-///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%3.0ld", (long)bit_score);
-/// } else {
-///     snprintf(bit_score_buf, sizeof(bit_score_buf), kBitScoreFormat.c_str(), bit_score);
-/// }
-/// // where kBitScoreFormat = "%4.1lf"
-/// ```
 pub fn format_bitscore_ncbi(bit_score: f64) -> String {
     if bit_score > 99999.0 {
         // NCBI: "%5.3le" -> scientific notation
@@ -282,18 +221,6 @@ pub fn format_bitscore_ncbi(bit_score: f64) -> String {
 /// formats as the bit score but with `%2.1lf` below 99.9.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:994-1003
-/// ```c++
-///     if (total_bit_score > 99999){
-///         snprintf(total_bit_score_buf, sizeof(total_bit_score_buf), "%5.3le",
-///             total_bit_score);
-///     } else if (total_bit_score > 99.9){
-///         snprintf(total_bit_score_buf, sizeof(total_bit_score_buf), "%3.0ld",
-///             (long)total_bit_score);
-///     } else {
-///         snprintf(total_bit_score_buf, sizeof(total_bit_score_buf), "%2.1lf",
-///             total_bit_score);
-///     }
-/// ```
 pub fn format_total_bitscore_ncbi(total_bit_score: f64) -> String {
     if total_bit_score > 99.9 {
         format_bitscore_ncbi(total_bit_score)
@@ -305,23 +232,7 @@ pub fn format_total_bitscore_ncbi(total_bit_score: f64) -> String {
 /// Format percent identity exactly as NCBI tabular output does.
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-441
-/// ```c
-/// inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
-/// {
-///     double perc_ident =
-///         (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
-///     m_Ostream << NStr::DoubleToString(perc_ident, 3);
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2388-2401
-/// ```c
-/// case fDoubleFixed: // default
-/// default:
-///     format = "%.*f";
-///     break;
-/// ...
-/// n = ::snprintf(buffer, kMaxDoubleStringSize, format, (int)precision, value);
-/// ```
 pub fn format_percent_identity_ncbi(
     num_ident: usize,
     alignment_length: usize,
@@ -344,23 +255,6 @@ pub fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
 /// Write E-value exactly as NCBI BLAST does (base GetScoreString logic).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-983
-/// ```c
-/// if (evalue < 1.0e-180) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "0.0");
-/// } else if (evalue < 1.0e-99) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
-/// } else if (evalue < 0.0009) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
-/// } else if (evalue < 0.1) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%4.3lf", evalue);
-/// } else if (evalue < 1.0) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.2lf", evalue);
-/// } else if (evalue < 10.0) {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.1lf", evalue);
-/// } else {
-///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0lf", evalue);
-/// }
-/// ```
 fn write_evalue_ncbi_base<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
@@ -382,12 +276,6 @@ fn write_evalue_ncbi_base<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io
 /// Write E-value exactly as NCBI BLAST does for tabular output.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1332-1337
-/// ```c
-/// CAlignFormatUtil::GetScoreString(evalue, bit_score, 0, score, m_Evalue, ...);
-/// if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
-///     m_Evalue = NStr::DoubleToString(evalue, 2, NStr::fDoubleScientific);
-/// }
-/// ```
 fn write_evalue_ncbi_tabular<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
@@ -401,17 +289,6 @@ fn write_evalue_ncbi_tabular<W: Write + ?Sized>(writer: &mut W, e_value: f64) ->
 /// Write bit score exactly as NCBI BLAST does.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-993
-/// ```c
-/// if (bit_score > 99999){
-///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
-/// } else if (bit_score > 99.9){
-///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%3.0ld",
-///         (long)bit_score);
-/// } else {
-///     snprintf(bit_score_buf, sizeof(bit_score_buf), kBitScoreFormat.c_str(),
-///         bit_score);
-/// }
-/// ```
 fn write_bitscore_ncbi<W: Write + ?Sized>(writer: &mut W, bit_score: f64) -> io::Result<()> {
     if bit_score > 99999.0 {
         write_scientific_ncbi(writer, bit_score, 3)
@@ -427,19 +304,7 @@ fn write_bitscore_ncbi<W: Write + ?Sized>(writer: &mut W, bit_score: f64) -> io:
 /// they are (NCBI writes the IDs that it takes from the titles without converting them).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:214-217
-/// ```c++
-/// void CBlastTabularInfo::x_PrintQueryAccessionVersion()
-/// {
-///     m_Ostream << s_GetSeqIdListString(m_QueryId, eAccVersion);
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:252-255
-/// ```c++
-/// void CBlastTabularInfo::x_PrintSubjectAccessionVersion(void)
-/// {
-///     m_Ostream << s_GetSeqIdListString(m_SubjectId, eAccVersion);
-/// }
-/// ```
 #[allow(clippy::too_many_arguments)]
 pub fn write_hit_fields_bytes<W: Write + ?Sized>(
     writer: &mut W,
@@ -463,11 +328,6 @@ pub fn write_hit_fields_bytes<W: Write + ?Sized>(
     write!(writer, "{}", delim)?;
     writer.write_all(subject_id)?;
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-441
-    // ```c
-    // double perc_ident =
-    //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
-    // m_Ostream << NStr::DoubleToString(perc_ident, 3);
-    // ```
     let identity_fmt = if config.ncbi_evalue_format {
         format_percent_identity_ncbi(num_ident, length, config.identity_decimals)
     } else {
@@ -509,28 +369,7 @@ pub fn write_hit_fields_bytes<W: Write + ?Sized>(
 /// (the bytes as they are; the ID of a local query is not shown).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
-/// ```c
-///     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
-///                                             m_ParseLocalIds, kHtmlFormat,
-///                                             kTabularFormat, rid);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:725-743
-/// ```c
-///     } else if (tabular) {
-///         out << "# " << label << ": ";
-///     } else {
-///         out << label << "= ";
-///     }
-///
-///     string all_id_str = GetSeqIdString(cbs, believe_query);
-///     all_id_str += " ";
-///     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
-///
-///     // For tabular output, there is no limit on the line length.
-///     // There is also no extra line with the sequence length.
-///     if (tabular) {
-///         out << all_id_str;
-/// ```
 /// The line ends with the `\n` that `x_PrintQueryAndDbNames` writes before `# Database:`
 /// (tabular.cpp:1310-1311).
 pub fn write_outfmt7_query_line<W: Write + ?Sized>(
@@ -554,20 +393,7 @@ mod tests {
     // ==========================================================================
     // E-value formatting tests (NCBI parity)
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-988
-    // ```c
-    // if (evalue < 1.0e-99) {
-    //     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
-    // } else if (evalue < 0.0009) {
-    //     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1328-1337
-    // ```c
-    // CAlignFormatUtil::GetScoreString(evalue, bit_score, 0, score, m_Evalue, ...);
-    // if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
-    //     m_Evalue = NStr::DoubleToString(evalue, 2, NStr::fDoubleScientific);
-    // }
-    // ```
     // ==========================================================================
     // ==========================================================================
 
@@ -626,13 +452,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-975
-    // ```c
-    // if (evalue < 1.0e-99) {
-    //     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
-    // } else if (evalue < 0.0009) {
-    //     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
-    // }
-    // ```
     #[test]
     fn test_format_evalue_ncbi_base_scientific() {
         // Base GetScoreString formatting uses no decimals for < 0.0009
@@ -643,17 +462,6 @@ mod tests {
     // ==========================================================================
     // Bit score formatting tests (NCBI parity)
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-993
-    // ```c
-    // if (bit_score > 99999){
-    //     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
-    // } else if (bit_score > 99.9){
-    //     snprintf(bit_score_buf, sizeof(bit_score_buf), "%3.0ld",
-    //         (long)bit_score);
-    // } else {
-    //     snprintf(bit_score_buf, sizeof(bit_score_buf), kBitScoreFormat.c_str(),
-    //         bit_score);
-    // }
-    // ```
     // ==========================================================================
 
     #[test]
@@ -691,16 +499,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-988
-    // ```c
-    // if (evalue < 1.0e-99) {
-    //     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
-    // } else if (evalue < 0.0009) {
-    //     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
-    // }
-    // if (bit_score > 99999){
-    //     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
-    // }
-    // ```
     #[test]
     fn test_exponent_padding_without_generated_fixture() {
         assert_eq!(format_evalue_ncbi_tabular(5e-5), "5.00e-05");
@@ -714,11 +512,6 @@ mod tests {
     #[test]
     fn test_format_percent_identity_ncbi_divides_before_scaling() {
         // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-441
-        // ```c
-        // double perc_ident =
-        //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
-        // m_Ostream << NStr::DoubleToString(perc_ident, 3);
-        // ```
         assert_eq!(format_percent_identity_ncbi(179, 320, 3), "55.937");
         assert_eq!(format_percent_identity_ncbi(0, 0, 3), "0.000");
     }

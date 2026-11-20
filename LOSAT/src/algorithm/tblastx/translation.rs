@@ -35,9 +35,7 @@ pub struct QueryFrame {
     /// NCBI BLAST preserves a copy of the unmasked query sequence buffer, then overwrites
     /// masked residues in the working sequence with X.
     ///
-    /// NCBI reference (verbatim):
-    ///   query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
-    ///   query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1381-1382
     pub aa_seq_nomask: Option<Vec<u8>>,
     /// Number of actual amino acids (excluding sentinels)
     pub aa_len: usize,
@@ -60,10 +58,6 @@ fn codon_to_aa_ncbistdaa(codon: &[u8], table: &GeneticCode) -> u8 {
 /// NCBI BLAST places NULLB sentinel bytes at the beginning and end of each
 /// translated sequence to ensure proper extension termination.
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:438-453
-/// ```c
-///   prot_seq[0] = NULLB;  // First character is sentinel
-///   prot_seq[index_prot] = NULLB;  // Last character is sentinel
-/// ```
 ///
 /// Returns (aa_seq_with_sentinels, actual_aa_count)
 fn translate_sequence(seq: &[u8], table: &GeneticCode) -> (Vec<u8>, usize) {
@@ -93,18 +87,6 @@ fn translate_sequence(seq: &[u8], table: &GeneticCode) -> (Vec<u8>, usize) {
 /// with it (the engine counts of the Seq-aligns, `report::engine_counts`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1299-1308
-/// ```c
-///                /* First produce the reverse strand of the nucleotide sequence */
-///               GetReverseNuclSequence(subject_blk->sequence_start, subject_blk->length,
-///                     &nucl_seq_rev);
-///
-///               for (context = 0; context < num_frames; ++context) {
-///                  int frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-///                  retval->translations[context] = (Uint1*) malloc((2+subject_blk->length/3)*sizeof(Uint1));
-///                  BLAST_GetTranslation(subject_blk->sequence_start, nucl_seq_rev,
-///                     subject_blk->length, frame, retval->translations[context], gen_code_string);
-///               }
-/// ```
 pub(crate) fn frame_residue(sequence: &[u8], frame: i8, offset: usize, table: &GeneticCode) -> u8 {
     let first = 3 * offset + frame.unsigned_abs() as usize - 1;
     if frame > 0 {
@@ -170,11 +152,6 @@ pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1216-1218
-// ```c
-//                length = BLAST_GetTranslation(nucl_seq, nucl_seq_rev,
-//                        nucl_length, hsp->subject.frame, target_t->translations[context],
-//                        target_t->gen_code_string);
-// ```
 // NCBI translates the one frame of the HSP. The frame here is the one `generate_frames` makes,
 // present under the same condition (`i + 3 <= len`): `translate_sequence` of `seq[i..]` or of
 // `revcomp(seq)[i..]`, whose codon k is the letters `seq[i + 3k..i + 3k + 3]`, or the complements
@@ -248,18 +225,6 @@ pub(crate) fn x_codons_into(
 const X_FRAME_WINDOW: usize = 3 << 16;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1299-1308
-// ```c
-//                /* First produce the reverse strand of the nucleotide sequence */
-//               GetReverseNuclSequence(subject_blk->sequence_start, subject_blk->length,
-//                     &nucl_seq_rev);
-//
-//               for (context = 0; context < num_frames; ++context) {
-//                  int frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//                  retval->translations[context] = (Uint1*) malloc((2+subject_blk->length/3)*sizeof(Uint1));
-//                  BLAST_GetTranslation(subject_blk->sequence_start, nucl_seq_rev,
-//                     subject_blk->length, frame, retval->translations[context], gen_code_string);
-//               }
-// ```
 // `x_generate_frames_in_windows` is `generate_frames` of a subject whose letters are read in
 // windows, without the subject's letters or their reverse complement in memory at once: the
 // six frames are filled in one pass over the letters, each codon start q (0 <= q <= len - 3)
@@ -384,10 +349,6 @@ const X_MASK_LETTERS: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-424 (`s_CodonToAA`; the
 // quote is at `GeneticCode::get`)
-// ```c
-// static Uint1 mapping[4] = { 8, 2, 1, 4 };
-// for (i = 0; i < 4; i++) if (codon[0] & mapping[i])
-// ```
 // `GeneticCode::get` reads a codon only through the masks of its three letters (`base_mask`;
 // its table read gives the loop's residue for single-bit masks), so the residue of a codon
 // is the residue of any codon with the same masks: here, of the letters `X_MASK_LETTERS`.

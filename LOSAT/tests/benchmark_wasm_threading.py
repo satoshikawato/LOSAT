@@ -20,7 +20,6 @@ ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / 'LOSAT/tests'
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180
-# m_iTotalLength += (Int8) (*iter)->length;
 # Fixture shape changes work distribution, never the search algorithm.
 def make_cases(out):
     inputs = fixtures(out)
@@ -28,7 +27,6 @@ def make_cases(out):
     lc1 = sequence(TESTS/'fasta/LC738874.fasta'); lc2 = sequence(TESTS/'fasta/LC738875.fasta')
     (out/'lc-query.fasta').write_text('>q\n'+lc1[:900]+'\n')
     # NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54
-    # #define MAX_DBSEQ_LEN 5000000
     # Cross the real subject chunk boundary, rather than only the old pool threshold.
     long_sequence = sequence(TESTS/'fasta/EDL933.fna')
     assert len(long_sequence) > 5_000_000
@@ -48,8 +46,6 @@ def make_cases(out):
     ]
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-48,75
-# const string kArgQuery("query"); const string kArgSubject("subject");
-# const string kArgOutput("out"); const string kArgNumThreads("num_threads");
 # Select existing comparison inputs without changing search options or fixtures.
 def select_cases(out, selection):
     if not selection:
@@ -70,7 +66,6 @@ def select_cases(out, selection):
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-# x_PrintField(*iter); m_Ostream << "\\n";
 # Every admitted sample has matching raw bytes and status. Failed and unfinished
 # conditions remain separate from performance summaries; this is not certification.
 def main():
@@ -78,7 +73,6 @@ def main():
     for name in ['candidate-dir', 'artifacts', 'baseline-dir', 'baseline-runners', 'oracle-dir', 'output-dir']:
         p.add_argument('--' + name, type=Path, required=True)
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-188
-    # (*thread)->Run(); (*thread)->Join(&result);
     # Cold timing includes host/worker loading; allow equal runner filesystem paths.
     p.add_argument('--candidate-runners', type=Path, default=TESTS,
                    help='candidate JS runner directory; use the same path as baseline when host code is unchanged')
@@ -88,7 +82,6 @@ def main():
     p.add_argument('--case', action='append', help='exact losat_stem from comparison_cases.tsv; omit for threading fixtures')
     p.add_argument('--threads', type=int, nargs='+', default=[1, 2, 4, 8])
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
-    # (*thread)->Run(); (*thread)->Join(&result);
     # Serial compatibility measurements require an explicit --kinds serial.
     p.add_argument('--kinds', nargs='+', choices=['native', 'serial', 'threaded'], default=['native', 'threaded'])
     p.add_argument('--warmups', type=int, default=1)
@@ -131,7 +124,6 @@ def run_benchmark(args, out):
     nodes = {'baseline':[args.node, *args.node_arg], 'candidate':[args.node, *args.node_arg, *args.candidate_node_arg]}
     prefixes = {}
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-188
-    # (*thread)->Run(); (*thread)->Join(&result);
     # Select the actual host paths explicitly instead of mixing runner filesystems.
     for version, directory, runners in [('baseline', args.baseline_dir, args.baseline_runners), ('candidate', args.candidate_dir, args.candidate_runners)]:
         for kind in args.kinds:
@@ -165,7 +157,6 @@ def run_benchmark(args, out):
         oracle_versions={program:subprocess.check_output([str(args.oracle_dir/program), '-version'], text=True).strip() for program in ['blastn', 'blastp', 'tblastx']},
         baseline_runner_hashes={p.name:digest(p) for p in args.baseline_runners.glob('*.js')},
         # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-188
-        # (*thread)->Run(); (*thread)->Join(&result);
         # Equal content hashes alone do not prove equal cold host-loading costs.
         candidate_runner_hashes={p.name:digest(p) for p in args.candidate_runners.glob('*.js')},
         runner_paths={'baseline':str(args.baseline_runners.resolve()), 'candidate':str(args.candidate_runners.resolve())},
@@ -173,7 +164,6 @@ def run_benchmark(args, out):
         artifacts={f'{version}-{kind}':{'path':prefix[-1], 'sha256':digest(prefix[-1])} for (version,kind),prefix in prefixes.items()},
         fixtures={str(p):digest(p) for _,_,q,s,_ in cases for p in [q,s]}, runners={p.name:digest(p) for p in TESTS.iterdir() if p.suffix in {'.js', '.py'}},
         # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
-        # (*thread)->Run(); (*thread)->Join(&result);
         # Native invocation has no Node or Wasm compilation boundary.
         boundary='cold process starts at process launch and ends after process exit; see boundary_by_kind',
         boundary_by_kind={kind: ('native process startup, search, output, and exit' if kind == 'native' else
@@ -196,7 +186,6 @@ def run_benchmark(args, out):
         common = ['-query', str(q), '-subject', str(s), '-outfmt', '6', *extra, '-out', '{output}']; common_args[name] = common
         oracle_args = common
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
-        # if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
         #     (program == eTblastn || program == eTblastx)) { opt.SetDbGeneticCode(...); }
         # Retain the existing database oracle for the approved local-subject exception.
         if program == 'tblastx' and '-db_gencode' in extra and extra[extra.index('-db_gencode') + 1] != '1':
@@ -246,7 +235,6 @@ def run_benchmark(args, out):
                           raw_equal=result['status']=='PASS' and result['raw_output_sha256']==expected[name])
             if result['status'] == 'PASS' and not result['raw_equal']: result['status'] = 'PARITY_FAIL'
             # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-            # (*thread)->Join(&result);
             # A clock disagreement invalidates timing, independently of raw parity.
             if result['status'] == 'PASS' and not result['monotonic_clock_agreement']:
                 result.update(status='CLOCK_INCONSISTENT', reason='boottime disagrees with monotonic duration')
@@ -286,7 +274,6 @@ def run_benchmark(args, out):
                     command=[*nodes[version],str(TESTS/'benchmark_wasi_reuse.js'),str(artifact.resolve()),kind,mode,str(jobs_path),'-out','{output}']
                     result=execute(command, ROOT, directory/'process', env, args.reuse_timeout)
                     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-                    # (*thread)->Join(&result);
                     # Apply the same elapsed-clock contract to every process lifetime.
                     if result['status'] == 'PASS' and not result['monotonic_clock_agreement']:
                         result.update(status='CLOCK_INCONSISTENT', reason='boottime disagrees with monotonic duration')

@@ -13,21 +13,6 @@ pub(crate) mod search;
 pub use args::RpstblastnArgs;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:96-108
-// ```c++
-// int CRPSTBlastnApp::Run(void)
-// {
-// 	const CArgs& args = GetArgs();
-// 	CMTArgs mt_args(args);
-// 	if ((mt_args.GetMTMode() == CMTArgs::eSplitByQueries) &&
-// 			(mt_args.GetNumThreads() > 1)){
-// 		m_UsageReport.AddParam(CBlastUsageReport::eMTMode, args[kArgMTMode].AsInteger());
-// 		return x_RunMTBySplitQuery();
-// 	}
-// 	else {
-// 		return x_RunMTBySplitDB();
-// 	}
-// }
-// ```
 /// Runs the RPSTBLASTN search with BLASTX's driver (`blastx::native::run`) and the settings of
 /// rpstblastn's application start. LOSAT's output is NCBI's `-num_threads 1` output at every
 /// thread count and `-mt_mode`.

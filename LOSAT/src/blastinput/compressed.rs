@@ -23,22 +23,6 @@
 //! it is cut into pieces.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1050
-//! ```c++
-//! 		unique_ptr<CDecompressIStream>  comp_seq_istream;
-//! 		bool is_gz = false, is_bz2 = false, is_zst=false;
-//! 		CCompressStream::EMethod method = CDecompressIStream::eGZipFile; // default gzip method if compressed
-//!
-//! 		if( (is_gz  = NStr::EndsWith( seq_file, ".gz", NStr::eNocase)) ||
-//! 		    (is_bz2 = NStr::EndsWith( seq_file, ".bz2",NStr::eNocase)) ||
-//! 		    (is_zst = NStr::EndsWith( seq_file, ".zst",NStr::eNocase))
-//! 		  )
-//! 		{
-//! 		    if( is_bz2  ) method = CDecompressIStream::eBZip2;
-//! 		    if( is_zst  ) method = CDecompressIStream::eZstd;
-//! 		    comp_seq_istream.reset(new CDecompressIStream(f , method ));
-//! 		    data_in =  comp_seq_istream.get();
-//! 		}
-//! ```
 
 use std::io::{self, BufRead, Read};
 
@@ -185,30 +169,6 @@ impl Progress {
 /// however it is cut. Built by `Compression::inflater`.
 ///
 /// NCBI reference (598d8ae6): c++/include/util/compress/compress.hpp:510-521, 532-540
-/// ```c++
-///     /// Compress/decompress as much data as possible, and stops when the input
-///     /// buffer becomes empty or the output buffer becomes full. It may
-///     /// introduce some output latency (reading input without producing any
-///     /// output).
-///     virtual EStatus Process
-///     (const char* in_buf,      // [in]  input buffer
-///      size_t      in_len,      // [in]  input data length
-///      char*       out_buf,     // [in]  output buffer
-///      size_t      out_size,    // [in]  output buffer size
-///      size_t*     in_avail,    // [out] count unproc.bytes in input buffer
-///      size_t*     out_avail    // [out] count bytes putted into out buffer
-///      ) = 0;
-/// ...
-///     /// Finish the compression/decompression process.
-///     /// Process pending input, flush pending output.
-///     /// This function slightly like to Flush(), but it must be called only
-///     /// at the end of compression process just before End().
-///     virtual EStatus Finish
-///     (char*       out_buf,     // [in]  output buffer
-///      size_t      out_size,    // [in]  output buffer size
-///      size_t*     out_avail    // [out] count bytes putted into out buffer
-///      ) = 0;
-/// ```
 /// `step` is `Process` (`at_end` false) and `Finish` (`at_end` true, after the last input) in
 /// one: `Progress::taken` is `in_len - *in_avail`, `Progress::written` is `*out_avail`,
 /// `Progress::ended` is `eStatus_EndOfData`, and an error is `eStatus_Error`.
@@ -244,12 +204,6 @@ impl Inflater {
     /// an error, every step gives the same error.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1358-1361
-    /// ```c++
-    ///     *out_avail = 0;
-    ///     if ( !out_size ) {
-    ///         return eStatus_Overflow;
-    ///     }
-    /// ```
     /// No NCBI counterpart for the empty file: makeblastdb's `x_VerifyInputFilesType` refuses
     /// an empty `-in` before it is opened; at the end of an input that brought no byte, the
     /// inflater fails with "the file is empty" for every format (no gzip or bzip2 header, no
@@ -292,43 +246,6 @@ impl Inflater {
 /// buffered source, as `CCompressionStreambuf` reads makeblastdb's `CDecompressIStream`.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/streambuf.cpp:377-441
-/// ```c++
-///     // Put data into the (de)compressor until there is something
-///     // in the output buffer
-///     do {
-///         ...
-///             // Refill the input buffer if necessary
-///             if ( m_Reader->m_Begin == m_Reader->m_End ) {
-///                 n_read = m_Stream->rdbuf()->sgetn(m_Reader->m_InBuf, m_Reader->m_InBufSize);
-///                 ...
-///                 if ( !n_read ) {
-///                     // We can't read more of data.
-///                     // Automatically 'finalize' (de)compressor.
-///                     m_Reader->m_State = CSP::eFinalize;
-///                     return Flush(CCompressionStream::eRead) == 0;
-///                 }
-///                 ...
-///             }
-///             // Process next data portion
-///             in_len = m_Reader->m_End - m_Reader->m_Begin;
-///             m_Reader->m_LastStatus = m_Reader->m_Processor->Process(
-///                                         m_Reader->m_Begin, in_len, egptr(), out_size,
-///                                         &in_available, &out_available);
-///         ...
-///         if ( m_Reader->m_LastStatus == CP::eStatus_Error ) {
-///             THROW_FAILURE;
-///             // return false;
-///         }
-///         ...
-///         // Update pointer to an unprocessed data
-///         m_Reader->m_Begin += (in_len - in_available);
-///         ...
-///         if ( m_Reader->m_LastStatus == CP::eStatus_EndOfData   &&  !out_available ) {
-///             return false;
-///         }
-///
-///     } while ( !out_available );
-/// ```
 /// Each read gives the output of one step that writes; the end of the source is the step with
 /// `at_end` (`Flush` with the state `eFinalize` calls `Finish`).
 struct PullInflater<R: Read> {
@@ -368,36 +285,6 @@ impl<R: Read> Read for PullInflater<R> {
 /// adapter refuses the whole file.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/streambuf.cpp:469-496
-/// ```c++
-///     // Loop until no data is left
-///     while ( in_available ) {
-///         // Process next data portion
-///         size_t out_available = 0;
-///         size_t out_size = m_Writer->m_OutBuf +
-///                           m_Writer->m_OutBufSize - m_Writer->m_End;
-///         m_Writer->m_LastStatus = m_Writer->m_Processor->Process(
-///             in_buf + count - in_available, in_available, m_Writer->m_End, out_size,
-///             &in_available, &out_available);
-///
-///         // Check on error / small output buffer
-///         if ( m_Writer->m_LastStatus == CP::eStatus_Error ) {
-///             THROW_FAILURE;
-///             //return false;
-///         }
-///         // No more data -- automatically finalize stream
-///         if ( m_Writer->m_LastStatus == CP::eStatus_EndOfData ) {
-///             m_Writer->m_State = CSP::eFinalize;
-///         }
-///         // Update the output buffer pointer
-///         m_Writer->m_End += out_available;
-///
-///         // Write data to the underlying stream only if the output buffer
-///         // is full or an overflow occurs.
-///         if ( !WriteOutBufToStream() ) {
-///             return false;
-///         }
-///     }
-/// ```
 /// (`CCompressionStreambuf::ProcessStreamWrite`, the writer of a `CDecompressOStream`.) The
 /// output buffer goes to the sink when it is full and at the end of each `push`; after the end
 /// of the data the rest of the input is not read.
@@ -442,15 +329,6 @@ impl PushInflater {
     /// dropped (see `PushInflater`).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/compress/api/streambuf.cpp:238-240, 277-279
-    /// ```c++
-    ///     // Finish. Change state to 'finalized'.
-    ///     sp->m_State = CSP::eFinalize;
-    ///     return Flush(dir);
-    /// ...
-    ///         if ( sp->m_State == CSP::eFinalize ) {
-    ///             // State is eFinalize
-    ///             sp->m_LastStatus = sp->m_Processor->Finish(buf, out_size, &out_available);
-    /// ```
     pub fn finish(mut self, sink: &mut dyn FnMut(&[u8])) -> io::Result<()> {
         while !self.ended {
             let progress = self
@@ -484,25 +362,9 @@ impl PushInflater {
 /// is looked for in the next `MAX_HEADER_SIZE` bytes of the file.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:99-100
-/// ```c++
-/// // Maximum size of gzip file header
-/// const size_t kMaxHeaderSize = 1024*4;
-/// ```
 const MAX_HEADER_SIZE: usize = 1024 * 4;
 
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:137-146
-/// ```c++
-/// // gzip magic header
-/// const unsigned char gz_magic[2] = {0x1f, 0x8b};
-///
-/// // gzip flag byte
-/// #define ASCII_FLAG   0x01 // bit 0 set: file probably ascii text
-/// #define HEAD_CRC     0x02 // bit 1 set: header CRC present
-/// #define EXTRA_FIELD  0x04 // bit 2 set: extra field present
-/// #define ORIG_NAME    0x08 // bit 3 set: original file name present
-/// #define COMMENT      0x10 // bit 4 set: file comment present
-/// #define RESERVED     0xE0 // bits 5..7: reserved
-/// ```
 const GZ_MAGIC: [u8; 2] = [0x1f, 0x8b];
 const HEAD_CRC: u8 = 0x02;
 const EXTRA_FIELD: u8 = 0x04;
@@ -519,61 +381,6 @@ const Z_DEFLATED: u8 = 8;
 /// `buf` (so a name longer than `buf` makes a header of all of `buf`).
 ///
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:151-211
-/// ```c++
-/// static
-/// size_t s_CheckGZipHeader(const void* src_buf, size_t src_len,
-///                          CZipCompression::SFileInfo* info = 0)
-/// {
-///     unsigned char* buf = (unsigned char*)src_buf;
-///     // .gz header cannot be less than 10 bytes
-///     if (src_len < 10) {
-///         return 0;
-///     }
-///     // Check the gzip magic header
-///     if (buf[0] != gz_magic[0]  ||
-///         buf[1] != gz_magic[1]) {
-///         return 0;
-///     }
-///     int method = buf[2];
-///     int flags  = buf[3];
-///     if (method != Z_DEFLATED  ||  (flags & RESERVED) != 0) {
-///         return 0;
-///     }
-///     // Header length:
-///     // gz_magic (2) + method (1) + flags (1) + time, xflags and OS code (6)
-///     size_t header_len = 10;
-///     ...
-///     // Skip the extra fields
-///     if ((flags & EXTRA_FIELD) != 0) {
-///         if (header_len + 2 > src_len) {
-///             return 0;
-///         }
-///         size_t len = buf[header_len++];
-///         len += ((size_t)buf[header_len++])<<8;
-///         header_len += len;
-///     }
-///     // Skip the original file name
-///     if ((flags & ORIG_NAME) != 0) {
-///         size_t pos = header_len;
-///         while (header_len < src_len  &&  buf[header_len++] != 0);
-///         ...
-///     }
-///     // Skip the file comment
-///     if ((flags & COMMENT) != 0) {
-///         size_t pos = header_len;
-///         while (header_len < src_len  &&  buf[header_len++] != 0);
-///         ...
-///     }
-///     // Skip the header CRC
-///     if ((flags & HEAD_CRC) != 0) {
-///         header_len += 2;
-///     }
-///     if (header_len > src_len) {
-///         return 0;
-///     }
-///     return header_len;
-/// }
-/// ```
 fn check_gzip_header(buf: &[u8]) -> usize {
     let src_len = buf.len();
     if src_len < 10 {
@@ -667,32 +474,7 @@ enum GzipState {
 /// zlib-compatible build) could in principle differ from zlib where the data is damaged.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/stream_util.cpp:47, 166-178
-/// ```c++
-///     const ICompression::TFlags kDefault_GZipFile            = CZipCompression::fGZip;
-/// ...
-///     case CCompressStream::eGZipFile:
-///     case CCompressStream::eConcatenatedGZipFile:
-/// #if defined(HAVE_LIBZ)
-///         if (flags == CCompressStream::fDefault) {
-///             flags = kDefault_GZipFile;
-///         } else {
-///             flags |= kDefault_GZipFile;
-///         }
-///         if (type == eCompress) {
-///             processor = new CZipStreamCompressor(level, flags);
-///         } else {
-///             processor = new CZipStreamDecompressor(flags);
-///         }
-/// ```
 /// c++/include/util/compress/zlib.hpp:103-104, 118-120
-/// ```c++
-///         /// Check (and skip) gzip file header on decompression stage
-///         fCheckFileHeader       = (1<<2),
-/// ...
-///         fAllowConcatenatedGZip = (1<<4),
-///         /// Set of flags for gzip file support. See each flag description above.
-///         fGZip = fCheckFileHeader | fWriteGZipFormat | fAllowConcatenatedGZip,
-/// ```
 ///
 /// The input is pushed (`step`), as `CZipDecompressor::Process` takes it: the bytes of a header
 /// check are kept in the cache until it holds `MAX_HEADER_SIZE` bytes or the input ends, and
@@ -725,48 +507,6 @@ impl GzipMembers {
     /// Looks for a header in the next `MAX_HEADER_SIZE` bytes and starts the inflater.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1412-1469
-    /// ```c++
-    ///             if ( m_NeedCheckHeader ) {
-    ///                 if (!x_in_buf  &&  !m_Cache.size()) {
-    ///                     // Possible Flush(), but we should refill the cache
-    ///                     // to perform header check -- so, just ignore.
-    ///                     *in_avail  = 0;
-    ///                     *out_avail = 0;
-    ///                     return eStatus_Success;
-    ///                 }
-    ///                 if (x_in_buf  &&  m_Cache.size() < kMaxHeaderSize) {
-    ///                     size_t n = min(kMaxHeaderSize - m_Cache.size(), x_in_len);
-    ///                     m_Cache.append(x_in_buf, n);
-    ///                     x_in_buf += n;
-    ///                     x_in_len -= n;
-    ///                     if (m_Cache.size() < kMaxHeaderSize) {
-    ///                         // Data block is very small and was fully cached.
-    ///                         *in_avail  = 0;
-    ///                         *out_avail = 0;
-    ///                         return eStatus_Success;
-    ///                     }
-    ///                 }
-    ///                 // Check gzip header in the buffer
-    ///                 header_len = s_CheckGZipHeader(m_Cache.data(), m_Cache.size());
-    ///                 _ASSERT(header_len < kMaxHeaderSize);
-    ///
-    ///                 // If gzip header found, skip it
-    ///                 if ( header_len ) {
-    ///                     m_Cache.erase(0, header_len);
-    ///                     IncreaseProcessedSize(header_len);
-    ///                     m_DecompressMode = eMode_Decompress;
-    ///                     m_IsGZ = true;
-    ///                 }
-    ///                 // Reinit decompression stream
-    ///                 Z(inflateEnd)(STREAM);
-    ///                 int errcode = Z(inflateInit2_)(
-    ///                                 STREAM, m_IsGZ ? -GetWindowBits() : GetWindowBits(),
-    ///                                 ZLIB_VERSION, (int)sizeof(z_stream));
-    ///                 ...
-    ///                 // Already skipped, or we don't have header here
-    ///                 m_NeedCheckHeader = false;
-    ///             }
-    /// ```
     /// The cache is filled from the input until it holds `kMaxHeaderSize` bytes; with fewer
     /// bytes left in the file, the input ends first and the check is made in `Finish`, on the rest
     /// of the file (`rest_in_cache`). The window bits are `MAX_WBITS` (15), flate2's. `reset`
@@ -803,30 +543,6 @@ impl GzipMembers {
     /// check; a zlib stream ends the reading.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1513-1526, 1555-1564
-    /// ```c++
-    ///             // Concatenated file? Try to process next .gz chunk, if present
-    ///             if ((errcode == Z_STREAM_END)  &&  m_IsGZ) {
-    ///                 // Skip .gz file footer (8 bytes)
-    ///                 if (STREAM->avail_in < 8) {
-    ///                     m_SkipInput = 8 - STREAM->avail_in;
-    ///                     STREAM->avail_in = 0;
-    ///                 } else {
-    ///                     STREAM->avail_in -= 8;
-    ///                 }
-    ///                 if ( F_ISSET(fAllowConcatenatedGZip) ) {
-    ///                     m_NeedCheckHeader = true;
-    ///                     errcode = Z_OK;
-    ///                 }
-    ///             }
-    /// ...
-    ///             switch (errcode) {
-    ///             case Z_OK:
-    ///                 ...
-    ///                 return eStatus_Success;
-    ///             case Z_STREAM_END:
-    ///                 return eStatus_EndOfData;
-    ///             }
-    /// ```
     /// The trailer's CRC-32 and ISIZE are skipped, never compared; `m_SkipInput` skips the bytes
     /// of the trailer that a later input block holds, and at the end of the file (a trailer
     /// cut short) `Finish` ends the data (`Process` returns `eStatus_Success` with no output).
@@ -842,31 +558,6 @@ impl GzipMembers {
     /// while more input is to be skipped.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1382-1404
-    /// ```c++
-    ///         if ( m_SkipInput ) {
-    ///             // Skip from cache if present
-    ///             if ( m_Cache.size() ) {
-    ///                 size_t n = min(m_Cache.size(), m_SkipInput);
-    ///                 m_Cache.erase(0, n);
-    ///                 m_SkipInput -= n;
-    ///                 IncreaseProcessedSize(n);
-    ///             }
-    ///             // And/or from input stream also
-    ///             if ( m_SkipInput ) {
-    ///                 size_t n = min(x_in_len, m_SkipInput);
-    ///                 x_in_buf += n;
-    ///                 x_in_len -= n;
-    ///                 m_SkipInput -= n;
-    ///                 IncreaseProcessedSize(n);
-    ///                 if ( m_SkipInput ) {
-    ///                     // Data block is very small... and was skipped.
-    ///                     *in_avail  = x_in_len;
-    ///                     *out_avail = 0;
-    ///                     return eStatus_Success;
-    ///                 }
-    ///             }
-    ///         }
-    /// ```
     /// At the end of the input the trailer is cut short, and the next header check finds the end
     /// of the file.
     fn skip_trailer(
@@ -893,32 +584,7 @@ impl GzipMembers {
     /// The file ended inside deflate or zlib data, and the inflater has given out all it can.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1617-1630
-    /// ```c++
-    ///     // Process only if we have some data -- otherwise zlib return error
-    ///     CCompressionProcessor::EStatus status = eStatus_Success;
-    ///     if ( GetProcessedSize() || m_Cache.size() ) {
-    ///         status = Process(0, 0, out_buf, out_size, &in_avail, out_avail);
-    ///     } else {
-    ///         ...
-    ///     }
-    ///     if (status == eStatus_Success  &&  *out_avail == 0) {
-    ///         // Possible case with .gz files only (check on concatenated files)
-    ///         return eStatus_EndOfData;
-    ///     }
-    ///     return status;
-    /// ```
     /// c++/src/util/compress/api/zlib.cpp:1555-1566
-    /// ```c++
-    ///             switch (errcode) {
-    ///             case Z_OK:
-    ///                 ...
-    ///                 return eStatus_Success;
-    ///             case Z_STREAM_END:
-    ///                 return eStatus_EndOfData;
-    ///             }
-    ///             ERR_COMPRESS(70, FormatErrorMessage("CZipDecompressor::Process", GetProcessedSize()));
-    ///             return eStatus_Error;
-    /// ```
     /// At the end of the input the stream buffer calls `Finish`, which calls `Process` without
     /// input: `inflate()` makes no progress (`Z_BUF_ERROR`), an error. One `Process` in `Finish`
     /// ends the data instead: the one that inflates a cache holding the rest of the file and
@@ -970,23 +636,6 @@ impl GzipMembers {
                 }
                 GzipState::Inflate => {
                     // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1472-1489
-                    // ```c++
-                    //         // Prepare STREAM for decompressing
-                    //         if ( m_Cache.size() ) {
-                    //             // Possible, we have some unprocessed data in the cache
-                    //             STREAM->next_in   = (unsigned char*)(m_Cache.data());
-                    //             STREAM->avail_in  = (unsigned int)m_Cache.size();
-                    //             ...
-                    //             from_cache        = true;
-                    //         } else {
-                    //             STREAM->next_in   = (unsigned char*)x_in_buf;
-                    //             STREAM->avail_in  = (unsigned int)x_in_len;
-                    //             ...
-                    //         }
-                    //
-                    //         // Try to decompress data
-                    //         int errcode = Z(inflate)(STREAM, Z_SYNC_FLUSH);
-                    // ```
                     // The cache first, then the input; any `inflate()` error is the stream's
                     // error (`eStatus_Error`, zlib.cpp:1565-1566). The inflater is called
                     // without input only at the end of the file (`Finish`).
@@ -1045,26 +694,6 @@ const BZIP2_WINDOW: usize = 8 * 1024;
 /// `bzip2::Decompress` (libbz2-rs-sys, a Rust port of libbzip2).
 ///
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/bzip2.cpp:795-824
-/// ```c++
-///         STREAM->next_in   = const_cast<char*>(in_buf);
-///         STREAM->avail_in  = (unsigned int)in_len;
-///         STREAM->next_out  = out_buf;
-///         STREAM->avail_out = (unsigned int)out_size;
-///
-///         int errcode = BZ2_bzDecompress(STREAM);
-///         ...
-///         if ( m_DecompressMode == eMode_Decompress ) {
-///             SetError(errcode, GetBZip2ErrorDescription(errcode));
-///             *in_avail  = STREAM->avail_in;
-///             *out_avail = out_size - STREAM->avail_out;
-///             ...
-///             switch (errcode) {
-///             case BZ_OK:
-///                 return eStatus_Success;
-///             case BZ_STREAM_END:
-///                 return eStatus_EndOfData;
-///             }
-/// ```
 /// makeblastdb's `CBZip2Decompressor` ends the data at the first stream's end; LOSAT reads the
 /// streams after it (`PD-LOSAT-NCBI-DEFECTS`, makeblastdb exception; line GZ, DECISIONS 9).
 ///
@@ -1179,25 +808,6 @@ enum ZstdState {
 /// `ZSTD_decompressStream` and ends the data at the first frame's end; LOSAT reads the frames
 /// after it (`PD-LOSAT-NCBI-DEFECTS`, makeblastdb exception; line GZ, DECISIONS 9).
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/zstd.cpp:937-967
-/// ```c++
-///         // Set I/O buffers for zstd stream.
-///         ZSTD_inBuffer  m_In  = { in_buf, in_len, 0 };
-///         ZSTD_outBuffer m_Out = { out_buf, out_size, 0 };
-///
-///         size_t result = ZSTD_decompressStream(DCTX, &m_Out, &m_In);
-///         ...
-///             *in_avail = m_In.size - m_In.pos;  // count unproc.bytes in input buffer
-///             *out_avail = m_Out.pos;            // count bytes putted into out buffer
-///             ...
-///             if ( result == 0 ) {
-///                 // frame is completely decoded and fully flushed
-///                 return eStatus_EndOfData;
-///             }
-///             if ( !ZSTD_isError(result) ) {
-///                 // decompressor still have some data
-///                 return eStatus_Success;
-///             }
-/// ```
 struct ZstdFrames {
     decoder: ruzstd::decoding::FrameDecoder,
     state: ZstdState,
@@ -2187,14 +1797,6 @@ mod tests {
         }
 
         // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1444-1447, 1489
-        // ```c++
-        //                 Z(inflateEnd)(STREAM);
-        //                 int errcode = Z(inflateInit2_)(
-        //                                 STREAM, m_IsGZ ? -GetWindowBits() : GetWindowBits(),
-        //                                 ZLIB_VERSION, (int)sizeof(z_stream));
-        // ...
-        //         int errcode = Z(inflate)(STREAM, Z_SYNC_FLUSH);
-        // ```
         // makeblastdb inflates with zlib, a new stream for each member: zlib's checks decide what
         // is read (zlib-rs makes them as zlib does; miniz_oxide, flate2's default, did not). Oracle
         // cases of the review of 2026-11-08 (swebok-improve SW8 DECISIONS 41): far_title (a

@@ -6,16 +6,6 @@
 //! `LOSAT_X_STATS`, in `scan_unit` and in the batched scan of `LOSAT_X_TBXEXTBATCH`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:536-552
-//! ```c
-//! if (diff >= window) {
-//!     diag_array[diag_coord].last_hit =
-//!         subject_offset + diag_offset;
-//!     continue;
-//! }
-//! if (diff < wordsize) {
-//!     continue;
-//! }
-//! ```
 //! The loop takes these two outcomes without a branch and hands the others to the per-hit body,
 //! with the same cell states and the same saved init HSPs (the module's argument), so the property
 //! under test is that the report does not depend on it. That reports equal NCBI's is the business of

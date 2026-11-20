@@ -371,7 +371,7 @@ def certify(
     wasm_commands: dict[tuple[str, str], list[str]] = {}
     native_environments: dict[tuple[str, str], dict[str, str] | None] = {}
 
-    # NCBI reference:
+    # NCBI reference (598d8ae6):
     # c++/src/algo/blast/format/blast_format.cpp:770-832
     # Existing program authorities construct and classify the exact raw output;
     # this orchestration layer never rewrites or sorts it.

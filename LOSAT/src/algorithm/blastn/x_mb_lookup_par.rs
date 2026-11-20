@@ -3,30 +3,7 @@
 //! of table cells.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1033,1043-1045,1081-1091
-//! ```c
-//!       for (index = from; index <= last_offset; index++) {
-//!          val = *++seq;
-//! ...
-//!          ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
-//!          if (seq < pos)
-//!             continue;
-//! ...
-//!          if (mb_lt->hashtable[ecode] == 0) {
-//! ...
-//!             PV_SET(pv_array, ecode, pv_array_bts);
-//!          }
-//!          else {
-//!             helper_array[ecode/kCompressionFactor]++;
-//!          }
-//!          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//!          mb_lt->hashtable[ecode] = index;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1104-1106
-//! ```c
-//!    longest_chain = 2;
-//!    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-//!        longest_chain = MAX(longest_chain, helper_array[index]);
-//! ```
 //!
 //! Why the table is the same. The update above reads and writes only the cell `ecode` of
 //! `hashtable`, the presence-vector word `ecode >> pv_array_bts`, the counter
@@ -127,14 +104,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-/// ```c
-///          if (mb_lt->hashtable[ecode] == 0) {
-///             PV_SET(pv_array, ecode, pv_array_bts);
-///          }
-///          else {
-///             helper_array[ecode/kCompressionFactor]++;
-///          }
-/// ```
 /// `kCompressionFactor`, the number of cells that share one counter.
 pub(super) const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
 
@@ -270,11 +239,6 @@ pub(super) fn pool_threads() -> Option<usize> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1049-1051
-/// ```c
-///          if (kDbFilter) {
-///              if (!(ecode & 1)) {
-///                  if ((counts[ecode / 2] >> 4) >= max_word_count) {
-/// ```
 /// Dispatch test of `build_mb_lookup`: the number of workers when the search runs on a pool of
 /// two threads or more and the table is the plain one (`eligible`: no database word counts, no
 /// debug counters). `None` runs the original loops.
@@ -575,16 +539,6 @@ pub(super) struct SharedTables {
 
 impl SharedTables {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-    // ```c
-    //          if (mb_lt->hashtable[ecode] == 0) {
-    //             PV_SET(pv_array, ecode, pv_array_bts);
-    //          }
-    //          else {
-    //             helper_array[ecode/kCompressionFactor]++;
-    //          }
-    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-    //          mb_lt->hashtable[ecode] = index;
-    // ```
     // The update of one word, as in the loop of `build_mb_lookup` (same statements);
     // the presence bit is set in the presence-vector word this worker owns. EXPERIMENT
     // (LOSAT_X_MB24): `H24`, on 3-byte elements, each read and written as exactly its 3 bytes
@@ -601,10 +555,6 @@ impl SharedTables {
             };
             if head == 0 {
                 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-50
-                // ```c
-                // #define PV_SET(lookup, index, shift) \
-                //     lookup[(index) >> (shift)] |= (PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)
-                // ```
                 // As `pv_set_shift`, on the presence-vector word this worker owns.
                 let array_idx = bucket >> self.pv_array_bts;
                 if array_idx < self.pv_array.len {
@@ -630,22 +580,6 @@ impl SharedTables {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1045
-/// ```c
-///       for (index = from; index <= last_offset; index++) {
-///          val = *++seq;
-///          /* if an ambiguity is encountered, do not add
-///             any words that would contain it */
-///          if ((val & BLAST2NA_MASK) != 0) {
-///             ecode = 0;
-///             pos = seq + kLutWordLength;
-///             continue;
-///          }
-///
-///          /* get next base */
-///          ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
-///          if (seq < pos)
-///             continue;
-/// ```
 /// One worker: the word loop of `build_mb_lookup` (same reading order, same resets), applying
 /// the update only to the words whose cell block `owner` gives to `part`; `H24`: on 3-byte
 /// elements (LOSAT_X_MB24, `SharedTables::apply`; newest first).
@@ -742,11 +676,6 @@ fn fill_part<const H24: bool>(
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:74-76
-    // ```c
-    // /* add the hit */
-    // chain[chain[1] + 2] = query_offset;
-    // chain[1]++;
-    // ```
     // The re-threading of `build_mb_lookup` for `ascending_cells`, on this part's words.
     if words.ascending_cells {
         for &(bucket, _) in &own_words {
@@ -816,12 +745,6 @@ pub(super) fn plan(table_size: usize, pv_array_bts: usize, parts: usize) -> (usi
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1091
-/// ```c
-///       for (index = from; index <= last_offset; index++) {
-/// ...
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-///          mb_lt->hashtable[ecode] = index;
-/// ```
 /// Fills the tables as the word loop of `build_mb_lookup` does, with `parts` workers on the
 /// search pool (or one after another, `in_pool == false`, where the unit tests run it without a
 /// pool). Returns what the fill did (the read-once fill of LOSAT_X_MBLUTONCE or not). `resident`:
@@ -926,10 +849,6 @@ pub(super) mod tests {
     use super::*;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-    // ```c
-    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-    //          mb_lt->hashtable[ecode] = index;
-    // ```
     // Random queries (with ambiguity codes and masks) through the original loop and through
     // the partitioned fill with 1..8 workers: every table element must be the same.
     pub(crate) struct Lcg(pub(crate) u64);

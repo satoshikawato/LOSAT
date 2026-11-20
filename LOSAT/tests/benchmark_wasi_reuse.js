@@ -34,13 +34,11 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
   } else {
     const start = performance.now(), bytes = fs.readFileSync(artifact);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-    // CATCH_ALL(status); ... return status;
     // Serial execution owns the inspected module; no second compile is requested.
     ({ module, identity } = prepareArtifact(bytes, kind));
     timings = { validation_including_raw_compile_seconds:(performance.now()-start)/1000, guard_seconds:0, second_compile_seconds:0 };
   }
   // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180
-  // m_iTotalLength += (Int8) (*iter)->length;
   // Explicit API inputs are prepared once per case, outside invocation timing.
   // Command jobs retain file paths; repeated job metadata never duplicates FASTA text.
   const inputStart = performance.now(), inputs = new Map();
@@ -71,7 +69,6 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
     return {instance, memory:instance.exports.memory, events:[], start:()=>wasi.start(instance), waitForWorkers:async()=>{}, close:async()=>{}};
   }
   // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-188
-  // (*thread)->Run(); ... (*thread)->Join(&result);
   // Complete lifecycle, exact bytes, and success status must all hold for timing.
   try {
     for (const [index, job] of jobs.entries()) {
@@ -80,7 +77,6 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
       sample.status = "RUNNING"; save();
       // Evidence serialization is outside the measured runtime boundary.
       // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-      // (*thread)->Join(&result);
       // Capture wall-clock evidence at the same endpoints as the monotonic timer.
       const realtimeStart = Date.now(), start = performance.now(), cpu = process.cpuUsage();
       let runtimeEnd, realtimeEnd, runtimeCpu, failure = null;

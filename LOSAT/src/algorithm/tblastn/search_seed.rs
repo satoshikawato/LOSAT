@@ -22,10 +22,8 @@ use anyhow::Result;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:486-502;
 // c++/src/algo/blast/api/blast_setup_cxx.cpp:655-657;
-// c++/src/algo/blast/core/blast_filter.c:1241-1255;
+// c++/src/algo/blast/core/blast_filter.c:1241-1256;
 // c++/src/algo/blast/core/blast_setup.c:614-638:
-// BlastSeqLocAppend(filter_out, lcase_mask_slp);
-// BlastSeqLocCombine(filter_out, 0);
 // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
 // BLAST_ComplementMaskLocations(..., filter_maskloc, lookup_segments);
 // query lowercase spans join the filtering locations; their complement
@@ -132,11 +130,8 @@ pub(super) fn tblastn_report_mask_intervals(
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:141-150
-// typedef union BlastOffsetPair {
 //     struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
-// } BlastOffsetPair;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:808-812:
-// subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Seed {
@@ -149,21 +144,6 @@ pub(super) struct Seed {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
-// ```c
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ...
-//     for (context=first_context; context<=last_context; context++) {
-//         BlastHSPList* hsp_list_for_chunks = NULL;
-//
-//         if (kTranslatedSubject) {
-//             Uint4 i;
-//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-// ```
 // NCBI translates the subject into its six frames once, then calls WordFinder for each frame and
 // chunk with a read-only lookup table. XScanPlan holds what those calls need (the lookup table and
 // the translated frames with their chunks and scan ranges) so that every unit can be scanned on its
@@ -178,15 +158,6 @@ pub(super) struct XScanPlan {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-108
-// ```c
-//        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-//                              &lookup_wrap->lut);
-// ...
-//    case eCompressedAaLookupTable:
-//       BlastCompressedAaLookupTableNew(query, lookup_segments,
-//                          (BlastCompressedAaLookupTable* *) &(lookup_wrap->lut),
-//                          lookup_options, sbp);
-// ```
 /// The lookup table of a scan plan: the standard table (`eAaLookupTable`), or the compressed
 /// table of word sizes 5 to 7 (`eCompressedAaLookupTable`, tblastn-fast).
 pub(super) enum XPlanLookup {
@@ -228,12 +199,6 @@ impl XCompressedSide {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:104-108
-// ```c
-//    case eCompressedAaLookupTable:
-//       BlastCompressedAaLookupTableNew(query, lookup_segments,
-//                          (BlastCompressedAaLookupTable* *) &(lookup_wrap->lut),
-//                          lookup_options, sbp);
-// ```
 /// The compressed lookup table of the query set (word sizes 5 to 7, `threshold` in its units,
 /// `stage_d_pipeline::lookup_threshold`): the masked query frames of the standard table
 /// (`x_scan_plan`), their concatenation and lookup segments as the standard table takes them (the
@@ -265,16 +230,6 @@ fn x_build_compressed(
         crate::algorithm::tblastx::lookup::x_lookup_query_for_profile(&query_frames, word_length);
     let tables = [0..locations.len()];
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310
-    // ```c
-    //     /* compute a custom score matrix, for use only
-    //        with lookup table creation. The matrix dimensions
-    //        are BLASTAA_SIZE x compressed_alphabet_size, and
-    //        the score entries are scaled up by kMatrixScale */
-    //
-    //     new_alphabet = SCompressedAlphabetNew(sbp,
-    //                                 lookup->compressed_alphabet_size,
-    //                                 kMatrixScale);
-    // ```
     // Dispatch point: the words of BLOSUM62 (the default) or of the search's other matrix.
     let built = if matrix == ScoringMatrix::Blosum62 {
         x_tbn_build_compressed_lookup(word_length, threshold, &query, &locations, &tables)
@@ -346,21 +301,6 @@ fn x_compressed_word_length(table: &XCompressedLookup) -> i32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
-// ```c
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ...
-//     for (context=first_context; context<=last_context; context++) {
-//         BlastHSPList* hsp_list_for_chunks = NULL;
-//
-//         if (kTranslatedSubject) {
-//             Uint4 i;
-//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-// ```
 // The six translated frames of one subject and the (frame, chunk, scan range) units in NCBI call
 // order.
 /// Graduated 2026-10-22 (was `LOSAT_X_TBNSSIDE`): the part of a scan plan that depends on the
@@ -372,13 +312,6 @@ pub(super) struct XSubjectPlan {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
-// ```c
-//     if (program_number != eBlastTypeRpsTblastn) {
-//         if (translation_buffer) {
-//             sfree(translation_buffer);
-//         }
-//     }
-// ```
 // NCBI frees a subject's translation after the subject; a dropped plan gives its frames to the
 // next plan of the thread instead.
 impl Drop for XSubjectPlan {
@@ -390,21 +323,6 @@ impl Drop for XSubjectPlan {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
-// ```c
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ...
-//     for (context=first_context; context<=last_context; context++) {
-//         BlastHSPList* hsp_list_for_chunks = NULL;
-//
-//         if (kTranslatedSubject) {
-//             Uint4 i;
-//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-// ```
 // NCBI translates a subject once per query batch (BLAST_GetAllTranslations in
 // s_BlastSearchEngineCore). The translation depends only on the subject, the genetic code and the
 // lowercase-masking option, so XSubjectSide keeps it for later batches. A reuse of the same value;
@@ -476,13 +394,6 @@ impl XSubjectSide {
     pub(super) const KEEP_LIMIT: usize = 256 << 20;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
-    // ```c
-    //     if (program_number != eBlastTypeRpsTblastn) {
-    //         if (translation_buffer) {
-    //             sfree(translation_buffer);
-    //         }
-    //     }
-    // ```
     // NCBI frees a subject's translation when the subject has been searched, in every query
     // batch. Below this number of batches the search does the same.
     /// Query batches (20,000 query residues each) from which a search keeps its
@@ -505,13 +416,6 @@ impl XSubjectSide {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
-    // ```c
-    //     if (program_number != eBlastTypeRpsTblastn) {
-    //         if (translation_buffer) {
-    //             sfree(translation_buffer);
-    //         }
-    //     }
-    // ```
     // NCBI frees each subject's translation after the subject, so a search holds the
     // translations of the subjects its threads are on. The kept plans are held where they are no
     // more than that.
@@ -728,8 +632,8 @@ fn x_own_plan(
 /// NCBI's size (`OFFSET_ARRAY_SIZE`).
 const X_PAIR_ROOM: usize = 8 * 4096;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.h:119
-// #define OFFSET_ARRAY_SIZE 4096
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/lookup_wrap.h:119
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/lookup_wrap.h:119-119
 /// NCBI's OFFSET_ARRAY_SIZE: the offset array of a unit scanned with `LOSAT_X_TBNSCANRESUME` holds
 /// this many entries more than the longest chain (GetOffsetArraySize, lookup_wrap.c:264-266).
 const OFFSET_ARRAY_SIZE: usize = 4096;
@@ -744,31 +648,9 @@ fn x_pair_cap_on() -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
-// ```c
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ...
-//     for (context=first_context; context<=last_context; context++) {
-//         BlastHSPList* hsp_list_for_chunks = NULL;
-//
-//         if (kTranslatedSubject) {
-//             Uint4 i;
-//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-// ```
 // x_scan_plan does the setup that precedes NCBI's WordFinder calls for one subject (translation,
 // scan ranges) and attaches the lookup table of the query set.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
-// ```c
-//        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-//                              &lookup_wrap->lut);
-//        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-//        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-//                                  query, lookup_segments, 0);
-// ```
 /// `None` when the subject is too short to be searched.
 pub(super) fn x_scan_plan(
     queries: &[&[u8]],
@@ -797,7 +679,6 @@ pub(super) fn x_scan_plan(
     // An unknown genetic code is refused before the subject length is looked at.
     GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
-    // return word_length * 3 + 2;
     // if (seq_arg.seq->length < min_subj_seq_length) { ... continue; }
     let length = subject.len();
     if length < word_length * 3 + 2 {
@@ -805,41 +686,8 @@ pub(super) fn x_scan_plan(
     }
     // Everything below that reads the subject.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
-    // ```c
-    //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-    //                                      backup.full_range.right,
-    //                                      subject->gen_code_string, &translation_buffer,
-    //                                      &frame_offsets, NULL);
-    // ...
-    //     for (context=first_context; context<=last_context; context++) {
-    //         BlastHSPList* hsp_list_for_chunks = NULL;
-    //
-    //         if (kTranslatedSubject) {
-    //             Uint4 i;
-    //             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-    //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-    //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-    // ```
     // Translation and chunking of the subject (the shared plan memoises them).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1071-1074,1080-1090
-    // ```c
-    //    } else {
-    //       translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
-    //       translation_table_rc = s_BlastGetTranslationTable(genetic_code, TRUE);
-    //    }
-    // ...
-    //    for (context = 0; context < NUM_FRAMES; ++context) {
-    //       frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-    //       if (encoding == eBlastEncodingNcbi2na) {
-    //          if (frame > 0) {
-    //             length =
-    //                BLAST_TranslateCompressedSequence(translation_table,
-    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
-    //          } else {
-    //             length =
-    //                BLAST_TranslateCompressedSequence(translation_table_rc,
-    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
-    // ```
     // What the shared plan memoises: the subject becomes ncbi2na in one pass and each frame is read
     // from the codon table of its strand, as BLAST_GetAllTranslations does for the compressed
     // subject (tblastn/x_subject_translate.rs). Graduated 2026-10-22 (was LOSAT_X_TBNXLATE).
@@ -904,21 +752,6 @@ pub(super) fn x_scan_plan(
         }
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
-    // ```c
-    //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-    //                                      backup.full_range.right,
-    //                                      subject->gen_code_string, &translation_buffer,
-    //                                      &frame_offsets, NULL);
-    // ...
-    //     for (context=first_context; context<=last_context; context++) {
-    //         BlastHSPList* hsp_list_for_chunks = NULL;
-    //
-    //         if (kTranslatedSubject) {
-    //             Uint4 i;
-    //             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-    //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-    //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-    // ```
     // Dispatch point: with the search's subject plans the plan is the shared one (made by the
     // first batch that reaches the subject); a search of fewer than four batches makes it here,
     // and so does every use of a plan the side does not keep (`XSubjectSide::keeps`).
@@ -927,19 +760,10 @@ pub(super) fn x_scan_plan(
         _ => x_build_subject()?,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
-    // ```c
-    //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-    //                              &lookup_wrap->lut);
-    //        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-    //        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-    //                                  query, lookup_segments, 0);
-    // ```
     // The query-side lookup table: BlastAaLookupTableNew and BlastAaLookupIndexQuery on the masked
     // query. The table-only variant (`x_lookup_table_for_profile`, graduated 2026-10-22, was
     // LOSAT_X_LUTSPLIT) skips the per-context Karlin blocks, which the table does not read.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245:
-    // lookup->word_length = opt->word_size;
-    // lookup->threshold = (Int4)opt->threshold;
     let x_build_lookup = || {
         let query_frames: Vec<_> = match x_frames {
             Some(frames) => frames.iter().map(|frame| vec![frame.clone()]).collect(),
@@ -962,26 +786,9 @@ pub(super) fn x_scan_plan(
     // gets here builds it (`XQuerySide`, was LOSAT_X_TBNQSIDE), unless the batch built it before
     // its subjects (`XQuerySide::x_build_lookup_on`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
-    // ```c
-    //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-    //                              &lookup_wrap->lut);
-    //        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-    //        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-    //                                  query, lookup_segments, 0);
-    // ```
     // NCBI builds the lookup table once per query batch: the first subject builds it and the
     // others read it.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:612-619
-    // ```c
-    // CBlastOptionsLocal::SetWordSize(int ws)
-    // {
-    //     m_LutOpts->word_size = ws;
-    //     if (m_LutOpts->lut_type == eCompressedAaLookupTable && ws <= 4)
-    // 	m_LutOpts->lut_type = eAaLookupTable;
-    //     else if (m_LutOpts->lut_type == eAaLookupTable && ws > 4)
-    // 	m_LutOpts->lut_type = eCompressedAaLookupTable;
-    // }
-    // ```
     // Dispatch point: word sizes 5 to 7 take the compressed table (`x_build_compressed`).
     let (lookup, longest_chain) = if word_length > 4 {
         x_compressed_plan_lookup(
@@ -1000,15 +807,6 @@ pub(super) fn x_scan_plan(
         (XPlanLookup::Aa(lookup), longest_chain)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-270
-    // ```c
-    //    case eAaLookupTable:
-    //       offset_array_size = OFFSET_ARRAY_SIZE +
-    //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
-    //       break;
-    //    case eCompressedAaLookupTable:
-    //       offset_array_size = OFFSET_ARRAY_SIZE +
-    //          ((BlastCompressedAaLookupTable*)lookup->lut)->longest_chain;
-    // ```
     // blast_engine.c:992,1040-1041 allocates each thread's offset array of that size and
     // aa_ungapped.c:504-505 passes it to scansub (OFFSET_ARRAY_SIZE 4096, lookup_wrap.h:119).
     // The size only decides where a scan call stops; the next call resumes there, so the pairs
@@ -1030,17 +828,6 @@ pub(super) fn x_scan_plan(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-515
-// ```c
-//         scan_range[2] = scan_range[1];
-//
-//     while (scan_range[1] <= scan_range[2]) {
-//         /* scan the subject sequence for hits */
-// ...
-//
-//         totalhits += hits;
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-// ```
 // x_scan_unit runs the scansub() calls of one unit and passes every filled offset array to the
 // caller in scan order, as the loop at line 506 consumes it.
 /// Scan one unit and hand every filled offset
@@ -1059,21 +846,7 @@ pub(super) fn x_scan_unit(
     x_scan_unit_of::<true>(plan, unit, subject, pairs, on_pairs)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-500 and 760-764
-// ```c
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     if (scan_range[2] < scan_range[1])
-//         scan_range[2] = scan_range[1];
-// ...
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     while (scan_range[1] <= scan_range[2]) {
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-502 and 760-764
 /// `x_scan_unit` of the two-hit word finder (`CLAMP`: a first range shorter than a word scans
 /// the word at its left end, aa_ungapped.c:499-500) or of the one-hit word finder (`-window_size
 /// 0`, `s_BlastAaWordFinder_OneHit`: no such clamp, so a unit whose first range is shorter than
@@ -1086,8 +859,6 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
     mut on_pairs: impl FnMut(&[BlastOffsetPair]),
 ) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1018-1019
-    // BlastChooseProteinScanSubject(lookup_wrap);
-    // aux_struct->WordFinder = BlastAaWordFinder;
     // The scan variant of the unit is chosen once per table, as NCBI picks one scansub: the
     // compressed table's (`x_scan_compressed_call`, range by range as below), or one of the
     // standard table's below.
@@ -1156,22 +927,10 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
     let mut x_calls = 0u64;
     for (range_index, &(left, right)) in ranges.iter().enumerate() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-501
-        // scan_range[1] = subject->seq_ranges[0].left;
-        // scan_range[2] = subject->seq_ranges[0].right - wordsize;
-        // if (scan_range[2] < scan_range[1])
-        //     scan_range[2] = scan_range[1];
         let mut end = right - lookup.word_length;
         if range_index == 0 && end < left {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-765 and
-            // c++/src/algo/blast/core/masksubj.inl:58-68
-            // ```c
-            //     while (scan_range[1] <= scan_range[2]) {
-            //         /* scan the subject sequence for hits */
-            //         hits = scansub(lookup_wrap, subject,
-            // ...
-            //     while (range[1] > range[2]) {
-            //         range[0]++;
-            // ```
+            // c++/src/algo/blast/core/masksubj.inl:58-59
             // The one-hit word finder's loop does not start on a first range shorter than a
             // word, so `scansub`, which would step to the next ranges, is never called: the unit
             // has no hit.
@@ -1181,15 +940,6 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
             end = left;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1098-1101 and
             // c++/src/algo/blast/core/blast_stat.c:1559-1575
-            // ```c
-            //       /* Increment offset by 1 extra byte for the sentinel NULLB
-            //          between frames. */
-            //       offset += length + 1;
-            // ...
-            //     /* Initialize with BLAST_SCORE_MIN */
-            // ...
-            //                 i == AMINOACID_TO_NCBISTDAA['-'] ||
-            // ```
             // A raised first range on the last letter of a frame's last chunk (a soft-masked
             // subject split into chunks) gives a word past `subject`, which ends at the frame's
             // closing NULLB. NCBI's word there holds that NULLB and the next byte of its buffer of
@@ -1248,23 +998,6 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:487-500 and
 // c++/src/algo/blast/core/blast_aascan.c:564-568
-// ```c
-//     else {
-//         BlastCompressedAaLookupTable *lookup =
-//                         (BlastCompressedAaLookupTable *)(lookup_wrap->lut);
-//         scansub = (TAaScanSubjectFunction)(lookup->scansub_callback);
-//         wordsize = lookup->word_length;
-//     }
-//
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     if (scan_range[2] < scan_range[1])
-//         scan_range[2] = scan_range[1];
-// ...
-//         lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
-// ```
 /// One scansub call of `s_BlastCompressedAaScanSubject` (the table's `scan_subject`, which writes
 /// no entry past `array_size`) on the range `(left, right)` from `scan_range`, for the compressed
 /// arm of `x_scan_unit` (`s_DetermineScanningOffsets` of a list of one range ends after it, and a
@@ -1486,7 +1219,6 @@ mod tests {
     // for the compressed ncbi2na preliminary subject.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:767-775,804-812
     // BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na, ...);
-    // subject->sequence = translation_buffer + frame_offsets[context] + 1;
     #[test]
     fn ncbi_preliminary_subject_frames_match_all_fixture_bytes() {
         let root = concat!(
@@ -1544,8 +1276,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505
-    // scansub = (TAaScanSubjectFunction)(lookup->scansub_callback);
-    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     // for (i = 0; i < hits; ++i) { query_offset = offset_pairs[i].qs_offsets.q_off;
     //                            subject_offset = offset_pairs[i].qs_offsets.s_off; }
     #[test]
@@ -1595,9 +1325,7 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831
     // if (context == 0) { /* convert subject scan ranges to AA */ }
     // else if (context == 3) { /* reverse ranges for minus frames */ }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:51-71
-    // range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
-    // range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:51-59
     #[test]
     fn ncbi_lowercase_mask_candidates_match_in_set_and_order() {
         let root = concat!(
@@ -1653,7 +1381,6 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
     // CRandom random(base_length); each ambiguous 4na value consumes one GetRand().
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
-    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     #[test]
     fn ncbi_ambiguity_spectrum_frames_and_candidates_match() {
         let root = concat!(
@@ -1720,9 +1447,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1101
-    // frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-    // offset += length + 1;
-    // frame_offsets[context+1] = offset;
     // New NCBI -outfmt 6 output supplies the frame and aligned subject AA.
     #[test]
     fn six_frame_translation_and_seed_coverage() {
@@ -1792,7 +1516,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234
     // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
-    // Blast_InitHitListSortByScore(init_hitlist);
     // The comparison-only C probe captures NCBI's saved seed pair. Each
     // unambiguous saved pair must exist in the Rust scan for the same frame.
     #[test]
@@ -1834,9 +1557,8 @@ mod tests {
         assert_eq!(compared, 10);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:337-370
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1381
     // BlastSetUp_Filter(..., query_blk, ...);
-    // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
     #[test]
     fn seg_suppresses_low_complexity_query_seeds() {
         let root = concat!(
@@ -1885,9 +1607,7 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:747-775,804-841
     // BLAST_GetAllTranslations(..., subject->gen_code_string, ...);
-    // subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505
-    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     #[test]
     fn code32_api_oracle_candidates_match_in_set_and_order() {
         let fixture = concat!(
@@ -2140,13 +1860,8 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-841:
-    // for (context=first_context; context<=last_context; context++) {
     //     status = s_BlastSearchEngineOneContext(...);
-    // }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-505:
-    // scan_range[1] = subject->seq_ranges[0].left;
-    // scan_range[2] = subject->seq_ranges[0].right - wordsize;
-    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     #[test]
     fn long_subject_every_candidate_matches_ncbi_in_chunk_order() {
         let root = concat!(
@@ -2895,14 +2610,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:264-409 and
     // c++/src/algo/blast/core/aa_ungapped.c:494-516
-    // ```c
-    //     while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
-    // ...
-    //     while (scan_range[1] <= scan_range[2]) {
-    //         /* scan the subject sequence for hits */
-    //         hits = scansub(lookup_wrap, subject,
-    //                                   offset_pairs, array_size, scan_range);
-    // ```
     // The unit scan of the compressed table (word sizes 5 to 7) finds the hits of NCBI's scan, in
     // its order, with any offset array (one that holds only the longest cell resumes at every
     // cell), on the flat table and, for word size 5, on the reference table, which is the flat
@@ -3077,15 +2784,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-501 and
     // c++/src/algo/blast/core/blast_engine.c:305-308
-    // ```c
-    //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-    //
-    //     if (scan_range[2] < scan_range[1])
-    //         scan_range[2] = scan_range[1];
-    // ...
-    //     if (subject->seq_ranges[len-1].right > subject->length)
-    //         subject->seq_ranges[len-1].right = subject->length;
-    // ```
     // The last chunk of a soft-masked frame of more than MAX_DBSEQ_LEN letters can have one range,
     // its last letter (`-lcase_masking`, a subject lowercase but its last codon). The raised word
     // there runs past the frame's closing NULLB, where `subject` ends: the unit does not scan it
@@ -3179,16 +2877,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-505 and 760-765
-    // ```c
-    //     if (scan_range[2] < scan_range[1])
-    //         scan_range[2] = scan_range[1];
-    //
-    //     while (scan_range[1] <= scan_range[2]) {
-    // ...
-    //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-    //
-    //     while (scan_range[1] <= scan_range[2]) {
-    // ```
     #[test]
     fn x_scan_unit_of_one_hit_does_not_scan_a_unit_whose_first_range_is_short() {
         let query = b"MKVLAAGIVGLLLAAGCSSHKEEAKSGGLW";

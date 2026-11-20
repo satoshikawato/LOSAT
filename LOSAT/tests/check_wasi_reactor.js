@@ -25,7 +25,6 @@ function runPair(host, program, query, subject, format, args) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
-// (*thread)->Run(); (*thread)->Join(&result);
 // Guest joins precede the API return; host exit callbacks are awaited explicitly.
 async function checkReactor(artifact, fixtures, output) {
   fs.mkdirSync(output, { recursive: true });
@@ -40,11 +39,10 @@ async function checkReactor(artifact, fixtures, output) {
     { id: "tblastx", program: "tblastx", seq: nuc, args: [] },
     { id: "blastp", program: "blastp", seq: aa, args: [] },
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-281
-    // CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter); results = lcl_blast.Run();
     // The translated nucleotide query uses a protein subject through the same ABI.
     { id: "blastx", program: "blastx", seq: fs.readFileSync(path.join(fixtures, "blastx-query.fasta"), "utf8"), subject: aa, args: ["-seg", "no"] },
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:217-219
-    // fasta.Reset(new CBlastFastaInputSource(m_CmdLineArgs->GetInputStream(), iconfig));
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_node.cpp:131-131
     // The protein query against translated nucleotide subjects (docs/web/abi_v1.md §7).
     { id: "tblastn", program: "tblastn", seq: aa, subject: fs.readFileSync(path.join(fixtures, "tblastn-subjects.fasta"), "utf8"), args: [] },
   ];
@@ -104,7 +102,6 @@ async function checkReactor(artifact, fixtures, output) {
           if (!expected) expected = response.result;
           assert.deepEqual(response.result, expected);
           // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
-          // (*thread)->Run(); (*thread)->Join(&result);
           for (const event of ["spawn_attempt", "spawned", "ready", "exited"]) {
             assert.equal(events.filter(e => e.event === event).length, n - 1);
           }
@@ -116,23 +113,12 @@ async function checkReactor(artifact, fixtures, output) {
       // residues at position(s): On line 1: 1, 5-6, 9") or as a protein, and exits 0, as
       // the shared reader now does.
       // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:751-758
-      // ```c++
-      //     if (bad >= good / 3  &&
-      //         (len_to_check > 3  ||  good == 0  ||  bad > good))
-      //     {
-      //         FASTA_ERROR( LineNumber(),
-      //             "CFastaReader: Near line " << LineNumber()
-      //             << ", there's a line that doesn't look like plausible data, "
-      //             "but it's not marked as defline or comment.",
-      //             CObjReaderParseException::eFormat);
-      // ```
       const invalid = runPair(host, c.program, "@@@@\n", c.subject ?? c.seq, "6", [...c.args, "-num_threads", "1"]);
       assert.equal(invalid.status, -1); assert.equal(invalid.result.length, 0);
       assert.match(invalid.error, /doesn't look like plausible data/);
       save(`${c.id}-invalid-input`, invalid, []);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
-    // (*thread)->Run(); (*thread)->Join(&result);
     // Repetition checks actual worker reclamation and bounded guest memory;
     // evidence is drained from the host after each call, not retained forever.
     const memorySizes = [];

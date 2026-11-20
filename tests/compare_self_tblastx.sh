@@ -44,9 +44,6 @@ echo "============================================="
 
 # Find LOSAT executable
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
-# ```c
-# m_ClientId = string(kProgram) + " " + CBlastVersion().Print();
-# ```
 #
 # Harness note: binary discovery only selects the local LOSAT executable used to
 # produce comparison output; it does not alter BLAST behavior or invoke NCBI as

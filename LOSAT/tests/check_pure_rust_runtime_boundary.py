@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """Enforce LOSAT's project-owned pure-Rust runtime boundary.
 
-NCBI references:
-- c++/src/algo/blast/core/blast_hits.c:1379-1381
-  qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-        ScoreCompareHSPs);
-- c++/src/algo/blast/core/link_hsps.c:483-486
-  qsort(link_hsp_array, total_number_of_hsps, sizeof(LinkHSPStruct*),
-        s_RevCompareHSPsTbx);
+NCBI references (598d8ae6):
+- c++/src/algo/blast/core/blast_hits.c:1379-1381 (the `qsort` of an HSP list)
+- c++/src/algo/blast/core/link_hsps.c:483-486 (the `qsort` of the HSPs to link)
 
-Those snippets define behavior that LOSAT ports from NCBI. This checker does
+Those calls define behavior that LOSAT ports from NCBI. This checker does
 not implement that behavior; it prevents project production code from gaining
 new imported/native implementation owners while the existing adapters are
 removed in later, behavior-preserving pull requests.
@@ -34,7 +30,7 @@ INVENTORY_HEADER = ("rule", "path", "symbol", "classification")
 TEMPORARY_DELEGATION = "temporary_production_algorithm_delegation"
 REVIEWED_NON_ALGORITHM = "reviewed_non_algorithm_integration"
 
-# NCBI references:
+# NCBI references (598d8ae6):
 # - c++/src/algo/blast/core/blast_hits.c:1379-1381
 # - c++/src/algo/blast/core/link_hsps.c:483-486
 # NCBI owns the comparator behavior at these call sites. LOSAT's completed
@@ -459,7 +455,6 @@ def _scan_manifest(manifest: Path, root: Path) -> list[Finding]:
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-# (*thread)->Run(); (*thread)->Join(&result);
 # PD-PURE-RUST-RUNTIME-AUTHORITY excludes compiler/thread startup internals.
 def _is_reviewed_wasi_crt(path: Path, root: Path) -> bool:
     return path.is_file() and _relative(path, root) == "LOSAT/build.rs" and hashlib.sha256(
@@ -479,7 +474,6 @@ def _scan_build_scripts(root: Path) -> list[Finding]:
         text = _strip_rust_comments(path.read_text(encoding="utf-8"))
         rel = _relative(path, root)
         # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-        # (*thread)->Run(); (*thread)->Join(&result);
         # Reviewed Rust WASI startup only: query the selected Rust sysroot and
         # link its bundled reactor CRT, with no NCBI or algorithm dependency.
         # Pin the complete normalized source; every modification requires review.

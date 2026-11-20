@@ -32,15 +32,7 @@ fn losat_binary() -> PathBuf {
     path
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
-// ```c
-// #if _BLAST_DEBUG
-// arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-//                  true);
-// arg_desc.AddFlag("remote_verbose",
-//                  "Produce verbose output for remote searches", true);
-// #endif /* _BLAST_DEBUG */
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
 #[test]
 fn tblastx_output_filter_debug_stderr_is_env_gated() {
     let query = temp_path("debug_query", "fa");
@@ -190,14 +182,6 @@ fn tblastx_diagnostics_summary_is_env_gated() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
-// ```c
-// status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-//                                dbseq_chunk_overlap);
-// BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-//         hit_params->options, &hsp_list);
-// Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-// status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
-// ```
 #[test]
 fn tblastx_parallel_chunks_matches_serial_on_real_chunk_boundaries() {
     if !cfg!(debug_assertions) {
@@ -283,18 +267,8 @@ fn tblastx_parallel_chunks_matches_serial_on_real_chunk_boundaries() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83-123
-// ```c
-// for (s = s_first; s <= s_last; s++) {
-//     ...
-//     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-// }
-// ```
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614
-// ```c
-// /* increment the offset in the diagonal array */
-// Blast_ExtendWordExit(ewp, subject->length);
-// ```
 #[test]
 fn tblastx_serial_scan_chunks_matches_normal_on_ap027133_50k() {
     if !cfg!(debug_assertions) {
@@ -313,12 +287,6 @@ fn tblastx_serial_scan_chunks_matches_normal_on_ap027133_50k() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
-// ```c
-// aux_struct->WordFinder(..., init_hitlist, ...);
-// BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-//         hit_params->options, &hsp_list);
-// Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-// ```
 #[test]
 fn tblastx_serial_scan_chunks_matches_normal_on_mjenmv() {
     if !cfg!(debug_assertions) {

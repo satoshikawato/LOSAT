@@ -89,7 +89,6 @@ def validate_kind(kind, inspection):
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-# TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
 # A stage with one job does not shrink the already constructed search pool.
 # Missing or contradictory records fail; old guessed evidence is not upgraded.
 def validate_thread_evidence(logtext, requested, kind):
@@ -434,7 +433,6 @@ def execute(argv, cwd, directory, env, timeout):
     usage = directory / "usage.txt"
     measured = ["/usr/bin/time", "-f", "%U\t%S\t%M\t%e", "-o", str(usage), *argv]
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-    # (*thread)->Join(&result);
     # Independent clock evidence covers the same process-completion boundary.
     realtime_start = time.time()
     boottime_start = time.clock_gettime(time.CLOCK_BOOTTIME) if hasattr(time, "CLOCK_BOOTTIME") else None
@@ -459,7 +457,6 @@ def execute(argv, cwd, directory, env, timeout):
 
             def expire():
                 # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-                # (*thread)->Join(&result);
                 # Test-only deadline: CPython 3.13 parking_lot.c uses realtime
                 # sem_timedwait when HAVE_SEM_CLOCKWAIT is absent. A forward
                 # clock step may wake Timer early; verify the monotonic deadline.
@@ -494,7 +491,6 @@ def execute(argv, cwd, directory, env, timeout):
         except OSError as error:
             status, reason = "BAD_EXIT", str(error)
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-    # (*thread)->Join(&result);
     # Record the exact existing elapsed-time endpoints for process overlap audits.
     monotonic_end = time.monotonic()
     elapsed = monotonic_end - start
@@ -899,7 +895,6 @@ def run(args):
                     ):
                         status = "MEMORY_BUDGET_FAIL"
                     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-                    # (*thread)->Join(&result);
                     # Clock validity gates timing, independently of canonical bytes.
                     if status == "PASS" and args.phase != "audit" and not result["monotonic_clock_agreement"]:
                         status = "CLOCK_INCONSISTENT"
@@ -1099,7 +1094,6 @@ def run_warm(args, manifest, dest):
             ):
                 sample["status"] = "MEMORY_BUDGET_FAIL"
             # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-            # (*thread)->Join(&result);
             # Retain failed host clock evidence and suppress every affected median.
             sample["monotonic_clock_agreement"] = execution["monotonic_clock_agreement"]
             if sample["status"] == "PASS" and not sample["monotonic_clock_agreement"]:

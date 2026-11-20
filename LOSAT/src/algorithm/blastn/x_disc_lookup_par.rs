@@ -6,56 +6,7 @@
 //! (`x_mb_lookup_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:754-767,775-786,788-804
-//! ```c
-//!       for (index = from; index <= to; index++) {
-//!          val = *++seq;
-//!          /* if an ambiguity is encountered, do not add
-//!             any words that would contain it */
-//!          if ((val & BLAST2NA_MASK) != 0) {
-//!             accum = 0;
-//!             pos = seq + template_length;
-//!             continue;
-//!          }
-//!
-//!          /* get next base */
-//!          accum = (accum << BITS_PER_NUC) | val;
-//!          if (seq < pos)
-//!             continue;
-//! ...
-//!          ecode1 = ComputeDiscontiguousIndex(accum, template_type);
-//!          if (mb_lt->hashtable[ecode1] == 0) {
-//! ...
-//!             PV_SET(pv_array, ecode1, pv_array_bts);
-//!          }
-//!          else {
-//!             helper_array[ecode1/kCompressionFactor]++;
-//!          }
-//!          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-//!          mb_lt->hashtable[ecode1] = index;
-//!
-//!          if (!kTwoTemplates)
-//!             continue;
-//! ...
-//!          ecode2 = ComputeDiscontiguousIndex(accum, second_template_type);
-//!          if (mb_lt->hashtable2[ecode2] == 0) {
-//! ...
-//!             PV_SET(pv_array, ecode2, pv_array_bts);
-//!          }
-//!          else {
-//!             helper_array2[ecode2/kCompressionFactor]++;
-//!          }
-//!          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
-//!          mb_lt->hashtable2[ecode2] = index;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:808-813
-//! ```c
-//!    longest_chain = 2;
-//!    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-//!        longest_chain = MAX(longest_chain, helper_array[index]);
-//!     /* +1 because helper_array is not incremented for the first position of a
-//!       word */
-//!    mb_lt->longest_chain = longest_chain + 1;
-//! ```
 //!
 //! Why the tables are the same. The update of a word for the first template reads and writes
 //! only the cell `ecode1` of `hashtable`, the presence-vector word `ecode1 >> pv_array_bts`,
@@ -495,25 +446,6 @@ impl SharedTables {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:776-786,794-804
-    // ```c
-    //          if (mb_lt->hashtable[ecode1] == 0) {
-    //             PV_SET(pv_array, ecode1, pv_array_bts);
-    //          }
-    //          else {
-    //             helper_array[ecode1/kCompressionFactor]++;
-    //          }
-    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-    //          mb_lt->hashtable[ecode1] = index;
-    // ...
-    //          if (mb_lt->hashtable2[ecode2] == 0) {
-    //             PV_SET(pv_array, ecode2, pv_array_bts);
-    //          }
-    //          else {
-    //             helper_array2[ecode2/kCompressionFactor]++;
-    //          }
-    //          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
-    //          mb_lt->hashtable2[ecode2] = index;
-    // ```
     // The update of one word for one template (`second`), as in `fill_disc_mb_tables` (same
     // statements; the counters wrap as there), except that the value `next_pos[index]` gets (the
     // cell's previous head) is returned, for phase C to write; the presence bit is set in the
@@ -528,10 +460,6 @@ impl SharedTables {
             let head = t.hashtable.get(ecode);
             if head == 0 {
                 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-50
-                // ```c
-                // #define PV_SET(lookup, index, shift) \
-                //     lookup[(index) >> (shift)] |= (PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)
-                // ```
                 // As `pv_set_shift`, on the presence-vector word this worker owns.
                 let array_idx = ecode >> self.pv_array_bts;
                 if array_idx < self.pv_array.len {
@@ -601,11 +529,6 @@ impl OwnerCounters {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:781-783
-    // ```c
-    //          else {
-    //             helper_array[ecode1/kCompressionFactor]++;
-    //          }
-    // ```
     /// After the last chunk (no job running): `helper[h] = helper[h].wrapping_add(n)`, `n` the
     /// count of counter `h` in the copy of the owner of its block (`owner[h >> counter_shift]`,
     /// `counter_shift = block_shift - 11`). Every increment of counter `h` was made in that copy
@@ -939,9 +862,6 @@ fn page_touchers(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:717-718
-// ```c
-//       mb_lt->hashtable2 = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
-// ```
 /// No NCBI counterpart (scheduling only): writes 0 to element `i` of `t`, which holds 0 (the
 /// caller's argument): a page touch that leaves the value as it is. A volatile write, so that it
 /// is made even though it stores the value the element has. In tests it records the write with
@@ -1031,27 +951,6 @@ struct Fill<'a, 'w> {
 
 impl Fill<'_, '_> {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:749-767,775,793
-    /// ```c
-    ///       from = loc->ssr->left - (template_length - 2);
-    ///       to = loc->ssr->right - (template_length - 2);
-    ///       seq = query->sequence_start + loc->ssr->left;
-    ///       pos = seq + template_length;
-    ///
-    ///       for (index = from; index <= to; index++) {
-    ///          val = *++seq;
-    ///          if ((val & BLAST2NA_MASK) != 0) {
-    ///             accum = 0;
-    ///             pos = seq + template_length;
-    ///             continue;
-    ///          }
-    ///          accum = (accum << BITS_PER_NUC) | val;
-    ///          if (seq < pos)
-    ///             continue;
-    /// ...
-    ///          ecode1 = ComputeDiscontiguousIndex(accum, template_type);
-    /// ...
-    ///          ecode2 = ComputeDiscontiguousIndex(accum, second_template_type);
-    /// ```
     /// Phase A, reader `a`: the words that end at the stream positions `[s0, s1)`, read by the
     /// loop of `fill_disc_mb_tables` (the same resets, `accum`, `index` and template indices),
     /// into the buckets `(a, owner of the cell)` of each template, in reading order. A range is
@@ -1176,14 +1075,6 @@ impl Fill<'_, '_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:776-786
-    // ```c
-    //          if (mb_lt->hashtable[ecode1] == 0) {
-    //             PV_SET(pv_array, ecode1, pv_array_bts);
-    //          }
-    // ...
-    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-    //          mb_lt->hashtable[ecode1] = index;
-    // ```
     /// Phase P (the prefault round, between phases A and B of the first chunk only, and only when
     /// that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per page of the cells,
     /// `fill_with`), toucher `j`: writes 0 to one element of each page chosen by `select_pages`
@@ -1454,15 +1345,6 @@ fn run_phase<F: Fn(usize) + Sync>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:733-806
-/// ```c
-///    for (loc = location; loc; loc = loc->next) {
-/// ...
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-///          mb_lt->hashtable[ecode1] = index;
-/// ...
-///          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
-///          mb_lt->hashtable2[ecode2] = index;
-/// ```
 /// Fills the tables as the word loop of `fill_disc_mb_tables` does, with `parts` workers on the
 /// search pool (or one after another, `in_pool == false`, for the unit tests without a pool).
 pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, in_pool: bool) {
@@ -1765,7 +1647,7 @@ fn csr_on_pool(
 ))]
 const STEP_POSITIONS: usize = CHUNK_POSITIONS / 2;
 
-/// NCBI reference: `Fill::read`'s (c++/src/algo/blast/core/blast_nalookup.c:749-767,775,793), first template only.
+/// NCBI reference (598d8ae6): `Fill::read`'s (c++/src/algo/blast/core/blast_nalookup.c:749-767,775,793), first template only.
 /// EXPERIMENT (LOSAT_X_DCSEEDLEAN): the words that end at the stream positions `[s0, s1)`, read
 /// by `Fill::read`'s loop (the same ranges entered up to `template_length - 1` positions before
 /// `s0`, resets, `accum`, `index` and first-template index), `f(ecode1, index)` for each, in
@@ -2449,13 +2331,6 @@ mod tests {
     use std::collections::BTreeSet;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804
-    // ```c
-    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-    //          mb_lt->hashtable[ecode1] = index;
-    // ...
-    //          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
-    //          mb_lt->hashtable2[ecode2] = index;
-    // ```
     // Random queries (with runs of ambiguity codes, masks, queries shorter than the template and
     // queries without a mask list) through the original loop and through the partitioned fill:
     // every element of every table must be the same.
@@ -3366,15 +3241,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:781-783,799-801
-    // ```c
-    //          else {
-    //             helper_array[ecode1/kCompressionFactor]++;
-    //          }
-    // ...
-    //          else {
-    //             helper_array2[ecode2/kCompressionFactor]++;
-    //          }
-    // ```
     // The owners' private counters, added into the counters after the last chunk, give the loop's
     // `helper_array` and `helper_array2` on search pools of 2, 3, 5 and 16 threads (the default
     // chunk and chunks of 1,000 positions, one and two templates, word sizes 11 and 12), also
@@ -3483,10 +3349,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786
-    // ```c
-    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-    //          mb_lt->hashtable[ecode1] = index;
-    // ```
     // The prefault round (`Fill::prefault`, here without the size rule) on search pools of 2, 5
     // and 16 threads and off a pool in 1, 3 and 64 parts, word sizes 11 and 12, one and two
     // templates: a query of 400 letters (chunks of 97 positions and the default chunk) and one of

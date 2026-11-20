@@ -4,20 +4,7 @@
 //! re-evaluation between them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3917-3922
-//! ```c
-//!    for (index=0; index<init_hitlist->total; index++)
-//! ...
-//!       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-//!                                         hit_options->min_diag_separation))
-//!       {
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,404-405
-//! ```c
-//!    for (index=0; index < num_initial_hsps; index++) {
-//! ...
-//!           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-//!                                hit_options->min_diag_separation)) {
-//! ```
 //! NCBI runs both loops for one subject on one thread, over the HSPs of all queries of the batch
 //! in one order (score order for the preliminary loop, the hit lists' order for the traceback),
 //! with one interval tree. `search_query_batch` does the same on the thread that owns the subject;

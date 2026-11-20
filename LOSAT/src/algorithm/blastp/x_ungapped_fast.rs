@@ -4,15 +4,6 @@
 //! (`two_hit_of`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883
-//! ```c
-//! for (i = 0; i < n; i++) {
-//!     score += matrix[q[i]][s[i]];
-//!     if (score > maxscore) { maxscore = score; best_i = i; }
-//!     if (score <= 0 || (maxscore - score) >= dropoff) break;
-//! }
-//! *length = best_i + 1;
-//! *s_last_off = s_off + i;
-//! ```
 //! (right walk; the left walk counts `i` down from `n`, has no `score <= 0` test, and returns
 //! `n - best_i + 1`.)
 //!

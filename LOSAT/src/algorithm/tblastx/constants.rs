@@ -5,7 +5,6 @@
 /// X-drop for ungapped protein alignments (in BITS)
 /// NCBI BLAST standard value = 7 bits
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h
-/// #define BLAST_UNGAPPED_X_DROPOFF_PROT 7
 ///
 /// IMPORTANT: NCBI converts this to raw score at runtime:
 ///   x_dropoff_raw = x_dropoff_bits * ln(2) / lambda
@@ -33,7 +32,6 @@ pub const MIN_UNGAPPED_SCORE: i32 = 14;
 /// to potentially trigger gapped alignment (though TBLASTX doesn't use gapped mode).
 /// This is also used as a ceiling for cutoff_score_max.
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:137
-/// #define BLAST_GAP_TRIGGER_PROT 22.0
 pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 
 /// Sentinel byte for sequence boundaries (NCBI BLAST style)
@@ -43,9 +41,7 @@ pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 /// stays at `BLAST_SCORE_MIN`; extension code does not special-case it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:120
-///   const Uint1 kProtSentinel = NULLB;
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/ncbi_std.h:181
-///   #define NULLB '\0'
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1579
 ///   `matrix[i][j] = BLAST_SCORE_MIN;`
 pub const SENTINEL_BYTE: u8 = 0;

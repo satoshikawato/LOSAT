@@ -79,45 +79,7 @@ impl<'a> RpsVolumeSet<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:349-371,374-379
-// ```c++
-// void CLocalRPSBlast::x_AdjustDbSize(void)
-// {
-// 	if(m_opt_handle->GetOptions().GetEffectiveSearchSpace()!= 0)
-// 		return;
-//
-// 	if(m_opt_handle->GetOptions().GetDbLength()!= 0)
-// 		return;
-//
-// 	CSeqDB db(m_db_name, CSeqDB::eProtein);
-//
-// 	Uint8 db_size = db.GetTotalLengthStats();
-// 	...
-// 	if(0 == db_size)
-// 	    db_size = db.GetTotalLength();
-// 	...
-// 	m_opt_handle->SetOptions().SetDbLength(db_size);
-// 	m_opt_handle->SetOptions().SetDbSeqNum(num_seq);
-// ...
-// CRef<CSearchResultSet> CLocalRPSBlast::Run(void)
-// {
-// 	if(1 != m_num_of_dbs)
-// 	{
-// 		x_AdjustDbSize();
-// 	}
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:73-83
-// ```c++
-// CSetupFactory::CreateRpsStructures(const string& rps_dbname,
-//                                    CRef<CBlastOptions> options)
-// {
-//     ...
-//     CRef<CBlastRPSInfo> retval(new CBlastRPSInfo(rps_dbname, mode));
-//     options->SetMatrixName(retval->GetMatrixName());
-//     options->SetGapOpeningCost(retval->GetGapOpeningCost());
-//     options->SetGapExtensionCost(retval->GetGapExtensionCost());
-//     return retval;
-// }
-// ```
 /// What the set-up of each query batch of an RPS search (rpsblast, rpstblastn) writes into NCBI's
 /// options handle, in its order, which the search strategy's requests after the first hold
 /// (`report::archive::OptionsHandle::pass`; NCBI BLAST+ 2.17.0 `p9.rps.q40.f6`,
@@ -179,10 +141,6 @@ pub(crate) fn per_volume_search_spaces(dbsize: i64, searchsp: i64, volumes: usiz
 /// has no list, or no valid query, as NCBI does (review B of PS12a, S3).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1176-1177
-/// ```c
-///       if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0)
-///           continue;
-/// ```
 pub(crate) struct Consensus<'a> {
     setup: &'a RpsVolumeSetup,
     volume: &'a Volume,
@@ -247,14 +205,6 @@ impl RpsVolumeSetup {
     /// error of a missing `.freq` names it as given, and each volume of several by its path.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:341-346, 380-386
-    /// ```c++
-    /// 	CSeqDB::FindVolumePaths(db, CSeqDB::eProtein, m_rps_databases, NULL, true, true);
-    /// 	m_num_of_dbs = static_cast<unsigned int>(m_rps_databases.size());
-    /// 	...
-    /// 		if(1 == m_num_of_dbs)
-    /// 		{
-    /// 			return s_RunLocalRpsSearch(m_db_name, *m_query_vector, m_opt_handle);
-    /// ```
     pub(crate) fn with_database(mut self, name: &str, num_volumes: usize) -> Self {
         self.database_name = (num_volumes == 1).then(|| name.to_string());
         self
@@ -360,12 +310,6 @@ impl RpsVolumeSetup {
             }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:72-83
-        // ```c++
-        //     if (rps_info) {
-        //         opts_memento->m_ScoringOpts->matrix = strdup(rps_info->aux_info.orig_score_matrix);
-        //         opts_memento->m_ScoringOpts->gap_open = rps_info->aux_info.gap_open_penalty;
-        //         opts_memento->m_ScoringOpts->gap_extend = rps_info->aux_info.gap_extend_penalty;
-        // ```
         // The search's Karlin, Gumbel and cutoff values are those of BLOSUM62 11/1 (blastp's
         // task); a database of other costs is refused, and so are volumes whose costs differ
         // (each volume sets its own in NCBI; the statistics are one set).
@@ -421,13 +365,7 @@ impl RpsVolumeSetup {
             );
         }
         let concat = files.rows().len();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1129-1133
-        // ```c
-        //     num_db_seqs = BlastSeqSrcGetNumSeqs(seq_src);
-        //     dbsize = BlastSeqSrcGetTotLen(seq_src) + num_db_seqs;
-        //     if (dbsize > INT4_MAX)
-        //       return -3;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1129-1135
         if concat as u64 + self.window as u64 > (i32::MAX / 2) as u64 {
             bail!(
                 "a profile volume of {concat} positions is not supported by LOSAT's {}",
@@ -460,35 +398,7 @@ impl RpsVolumeSetup {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:177-190
-// ```c
-//    case eRPSLookupTable:
-//        {
-//            BlastRPSLookupTable *lookup;
-//            Int4 alphabet_size;
-//            RPSLookupTableNew(rps_info, (BlastRPSLookupTable* *)
-//                                         (&lookup_wrap->lut));
-//
-//            /* if the alphabet size from the RPS database is too
-//               small, mask all unsupported query letters */
-//            lookup = (BlastRPSLookupTable*)(lookup_wrap->lut);
-//            alphabet_size = lookup->alphabet_size;
-//            if (alphabet_size < BLASTAA_SIZE)
-//                Blast_MaskUnsupportedAA(query, alphabet_size);
-//            break;
-//        }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1336-1346
-// ```c
-// Blast_MaskUnsupportedAA(BLAST_SequenceBlk* seq, Uint1 min_invalid)
-// {
-//     ...
-//     for (i = 0; i < length; i++) {
-//         if (sequence[i] >= min_invalid) {
-//             sequence[i] = kProtMask;
-//         }
-//     }
-// }
-// ```
 // The lookup table is made after the score block, so the queries' Karlin-Altschul values
 // keep their letters; the search (scan, extensions, traceback, rescale) reads them masked.
 pub(crate) fn mask_unsupported_letters(aa_seq: &[u8], alphabet: usize) -> Option<Vec<u8>> {
@@ -532,50 +442,7 @@ pub(crate) fn shift_ordinal_ids(hit_list: &mut BlastpHitList, start: u32) {
 /// merged set, and outfmt 7 counts its HSPs before the cut.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:69-137
-/// ```c++
-///     while(input_it != input_list.end())
-///     {
-///         double final_evalue;
-///         double input_evalue;
-///
-///         (*final_it)->GetNamedScore(CSeq_align::eScore_EValue, final_evalue);
-///         (*input_it)->GetNamedScore(CSeq_align::eScore_EValue, input_evalue);
-///
-///         if(input_evalue == final_evalue)
-///         {
-///             //Pulling a trick here to keep the program flow simple
-///             //Replace the final evalue with input bitscore and vice versa
-///             (*final_it)->GetNamedScore(CSeq_align::eScore_BitScore, input_evalue);
-///             (*input_it)->GetNamedScore(CSeq_align::eScore_BitScore, final_evalue);
-///         }
-///
-///         if(input_evalue <  final_evalue)
-///         {
-///             ... (the whole group of the input's subject)
-///             final_list.insert(final_it, start_input_it, input_it);
-///         }
-///         else
-///         {
-///             ... (final_it past the whole group of its subject)
-///             if(final_it == final_list.end())
-///             {
-///                 final_list.insert(final_it, input_it, input_list.end());
-///                 break;
-///             }
-///         }
-///     }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-160
-/// ```c++
-///             if(thread_results[d]->HasAlignments())
-///             {
-///                 CConstRef<CSeq_align_set>  thread_align_set = thread_results[d]->GetSeqAlign();
-///                 if(align_set->IsEmpty())
-///                 {
-///                     align_set->Set().insert(align_set->Set().begin(),
-///                                         thread_align_set->Get().begin(),
-///                                         thread_align_set->Get().end());
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-166
 #[cold]
 #[inline(never)]
 pub(crate) fn merge_volume(
@@ -612,11 +479,6 @@ pub(crate) fn merge_volume(
 /// reads with `GetNamedScore`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1131 (and `:62`)
-/// ```c++
-/// #define SMALLEST_EVALUE 1.0e-180
-/// ...
-///     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
-/// ```
 fn seqalign_evalue(e_value: f64) -> f64 {
     if e_value < 1.0e-180 {
         0.0

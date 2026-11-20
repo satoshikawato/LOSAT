@@ -78,31 +78,6 @@ impl RpsPrelimScratch {
 /// that starts at or before `n`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
-/// ```c
-/// Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
-/// {
-///     Int4 m=0, b=0, e=0, size=0;
-///
-///     size = A->last_context+1;
-///
-///     if (A->min_length > 0 && A->max_length > 0 && A->first_context == 0) {
-///         ...
-///     }
-///     else {
-///         b = 0;
-///         e = size;
-///     }
-///
-///     while (b < e - 1) {
-/// 	m = (b + e) / 2;
-/// 	if (A->contexts[m].query_offset > n)
-/// 	    e = m;
-/// 	else
-/// 	    b = m;
-///     }
-///     return b;
-/// }
-/// ```
 pub(crate) fn context_of(offsets: &[i32], n: i32) -> usize {
     let size = offsets.len() - 1;
     let (mut b, mut e) = (0usize, size);
@@ -119,20 +94,7 @@ pub(crate) fn context_of(offsets: &[i32], n: i32) -> usize {
 
 /// `score_compare_match` (`Blast_InitHitListSortByScore`), stable as glibc's qsort.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-292
-/// ```c
-///    if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
-///                                 h1->ungapped_data->score)) &&
-///        0 == (result = BLAST_CMP(h1->ungapped_data->s_start,
-///                                 h2->ungapped_data->s_start)) &&
-///        0 == (result = BLAST_CMP(h2->ungapped_data->length,
-///                                 h1->ungapped_data->length)) &&
-///        0 == (result = BLAST_CMP(h1->ungapped_data->q_start,
-///                                 h2->ungapped_data->q_start))) {
-///        result = BLAST_CMP(h2->ungapped_data->length,
-///                           h1->ungapped_data->length);
-///    }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-300
 fn sort_init_hsps_by_score(init_hsps: &mut [RpsInitHsp]) {
     init_hsps.sort_by(|a, b| {
         b.ungapped
@@ -169,27 +131,15 @@ impl RpsPrelim<'_> {
         } = scratch;
         init_hsps.clear();
         word_finder(&self.word, word, subject, init_hsps);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:497
-        // ```c
-        //             if (init_hitlist->total == 0) continue;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:497,500
         if init_hsps.is_empty() {
             return Ok(());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:282
-        // ```c
-        //     Blast_InitHitListSortByScore(init_hitlist);
-        // ```
         sort_init_hsps_by_score(init_hsps);
         hsps.clear();
         self.gapped_score(init_hsps, tree, hsps, gap, subject_seq, subject_len)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:541-555
-        // ```c
-        //             /* Removes redundant HSPs. */
-        //             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-        //         ...
-        //         Blast_HSPListSortByScore(hsp_list);
-        // ```
         purge_hsps_with_common_endpoints(hsps, |hsp| hsp);
         if hsps
             .windows(2)
@@ -198,9 +148,6 @@ impl RpsPrelim<'_> {
             hsps.sort_by(score_compare);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
-        // ```c
-        //                 Blast_HSPListAppend(&hsp_list, &hsp_list_out, kHspNumMax);
-        // ```
         // Without a cap (`hsp_num_max` 0: `INT4_MAX`, blast_hits.c:213-226) the lists of the
         // frames are concatenated in the frame order (`s_BlastHSPListsCombineByScore`).
         out.extend(hsps.iter().map(|hsp| BlastpPreliminaryHsp {
@@ -222,42 +169,12 @@ impl RpsPrelim<'_> {
         if hsps.is_empty() {
             return None;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:882-899
-        // ```c
-        //         double scale_factor = 1.0;
-        //         if (isRPS) {
-        //             scale_factor = score_params->scale_factor;
-        //         }
-        //         Blast_HSPListGetEvalues(program_number, query_info,
-        //                                          stat_length, hsp_list_out,
-        //                                          score_options->gapped_calculation,
-        //                                          isRPS, gap_align->sbp, 0, scale_factor);
-        //     ...
-        //        status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
-        // ```
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1876-1883
-        // ```c
-        //           } else {
-        //               /* for RPS blast, query and subject is swapped */
-        //               hsp->evalue =
-        //                   BLAST_SpougeStoE(score, kbp[kbp_context], sbp->gbp,
-        //                                subject_length,
-        //                                query_info->contexts[hsp->context].query_length);
-        //           }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:881-899
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1876-1884
         // `subject_length` is the user query's length (`stat_length`), the context's length the
         // profile's.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:874-880
-        // ```c
-        //     } else if (!Blast_ProgramIsPhiBlast(program_number)
-        //            && !(isRPS && !sbp->gbp)
-        //            /* do not calculate E-values for mapping */
-        //            && program_number != eBlastTypeMapping ) {
-        //         /* Calculate e-values for all HSPs. Skip this step
-        //            for PHI or RPS with old FSC, since calculating the E values
-        //            requires precomputation that has not been done yet */
-        // ```
         // Without the Gumbel block (`-searchsp` at any value, `OLD_FSC`) the HSPs keep their
         // e-value of 0; the reap by `prelim_evalue` (blast_engine.c:896-899, outside that branch)
         // then keeps every one, and the hit list orders its lists by score, then ordinal id
@@ -290,33 +207,6 @@ impl RpsPrelim<'_> {
     /// list in that order.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:228-262
-    /// ```c
-    ///    qsort(hsplist_in->hsp_array, hsplist_in->hspcnt, sizeof(BlastHSP*),
-    ///          s_ScoreCompareHSPWithContext);
-    ///
-    ///    /* Sequentially extract HSPs corresponding to one subject into a new
-    ///       HSPList, and save these new HSPLists in a normal way, as in all other
-    ///       BLAST programs. */
-    ///    next_index = 0;
-    ///
-    ///    for (index = 0; index < hsplist_in->hspcnt; index = next_index) {
-    ///        BlastHSPList* hsp_list;
-    ///        Int4 oid = hsplist_in->hsp_array[index]->context;
-    ///        Int4 hspcnt;
-    ///        /* Find the first HSP that corresponds to a different subject.
-    ///           At the same time, set all HSP contexts to 0, since this is what
-    ///           traceback code expects. */
-    ///        for (next_index = index; next_index < hsplist_in->hspcnt;
-    ///             ++next_index) {
-    ///            if (hsplist_in->hsp_array[next_index]->context != oid)
-    ///                break;
-    ///            hsplist_in->hsp_array[next_index]->context = 0;
-    ///        }
-    ///        ...
-    ///        /* Insert this HSPList into this query's hit list. */
-    ///        Blast_HitListUpdate(hit_list, hsp_list);
-    ///    }
-    /// ```
     /// `s_ScoreCompareHSPWithContext` (hspfilter_collector.c:191-193): the context, then
     /// `ScoreCompareHSPs`.
     fn collect(&self, mut hsps: Vec<XPrelimHsp>) -> BlastpHitList<XPrelimHsp> {
@@ -360,70 +250,8 @@ impl RpsPrelim<'_> {
     /// containment tree over the concatenated coordinates. No restricted alignment (blastp's
     /// only) and no chaining (an option of blastp-fast).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3858-4085
-    /// ```c
-    ///    for (index=0; index<init_hitlist->total; index++)
-    ///    {
-    ///       ...
-    ///       s_AdjustHspOffsetsAndGetQueryData(query, query_info, init_hsp,
-    ///                                         &query_tmp, &context);
-    ///       ...
-    ///       if (rpsblast_pssms)
-    ///          gap_align->sbp->psi_matrix->pssm->data = rpsblast_pssms +
-    ///              query_info->contexts[context].query_offset;
-    ///       ...
-    ///          q_start = init_hsp->ungapped_data->q_start;
-    ///          q_end = q_start + init_hsp->ungapped_data->length;
-    ///          s_start = init_hsp->ungapped_data->s_start;
-    ///          s_end = s_start + init_hsp->ungapped_data->length;
-    ///          score = init_hsp->ungapped_data->score;
-    ///       ...
-    ///       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-    ///                                         hit_options->min_diag_separation))
-    ///       {
-    ///          ...
-    ///          if (is_rpsblast)
-    ///             cutoff = hit_params->cutoffs[rps_cutoff_index].cutoff_score;
-    ///          ...
-    ///             max_offset =
-    ///                BlastGetStartForGappedAlignment(query_tmp.sequence,
-    ///                   subject->sequence, gap_align->sbp,
-    ///                   init_hsp->ungapped_data->q_start,
-    ///                   init_hsp->ungapped_data->length,
-    ///                   init_hsp->ungapped_data->s_start,
-    ///                   init_hsp->ungapped_data->length);
-    ///             init_hsp->offsets.qs_offsets.s_off +=
-    ///                 max_offset - init_hsp->offsets.qs_offsets.q_off;
-    ///             init_hsp->offsets.qs_offsets.q_off = max_offset;
-    ///          ...
-    ///             status = s_BlastProtGappedAlignment(program_number, &query_tmp,
-    ///                                                 subject, gap_align,
-    ///                                                 score_params, init_hsp,
-    ///                                                 restricted_alignment,
-    ///                                                 fence_hit);
-    ///          ...
-    ///          if (gap_align->score >= cutoff) {
-    ///              ...
-    ///              status = Blast_HSPInit(gap_align->query_start,
-    ///                            gap_align->query_stop, gap_align->subject_start,
-    ///                            gap_align->subject_stop,
-    ///                            init_hsp->offsets.qs_offsets.q_off,
-    ///                            init_hsp->offsets.qs_offsets.s_off, context,
-    ///                            query_frame, subject->frame, gap_align->score,
-    ///                            &(gap_align->edit_script), &new_hsp);
-    ///              ...
-    ///              status = Blast_HSPListSaveHSP(hsp_list, new_hsp);
-    ///              ...
-    ///              status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
-    ///                                      eQueryAndSubject);
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850-4087
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824-3832
-    /// ```c
-    ///    else {
-    ///       tree = Blast_IntervalTreeInit(0, query->length+1,
-    ///                                     0, subject->length+1);
-    ///    }
-    /// ```
     fn gapped_score(
         &self,
         init_hsps: &[RpsInitHsp],
@@ -608,11 +436,6 @@ mod tests {
     // The prelim hit list holds `min(max(2*size, 10), size + 50)` lists, 10 for `-max_target_seqs`
     // 1 to 5 (blast_hits.c:68), and a list past that capacity goes through
     // `Blast_HitListUpdate` (blast_hits.c:3243-3297) into the heap whose root is the worst list:
-    // ```c
-    //       evalue_order = s_EvalueCompareHSPLists(&(hit_list->hsplist_array[0]), &hsp_list);
-    //       if (evalue_order < 0) { Blast_HSPListFree(hsp_list); }  /* new is worse: discard */
-    //       else { s_BlastHitListInsertHSPListInHeap(hit_list, hsp_list); } /* replaces the root */
-    // ```
     // with `s_EvalueCompareHSPLists` (blast_hits.c:3078-3106) ordering by best E-value (up), then
     // the first HSP's score (down), then `BLAST_CMP(h2->oid, h1->oid)`: of two lists equal in
     // E-value and score the one of the higher ordinal id is the better, so the root is the lowest

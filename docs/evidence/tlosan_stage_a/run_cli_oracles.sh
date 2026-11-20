@@ -3,11 +3,8 @@ set -euo pipefail
 
 # Comparison-only NCBI oracle. Run from any directory with a new output path.
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:997-1056:
-#   static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
-#   opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2538-2557:
 #   m_Scope = ReadSequencesToBlast(... subjects ...);
-#   m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
 root=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: run_cli_oracles.sh NEW_OUTPUT_DIRECTORY}
 mkdir "$out"

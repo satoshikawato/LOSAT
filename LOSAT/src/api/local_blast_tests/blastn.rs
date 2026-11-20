@@ -79,19 +79,7 @@ impl Inputs {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
 #[test]
 fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new();
@@ -106,11 +94,6 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-// ```c
-// if (args[kArgOutputFormat]) {
-//     string fmt_choice =
-//         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-// ```
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
@@ -225,11 +208,6 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:672-674
-// ```c
-//     if (hsp->score == 0) {
-//         return CRef<CSeq_align>();
-//     }
-// ```
 // The preliminary search reads the N of the subject as random bases, so seeds of the query
 // land in them; the traceback scores those HSPs 0, and no format or hit record shows them.
 #[test]
@@ -249,11 +227,6 @@ fn hsps_of_score_zero_are_not_reported() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:977,989
-// ```c
-//     sv.SetCoding(CSeq_data::e_Ncbi4na);
-//     ...
-//     sv.GetStrandData(strand, buffer);
-// ```
 // Without -lcase_masking, the letter case of the query changes nothing: both strands come
 // from the same case-free sequence data.
 #[test]
@@ -307,16 +280,6 @@ fn a_lowercase_query_finds_the_same_hits_on_both_strands() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-225
-// ```c++
-//     ITERATE(vector< CConstRef<CSeq_id> >, itr, original_seqids) {
-//         CRef<CSeq_id> next_seqid(new CSeq_id());
-//         string id_token = NcbiEmptyString;
-//
-//         if (((*itr)->IsGeneral() &&
-//             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
-//             != string::npos) ||
-// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
-// ```
 // The tabular subject ID of a title whose first word starts with `Subject_` is the first
 // word of the decoded title (oracle RP v01: `Subject_&amp;x desc` -> `Subject_&x`; v09:
 // `Subject_4.` -> `Subject_4`); the query ID stays the title's first word. A title that NCBI
@@ -451,21 +414,6 @@ fn run_local_outputs(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1326
-// ```c
-//     if (options->word_size <= 0)
-//     {
-//         if ( !Blast_ProgramIsRpsBlast(program_number)) {
-//             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-//                                      "Word-size must be greater than zero");
-//             return BLASTERR_OPTION_VALUE_INVALID;
-//         }
-//     } else if (/*program_number == eBlastTypeBlastn*/
-//                Blast_ProgramIsNucleotide(program_number) &&
-//                !Blast_QueryIsPattern(program_number) && options->word_size < 4)
-//     {
-//         Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-//                   "Word-size must be 4 or greater for nucleotide comparison");
-// ```
 // The command line's `-word_size` is at least 4 (clap's `blastn_word_size`); a caller of
 // `run_local` that sets the field itself gets the error of NCBI's core (the task's lookup word
 // is longer, so the search would have wrapped `word - lut + 1` and reported other hits).
@@ -522,8 +470,8 @@ fn a_word_size_below_four_is_ncbis_core_error() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1263-1269 and :1422-1427
-// (quoted at `check_scoring_options_with`); c++/src/algo/blast/api/blast_aux.cpp:662-673
-// (`ThrowIfInvalidTask`, quoted at `TaskParser::check`). Values that the command line cannot give
+// (cited at `check_scoring_options_with`); c++/src/algo/blast/api/blast_aux.cpp:662-673
+// (`ThrowIfInvalidTask`, cited at `TaskParser::check`). Values that the command line cannot give
 // (a template length the parser refuses, `limit_lookup`, which has no spelling, a task the parser
 // refuses) get NCBI's errors, or LOSAT's for rmblastn, instead of a search.
 #[test]
@@ -631,12 +579,6 @@ fn native_error(result: anyhow::Result<()>) -> (i32, String) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
-// ```c
-//     // Validate that at least one query context is valid
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
 // A batch of queries without residues only stops NCBI after the prolog with one message
 // per query (oracle BI e03).
 #[test]
@@ -668,12 +610,6 @@ fn a_batch_of_queries_without_residues_stops_after_the_prolog() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:153-156
-// ```c
-//     // get any warning messages from instantiating the queries
-//     query_data->GetMessages(m);
-//     retval->m_Messages.resize(query_data->GetNumQueries());
-//     retval->m_Messages.Combine(m);
-// ```
 // With scores that have no Karlin-Altschul values, each query of the batch gets the error,
 // and a query without residues keeps its warning after it (`scoring::karlin_error`; NCBI
 // 2.17.0 with `-reward 1 -penalty -6`).
@@ -708,20 +644,6 @@ fn a_query_without_residues_keeps_its_warning_in_a_table_error() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-// ```c
-//    if (sbp->gbp) {
-//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-//        if (Blast_SubjectIsTranslated(program_number)) {
-//            min_subject_length/=3;
-//        }
-//    } else {
-//        min_subject_length = (Int4) (total_length/num_seqs);
-//    }
-//
-//    if(min_subject_length <=0) {
-// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-//    }
-// ```
 // Subjects with fewer letters than subjects (every subject without residues, oracle BI e08)
 // stop NCBI when it searches the first batch, after the subjects' warnings and the prolog.
 #[test]
@@ -760,11 +682,6 @@ fn subjects_with_fewer_letters_than_subjects_stop_the_search() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
-// ```c++
-//     // set sequence range
-//     retval->SetInt().SetFrom(from);
-//     retval->SetInt().SetTo((to > 0 && to < seqlen) ? to : (seqlen-1));
-// ```
 // A range that starts just past a record's end gives an interval without letters, which
 // NCBI sets up as a record without residues (oracle BI r3, r4).
 #[test]
@@ -801,11 +718,6 @@ fn intervals_without_letters_are_records_without_residues() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
-// ```c++
-//         arg_desc.AddDefaultKey(kArgStrand, "strand",
-//                      "Query strand(s) to search against database/subject",
-//                                CArgDescriptions::eString, kDfltArgStrand);
-// ```
 // The command line checks `-strand` at parsing; `run_local` takes the arguments as a struct, so
 // it checks the value itself: an unknown strand is an argument error and nothing is written,
 // while `plus` and `minus` search and `both` is the plain search.

@@ -2,20 +2,6 @@
 //! the former switch `LOSAT_X_TBNSCANBF` graduated on 2026-10-26) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127
-//! ```c
-//! for (s = s_first; s <= s_last; s++) {
-//!     index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
-//!     if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-//!         numhits = bbc[index].num_used;
-//!         if (numhits <= (array_size - totalhits)) {
-//!             ...
-//!         } else {
-//!             s_range[1] = (Int4)(s - subject->sequence);
-//!             return totalhits;
-//!         }
-//!     }
-//! }
-//! ```
 //! The loop returns NCBI's offset pairs and scan range on every call (the unit test
 //! `x_scan_bf_equals_ncbi_scan_on_random_subjects` compares the calls), so a search gives the
 //! report of NCBI's loop (the frozen NCBI hashes of the fast regressions check that). It acts in

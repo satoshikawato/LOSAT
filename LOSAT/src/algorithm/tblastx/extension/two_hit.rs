@@ -32,24 +32,6 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
     // the `n` letters before the offsets (the walk's step `i` reads the letters at
     // `k = n - 1 - i`), and the best's `k`; the length is `n - best_k`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:897-920
-    // ```c
-    //     n = MIN(s_off, q_off);
-    //     best_i = n + 1;
-    //     s = subject->sequence + s_off - n;
-    //     q = query->sequence + q_off - n;
-    //     for (i = n; i >= 0; i--) {
-    //         score += matrix[q[i]][s[i]];
-    //         if (score > maxscore) {
-    //             maxscore = score;
-    //             best_i = i;
-    //         }
-    // ...
-    //         if ((maxscore - score) >= dropoff)
-    //             break;
-    //     }
-    //
-    //     *length = n - best_i + 1;
-    // ```
     // NCBI's offsets are those of the letters before the word (`s_off - 1`, `q_off - 1`), LOSAT's
     // one past them: LOSAT's `n` is NCBI's `n + 1`, its `k` NCBI's `i` (from the same first
     // letter), its `best_k` NCBI's `best_i` and `n - best_k` NCBI's length.
@@ -95,21 +77,6 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
 }
 
 // NCBI BLAST reference (c++/src/algo/blast/core/aa_ungapped.c:886-921):
-//   n = MIN(s_off, q_off);
-//   best_i = n + 1;
-//   s = subject->sequence + s_off - n;
-//   q = query->sequence + q_off - n;
-//   for (i = n; i >= 0; i--) {
-//       score += matrix[q[i]][s[i]];
-//       if (score > maxscore) {
-//           maxscore = score;
-//           best_i = i;
-//       }
-//       if ((maxscore - score) >= dropoff)
-//           break;
-//   }
-//   *length = n - best_i + 1;
-//   return maxscore;
 #[cfg(all(
     target_arch = "wasm32",
     target_feature = "simd128",
@@ -226,13 +193,6 @@ pub(super) fn extend_left_ungapped<S: TbxScore>(
     ))]
     {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:886-921
-        // ```c
-        // for (i = n; i >= 0; i--) {
-        //    score += matrix[q[i]][s[i]];
-        //    if (score > maxscore) { ... }
-        //    if ((maxscore - score) >= dropoff) break;
-        // }
-        // ```
         // The `tblastx-wasm-scalar` feature is diagnostic-only: it keeps this
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
@@ -322,17 +282,6 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
 }
 
 // NCBI BLAST reference (c++/src/algo/blast/core/aa_ungapped.c:846-866):
-//   for (i = 0; i < n; i++) {
-//       score += matrix[q[i]][s[i]];
-//       if (score > maxscore) {
-//           maxscore = score;
-//           best_i = i;
-//       }
-//       if (score <= 0 || (maxscore - score) >= dropoff)
-//           break;
-//   }
-//   *length = best_i + 1;
-//   *s_last_off = s_off + i;
 #[cfg(all(
     target_arch = "wasm32",
     target_feature = "simd128",
@@ -468,13 +417,6 @@ pub(super) fn extend_right_ungapped<S: TbxScore>(
     ))]
     {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866
-        // ```c
-        // for (i = 0; i < n; i++) {
-        //    score += matrix[q[i]][s[i]];
-        //    if (score > maxscore) { ... }
-        //    if (score <= 0 || (maxscore - score) >= dropoff) break;
-        // }
-        // ```
         // The `tblastx-wasm-scalar` feature is diagnostic-only: it keeps this
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
@@ -759,9 +701,6 @@ pub(super) fn two_hit_walks<S: TbxScore>(
     q_right_off: usize, // Position of second hit (R) in query
     x_drop: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1096
-    // ```c
-    // s_BlastAaExtendTwoHit(..., Int4 q_right_off, Int4 dropoff, ...)
-    // ```
     // Existing LOSAT diagnostics only; supplied by the current search owner.
     debug_ext: bool,
     first: bool,
@@ -771,13 +710,6 @@ pub(super) fn two_hit_walks<S: TbxScore>(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108 (the word length of the
     // lookup table, `-word_size`: 3 for BLOSUM62's instance, `TbxScore::word`)
-    // ```c
-    //     /* find one beyond the position (up to word_size-1 letters to the right)
-    //        that gives the largest starting score */
-    //     /* Use "one beyond" to make the numbering consistent with how it's done
-    //        for BlastAaExtendOneHit and the "Extend" functions called here. */
-    //     for (i = 0; i < word_size; i++) {
-    // ```
     let k_size = sc.word();
 
     // First, find the best scoring position within the word at R

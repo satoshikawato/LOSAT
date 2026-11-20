@@ -1,13 +1,6 @@
 //! The substitution scores of one TBLASTX search: BLOSUM62, or the matrix that `-matrix` names.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:383-387
-//! ```c
-//!         sbp->read_in_matrix = TRUE;
-//!         BLAST_ScoreSetAmbigRes(sbp, 'X');
-//!         sbp->name = BLAST_StrToUpper(scoring_options->matrix);
-//!     }
-//!     status = Blast_ScoreBlkMatrixFill(sbp, get_path);
-//! ```
 //!
 //! The search reads its matrix through [`TbxScore`], chosen once before the search
 //! (`blast_engine::run_impl::run_in_pool`). BLOSUM62's instance ([`Blosum62Score`], no data)
@@ -40,11 +33,7 @@ use crate::utils::matrix::{protein_score, protein_score_rows, ScoreRows, BLOSUM6
 
 /// The scores of a search's matrix, `matrix[a][b]` of NCBI's score block.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:847-849
-/// ```c
-///     for (i = 0; i < n; i++) {
-///         score += matrix[q[i]][s[i]];
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-849
 pub(crate) trait TbxScore: Copy + Send + Sync {
     /// `true` for BLOSUM62's instance: the search keeps the paths built on BLOSUM62's scores.
     const BLOSUM62: bool;
@@ -58,9 +47,6 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
     /// The word length of the search's lookup table (`-word_size`): 3 for BLOSUM62's instance.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:237
-    /// ```c
-    ///     lookup->word_length = opt->word_size;
-    /// ```
     #[inline(always)]
     fn word(self) -> usize {
         3
@@ -210,19 +196,6 @@ impl TbxScore for Blosum62Score {
 /// `protein_score_rows`), its word length and the byte table of its two-hit walks.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1592
-/// ```c
-///     for (i = 0; i < sbp->alphabet_size; i++) {
-///         for (j = 0; j < sbp->alphabet_size; j++) {
-///             matrix[i][j] = BLAST_SCORE_MIN;
-/// ...
-///             matrix[i][j] = NCBISM_GetScore((const SNCBIPackedScoreMatrix*) psm,
-///                                            i, j);
-/// ...
-///         matrix[u_index][i] = matrix[c_index][i];
-///         matrix[i][u_index] = matrix[i][c_index];
-///         matrix[o_index][i] = matrix[x_index][i];
-///         matrix[i][o_index] = matrix[i][x_index];
-/// ```
 #[derive(Clone, Copy)]
 pub(crate) struct MatrixScore {
     matrix: ScoringMatrix,
@@ -420,13 +393,6 @@ impl TbxScore for MatrixScore {
         // length takes the reference.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108 (`word_size`, the lookup
         // table's word length)
-        // ```c
-        //     /* find one beyond the position (up to word_size-1 letters to the right)
-        //        that gives the largest starting score */
-        //     /* Use "one beyond" to make the numbering consistent with how it's done
-        //        for BlastAaExtendOneHit and the "Extend" functions called here. */
-        //     for (i = 0; i < word_size; i++) {
-        // ```
         let t = self.walk?;
         match self.word {
             3 => two_hit_in(

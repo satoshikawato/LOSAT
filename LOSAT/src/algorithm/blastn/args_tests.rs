@@ -225,12 +225,6 @@ fn test_query_and_subject_paths() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
-// ```c
-//     } else if (!m_IsIgBlast){
-//         // IgBlast permits use of germline database
-//         NCBI_THROW(CInputException, eInvalidInput,
-//            "Either a BLAST database or subject sequence(s) must be specified");
-// ```
 // A missing -subject is NCBI's error after the parsing, not a parser error.
 #[test]
 fn test_subject_is_optional_for_the_parser() {

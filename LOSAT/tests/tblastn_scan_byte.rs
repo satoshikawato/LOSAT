@@ -2,20 +2,6 @@
 //! `src/algorithm/tblastx/x_scan_byte.rs`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127
-//! ```c
-//! for (s = s_first; s <= s_last; s++) {
-//!     index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
-//!     if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-//!         numhits = bbc[index].num_used;
-//!         if (numhits <= (array_size - totalhits)) {
-//!             ...
-//!         } else {
-//!             s_range[1] = (Int4)(s - subject->sequence);
-//!             return totalhits;
-//!         }
-//!     }
-//! }
-//! ```
 //! The switch's scan returns NCBI's offset pairs and scan range on every call (the unit test
 //! `x_scan_byte_equals_ncbi_scan_on_random_subjects` compares the calls of both forms), so a search
 //! with it gives the report of the scan before it (`LOSAT_X_TBNSCANBYTE=0`) and takes as many scan
@@ -292,11 +278,6 @@ fn scan_calls(stderr: &str) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
-// ```c
-//    case eAaLookupTable:
-//       offset_array_size = OFFSET_ARRAY_SIZE +
-//          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
-// ```
 // `LOSAT_X_TBNPAIRCAP` (in the strict set) gives the offset array 32768 + the longest chain where
 // that is less than 1024 x the longest chain (`=0`), and `LOSAT_X_TBNSCANRESUME` (in the strict
 // set) NCBI's 4096 + the longest chain to the scan on presence bytes, whose calls resume in the

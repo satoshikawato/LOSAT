@@ -17,13 +17,6 @@ use super::params::LinkHspCutoffs;
 /// blast_stat.c:4090-4130; the 22-bit gap trigger of TBLASTX's matrices is positive).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
-/// ```c
-///       if (hit_params->link_hsp_params && !kNucleotide &&
-///           !gapped_calculation) {
-///           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
-///             hit_params->link_hsp_params, word_params, db_length,
-///             seq_arg.seq->length);
-/// ```
 pub fn calculate_link_hsp_cutoffs_ncbi(
     avg_query_length: i32,
     subject_len_nucl: i64,

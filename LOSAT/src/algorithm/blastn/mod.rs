@@ -20,12 +20,6 @@ pub mod sequence_compare;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:280-313: the query masks of `-window_masker_db`.
 pub(crate) mod window_masker;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:633-692
-// ```c
-// Blast_HSPListPurgeHSPsWithCommonEndpoints(..., FALSE);
-// Blast_HSPReevaluateWithAmbiguitiesGapped(...);
-// Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
-// Blast_IntervalTreeReset(tree);
-// ```
 pub mod tracing;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:676-735, c++/src/algo/blast/core/blast_parameters.c:346-374: the steps of an
 // ungapped (`-ungapped`) search on a subject's HSP list and the word cutoff of its batch.
@@ -41,20 +35,6 @@ pub(crate) mod x_query_dust_par;
 // loops with their step counts worked out first (LOSAT_X_BNUNGAPCOUNT, graduated 2026-10-27).
 pub(crate) mod x_ungap_count;
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-166
-// ```c
-// typedef struct BlastHSP {
-//    Int4 score;
-//    double evalue;
-//    BlastSeg query;
-//    BlastSeg subject;
-//    Int4 context;
-// } BlastHSP;
-// typedef struct BlastHSPList {
-//    Int4 oid;
-//    Int4 query_index;
-//    BlastHSP** hsp_array;
-// } BlastHSPList;
-// ```
 pub mod hsp;
 pub(crate) mod sam;
 pub(crate) mod seqalign;

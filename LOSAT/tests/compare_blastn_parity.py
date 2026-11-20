@@ -26,20 +26,7 @@ from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage r
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-# ```c
-# const char* kDfltArgTabularOutputFmt =
-#     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-#     "evalue bitscore";
-# ```
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-# ```c
-# ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-#     if (iter != m_FieldsToShow.begin())
-#         m_Ostream << m_FieldDelimiter;
-#     x_PrintField(*iter);
-# }
-# m_Ostream << "\n";
-# ```
 DEFAULT_FIELDS = (
     "query",
     "subject",
@@ -81,14 +68,6 @@ class HspRow:
         return (self.pident, self.length, self.mismatch, self.gapopen, self.evalue, self.bitscore)
 
     # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-    # ```c
-    # ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-    #     if (iter != m_FieldsToShow.begin())
-    #         m_Ostream << m_FieldDelimiter;
-    #     x_PrintField(*iter);
-    # }
-    # m_Ostream << "\n";
-    # ```
     # All emitted default fields participate in structured equality.  Keeping
     # this key separate from ordinal lets a Counter retain duplicate rows while
     # the ordered list comparison below retains their emission order.
@@ -162,11 +141,6 @@ def parse_outfmt(path: Path) -> list[HspRow]:
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
-# ```c
-# m_Ostream << "\n";
-# // The tabular writer emits the selected fields and delimiters directly to
-# // the output stream; byte comparison is therefore the final output gate.
-# ```
 def compare_raw_bytes(ncbi_path: Path, losat_path: Path) -> bool:
     ncbi_bytes = ncbi_path.read_bytes()
     losat_bytes = losat_path.read_bytes()
@@ -210,16 +184,6 @@ def rows_by_coord(rows: Iterable[HspRow]) -> dict[tuple[str, str, int, int, int,
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-832
-# ```c
-# if (results.HasAlignments()) {
-#     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
-#     ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-#         const CSeq_align& s = **itr;
-#         tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
-#         tabinfo.Print();
-#     }
-# }
-# ```
 # NCBI emits every retained alignment in CSeq_align_set iteration order.  These
 # counters expose multiplicity without replacing the existing coordinate-key
 # diagnostics, which intentionally retain only the first row for each key.
@@ -229,13 +193,6 @@ def duplicate_coord_rows(rows: Iterable[HspRow]) -> dict[tuple[str, str, int, in
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832
-# ```c
-# ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-#     const CSeq_align& s = **itr;
-#     tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
-#     tabinfo.Print();
-# }
-# ```
 def first_order_difference(ncbi_rows: list[HspRow], losat_rows: list[HspRow]) -> int | None:
     for index, (ncbi_row, losat_row) in enumerate(zip(ncbi_rows, losat_rows)):
         if ncbi_row.structured_key != losat_row.structured_key:
@@ -307,14 +264,6 @@ def total_alignment_length(rows: Iterable[HspRow]) -> int:
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-# ```c
-# ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-#     if (iter != m_FieldsToShow.begin())
-#         m_Ostream << m_FieldDelimiter;
-#     x_PrintField(*iter);
-# }
-# m_Ostream << "\n";
-# ```
 def compare_case(case_id: str, ncbi_path: Path, losat_path: Path, limit: int) -> dict[str, object]:
     ncbi_rows = parse_outfmt(ncbi_path)
     losat_rows = parse_outfmt(losat_path)
@@ -489,21 +438,7 @@ def require_manifest_condition(row: dict[str, str], condition: bool, message: st
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:365-368
-# ```c
-# arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
-#                 "Apply filtering locations as soft masks",
-#                 CArgDescriptions::eBoolean,
-#                 kDfltArgLookupTableMaskingOnlyNucl);
-# ```
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:475-480,505-511
-# ```c
-# arg_desc.AddOptionalKey(kArgWindowSize, "int_value",
-#                         "Multiple hits window size, use 0 to specify 1-hit algorithm",
-#                         CArgDescriptions::eInteger);
-# arg_desc.AddDefaultKey(kArgOffDiagonalRange, "int_value",
-#                         "Number of off-diagonals to search for the 2nd hit, use 0 to turn off",
-#                         CArgDescriptions::eInteger, NStr::IntToString(kDfltOffDiagonalRange));
-# ```
 # LOSAT does not expose every one of these NCBI switches yet.  A paired oracle
 # run is valid only for the manifest values matching the supported Rust path.
 def validate_manifest_row(row: dict[str, str]) -> None:
@@ -541,34 +476,7 @@ def validate_manifest_row(row: dict[str, str]) -> None:
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107,157-168,208
-# ```c
-# const string kArgQuery("query");
-# const string kArgOutput("out");
-# const string kArgSubject("subject");
-# const string kTask("task");
-# const string kArgNumThreads("num_threads");
-# const string kArgEvalue("evalue");
-# const string kArgMaxTargetSequences("max_target_seqs");
-# const string kArgGapOpen("gapopen");
-# const string kArgGapExtend("gapextend");
-# const string kArgMismatch("penalty");
-# const string kArgMatch("reward");
-# const string kArgWordSize("word_size");
-# const string kArgDustFiltering("dust");
-# const string kArgLookupTableMaskingOnly("soft_masking");
-# const string kArgMaxHSPsPerSubject("max_hsps");
-# ```
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-319,2960-2968
-# ```c
-# if (args.Exist(kArgMaxHSPsPerSubject) && args[kArgMaxHSPsPerSubject]) {
-#     opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());
-# }
-# if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
-#     hitlist_size = args[kArgMaxTargetSequences].AsInteger();
-# }
-# m_NumDescriptions = hitlist_size;
-# m_NumAlignments = hitlist_size;
-# ```
 def build_losat_command(
     row: dict[str, str],
     losat_bin: Path,
@@ -621,18 +529,6 @@ def build_losat_command(
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107,157-168,208
-# ```c
-# const string kArgQuery("query");
-# const string kArgOutput("out");
-# const string kArgSubject("subject");
-# const string kTask("task");
-# const string kArgNumThreads("num_threads");
-# const string kArgEvalue("evalue");
-# const string kArgWordSize("word_size");
-# const string kArgDustFiltering("dust");
-# const string kArgLookupTableMaskingOnly("soft_masking");
-# const string kArgMaxHSPsPerSubject("max_hsps");
-# ```
 def build_ncbi_command(row: dict[str, str], ncbi_bin: str, output_path: Path | str) -> list[str]:
     validate_manifest_row(row)
     command = [
@@ -687,16 +583,6 @@ def refresh_losat_output(root: Path, row: dict[str, str], losat_bin: Path, print
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-782,828-832
-# ```c
-# if (m_FormatType == CFormattingArgs::eTabular ||
-#     m_FormatType == CFormattingArgs::eTabularWithComments) {
-#     CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-#     ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-#         tabinfo.SetFields(**itr, *m_Scope, &m_ScoringMatrix);
-#         tabinfo.Print();
-#     }
-# }
-# ```
 # Fresh paired artifacts isolate both writers from stale checked-in output.  The
 # NCBI executable is an explicitly supplied/local comparison oracle only; this
 # helper does not locate, download, install, or link it into LOSAT.
@@ -716,16 +602,6 @@ def prepare_paired_output_dir(root: Path, requested: Path | None) -> Path:
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-782,828-832
-# ```c
-# if (m_FormatType == CFormattingArgs::eTabular ||
-#     m_FormatType == CFormattingArgs::eTabularWithComments) {
-#     CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-#     ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-#         tabinfo.SetFields(**itr, *m_Scope, &m_ScoringMatrix);
-#         tabinfo.Print();
-#     }
-# }
-# ```
 def run_fresh_paired(
     root: Path,
     rows: list[dict[str, str]],
@@ -835,11 +711,6 @@ def main() -> int:
         help="Regenerate selected LOSAT output paths from the manifest before comparison.",
     )
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-51
-    # ```c
-    # const string kArgQuery("query");
-    # const string kArgOutput("out");
-    # const string kArgSubject("subject");
-    # ```
     # Paired mode invokes an already-available blastn only as a test oracle and
     # gives both processes the same manifest paths and cwd.
     parser.add_argument(
@@ -963,12 +834,6 @@ def main() -> int:
         print(f"wrote trace targets: {args.write_targets}")
 
     # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-    # ```c
-    # ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-    #     x_PrintField(*iter);
-    # }
-    # m_Ostream << "\n";
-    # ```
     # Raw and structured gates are independent: requesting either one makes its
     # own observed divergence determine the process status.
     return 1 if (args.fail_on_byte_diff and raw_failed) or (args.fail_on_diff and structured_failed) else 0

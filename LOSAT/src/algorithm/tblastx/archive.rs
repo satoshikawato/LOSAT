@@ -2,12 +2,6 @@
 //! each query batch from the batch's report data, and the error archive.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
-//! ```c++
-//!                 if (fmt_args->ArchiveFormatRequested(args)) {
-//!                     formatter.WriteArchive(*queries, *opts_hndl, *results, 0, m_Bah.GetMessages());
-//!                     m_Bah.ResetMessages();
-//!                 } else {
-//! ```
 //! One archive per query batch (the reader's batch, `BATCH_SIZE` letters, 10002 by default),
 //! written after the batch's search. LOSAT's TBLASTX searches the batches first and writes every
 //! format at the end, from the hits of all of them (`write_tblastx_outputs`), so the archives are
@@ -68,39 +62,13 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // as the lookup table takes it: `ncbi_int4_from_double`). Without `-threshold` and
     // `-window_size` the list holds the matrix's suggestions (`report::archive::options`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
-    // ```c++
-    // CBlastOptions::SetWordThreshold(double w)
-    // {
-    //     ...
-    //     if (m_Remote) {
-    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
-    //     }
-    // }
-    // ```
     inputs.matrix = args.matrix.clone();
     inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
-    // ```c++
-    //     if (args[kArgLookupTableMaskingOnly]) {
-    //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
-    //     }
-    // ```
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:321-323
-    // ```c++
-    //     if (args.Exist(kArgSumStats) && args[kArgSumStats]) {
-    //         opt.SetSumStatisticsMode(args[kArgSumStats].AsBoolean());
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2043-2052
-    // ```c++
-    // CBlastOptions::SetSumStatisticsMode(bool m)
-    // ...
-    //     if (m_Remote) {
-    //         m_Remote->SetValue(eBlastOpt_SumStatisticsMode, m);
-    //     }
-    // ```
     // `SumStatistics` is recorded only when `-sum_stats` is given, with its value.
     inputs.sum_stats = args.sum_stats;
     inputs.window_size = args.window_size;
@@ -109,9 +77,6 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:957
-    // ```c++
-    //     opt.SetLongestIntronLength(args[kArgMaxIntronLength].AsInteger());
-    // ```
     // The argument has a default, so the list always holds it; a value other than 0 stops the run
     // before any archive (`check_ncbi_options`).
     inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
@@ -156,23 +121,7 @@ pub(super) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) ->
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
-// ```c++
-// inline Int8
-// CBlastOptionsLocal::GetEffectiveSearchSpace() const
-// {
-//     if (m_EffLenOpts->num_searchspaces == 0)
-//         return 0;
-//
-//     return m_EffLenOpts->searchsp_eff[0];
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-// ```c++
-//     int status = m_PrelimSearch->CheckInternalData();
-//     if (status != 0)
-//     {
-//          // Search was not run, but we send back an empty CSearchResultSet.
-// ```
 /// The `EffectiveSearchSpace` option of a batch whose first query has the statistics `first`
 /// (`BatchArchive::searched_space`, `StrategyExport::note_searched`): the effective search space
 /// of context 0 and that context's length in residues (`archive::RequestLength::space`), when NCBI

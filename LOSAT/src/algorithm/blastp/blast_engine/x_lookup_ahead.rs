@@ -125,26 +125,7 @@
 //! frames, the table and the contexts (the Karlin blocks bit for bit).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//!             ...
-//!                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//!                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//!                 results = lcl_blast.Run();
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
-//! ```c++
-//!     // 5. Create the lookup table
-//!     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
-//!         LookupTableWrap* lut =
-//!             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
-//!                                              sbp, lookup_segments_wrap,
-//!                                              retval->m_InternalData->m_RpsData,
-//!                                              seqsrc,
-//!                                              num_threads);
-//! ```
 //! NCBI makes each batch's lookup table when that batch's search is set up, after the previous
 //! batch's report. The table is a function of the batch's queries and the options only, so building
 //! it earlier, beside the previous block's search, gives the same table. Scheduling only.
@@ -320,12 +301,6 @@ impl XAheadBlock<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
-// ```c++
-//     // 5. Create the lookup table
-//     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
-//         LookupTableWrap* lut =
-//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
-// ```
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the lookup table and contexts of the lookup region from values
 /// built ahead (`prebuilt`, whose query frames the search took with `take_query_frames`). They are
 /// the values the block's own build gives (module header; the unit test
@@ -652,11 +627,6 @@ fn x_make_room_flat(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
-// ```c++
-//         LookupTableWrap* lut =
-//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
-//                                              sbp, lookup_segments_wrap,
-// ```
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the query frames, table and contexts of a block of
 /// `query_records` for exact blastp, as its search builds them (module header: the same calls with
 /// the same inputs), its table on the spare vectors of `XAaSpares`. `None` where the build fails,
@@ -710,11 +680,6 @@ struct XFlatAheadPart {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
-// ```c++
-//         LookupTableWrap* lut =
-//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
-//                                              sbp, lookup_segments_wrap,
-// ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): part 1 of the build ahead of a block of `query_records` for
 /// blastp-fast (the flat table of any search matrix, item SC2d-2), on a pool task once the block
 /// before it has its table: the calls of `blastp_compressed_lookup` (of
@@ -786,10 +751,6 @@ fn x_flat_ahead_appends(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
-// ```c++
-//         LookupTableWrap* lut =
-//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
-// ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): part 2 of the build ahead of a block's flat table, once part 1
 /// gave `part` and the block before it has given its table's vectors to the second spare after its
 /// preliminary stage (`x_make_room_flat`): the stripes pass on those vectors
@@ -899,12 +860,6 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276 (module header)
-    // ```c++
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    //             ...
-    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-    //                 results = lcl_blast.Run();
-    // ```
     /// Searches a block with `run` (its `run_resolved_in_pool`), giving it the values built ahead for
     /// it (its search checks that they are its records', `XAheadBlock::take_prebuilt`); with `next`
     /// (the next block's records) and where the switch acts,

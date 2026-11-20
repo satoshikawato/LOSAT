@@ -4,13 +4,6 @@
 use anyhow::{ensure, Result};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:75-101
-// ```c
-// if (0 == (result = CMP(place1->bestEvalue, place2->bestEvalue)) &&
-//     0 == (result = CMP(place2->bestScore, place1->bestScore))) {
-//     result = CMP(place2->subject_index, place1->subject_index);
-// }
-// return result > 0;
-// ```
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CompoHeapRecord {
     pub best_evalue: f64,
@@ -20,12 +13,6 @@ pub(super) struct CompoHeapRecord {
 
 impl CompoHeapRecord {
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:89-101
-    // ```c
-    // if (0 == (result = CMP(place1->bestEvalue, place2->bestEvalue)) &&
-    //     0 == (result = CMP(place2->bestScore, place1->bestScore)))
-    //     result = CMP(place2->subject_index, place1->subject_index);
-    // return result > 0;
-    // ```
     fn worse_than(self, other: Self) -> bool {
         if self.best_evalue > other.best_evalue {
             return true;
@@ -43,14 +30,7 @@ impl CompoHeapRecord {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:43-54,401-419
-// ```c
-// #define HEAP_INITIAL_CAPACITY 100
-// self->heapThreshold = heapThreshold;
-// self->ecutoff = ecutoff;
-// self->capacity = MIN(HEAP_INITIAL_CAPACITY, heapThreshold);
-// self->worstEvalue = 0;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:43-54,401-422
 #[allow(dead_code)] // Attached to the TBLASTN D result pipeline after all boundaries agree.
 pub(super) struct CompoHeap {
     records: Vec<CompoHeapRecord>,
@@ -64,11 +44,6 @@ pub(super) struct CompoHeap {
 #[allow(dead_code)] // Source-equivalent heap is exercised by comparison fixtures.
 impl CompoHeap {
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:401-419
-    // ```c
-    // self->n = 0; self->heapThreshold = heapThreshold;
-    // self->ecutoff = ecutoff; self->capacity = MIN(100, heapThreshold);
-    // self->worstEvalue = 0;
-    // ```
     pub(super) fn new(threshold: usize, ecutoff: f64) -> Result<Self> {
         ensure!(
             threshold > 0,
@@ -85,46 +60,26 @@ impl CompoHeap {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:401-415
-    // ```c
-    // self->n = 0; self->capacity = MIN(HEAP_INITIAL_CAPACITY, heapThreshold);
-    // self->worstEvalue = 0;
-    // ```
     pub(super) fn len(&self) -> usize {
         self.records.len()
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:411-415
-    // ```c
-    // self->capacity = MIN(HEAP_INITIAL_CAPACITY, heapThreshold);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:421
     pub(super) fn capacity(&self) -> usize {
         self.capacity
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:411-414
-    // ```c
-    // self->worstEvalue = 0;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:422
     pub(super) fn worst_evalue(&self) -> f64 {
         self.worst_evalue
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:405-410:
-    // return self->n >= self->heapThreshold &&
-    //     self->worstEvalue <= self->ecutoff;
     pub(super) fn filled_to_cutoff(&self) -> bool {
         self.records.len() >= self.threshold && self.worst_evalue <= self.ecutoff
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:163-211,237-245
-    // ```c
-    // if (left <= n && s_CompoHeapRecordCompare(&heapArray[left], &heapArray[i]))
-    //     largest = left;
-    // if (right <= n && s_CompoHeapRecordCompare(&heapArray[right], &heapArray[largest]))
-    //     largest = right;
-    // if (largest != i) s_CompoHeapRecordSwap(&heapArray[i], &heapArray[largest]);
-    // for (i = n / 2; i >= 1; --i) s_CompoHeapifyDown(self->heapArray, i, n);
-    // ```
     fn heapify_down(&mut self, start: usize) {
         let mut position = start;
         loop {
@@ -146,12 +101,6 @@ impl CompoHeap {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:212-245
-    // ```c
-    // while (parent >= 1 && s_CompoHeapRecordCompare(&heapArray[i], &heapArray[parent])) {
-    //     s_CompoHeapRecordSwap(&heapArray[i], &heapArray[parent]);
-    //     i = parent; parent /= 2;
-    // }
-    // ```
     fn heapify_up(&mut self, mut position: usize) {
         while position > 0 {
             let parent = (position - 1) / 2;
@@ -164,11 +113,6 @@ impl CompoHeap {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:225-245
-    // ```c
-    // self->heapArray = self->array;
-    // self->array = NULL;
-    // for (i = n / 2; i >= 1; --i) s_CompoHeapifyDown(self->heapArray, i, n);
-    // ```
     fn convert_to_heap(&mut self) {
         if !self.heapified {
             self.heapified = true;
@@ -179,12 +123,6 @@ impl CompoHeap {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
-    // ```c
-    // if (self->n < self->heapThreshold || eValue <= self->ecutoff ||
-    //     eValue < self->worstEvalue) return TRUE;
-    // if (self->heapArray == NULL) s_ConvertToHeap(self);
-    // return s_CompoHeapRecordCompare(&self->heapArray[1], &heapRecord);
-    // ```
     pub(super) fn would_insert(&mut self, candidate: CompoHeapRecord) -> bool {
         if self.records.len() < self.threshold
             || candidate.best_evalue <= self.ecutoff
@@ -197,15 +135,6 @@ impl CompoHeap {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:292-391
-    // ```c
-    // new_capacity = MAX(HEAP_MIN_RESIZE + *capacity,
-    //                    (int)(HEAP_RESIZE_FACTOR * (*capacity)));
-    // if (self->array && self->n >= self->heapThreshold) s_ConvertToHeap(self);
-    // if (self->array != NULL) { append; worstEvalue = MAX(worstEvalue, eValue); }
-    // else if (n < threshold || (eValue <= ecutoff && worstEvalue <= ecutoff))
-    //     { append; s_CompoHeapifyUp(...); }
-    // else { compare root with candidate; discard one; s_CompoHeapifyDown(...); }
-    // ```
     pub(super) fn insert(&mut self, candidate: CompoHeapRecord) -> Option<CompoHeapRecord> {
         if !self.heapified && self.records.len() >= self.threshold {
             self.convert_to_heap();
@@ -242,12 +171,6 @@ impl CompoHeap {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:439-466
-    // ```c
-    // s_ConvertToHeap(self);
-    // results = first->theseAlignments;
-    // if (--self->n > 0) { memcpy(first, last, sizeof(BlastCompo_HeapRecord));
-    //     s_CompoHeapifyDown(self->heapArray, 1, self->n); }
-    // ```
     pub(super) fn pop(&mut self) -> Option<CompoHeapRecord> {
         self.convert_to_heap();
         if self.records.is_empty() {
@@ -261,16 +184,9 @@ impl CompoHeap {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,1565-1566,1576-1579,
 // 1560-1580:
-// #define EVALUE_STRETCH 5
-// for (i = 0; i < numQueries; i++) {
-//     if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
 //         if (evalue <= EVALUE_STRETCH * significantMatches[i].ecutoff)
-//             return FALSE;
-//     } else return FALSE;
-// }
-// return TRUE;
 #[allow(dead_code)] // Used by TBLASTN Kappa before each redo in the gated D pipeline.
 pub(super) fn compo_early_termination(evalue: f64, heaps: &[CompoHeap]) -> bool {
     for heap in heaps {
@@ -287,10 +203,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
     // 1560-1580; composition_adjustment/compo_heap.c:405-410:
-    // if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
-    //     if (evalue <= EVALUE_STRETCH * ecutoff) return FALSE;
-    // } else return FALSE;
-    // return TRUE;
     #[test]
     fn natural_112_subject_early_termination_matches_ncbi_call_state() {
         let trace = std::fs::read_to_string(concat!(
@@ -334,12 +246,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3705-3736,2500-2515;
     // composition_adjustment/compo_heap.c:252-275,330-391,439-466
-    // ```c
-    // if (BlastCompo_HeapWouldInsert(...))
-    //     BlastCompo_HeapInsert(..., &discarded_aligns);
-    // while (NULL != (hsp_list = BlastCompo_HeapPop(heap)))
-    //     Blast_HitListUpdate(hitlist, hsp_list);
-    // ```
     #[test]
     fn saved_ncbi_local_subject_heap_rank_and_pop_order() {
         for (path, threshold, expected) in [
@@ -432,10 +338,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:89-101,252-275,330-391
-    // ```c
-    // if (self->n < self->heapThreshold || eValue <= self->ecutoff) return TRUE;
-    // else return s_CompoHeapRecordCompare(&self->heapArray[1], &heapRecord);
-    // ```
     #[test]
     fn heap_threshold_ties_and_discarded_record_follow_ncbi_comparator() {
         let mut heap = CompoHeap::new(2, 0.001).unwrap();

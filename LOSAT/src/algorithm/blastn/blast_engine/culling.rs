@@ -24,20 +24,6 @@ fn int4(length: usize) -> i32 {
 /// context folds its range over the query length.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:617-633
-/// ```c
-///       A.cid   = isBlastn ? (A.hsp->context  - A.hsp->context % NUM_STRANDS) : A.hsp->context;
-///       A.sid   = hsp_list->oid;
-///       A.merit = params->culling_max;
-///       qlen    = cull_data->query_info->contexts[A.hsp->context].query_length;
-///       if(isBlastn && (A.hsp->context % NUM_STRANDS)) {
-///     	  A.begin = qlen - A.hsp->query.end;
-///     	  A.end   = qlen -  A.hsp->query.offset;
-///       }
-///       else {
-///     	  A.begin = A.hsp->query.offset;
-///     	  A.end   = A.hsp->query.end;
-///       }
-/// ```
 /// `query_offset` and `query_end` are the HSP's offsets within its context, NCBI's `Int4` ones
 /// (outside the context for an HSP from a hit that passes an end of it, `PrelimHit::prelim_qs`).
 fn cull_key(
@@ -76,21 +62,6 @@ pub(super) struct PrelimCulling {
 
 impl PrelimCulling {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:318-342
-    /// ```c
-    ///         else if (filt_opts->culling_opts &&
-    ///                  (filt_opts->culling_stage & ePrelimSearch))
-    ///         {
-    ///             BlastHSPCullingParams* params =
-    ///                 BlastHSPCullingParamsNew(opts_memento->m_HitSaveOpts,
-    ///                      filt_opts->culling_opts,
-    ///                      opts_memento->m_ExtnOpts->compositionBasedStats,
-    ///                      opts_memento->m_ScoringOpts->gapped_calculation);
-    ///             if(params->culling_max > 1){
-    ///             	params->culling_max += 3;
-    ///             }
-    ///             writer_info = BlastHSPCullingInfoNew(params);
-    ///         }
-    /// ```
     pub(super) fn new(
         query_lengths: &[usize],
         prelim_hitlist_size: usize,
@@ -106,23 +77,6 @@ impl PrelimCulling {
     /// `s_BlastHSPCullingRun` for the HSPs of subject `oid` (all queries, both strands).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:602-644
-    /// ```c
-    ///    for (i=0; i<hsp_list->hspcnt; ++i) {
-    ///       /* wrap the hsp with a LinkedHSP structure */
-    ///       A.hsp   = hsp_list->hsp_array[i];
-    ///       A.cid   = isBlastn ? (A.hsp->context  - A.hsp->context % NUM_STRANDS) : A.hsp->context;
-    ///       A.sid   = hsp_list->oid;
-    ///       A.merit = params->culling_max;
-    /// ...
-    ///       if (! c_tree[A.cid]) {
-    ///          c_tree[A.cid] = s_CTreeNew(qlen);
-    ///       }
-    ///
-    ///       if(s_SaveHSP(c_tree[A.cid], &A)){
-    ///     	 hsp_list->hsp_array[i] = NULL;
-    ///       }
-    ///    }
-    /// ```
     /// The tree id is the query (`cid` is its first context, and the trees are ripped in the
     /// order of their `cid`). An HSP that is not saved is freed.
     pub(super) fn add(&mut self, oid: usize, hits: Vec<PrelimHit>) {
@@ -146,29 +100,7 @@ impl PrelimCulling {
     /// sorted by score, and as many lists as the tree keeps: the hit list is made with
     /// `prelim_hitlist_size` as its maximum but is not cut to it, and it is not heapified.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581
-    /// ```c
-    ///          if (!results->hitlist_array[qid]) {
-    ///             results->hitlist_array[qid] = Blast_HitListNew(params->prelim_hitlist_size);
-    ///          }
-    /// ...
-    ///          /* sort hsplist */
-    ///          worst_evalue = 0.0;
-    ///          low_score = INT4_MAX;
-    ///          for (sid=0; sid < hitlist->hsplist_count; ++sid) {
-    ///             list = hitlist->hsplist_array[sid];
-    ///             best_evalue = (double) INT4_MAX;
-    ///             for (id=0; id < list->hspcnt; ++id) {
-    ///                 best_evalue = MIN(list->hsp_array[id]->evalue, best_evalue);
-    ///             }
-    ///             Blast_HSPListSortByScore(list);
-    ///             list->best_evalue = best_evalue;
-    ///             worst_evalue = MAX(worst_evalue, best_evalue);
-    ///             low_score = MIN(list->hsp_array[0]->score, low_score);
-    ///          }
-    ///          hitlist->worst_evalue = worst_evalue;
-    ///          hitlist->low_score = low_score;
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-587
     /// The merge of a split query (`merge_prelim_hit_list`, `Blast_HitListMerge`) and the
     /// traceback input (`prelim_hits_by_subject`, `listed_prelim_hits`) read a hit list
     /// through its lists only; the first chunk's list is moved as it is, with more lists
@@ -213,40 +145,6 @@ impl PrelimCulling {
 /// writer), and the kept HSPs made into the query's hit list again.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:699-733
-/// ```c
-/// static int
-/// s_BlastHSPCullingPipeRun(void* data, BlastHSPResults* results)
-/// {
-///    int qid, sid, num_list;
-///    BlastHSPList* hsp_list = NULL;
-///    s_BlastHSPCullingInit(data, results);
-///    for (qid = 0; qid < results->num_queries; ++qid) {
-///          if (!(results->hitlist_array[qid])) continue;
-///          num_list = results->hitlist_array[qid]->hsplist_count;
-///          for (sid = 0; sid < num_list; ++sid) {
-///         	 hsp_list = results->hitlist_array[qid]->hsplist_array[sid];
-///         	 Blast_HSPListSortByEvalue(hsp_list);
-///         	 hsp_list->best_evalue = hsp_list->hsp_array[0]->evalue;
-///          }
-///          Blast_HitListSortByEvalue(results->hitlist_array[qid]);
-///    }
-///
-///    for (qid = 0; qid < results->num_queries; ++qid) {
-///       if (!(results->hitlist_array[qid])) continue;
-///       num_list = results->hitlist_array[qid]->hsplist_count;
-///       for (sid = 0; sid < num_list; ++sid) {
-///          s_BlastHSPCullingRun(data,
-///                    results->hitlist_array[qid]->hsplist_array[sid]);
-///          results->hitlist_array[qid]->hsplist_array[sid] = NULL;
-///       }
-///       results->hitlist_array[qid]->hsplist_count = 0;
-///       Blast_HitListFree(results->hitlist_array[qid]);
-///       results->hitlist_array[qid] = NULL;
-///    }
-///    s_BlastHSPCullingFinal(data, results);
-///    return 0;
-/// }
-/// ```
 /// The trees are per query, so the pipe of a batch is this function for each of its queries.
 /// `query_len` is the length of each context of the query (`finish_query_hit_list`). The HSP
 /// offsets are those within the HSP's context and the context is minus for a negative frame
@@ -258,14 +156,6 @@ pub(super) fn cull_traceback(
     prelim_hitlist_size: usize,
 ) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:707-713
-    // ```c
-    //          for (sid = 0; sid < num_list; ++sid) {
-    //         	 hsp_list = results->hitlist_array[qid]->hsplist_array[sid];
-    //         	 Blast_HSPListSortByEvalue(hsp_list);
-    //         	 hsp_list->best_evalue = hsp_list->hsp_array[0]->evalue;
-    //          }
-    //          Blast_HitListSortByEvalue(results->hitlist_array[qid]);
-    // ```
     for list in &mut hit_list.hsplist_array {
         sort_hsplist_by_evalue(list);
         if let Some(first) = list.hsps.first() {
@@ -279,11 +169,6 @@ pub(super) fn cull_traceback(
         .map_or(0, |list| list.query_index);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:715-725
-    // ```c
-    //       for (sid = 0; sid < num_list; ++sid) {
-    //          s_BlastHSPCullingRun(data,
-    //                    results->hitlist_array[qid]->hsplist_array[sid]);
-    // ```
     let qlen = int4(query_len);
     let mut forest = CullingForest::new(i64::from(culling_limit));
     for list in std::mem::take(&mut hit_list.hsplist_array) {

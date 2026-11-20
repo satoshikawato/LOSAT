@@ -6,9 +6,7 @@ mod in_pssm;
 mod score;
 mod tblastn_app;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-844:
-// for (context=first_context; context<=last_context; context++) {
 //     status = s_BlastSearchEngineOneContext(...);
-// }
 pub(crate) mod search_seed;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
 // (blastx's direct loop takes it too, LOSAT_X_BXSCANBYTE).
@@ -17,7 +15,6 @@ pub(crate) mod search_seed;
 #[cfg(test)]
 mod x_scan_bf_tests;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
-// translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
 // The subject frames read from tables.
 mod x_subject_translate;
@@ -27,15 +24,13 @@ mod x_subject_store;
 mod x_db_stream;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234:
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
-// Blast_InitHitListSortByScore(init_hitlist);
 mod search_init;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552: the two-hit tests of every hit.
 // Too far and overlap without a branch.
 mod x_tbn_hitbf;
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-552:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-552,555:
 // aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(...);
-// Blast_HSPListSortByScore(hsp_list);
 mod search_gapped;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
 // translated db_length /= 3 before per-context length adjustment and search space.

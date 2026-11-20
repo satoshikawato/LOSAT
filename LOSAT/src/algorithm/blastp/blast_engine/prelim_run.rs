@@ -9,11 +9,6 @@
 //! once, with the kernels and the hit lists, and its `?` passes the stage's errors on.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1334-1336
-//! ```c
-//! Int4
-//! BLAST_PreliminarySearchEngine(EBlastProgramType program_number,
-//!     BLAST_SequenceBlk* query, BlastQueryInfo* query_info,
-//! ```
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`preliminary_search_error`, `run_resolved_in_pool`, `x_block_input`, `PrelimCollector`,
@@ -142,22 +137,10 @@ pub(super) struct PrelimOutcome {
 /// after its blocks (`subject_space_overflow`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:307-310
-/// ```c++
-///         if (IsMultiThreaded()) {
-///              x_LaunchMultiThreadedSearch(*m_InternalData);
-///         } else {
-///             retval = CPrelimSearchRunner(*m_InternalData, opts_memento.get())();
-/// ```
 /// A database's threads are chosen in its driver (`database::search_blocks`). For a subject set
 /// NCBI uses one thread (`-subject` resets `-num_threads`):
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3224-3227
-/// ```c++
-///         // This is temporarily ignored (per SB-635)
-///         if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
-///             m_NumThreads != CThreadable::kMinNumThreads) {
-///             m_NumThreads = CThreadable::kMinNumThreads;
-/// ```
 /// No NCBI counterpart: `use_parallel`, the pool for a subject set, whose output is the one
 /// thread's.
 pub(super) fn run_preliminary<K, O>(
@@ -223,12 +206,6 @@ where
     ))]
     let use_parallel = {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1475
-        // ```c
-        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-        //        != BLAST_SEQSRC_EOF) {
-        //    status = s_BlastSearchEngineCore(...);
-        // }
-        // ```
         // (A database has its own driver below, `database::search_blocks`.)
         database.is_none()
             && blastp_should_parallelize_stage(
@@ -358,26 +335,11 @@ where
         })?;
     } else if database.is_some() && !contexts.iter().any(|ctx| ctx.is_valid) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-        // ```c++
-        //     int status = m_PrelimSearch->CheckInternalData();
-        //     if (status != 0)
-        //     {
-        //          // Search was not run, but we send back an empty CSearchResultSet.
-        // ```
         // No query of the call has Karlin-Altschul parameters: NCBI searches none of its
         // batches and reads no sequence of the database (a sequence file that cannot be read
         // fails no batch: NCBI 2.17.0 blastp, an all-X query, exit 0; line PS DECISIONS 30).
     } else if let Some(blocks) = x_blocks.as_deref() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
-        // ```c++
-        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-        //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-        //             ...
-        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-        //                 results = lcl_blast.Run();
-        // ```
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks of whole batches, NCBI's
         // batches in order: each block a call of its own (`PrelimOnly::Block`: its lookup table,
         // diagonal table and scratch, freed when it returns), whose compact hit lists move to their
@@ -537,26 +499,10 @@ where
         ))]
         {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1688
-            // ```c
-            // aux_arg->gap_align = BLAST_GapAlignStructNew(...);
-            // aux_arg->hsp_stream = BlastHSPStreamNew(...);
-            // status = Blast_RunPreliminarySearchWithInterrupt_MT(...);
-            // ```
             let subject_diag_offsets = blastp_subject_diag_offsets(subjects, window);
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1688
-            // ```c
-            // BlastScoringParameters* score_params = NULL;
-            // BlastExtensionParameters* ext_params = NULL;
-            // BlastGapAlignStruct* gap_align = NULL;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1744-1748
             let pool = blastp_parallel_pool;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1554
-            // ```c
-            // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
-            //     status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-            //     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-            // }
-            // ```
             //
             // Parallel workers write one subject result into its oid-indexed
             // slot; the reducer below replays those slots in NCBI subject

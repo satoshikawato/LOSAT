@@ -10,17 +10,6 @@ use crate::utils::dust::MaskedInterval;
 /// or blank (`SplitQuery_GetChunkSize`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:65-73
-/// ```c
-///         switch (program) {
-///         case eBlastn:
-///             retval = 1000000;
-///             break;
-///         case eMegablast:
-///         case eDiscMegablast:
-///         case eMapper:
-///             retval = 5000000;
-///             break;
-/// ```
 pub fn query_chunk_size(megablast: bool) -> usize {
     if megablast {
         5_000_000
@@ -33,39 +22,13 @@ pub fn query_chunk_size(megablast: bool) -> usize {
 /// `OVERLAP_CHUNK_SIZE` is not set or blank.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:51-53
-/// ```c
-/// SplitQuery_GetOverlapChunkSize(EBlastProgramType program)
-/// {
-///     size_t retval = 100;
-/// ```
 pub const QUERY_CHUNK_OVERLAP: usize = 100;
 
 /// NCBI's query chunk size and chunk overlap (`size_t` values), from the environment
 /// variables `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` when they are set and not blank.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:54-62
-/// ```c
-/// size_t
-/// SplitQuery_GetChunkSize(EProgram program)
-/// {
-///     size_t retval = 0;
-///
-///     // used for experimentation purposes
-///     char* chunk_sz_str = getenv("CHUNK_SIZE");
-///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-///         retval = NStr::StringToInt(chunk_sz_str);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:53-62
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:53-60
-/// ```c
-///     size_t retval = 100;
-///     // used for experimentation purposes
-///     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
-///     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
-///         retval = NStr::StringToInt(overlap_sz_str);
-///         _TRACE("Using overlap chunk size from environment " << retval);
-///         return retval;
-///     }
-/// ```
 /// The `int` converts to the 64-bit `size_t` of the oracle: a negative value becomes
 /// 2^64 plus the value. `u64` keeps that arithmetic on every target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,9 +65,6 @@ impl SplitSizes {
     /// its `Int4` parameter.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261
-    /// ```c
-    ///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
-    /// ```
     pub fn mixer_max_batch_size(&self) -> i32 {
         self.chunk_size.wrapping_sub(1000) as u32 as i32
     }
@@ -139,24 +99,6 @@ pub struct QueryChunk {
 /// chunk size NCBI then uses.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
-/// ```c
-///     // Fix for small query size
-///     if ((*chunk_size) > overlap_size) {
-///        num_chunks = concatenated_query_length / ((*chunk_size) - overlap_size);
-///     }
-///
-///     // Only one chunk, just return;
-///     if (num_chunks <= 1) {
-///        *chunk_size = concatenated_query_length;
-///        return 1;
-///     }
-///
-///     // Re-adjust the chunk_size to make load even
-///     if (!Blast_QueryIsTranslated(program)) {
-///        *chunk_size = (concatenated_query_length + (num_chunks - 1) * overlap_size) / num_chunks;
-///        // Round up only if this will not decrease the number of chunks
-///        if (num_chunks < (*chunk_size) - overlap_size ) (*chunk_size)++;
-/// ```
 pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize) -> (usize, usize) {
     let overlap_size = sizes.overlap;
     let length = concatenated_query_length as u64;
@@ -188,35 +130,6 @@ pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
 /// The chunk ranges on the concatenated queries:
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
-/// ```c
-///     size_t chunk_start = 0;
-///     const size_t kOverlapSize =
-///         SplitQuery_GetOverlapChunkSize(m_Options->GetProgramType());
-///     for (size_t chunk_num = 0; chunk_num < m_NumChunks; chunk_num++) {
-///         size_t chunk_end = chunk_start + m_ChunkSize;
-///
-///         // if the chunk end is larger than the sequence ...
-///         if (chunk_end >= m_TotalQueryLength ||
-///             // ... or this is the last chunk and it didn't make it to the end
-///             // of the sequence
-///             (chunk_end < m_TotalQueryLength && (chunk_num + 1) == m_NumChunks))
-///         {
-///             // ... assign this chunk's end to the end of the sequence
-///             chunk_end = m_TotalQueryLength;
-///         }
-///
-///         m_SplitBlk->SetChunkBounds(chunk_num,
-///                                    TChunkRange(static_cast<unsigned int>(chunk_start), static_cast<unsigned int>(chunk_end)));
-///         _TRACE("Chunk " << chunk_num << ": ranges from " << chunk_start
-///                << " to " << chunk_end);
-///
-///         chunk_start += (m_ChunkSize - kOverlapSize);
-///         if (chunk_start > m_TotalQueryLength ||
-///             chunk_end == m_TotalQueryLength) {
-///             break;
-///         }
-///     }
-/// ```
 /// A chunk the loop leaves unset keeps the empty range of `SSplitQueryBlkNew`, and has no
 /// query (NCBI then fails to make its query factory, "Empty CBlastQueryVector"); the chunk
 /// size of `calculate_num_chunks` leaves none.
@@ -224,64 +137,14 @@ pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
 /// The queries of a chunk, and their parts in it:
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:223-247
-/// ```c
-///     query_ranges.push_back(TChunkRange(0, static_cast<unsigned int>(m_LocalQueryData->GetSeqLength(0)))); // FIXED
-///     ...
-///     for (int i = 1; i < kNumQueries; i++) {
-///         TSeqPos query_start = query_ranges[i-1].GetTo() + 1;
-///         TSeqPos query_end = query_start + static_cast<TSeqPos>(m_LocalQueryData->GetSeqLength(i));
-///         query_ranges.push_back(TChunkRange(query_start, query_end));
-///     ...
-///     for (size_t chunk_num = 0; chunk_num < m_NumChunks; chunk_num++) {
-///         const TChunkRange chunk = m_SplitBlk->GetChunkBounds(chunk_num);
-///         ...
-///         for (size_t qindex = 0; qindex < query_ranges.size(); qindex++) {
-///             const TChunkRange& query_range = query_ranges[qindex];
-///             if ( !chunk.IntersectingWith(query_range) ) {
-///                 continue;
-///             }
-///             m_SplitBlk->AddQueryToChunk(chunk_num, static_cast<Int4>(qindex));
-/// ```
 /// (`TChunkRange` is a `COpenRange`, so `GetTo() + 1` is the end of the previous query.)
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:196-210
-/// ```c
-///     CSeq_interval& interval = split_query_loc->SetInt();
-///     const int qstart = chunk.GetFrom() - query_range.GetFrom();
-///     const int qend = chunk.GetToOpen() - query_range.GetToOpen();
-///
-///     interval.SetFrom(max(0, qstart) + query_offset);
-///
-///     if (qend >= 0) {
-///         interval.SetTo(query_range.GetToOpen() - query_range.GetFrom() + query_offset);
-///     } else {
-///         interval.SetTo(chunk.GetToOpen() - query_range.GetFrom() + query_offset);
-///     }
-///
-///     // Note subtraction, as Seq-intervals are assumed to be
-///     // open/inclusive
-///     interval.SetTo() -= 1;
-/// ```
 /// The query location of a FASTA query starts at 0, so `query_offset` is 0.
 ///
 /// The contexts of a chunk (the strand that is not searched is `None`):
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:392-410
-/// ```c
-///             } else if (Blast_QueryIsNucleotide(kProgram)) {
-///
-///                 for (unsigned int ctx = 0; ctx < kNumContexts; ctx++) {
-///                     // handle the plus strand...
-///                     if (ctx % NUM_STRANDS == 0) {
-///                         ...
-///                             m_SplitBlk->AddContextToChunk(chunk_num,
-///                                               static_cast<Int4>(kNumContexts*queries[i]+ctx));
-///                         }
-///                     } else { // handle the negative strand
-///                         ...
-///                             m_SplitBlk->AddContextToChunk(chunk_num,
-///                                               static_cast<Int4>(kNumContexts*queries[i]+ctx));
-/// ```
 /// The offsets are `context_offsets`.
 pub fn split_query_batch(
     lengths: &[usize],
@@ -359,21 +222,6 @@ pub fn split_query_batch(
 /// The position of the batch context `absolute_context` among the contexts of a chunk.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:251-264
-/// ```c
-/// CContextTranslator::GetContextInChunk(size_t chunk_num,
-///                                       int absolute_context) const
-/// {
-///     _ASSERT(chunk_num < m_ContextsPerChunk.size());
-///     const vector<int>& context_indices = m_ContextsPerChunk[chunk_num];
-///     vector<int>::const_iterator itr = find(context_indices.begin(),
-///                                            context_indices.end(),
-///                                            absolute_context);
-///     if (itr == context_indices.end()) {
-///         return kInvalidContext;
-///     }
-///     return static_cast<int>(itr - context_indices.begin());  // FIXED
-/// }
-/// ```
 fn context_in_chunk(chunk: &QueryChunk, absolute_context: usize) -> Option<usize> {
     chunk
         .contexts
@@ -384,23 +232,6 @@ fn context_in_chunk(chunk: &QueryChunk, absolute_context: usize) -> Option<usize
 /// The length of a batch context in a chunk (0 when the chunk does not have it).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:452-466
-/// ```c
-/// s_GetAbsoluteContextLength(const vector<const BlastQueryInfo*>& chunk_qinfo,
-///                            int chunk_num,
-///                            const CContextTranslator& ctx_translator,
-///                            int absolute_context)
-/// {
-///     if (chunk_num < 0) {
-///         return 0;
-///     }
-///
-///     int pos = ctx_translator.GetContextInChunk((size_t)chunk_num,
-///                                                absolute_context);
-///     if (pos != kInvalidContext) {
-///         return chunk_qinfo[chunk_num]->contexts[pos].query_length;
-///     }
-///     return 0;
-/// ```
 fn absolute_context_length(
     chunks: &[QueryChunk],
     chunk_num: isize,
@@ -419,27 +250,6 @@ fn absolute_context_length(
 /// context `absolute_context`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:266-284
-/// ```c
-/// CContextTranslator::GetStartingChunk(size_t curr_chunk,
-///                                      Int4 context_in_chunk) const
-/// {
-///     int absolute_context = GetAbsoluteContext(curr_chunk, context_in_chunk);
-///     if (absolute_context == kInvalidContext) {
-///         return kInvalidContext;
-///     }
-///
-///     size_t retval = curr_chunk;
-///
-///     for (--curr_chunk; static_cast<int>(curr_chunk) >= 0; --curr_chunk) {
-///         if (GetContextInChunk(curr_chunk, absolute_context) ==
-///             kInvalidContext) {
-///             break;
-///         }
-///         retval = curr_chunk;
-///     }
-///     return static_cast<int>(retval);
-/// }
-/// ```
 fn starting_chunk(chunks: &[QueryChunk], curr_chunk: usize, absolute_context: usize) -> usize {
     let mut retval = curr_chunk;
     for chunk_num in (0..curr_chunk).rev() {
@@ -456,51 +266,6 @@ fn starting_chunk(chunks: &[QueryChunk], curr_chunk: usize, absolute_context: us
 /// query's end).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:612-662
-/// ```c
-///         for (Int4 ctx = chunk_qinfo[chunk_num]->first_context;
-///              ctx <= chunk_qinfo[chunk_num]->last_context;
-///              ctx++) {
-///
-///             size_t correction = 0;
-///             const int starting_chunk =
-///                 ctx_translator.GetStartingChunk(chunk_num, ctx);
-///             const int absolute_context =
-///                 ctx_translator.GetAbsoluteContext(chunk_num, ctx);
-///             ...
-///             if (s_IsPlusStrand(chunk_qinfo[chunk_num], ctx)) {
-///
-///                 for (int c = static_cast<int>(chunk_num); c != starting_chunk; c--) {
-///                     size_t prev_len = s_GetAbsoluteContextLength(chunk_qinfo,
-///                                                          c - 1,
-///                                                          ctx_translator,
-///                                                          absolute_context);
-///                     size_t curr_len = s_GetAbsoluteContextLength(chunk_qinfo, c,
-///                                                          ctx_translator,
-///                                                          absolute_context);
-///                     size_t overlap = min(kOverlap, curr_len);
-///                     correction += prev_len - min(overlap, prev_len);
-///                 }
-///
-///             } else {
-///
-///                 size_t subtrahend = 0;
-///
-///                 for (int c = static_cast<int>(chunk_num); c >= starting_chunk && c >= 0; c--) {
-///                     size_t prev_len = s_GetAbsoluteContextLength(chunk_qinfo,
-///                                                          c - 1,
-///                                                          ctx_translator,
-///                                                          absolute_context);
-///                     size_t curr_len = s_GetAbsoluteContextLength(chunk_qinfo,
-///                                                          c,
-///                                                          ctx_translator,
-///                                                          absolute_context);
-///                     size_t overlap = min(kOverlap, curr_len);
-///                     subtrahend += (curr_len - min(overlap, prev_len));
-///                 }
-///                 correction =
-///                     global_qinfo->contexts[absolute_context].query_length -
-///                     subtrahend;
-/// ```
 fn context_offsets(
     chunks: &[QueryChunk],
     chunk_num: usize,
@@ -511,14 +276,7 @@ fn context_offsets(
         .contexts
         .iter()
         .map(|&context| {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:604-626
-            // ```c
-            //             if (absolute_context == kInvalidContext ||
-            //                 starting_chunk == kInvalidContext) {
-            //                 // INT4_MAX is the sentinel value for invalid contexts
-            //                 m_SplitBlk->AddContextOffsetToChunk(chunk_num, INT4_MAX);
-            //                 continue;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:604-627
             let Some(absolute_context) = context else {
                 return i32::MAX;
             };
@@ -557,52 +315,14 @@ fn context_offsets(
 /// the part at most).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281
-/// ```c
-///             CRef<CSeq_loc> mask_query_loc(new CSeq_loc);
-///             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
-///             TMaskedQueryRegions split_mask =
-///                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seqlocinfo.cpp:102-116
-/// ```c
-///     TSeqRange loc(location.GetFrom(), 0);
-///     loc.SetToOpen(location.GetTo());
-///
-///     ITERATE(TMaskedQueryRegions, maskinfo, *this) {
-///         const CSeq_interval& intv = (*maskinfo)->GetInterval();
-///         TSeqRange mask (intv.GetFrom(), intv.GetTo());
-///         TSeqRange range = loc.IntersectionWith(mask);
-///         if (range.NotEmpty()) {
-///             ...
-///             CRef<CSeq_interval> si
-///                 (new CSeq_interval(const_cast<CSeq_id&>(intv.GetId()),
-///                                    range.GetFrom(),
-///                                    range.GetToOpen(),
-///                                    kStrand));
-/// ```
 /// (`TSeqRange` is a `CRange`, whose constructor takes the last position.) The chunk's query
 /// block then puts the masks in the part's coordinates, from the chunk's Seq-interval in
 /// the query's record:
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1047
-/// ```c
-///    for (seqloc = *mask; seqloc; seqloc = next_loc) {
-///       next_loc = seqloc->next;
-///       seqloc->ssr->left = MAX(0, seqloc->ssr->left - from);
-///       seqloc->ssr->right = MIN(seqloc->ssr->right, to) - from;
-///       /* If this mask location does not intersect the [from,to] interval,
-///          do not add it to the newly constructed list and free its contents. */
-///       if (seqloc->ssr->left > seqloc->ssr->right) {
-/// ```
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:256-262
-/// ```c
-///             	int q_sl_offset = 0;
-///             	if(query_seqloc->IsInt() && (query_seqloc->GetInt().GetFrom() > 0 )) {
-///             		q_sl_offset = query_seqloc->GetInt().GetFrom();
-///             	}
-///             	s_SetSplitQuerySeqInterval(chunk, query_range, q_sl_offset, split_query_loc);
-/// ```
 /// With `-query_loc` the query's masks are in record coordinates (the searched letters'
 /// masks moved by `offset`, the start of the query's interval) and so is the chunk's
 /// Seq-interval, but the restriction above takes the part in the searched letters
@@ -694,13 +414,6 @@ mod tests {
     use super::*;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
-    // ```c
-    //     if ((*chunk_size) > overlap_size) {
-    //        num_chunks = concatenated_query_length / ((*chunk_size) - overlap_size);
-    //     }
-    //        *chunk_size = (concatenated_query_length + (num_chunks - 1) * overlap_size) / num_chunks;
-    //        if (num_chunks < (*chunk_size) - overlap_size ) (*chunk_size)++;
-    // ```
     #[test]
     fn the_chunk_count_and_size_are_ncbis() {
         assert_eq!(
@@ -723,13 +436,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:612-662
-    // ```c
-    //                     correction += prev_len - min(overlap, prev_len);
-    //                     subtrahend += (curr_len - min(overlap, prev_len));
-    //                 correction =
-    //                     global_qinfo->contexts[absolute_context].query_length -
-    //                     subtrahend;
-    // ```
     #[test]
     fn a_query_over_two_chunks_is_mapped_onto_its_contexts() {
         let chunks = split_query_batch(
@@ -810,13 +516,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:256-281
-    // ```c
-    //             	s_SetSplitQuerySeqInterval(chunk, query_range, q_sl_offset, split_query_loc);
-    //     ...
-    //             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
-    //             TMaskedQueryRegions split_mask =
-    //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
-    // ```
     // With `-query_loc 1000001-3200000` a mask survives in a chunk only from the chunk's
     // start plus the interval's start on (oracle: `-task blastn -lcase_masking` loses the
     // lower-case runs at record 1.2 Mb and 2.3 Mb, keeps those at 1.05 Mb and 2.12 Mb).
@@ -858,12 +557,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seqlocinfo.cpp:102-116
-    // ```c
-    //     TSeqRange loc(location.GetFrom(), 0);
-    //     loc.SetToOpen(location.GetTo());
-    //         TSeqRange range = loc.IntersectionWith(mask);
-    //                                    range.GetToOpen(),
-    // ```
     #[test]
     fn restricted_masks_grow_by_one_and_drop_one_at_the_last_residue() {
         let part = ChunkQuery {
@@ -1062,14 +755,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:392-410,604-626
-    // ```c
-    //                         if (kStrand == eNa_strand_minus) {
-    //                             m_SplitBlk->AddContextToChunk(chunk_num,
-    //                                                           kInvalidContext);
-    //     ...
-    //                 // INT4_MAX is the sentinel value for invalid contexts
-    //                 m_SplitBlk->AddContextOffsetToChunk(chunk_num, INT4_MAX);
-    // ```
     // A strand that is not searched has no chunk context and the offset INT4_MAX; the other
     // strand's offsets are those of the split with both strands.
     #[test]

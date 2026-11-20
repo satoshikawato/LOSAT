@@ -338,7 +338,6 @@ jobs:
       - name: Guard the threaded-Wasm release artifact
         run: |
           # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-          # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
           # The guard is host compatibility only; it implements no BLAST behavior.
           mkdir -p .tmp/release-readiness/threaded-guarded
           node LOSAT/tests/wasi_shared_memory.js guard \
@@ -348,7 +347,6 @@ jobs:
       - name: Assemble, extract, and smoke threaded-Wasm artifact
         run: |
           # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-          # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
           # The threaded WASI runner hosts the command; it implements no BLAST behavior.
           python3 LOSAT/tests/prepare_release_candidate_v020.py wasm \
             --repo-root . \

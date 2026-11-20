@@ -2,7 +2,7 @@
 //! `-parse_seqids`).
 //!
 //! The expected values are what makeblastdb printed and what its databases hold
-//! (`makeblastdb_cases`, and the values quoted in the tests). The tests add the part of
+//! (`makeblastdb_cases`, and the values cited in the tests). The tests add the part of
 //! `CBuildDatabase::AddSequences` that decides whether a sequence is stored (`run`), so
 //! that a whole input compares with makeblastdb's messages and database.
 

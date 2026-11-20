@@ -7,19 +7,6 @@
 //! `x_batch_pipe.rs` is), so that it reads that file's types.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-215
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!     ...
-//!             CRef<CSearchResultSet> results = lcl_blast->Run();
-//!     ...
-//!                 ITERATE(CSearchResultSet, result, *results) {
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//!                 }
-//!     ...
-//!         }
-//!         formatter.PrintEpilog(opt);
-//! ```
 //!
 //! When the stream acts (`check`), the loop writes a batch's reports right after it has taken
 //! the batch (`-db`: its titles read and its prefetch done) and added its queries' warnings: it

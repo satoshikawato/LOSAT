@@ -25,14 +25,6 @@
 //! (`LOSAT_X_BPREDOPAR`: the default test, `blastp_redo_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!             ...
-//!                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//!             ...
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//! ```
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};

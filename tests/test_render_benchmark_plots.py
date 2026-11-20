@@ -192,9 +192,6 @@ class RendererTests(unittest.TestCase):
                         + [""] * 14
                     )
             # NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:191-194
-            # CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
-            # lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-            # results = lcl_blast.Run();
             for mode_index, (mode, implementation, threads, effective) in enumerate(
                 (
                     ("ncbi_n1", "NCBI BLAST+", "1", "requested/configured 1"),
@@ -360,10 +357,6 @@ class RendererTests(unittest.TestCase):
         )
 
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:48,55-61
-    # static const char kProgram[] = "blastn";
-    # static const char kDefaultTask[] = "megablast";
-    # SetTask(kDefaultTask);
-    # arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
     # Validate presentation of the recorded task identities and samples only.
     def test_current_snapshot_has_independent_linear_facets_and_all_modes(self) -> None:
         snapshot = ROOT / "benchmarks" / "v0.1.0"

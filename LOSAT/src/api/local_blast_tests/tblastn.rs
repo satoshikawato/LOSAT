@@ -85,7 +85,7 @@ fn run(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:662-673 (`ThrowIfInvalidTask`,
-// quoted at `TaskParser::check`). The command line's parser refuses a task that is not TBLASTN's;
+// cited at `TaskParser::check`). The command line's parser refuses a task that is not TBLASTN's;
 // a caller of `run_local` (or `run_local_database`, before it opens the database) that sets one
 // itself gets NCBI's error for a name NCBI does not know, LOSAT's for another program's task,
 // instead of a search with the default task.
@@ -135,20 +135,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
-// ```c
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-//     ...
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1443-1451
-// ```c
-// if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
-// ```
 // The saved NCBI outputs name the inputs by the paths NCBI read, so those paths are
 // passed as the display names.
 #[test]
@@ -280,14 +267,6 @@ impl Drop for Inputs {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289-301
-// ```c
-// CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-// results = lcl_blast.Run();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     formatter.PrintOneResultSet(**result, query);
-// }
-// ```
 // This is the engine half of the test of the same name in `LOSAT/tests/run_local_tblastn.rs`,
 // which compares every format with the CLI run of that format through `losat::api`. Here the
 // reference is the same entry in process: a search that requests every format together, with the
@@ -326,11 +305,6 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3971-3980
-// ```c++
-// x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
-// ...
-// out<<"\n";
-// ```
 #[test]
 fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new();
@@ -353,12 +327,6 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-// ```c
-// arg_desc.AddDefaultKey(kArgOutputFormat, "format",
-//                        kOutputFormatDescription,
-//                        CArgDescriptions::eString,
-//                        NStr::IntToString(dft_outfmt));
-// ```
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();

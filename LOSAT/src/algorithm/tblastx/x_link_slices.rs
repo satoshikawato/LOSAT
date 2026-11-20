@@ -14,32 +14,8 @@
 //! touched; the unit tests below compare this file with a copy of that loop.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
-//! ```c
-//! if (H->prev != NULL &&
-//!     ((H->hsp->context/strand_factor) !=
-//!      (H->prev->hsp->context/strand_factor) ||
-//!      (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
-//! { /* If frame switches, then start new list. */
-//!    hp_frame_number[cur_frame]--;
-//!    hp_frame_number[++cur_frame]++;
-//!    hp_frame_start[cur_frame] = H;
-//!    H->prev->next = NULL;
-//!    H->prev = NULL;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-//! ```c
-//! for (frame_index=0; frame_index<num_query_frames; frame_index++)
-//! {
-//!    hp_start = s_LinkHSPStructReset(hp_start);
-//!    hp_start->next = hp_frame_start[frame_index];
-//!    hp_frame_start[frame_index]->prev = hp_start;
-//!    number_of_hsps = hp_frame_number[frame_index];
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1082
-//! ```c
-//! for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-//!    hsp_list->hsp_array[index] = H->hsp;
-//! ```
 //! NCBI's groups are sublists of the one sorted array (`hp_frame_start[frame_index]` and
 //! `hp_frame_number[frame_index]`), each linked in place, and the array is read back in chain
 //! order: the slices are closer to NCBI than the cut Vecs. NCBI has no second array of the HSPs.
@@ -90,7 +66,6 @@
 //!    `buffer_pools` with the reference's arguments, once per call serially and once per worker
 //!    thread on the pool (a thread-local of this file, made on first use, as the reference's
 //!    `POOLS`). The incremental kernel does not read it; it reaches the literal port only under
-//!    `LOSAT_LINK_FAST_SHADOW`, and the literal port runs `pool_hsp_links.clear();
 //!    pool_hsp_links.reserve(n)` and `pool_lh_helpers.clear(); pool_lh_helpers.resize(..)` for
 //!    every group before it reads them, so neither their contents nor their capacity at entry
 //!    changes a value.
@@ -137,16 +112,7 @@ use super::{
 // Diagnostic (LOSAT_TIMING): the clock of the linking call (tblastx/x_link_timing.rs); the
 // linking reads nothing from it.
 use crate::algorithm::tblastx::x_link_timing::{KernelTimes, LinkLap, LinkStage};
-// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-// ```c
-// CMTArgs(...)
-// {
-// #ifdef NCBI_NO_THREADS
-//     m_NumThreads = CThreadable::kMinNumThreads;
-//     m_MTMode = eNotSupported;
-// #endif
-// }
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1297
 // As in `linking.rs`: a build without threads has no pool.
 #[cfg(all(
     feature = "parallel",
@@ -227,13 +193,6 @@ pub fn print_summary() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,553-558
-// ```c
-// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
-// ...
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-// ```
 // No computation: the arguments of the linking call that its group step reads, the values
 // `link_in_place` builds `GroupArgs` from.
 /// What `link_in_place` hands the group step besides the sorted list.
@@ -250,16 +209,6 @@ pub(super) struct Call<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
-// ```c
-// if (H->prev != NULL &&
-//     ((H->hsp->context/strand_factor) !=
-//      (H->prev->hsp->context/strand_factor) ||
-//      (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
-// { /* If frame switches, then start new list. */
-//    hp_frame_number[cur_frame]--;
-//    hp_frame_number[++cur_frame]++;
-//    hp_frame_start[cur_frame] = H;
-// ```
 // NCBI's groups are sublists of the sorted array: `hp_frame_start[k]` and `hp_frame_number[k]`.
 // The runs between the starts of `group_starts`, as views of the list: disjoint sub-slices of the
 // one sorted list, not copies (module doc, item 1).
@@ -285,14 +234,6 @@ fn group_slices<'h>(hits: &'h mut [UngappedHit], starts: &[usize]) -> Vec<&'h mu
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-//    hp_frame_start[frame_index]->prev = hp_start;
-//    number_of_hsps = hp_frame_number[frame_index];
-// ```
 // One group through the reference's per-group function with the reference's arguments, on its
 // records where they lie (module doc, item 2): the reference body's per-group call, on a slice.
 /// Links one group in place.
@@ -343,14 +284,6 @@ struct Scratch {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-//    hp_frame_start[frame_index]->prev = hp_start;
-//    number_of_hsps = hp_frame_number[frame_index];
-// ```
 // The groups in frame_index order with one scratch, or on the pool with one scratch per worker
 // thread, as the reference body does (module doc, items 2 and 4). Each kernel runs once, on its
 // own slice, timed by the kernel clock.
@@ -457,20 +390,7 @@ fn x_link_board(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
-// ```c
-// if (H->prev != NULL &&
-//     ((H->hsp->context/strand_factor) !=
-//      (H->prev->hsp->context/strand_factor) ||
-//      (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
-// { /* If frame switches, then start new list. */
-//    hp_frame_number[cur_frame]--;
-//    hp_frame_number[++cur_frame]++;
-//    hp_frame_start[cur_frame] = H;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419
-// ```c
-// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
-// ```
 // No NCBI counterpart for the two switches: LOSAT_LINKING_LEGACY links every group with the literal
 // port, LOSAT_LINK_FAST_SHADOW also runs it and compares (`link_hsp_group_incremental`). They do
 // not change any value NCBI computes.
@@ -482,14 +402,6 @@ pub(super) fn link_modes() -> (bool, bool) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-//    hp_frame_start[frame_index]->prev = hp_start;
-//    number_of_hsps = hp_frame_number[frame_index];
-// ```
 // The group step of `x_hsp_inplace::link_in_place` on the sorted list (module doc), with the two
 // variables of `link_groups_as` that `link_modes` gives (`link_modes` itself for the default list).
 // Returns the list and its number of groups.
@@ -508,14 +420,6 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-//    hp_frame_start[frame_index]->prev = hp_start;
-//    number_of_hsps = hp_frame_number[frame_index];
-// ```
 // `link_groups` with the two variables that choose the literal port and size the scratch given
 // (`link_modes`; the tests run both ways, and a one-hit list with an HSP of length 0 or less asks
 // for the literal port). The statements of the reference's group step in their order, with the
@@ -819,16 +723,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
-    // ```c
-    // if (H->prev != NULL &&
-    //     ((H->hsp->context/strand_factor) !=
-    //      (H->prev->hsp->context/strand_factor) ||
-    //      (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
-    // { /* If frame switches, then start new list. */
-    //    hp_frame_number[cur_frame]--;
-    //    hp_frame_number[++cur_frame]++;
-    //    hp_frame_start[cur_frame] = H;
-    // ```
     // Module doc, item 1: the slices are the reference's groups (the push loop), the same records
     // in the same order, and each one is a view of the list at its run's position: no HSP, one
     // HSP, one group, sorted lists of one and three queries, and groups of one HSP each.
@@ -883,15 +777,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558,1080-1082
-    // ```c
-    // for (frame_index=0; frame_index<num_query_frames; frame_index++)
-    // {
-    //    hp_start = s_LinkHSPStructReset(hp_start);
-    //    hp_start->next = hp_frame_start[frame_index];
-    // ...
-    // for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-    //    hsp_list->hsp_array[index] = H->hsp;
-    // ```
     // Module doc, items 1-5: on random lists of one and two queries (up to eight groups, chains,
     // comparator-equal HSPs) the slices give the reference's group step, every field, with the
     // incremental kernel and with the literal port, serially and on pools of 1, 2 and 8 threads,
@@ -1013,12 +898,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-    // ```c
-    // for (frame_index=0; frame_index<num_query_frames; frame_index++)
-    // {
-    //    hp_start = s_LinkHSPStructReset(hp_start);
-    //    hp_start->next = hp_frame_start[frame_index];
-    // ```
     // The edges: an empty list (no group, no kernel), one HSP, one group of many HSPs with the
     // pool allowed, and a list that arrives with spare capacity (given back, as the reference's cut
     // does).

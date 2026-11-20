@@ -31,30 +31,6 @@ pub(crate) enum ProcessError {
 /// The `CInvalidChoiceSelection` message of `C<type>::Get<variant>()` on a CHOICE of
 /// `module::type` that holds `current`.
 // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:122-150
-// ```c++
-// CInvalidChoiceSelection::CInvalidChoiceSelection(
-//     const CDiagCompileInfo& diag_info,
-//     const CSerialObject* object,
-//     size_t currentIndex, size_t mustBeIndex,
-//     const char* const names[], size_t namesCount,
-//     EDiagSev severity)
-//         : CSerialException(diag_info, 0, "", severity, 0)
-// {
-//     CNcbiOstrstream msg;
-//     const CChoiceTypeInfo* type = 0;
-//     if ( object ) {
-//         type = dynamic_cast<const CChoiceTypeInfo*>(object->GetThisTypeInfo());
-//     }
-//     const char* cur_name = GetName(currentIndex, names, namesCount);
-//     const char* req_name = GetName(mustBeIndex, names, namesCount);
-//     if ( type ) {
-//         msg << "C" << SPrintIdentifier(type->GetAccessName())
-//             << "::Get" << SPrintIdentifier(req_name) << "()";
-//         msg << ": Invalid choice selection: "
-//             << type->GetAccessModuleName() <<"::"<< type->GetAccessName()
-//             << '.' << cur_name;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:86-118 (`SPrintIdentifier`: `-` is
 // `_`, the first letter and each one after `.` upper-cased)
 // (NCBI's rpsbproc printed `CSeq_id::GetGeneral(): Invalid choice selection:
@@ -97,29 +73,6 @@ fn identifier(name: &str) -> String {
 /// The `CUnassignedMember` exception of `C<type>::Get<member>()` on a SEQUENCE of
 /// `module::type` whose `member` is not set.
 // NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:266-306
-// ```c++
-// void CSerialObject::ThrowUnassigned(TMemberIndex index,
-//                                     const char* file_name,
-//                                     int file_line) const
-// {
-//     if (x_GetVerifyData() == eSerialVerifyData_Yes) {
-//         ...
-//         CNcbiOstrstream s;
-//         if ( true ) {
-//             // make class name
-//             s << "C" << SPrintIdentifier(type->GetAccessName());
-//         }
-//         if ( !member_name.empty() ) {
-//             // make method name
-//             s << "::Get" << SPrintIdentifier(member_name) << "()";
-//         }
-//         s << ": Attempt to get unassigned member "
-//           << type->GetAccessModuleName() <<"::"<< type->GetAccessName() << '.';
-//         if ( !member_name.empty() ) {
-//             s << member_name;
-//         ...
-//         NCBI_THROW(CUnassignedMember,eGet,CNcbiOstrstreamToString(s));
-// ```
 // (`x_GetVerifyData` is `eSerialVerifyData_Yes` unless `SERIAL_VERIFY_DATA_GET` says otherwise,
 // which LOSAT's rpsbproc rejects: `reader_variable`.)
 pub(crate) fn unassigned_member(module: &str, type_name: &str, member: &str) -> ProcessError {
@@ -134,41 +87,9 @@ pub(crate) fn unassigned_member(module: &str, type_name: &str, member: &str) -> 
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:317-320
-// ```c++
-// void CSerialObject::ThrowUnassigned(TMemberIndex index) const
-// {
-//     ThrowUnassigned(index, 0, 0);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/serial/datatool/classstr.cpp:849-855
-// ```c++
-//                     code.Methods(inl) <<
-//                         "    if (!CanGet"<< mem_cName<<"()) {\n"
-//                         "        ThrowUnassigned("<<member_index;
-// #if 0
-//                     code.Methods(inl) << ", __FILE__, __LINE__";
-// #endif
-//                     code.Methods(inl) << ");\n"
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:805-810
-// ```c++
-// const char* find_match(char        lsep,
-//                        char        rsep,
-//                        const char* start,
-//                        const char* stop)
-// {
-//     if (*(stop - 1) != rsep) return stop;
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:836-842
-// ```c++
-//     const char* end_str = find_match('(', ')',
-//                                      m_CurrFunctName,
-//                                      m_CurrFunctName + len);
-//     if (end_str == m_CurrFunctName + len) {
-//         // Missing '('
-//         return;
-//     }
-// ```
 // The generated getters call `ThrowUnassigned(index)`, so the place is the `NCBI_THROW` of
 // serialobject.cpp:306 (`file_name` and `file_line` are 0). Its function is a `const` method,
 // whose `__PRETTY_FUNCTION__` ends with `const`, not `)`: `ParseCurrFunctName` names no
@@ -207,45 +128,6 @@ pub(crate) struct DomQuery {
 /// `ConvertBlastMaskListToSeqLocInfoVector` as far as it can fail: the first location of each
 /// mask that has locations must be a `packed-int`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_blast.cpp:264-300
-// ```c++
-// void ConvertBlastMaskListToSeqLocInfoVector(const TBlast4MaskList &bmlist, TSeqLocInfoVector &dst)
-// {
-//
-// 	TBlast4MaskList::const_iterator iterBM = bmlist.begin(), iterBMEnd = bmlist.end();
-//
-// 	const CSeq_id *pLastId = nullptr;
-// 	TSeqLocInfoVector::iterator iterDstMaskedRegions = dst.end();
-// 	while (iterBMEnd != iterBM)
-// 	{
-// 		const CBlast4_mask::TLocations &locs = (*iterBM)->GetLocations();	//list< CRef< CSeq_loc > >
-//
-// 		if (!locs.empty())	//should always be true, expect only one
-// 		{
-// 			int rf = (*iterBM)->GetFrame();
-// 			if (rf > 0)
-// 				rf = READINGFRAME::Idx2Id(rf - 1);	//CSeqLocInfo::ETranslationFrame uses 0, 1, 2, 3, -1, -2, -3
-// 			const CSeq_loc& loc = **locs.begin();
-// 			const CSeq_id *thisId = loc.GetId();	//should not be null
-//
-// 			if (nullptr == pLastId || !thisId->Match(*pLastId))
-// 			{
-//
-// 				// -- create a new TMaskedQueryRegions
-// 				iterDstMaskedRegions = dst.emplace(dst.end());
-// 				pLastId = thisId;
-// 			}
-//
-// 			const list< CRef< CSeq_interval > > & ints = loc.GetPacked_int().Get();
-//
-// 			for (auto v : ints)
-// 				iterDstMaskedRegions->emplace_back(new CSeqLocInfo(v.GetNCPointer(), rf));
-// 		}
-//
-// 		++iterBM;
-//
-// 	}
-// }
-// ```
 // The masks are kept with the queries (`m_vecMaskedRegions`), which the text output never prints;
 // what is observable is the exception of a location that is not a `packed-int`. A location
 // without one id (`GetId` gives no id: `null`, `feat`, `mix`, `equiv`, `bond`, or intervals of
@@ -285,47 +167,7 @@ pub(crate) fn check_masks(masks: &[Mask]) -> Result<(), ProcessError> {
 /// `FillSequenceFromBioseq`: the label of the best id, the text after its first `:` and then
 /// after its first `|`.
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2292-2345
-// ```c++
-// string CSeq_id::GetStringDescr(const CBioseq& bioseq, EStringFormat fmt)
-// {
-//     ...
-//     bool is_na            = bioseq.GetInst().GetMol() != CSeq_inst::eMol_aa;
-//     CRef<CSeq_id> best_id = FindBestChoice(bioseq.GetId(),
-//                                            is_na ? CSeq_id::FastaNARank
-//                                            : CSeq_id::FastaAARank);
-//     switch (fmt) {
-//     ...
-//     case eFormat_BestWithVersion:
-//         // eBestWithVersion produces only the 'best' accession name, with
-//         // its version indicator
-//         if (best_id.NotEmpty()) {
-//             string label;
-//             best_id->GetLabel(&label, eDefault, fLabel_Version);
-//             return label;
-//         }
-//         break;
-// ```
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:1030-1046
-// ```c++
-// 	if (TSequence::e_IsLocal == dst.m_iValid)	//replace accession with label
-// 	{
-// 		// -- check original fasta defline from reader
-// 		dst.m_OriDefline.clear();
-// 		ObtainUserDeflineFromBioseq(bioseq, dst.m_OriDefline);
-//
-// 		if (dst.m_strAccession.empty() && !localId.empty())
-// 			dst.m_strAccession = move(localId);
-// 	}
-//
-// 	// -- sanitize accession
-// 	size_t dlm_pos = dst.m_strAccession.find(':');
-// 	if (string::npos != dlm_pos)
-// 		dst.m_strAccession = dst.m_strAccession.substr(dlm_pos + 1);
-// 	dlm_pos = dst.m_strAccession.find('|');
-// 	if (string::npos != dlm_pos)
-// 		dst.m_strAccession = dst.m_strAccession.substr(dlm_pos + 1);
-// }
-// ```
 // (The best id's label is never empty when the Bioseq has an id, so the local id's label is
 // never used.)
 fn query_accession(query: &Query) -> Vec<u8> {
@@ -351,60 +193,8 @@ fn query_accession(query: &Query) -> Vec<u8> {
 /// `FillSequenceFromBioseq` for the members that rpsbproc prints: the label, the title, the
 /// length and the residues (or bases) of a query.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:952-983
-// ```c++
-// void FillSequenceFromBioseq(const CBioseq &bioseq, TSequence &dst)
-// {
-// 	if (bioseq.IsSetInst() && bioseq.CanGetInst())
-// 	{
-// 		dst.m_iValid = TSequence::e_Current;	//by default
-// 		const CSeq_inst & seqInst = bioseq.GetInst();
-// 		dst.m_strSeqData = Get1LetterSeqData(seqInst);
-//
-//
-// 		if (seqInst.IsSetMol() && seqInst.CanGetMol())
-// 			dst.m_bIsNa = (CSeq_inst::eMol_aa != seqInst.GetMol());
-// 			//dst.m_iMolType = seqInst.GetMol();
-//
-// 		if (seqInst.IsSetLength() && seqInst.CanGetLength())
-// 			dst.m_uiSeqLen = seqInst.GetLength();
-// 		else
-// 			dst.m_uiSeqLen = dst.m_strSeqData.size();
-// 	}
-// 	...
-// 	dst.m_strTitle = GetDescrTitleFromBioseq(bioseq);
-// 	if (0 == dst.m_iTaxId) dst.m_iTaxId = bioseq.GetTaxId();
-//
-// 	const CBioseq::TId &ids = bioseq.GetId();
-// 	string localId;
-//     CBioseq::TId pack_ids;  //list to collect ids to be packed
-//
-// 	dst.m_strAccession = CSeq_id::GetStringDescr(bioseq, CSeq_id::eFormat_BestWithVersion);
-// ```
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:248-253
-// ```c++
-// 	// -- somehow the CSeqportUtil::Convert may append an extra residue to the result (bug?), so check
-// 	SeqLen_t ori_len = rSeqInst.GetLength(), end_len = dst.size();
-// 	if (ori_len < end_len)
-// 	{
-// 		dst.erase(ori_len);
-// 	}
-// ```
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:297-317
-// ```c++
-// const string& GetDescrTitleFromBioseq(const CBioseq& rBioseq)
-// {
-// 	if (rBioseq.IsSetDescr() && rBioseq.CanGetDescr())
-// 	{
-// 		...
-// 				CSeqdesc::E_Choice c = rSeqDesc.Which();
-// 				if (CSeqdesc::e_Title == c)
-// 				{
-// 					return rSeqDesc.GetTitle();
-// 				}
-// 		...
-// 	if (rBioseq.IsSetAnnot() && rBioseq.CanGetAnnot())
-// 	{
-// ```
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:297-319
 // `Get1LetterSeqData` converts the residues, then asks for `inst.length` whether it is set or
 // not: `GetLength` of an unset member throws `CUnassignedMember`, which ends rpsbproc as NCBI's
 // does (exit 3, after the `SESSION` line). The residues serve the site output (PS16b; a
@@ -465,95 +255,10 @@ type LetterType = u8;
 /// not convert. (`gap` data, type -1, is refused as a `seq-data`, as in PS16a: the reader does
 /// not check its grammar; the archive reader leaves the literals of `gap` data out.)
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:149-197
-// ```c++
-// int SeqDataTo1LtrSeq(const CSeq_data &rSeqData, string &dst)
-// {
-// 	dst.clear();
-// 	int iDataType = rSeqData.Which();
-//
-// 	switch (iDataType)
-// 	{
-// 	case CSeq_data::e_Ncbieaa:
-//
-// 		dst = rSeqData.GetNcbieaa().Get();
-//
-// 		iDataType = 0;
-// 		break;
-// 	case CSeq_data::e_Ncbi8aa:
-// 	case CSeq_data::e_Ncbipaa:
-// 	case CSeq_data::e_Iupacaa:
-// 	case CSeq_data::e_Ncbistdaa:	//all other aa format
-// 		{
-// 			CSeq_data objEaaData;
-// 			CSeqportUtil::Convert(rSeqData, &objEaaData, CSeq_data::e_Ncbieaa);
-// 			dst = objEaaData.GetNcbieaa().Get();
-// 		}
-// 		iDataType = 0;
-// 		break;
-// 	case CSeq_data::e_Iupacna:
-// 		dst = rSeqData.GetIupacna().Get();
-//
-//
-// 		iDataType = 1;
-// 		break;
-// 	case CSeq_data::e_Ncbi2na:
-// 	case CSeq_data::e_Ncbi4na:
-// 	case CSeq_data::e_Ncbi8na:
-// 	case CSeq_data::e_Ncbipna:
-// 		{
-// 			CSeq_data objIupacData;
-// 			CSeqportUtil::Convert(rSeqData, &objIupacData, CSeq_data::e_Iupacna);
-//
-//
-// 			dst = objIupacData.GetIupacna().Get();
-//
-// 		}
-// 		iDataType = 1;
-// 		break;
-// 	default:
-// 		iDataType = -1;
-// 	}
-// 	return iDataType;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:367-374,651-658,777-784
-// ```c++
-// SIZE_TYPE CSeqConvert_imp::x_Convert2naToIupacna
-// ...
-//     return convert_1_to_4(src, pos, length, dst, C2naToIupacna::GetTable());
-// ...
-// SIZE_TYPE CSeqConvert_imp::x_Convert4naToIupacna
-// ...
-//     return convert_1_to_2(src, pos, length, dst, C4naToIupacna::GetTable());
-// ...
-// SIZE_TYPE CSeqConvert_imp::x_Convert8naToIupacna
-// ...
-//     return convert_1_to_1(src, pos, length, dst, C8naToIupacna::GetTable());
-// ```
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1504-1507
-// ```c++
-// const Uint1 C8naToIupacna::scm_Table[256] = {
-//     0x4e, 0x41, 0x43, 0x4d, 0x47, 0x52, 0x53, 0x56,
-//     0x54, 0x57, 0x59, 0x48, 0x4b, 0x44, 0x42, 0x4e,
-//     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-// ```
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:886-893,950-958
-// ```c++
-// SIZE_TYPE CSeqConvert_imp::x_ConvertIupacaaToEaa(...)
-// {
-//     return Subseq(src, CSeqUtil::e_Iupacaa, pos, length, dst);
-// }
-// ...
-//     return convert_1_to_1(src, pos, length, dst, CStdaaToEaa::GetTable());
-// ```
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1822-1826
-// ```c++
-// const Uint1 CStdaaToEaa::scm_Table[256] = {
-//     0x2d, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
-//     0x48, 0x49, 0x4b, 0x4c, 0x4d, 0x4e, 0x50, 0x51,
-//     0x52, 0x53, 0x54, 0x56, 0x57, 0x58, 0x59, 0x5a,
-//     0x55, 0x2a, 0x4f, 0x4a, 0xff, 0xff, 0xff, 0xff,
-// ```
 // The tables `C2naToIupacna` and `C4naToIupacna` (sequtil_tables.cpp:498, 1094) spell the
 // bases of each byte from its high bits: NCBI2na codes 0 to 3 are `ACGT`, NCBI4na codes 0 to
 // 15 are `NACMGRSVTWYHKDBN` (code 0, a gap, is `N`); NCBI8na codes 16 and up are the byte
@@ -612,96 +317,14 @@ fn one_letter(data: &(&'static str, Vec<u8>)) -> Result<(LetterType, Vec<u8>), &
 /// `std::runtime_error`, reported by `CNcbiApplication` (oracle `pna` of PS16c: `Error: (106.7)
 /// Application's execution failed: Requested conversion not implemented`, exit 3).
 // NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:2029-2035
-// ```c++
-//     if(to_code == CSeq_data::e_not_set || from_code == CSeq_data::e_not_set) {
-//         throw std::runtime_error("to_code or from_code not set");
-//     }
-//     if ( s_SeqDataToSeqUtil[to_code]  == CSeqUtil::e_not_set  ||
-//          s_SeqDataToSeqUtil[from_code] == CSeqUtil::e_not_set ) {
-//         throw runtime_error("Requested conversion not implemented");
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:1947-1959
-// ```c++
-// static CSeqUtil::TCoding s_SeqDataToSeqUtil[] = {
-//     CSeqUtil::e_not_set,
-//     CSeqUtil::e_Iupacna,
-//     CSeqUtil::e_Iupacaa,
-//     CSeqUtil::e_Ncbi2na,
-//     CSeqUtil::e_Ncbi4na,
-//     CSeqUtil::e_Ncbi8na,
-//     CSeqUtil::e_not_set,
-//     CSeqUtil::e_Ncbi8aa,
-//     CSeqUtil::e_Ncbieaa,
-//     CSeqUtil::e_not_set,
-//     CSeqUtil::e_Ncbistdaa
-// };
-// ```
 const UNCONVERTIBLE: &str = "Requested conversion not implemented";
 
 /// `Get1LetterSeqData` before its cut to `inst.length`: the `seq-data`, else the literals of
 /// `ext delta` of the kind of the first one with letters, one after another; or what to refuse
 /// (the place and the encoding).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:199-246
-// ```c++
-// string Get1LetterSeqData(const CSeq_inst& rSeqInst)
-// {
-// 	string dst;
-// 	if (rSeqInst.IsSetSeq_data() && rSeqInst.CanGetSeq_data())
-// 	{
-// 		SeqDataTo1LtrSeq(rSeqInst.GetSeq_data(), dst);
-// 	}
-// 	else if (rSeqInst.IsSetExt() && rSeqInst.CanGetExt())
-// 	{
-// 		const CSeq_ext &rSeqExt = rSeqInst.GetExt();
-//
-// 		switch (rSeqExt.Which())
-// 		{
-// 		case CSeq_ext::e_not_set:
-// 		case CSeq_ext::e_Seg:
-// 		case CSeq_ext::e_Ref:
-// 		case CSeq_ext::e_Map:
-// 			break;
-// 		case CSeq_ext::e_Delta:
-// 			{
-// 				const CDelta_ext::Tdata &rDeltaExt_data = rSeqExt.GetDelta().Get();	//typedef list< CRef< CDelta_seq > > Tdata;
-// 				int litType = -1;
-// 				for (CDelta_ext::Tdata::const_iterator iter = rDeltaExt_data.begin(), iterEnd = rDeltaExt_data.end(); iterEnd != iter; ++iter)
-// 				{
-// 					switch ((*iter)->Which())
-// 					{
-// 					case CDelta_seq::e_Literal:
-// 						{
-// 							const CSeq_literal &rSeqLit = (*iter)->GetLiteral();
-// 							if (rSeqLit.IsSetSeq_data() && rSeqLit.CanGetSeq_data())
-// 							{
-// 								string tmp(k_strEmptyString);
-// 								int stype = SeqDataTo1LtrSeq(rSeqLit.GetSeq_data(), tmp);
-// 								if (stype >= 0)	//valid
-// 								{
-// 									if (litType < 0) litType = stype;
-//
-// 									if (litType == stype)	//same aa or na
-// 										dst.append(tmp);
-// 								}
-// 							}
-// 						}
-// 						break;
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-// ```
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:248-253
-// ```c++
-// 	// -- somehow the CSeqportUtil::Convert may append an extra residue to the result (bug?), so check
-// 	SeqLen_t ori_len = rSeqInst.GetLength(), end_len = dst.size();
-// 	if (ori_len < end_len)
-// 	{
-// 		dst.erase(ori_len);
-// 	}
-// ```
 fn one_letter_residues(query: &Query) -> Result<Vec<u8>, (&'static str, &'static str)> {
     if let Some(data) = &query.seq_data {
         return Ok(one_letter(data).map_err(|name| ("Seq-data", name))?.1);
@@ -721,25 +344,6 @@ fn one_letter_residues(query: &Query) -> Result<Vec<u8>, (&'static str, &'static
 /// `x_GetPssmId`: the PSSM-ID of a subject id (`ProcessCDAlign` keeps the hits whose PSSM-ID
 /// is not 0).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_biodata.cpp:175-191
-// ```c++
-// PssmId_t CNcbiCdAlignProcessor::x_GetPssmId(const CSeq_id &seqid, string & acxn) const
-// {
-//
-// 	const CSeq_id::TGeneral& rDbTag = seqid.GetGeneral();  //CDbtag
-//
-// 	const CDbtag::TTag& rObjectId = rDbTag.GetTag();  //CObject_id
-//
-// 	acxn.clear();
-// 	if (rObjectId.Which() == CObject_id::e_Id)	//correct pssmid
-// 		return rObjectId.GetId();
-// 	else if (rObjectId.Which() == CObject_id::e_Str)
-// 	{
-// 		acxn = rObjectId.GetStr();
-// 		return TDomSrcCount::ComputePseudoPssmId(acxn);
-// 	}
-// 	return 0;
-// }
-// ```
 // (The `int` id is returned as `PssmId_t`, an `unsigned int`.)
 fn pssm_id(id: &ParsedSeqId) -> Result<u32, ProcessError> {
     let ParsedSeqId::General(dbtag) = id else {
@@ -758,61 +362,7 @@ fn pssm_id(id: &ParsedSeqId) -> Result<u32, ProcessError> {
 
 /// `ProcessCDQuery`: the query's hits (`ProcessCDAlign`) and their classification, of all of
 /// them for a protein query, of each reading frame's for a nucleotide query.
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_biodata.cpp:195-232
-// ```c++
-// void CNcbiCdAlignProcessor::ProcessCDAlign(const list<CRef<CSeq_align> > &rAligns, vector<TDomSeqAlignment> &dst) const
-// {
-// 	for (list<CRef<CSeq_align> > :: const_iterator iterSrc = rAligns.begin(); iterSrc != rAligns.end(); ++iterSrc)
-// 	{
-//
-// 		TDomSeqAlignment newalign;
-//
-// 		CRef<CSeq_id> hit_id = ParseAlignSegs((*iterSrc)->GetSegs(), newalign);
-//
-// 		if (!hit_id.IsNull())
-// 		{
-// 			string acxn;
-// 			PssmId_t uiPssmId = x_GetPssmId(*hit_id, acxn);
-// 			if (uiPssmId > 0)	//pseudo or not
-// 			{
-//
-// 				newalign.m_uiPssmId = uiPssmId;
-//
-// 				ParseAlignScores(**iterSrc, newalign);
-//
-// 				dst.emplace_back(move(newalign));
-// 			}
-// 		}
-// 	}
-// }
-//
-// void CNcbiCdAlignProcessor::ProcessCDQuery(const list<ncbi::CRef<ncbi::objects::CSeq_align> > &rAligns, TDomQuery &dst, vector<PssmId_t> *missed) const
-// {
-//
-// 	ProcessCDAlign(rAligns, dst.m_vecAlignments);
-// 	...
-// 	if (!dst.m_bIsNa)
-// 	{
-// 		Calculate(dst.m_vecAlignments, dst.m_dimSplitAligns[0], missed_pssmids);
-// 	}
-// 	else
-// 	{
-// 		vector<size_t> rfIndice[READINGFRAME::TOTAL_RFS];
-// 		CCdAlignProcessor::SortReadingFrames(dst.m_vecAlignments, rfIndice, dst.m_uiSeqLen);
-// 		for (int i = 0; i < READINGFRAME::TOTAL_RFS; ++i)
-// 		{
-//
-// 			if (!rfIndice[i].empty())
-// 			{
-// 				vecMissed.clear();
-//
-// 				Calculate(dst.m_vecAlignments, rfIndice[i], dst.m_dimSplitAligns[i], missed_pssmids);
-//
-// 			}
-// 		}
-// 	}
-// }
-// ```
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_biodata.cpp:195-244
 // (`ParseAlignSegs` is `domains::parse_align` and `domains::parse_std_align`; it takes the
 // hit's id from the second id of a Dense-seg or of the first Std-seg, and reads past `ids` when
 // there are fewer: refused. The reading frames of a nucleotide query's hits are the classes of
@@ -869,15 +419,7 @@ fn process_cd_query(
             (None, _) => unreachable!("a Dense-seg"),
         };
         // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1809,1836
-        // ```c++
-        // 	(*m_ostream) << pType << DELIMIT << (rec.pAlign->m_uiPssmId >= INVALIDPSSMID ? 0 : rec.pAlign->m_uiPssmId) << DELIMIT << rec.pAlign->m_iFrom + COORDSBASE << DELIMIT << rec.pAlign->m_iTo + COORDSBASE << DELIMIT << ...
-        // 	(*m_ostream) << HITTYPE_CLUSTER << DELIMIT << (rec.pCdInfo->m_uiClusterPssmId >= INVALIDPSSMID ? 0 : rec.pCdInfo->m_uiClusterPssmId) << DELIMIT << rec.pAlign->m_iFrom + COORDSBASE << DELIMIT << rec.pAlign->m_iTo + COORDSBASE << DELIMIT << ...
-        // ```
         // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.cpp:205-206
-        // ```c++
-        // 			CSegSet thisSegs;
-        // 			thisSegs.AddSeg(iter->pAlign->m_iFrom, iter->pAlign->m_iTo);
-        // ```
         // A kept hit whose range starts or ends at 2^31 - 1, of a protein or a nucleotide query:
         // the `int` sums of its DOMAINS and SUPERFAMILIES lines overflow (undefined; PS16c review
         // oracle `plusmax`: both 0.5.1 builds print -2147483648), and so may the overlap sets of
@@ -907,46 +449,7 @@ fn process_cd_query(
 /// (NCBI's exceptions when no segment names one, and the location variants whose id LOSAT does
 /// not look up).
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:317-358
-// ```c++
-// const CSeq_id& CSeq_align::GetSeq_id(TDim row) const
-// {
-//     switch (GetSegs().Which()) {
-//     case C_Segs::e_Denseg:
-//         return GetSegs().GetDenseg().GetSeq_id(row);
-//     ...
-//     case C_Segs::e_Std:
-//         {{
-//             // If segments have different number of rows, this will try
-//             // to find the segment with enough rows to get the id.
-//             ITERATE(CSeq_align::C_Segs::TStd, seg, GetSegs().GetStd()) {
-//                 if ( (*seg)->IsSetIds()  &&
-//                      (size_t)row < (*seg)->GetIds().size()) {
-//                     return *((*seg)->GetIds()[row]);
-//                 }
-//                 else if ( (*seg)->IsSetLoc()  &&
-//                      (size_t)row < (*seg)->GetLoc().size() ) {
-//                     const CSeq_loc& loc = *(*seg)->GetLoc()[row];
-//                     CConstRef<CSeq_id> id(loc.GetId());
-//                     if (id) {
-//                         return *id;
-//                     }
-//                 }
-//             }
-//         }}
-//         break;
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:390-398
-// ```c++
-//     default:
-//         NCBI_THROW(CSeqalignException, eUnsupported,
-//                    "CSeq_align::GetSeq_id() currently does not handle "
-//                    "this type of alignment.");
-//     }
-//
-//     NCBI_THROW(CSeqalignException, eInvalidRowNumber,
-//                "CSeq_align::GetSeq_id(): "
-//                "can not get seq-id for the row requested.");
-// ```
 // (A `null` location has no id; `empty`, `whole`, `int` and `pnt` have theirs. The exceptions
 // end rpsbproc as its other `CException`s of a session do: PS16c oracles `noids2` and
 // `packed`, the two `Error:` lines, exit 3. `GetSeq_id` is a `const` method, so the report names
@@ -996,50 +499,6 @@ fn query_row_id(align: &Align) -> Result<&ParsedSeqId, ProcessError> {
 /// `ProcessBlastResults`: each query with the alignments that follow in the list while their
 /// first id matches the query's local id (else its first id).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_biodata.cpp:308-366
-// ```c++
-// void CNcbiCdAlignProcessor::ProcessBlastResults(list<TDomQuery> &dst, const list<CRef<CSeq_entry> > &qseqs, const TSeqLocInfoVector & masks, const list< CRef<CSeq_align > > &aligns, int gcode, vector<PssmId_t> *missed) const
-// {
-//
-// 	if (!qseqs.empty())
-// 	{
-// 		list< CRef<CSeq_align> > :: const_iterator iterAlign = aligns.begin(), iterAlignEnd = aligns.end();
-// 		...
-// 		for (list<CRef<CSeq_entry> > :: const_iterator iterSeq = qseqs.begin(), iterSeqEnd = qseqs.end(); iterSeqEnd != iterSeq; ++iterSeq)
-// 		{
-// 			const CBioseq &seq = (*iterSeq)->GetSeq();	//offline sequence, assume to be seq, no more check
-// 			list<TDomQuery> :: iterator iterDQ = dst.emplace(dst.end());
-//
-// 			FillSequenceFromBioseq(seq, *iterDQ);
-//
-// 			const CSeq_id* curr_seq_id = seq.GetLocalId();
-// 			if (nullptr == curr_seq_id)	//added because Bioseq from command line rpsblast may not contain a local seq-id.
-// 				curr_seq_id = seq.GetFirstId();
-// 			...
-// 			list< CRef< CSeq_align > > lstAligns;
-//
-// 			while (iterAlignEnd != iterAlign)
-// 			{
-// 				const CSeq_id &aligned = (*iterAlign)->GetSeq_id(0);
-// 				if (!curr_seq_id->Match(aligned))
-// 				{
-// 					if (!lstAligns.empty())
-// 						ProcessCDQuery(lstAligns, *iterDQ, missed);
-//
-// 					goto labelNextSeq;	//to next sequence
-// 				}
-//
-// 				// -- collect aligns for current sequence
-// 				lstAligns.emplace_back(*iterAlign);
-//
-// 				++iterAlign;
-// 			}
-//
-// 			if (!lstAligns.empty())
-// 				ProcessCDQuery(lstAligns, *iterDQ, missed);
-//
-// 		labelNextSeq:;
-// 		}
-// ```
 // (`CSeq_id::Match` is `Compare(...) == e_YES`, `seqid::defline_set::compare`. The masks of
 // each query are not printed. `query_row_id` is `GetSeq_id(0)` of a `Dense-seg`, of the
 // `Std-seg`s of a translated search and of a `Packed-seg` (NCBI's exception); the other
@@ -1067,34 +526,6 @@ pub(crate) fn process_blast_results(
             translated: None,
         };
         // NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:271-279,327-343
-        // ```c++
-        // const CSeq_id* CBioseq::GetFirstId() const
-        // {
-        //     // If no ids for Bioseq, return 0 -- should not happen
-        //     if (GetId().empty()) {
-        //         return 0;
-        //     }
-        //
-        //     return *GetId().begin();
-        // }
-        // ...
-        // static int s_BestLocalRank(const CRef<CSeq_id>& id)
-        // {
-        //     if (id.Empty() || !id->IsLocal()) {
-        //         return kMax_Int;
-        //     }
-        //     return id->BestRankScore();
-        // }
-        //
-        // const CSeq_id* CBioseq::GetLocalId() const
-        // {
-        //     CRef<CSeq_id> id = FindBestChoice(GetId(), &s_BestLocalRank);
-        //     if (id.NotEmpty() && id->IsLocal()) {
-        //         return &*id;
-        //     }
-        //     return NULL;
-        // }
-        // ```
         let current = crate::seqid::rank::find_best(&query.ids, |id| {
             if matches!(id, ParsedSeqId::Local(_)) {
                 crate::seqid::rank::best_rank_score(id)
@@ -1151,7 +582,7 @@ mod tests {
     }
 
     // The refusals of a nucleotide query's `Std-seg`s (cdalignproc_biodata.cpp:195-232,
-    // Seq_align.cpp:339-358 and rpsbproc_main.cpp:1809,1836, quoted at `process_cd_query` and
+    // Seq_align.cpp:339-358 and rpsbproc_main.cpp:1809,1836, cited at `process_cd_query` and
     // `query_row_id`): a first segment with fewer than 2 ids is read past its end (PS16c oracle
     // `noids1`: segmentation fault in both 0.5.1 builds); a first location of a variant whose
     // id LOSAT does not look up. A kept hit whose range starts or ends at 2^31 - 1, whose
@@ -1237,7 +668,7 @@ mod tests {
         assert_eq!(run(row(), cdd(0), 0, 0x7fff_ffff, 1), Ok(vec![]));
     }
 
-    // `Get1LetterSeqData` (biodata_core.cpp:199-253, quoted at `one_letter_residues`): the
+    // `Get1LetterSeqData` (biodata_core.cpp:199-253, cited at `one_letter_residues`): the
     // literals of `ext delta` one after another (NCBIstdaa converted), cut to `inst.length`;
     // the `seq-data` first when both are set; a literal in an encoding LOSAT does not convert is
     // refused as a `seq-data` in it is.
@@ -1278,7 +709,7 @@ mod tests {
     }
 
     // `SeqDataTo1LtrSeq` of the nucleotide encodings (biodata_core.cpp:149-197 and the
-    // `CSeqportUtil` tables, quoted at `one_letter`): NCBI2na 4 bases per byte from the high
+    // `CSeqportUtil` tables, cited at `one_letter`): NCBI2na 4 bases per byte from the high
     // bits, NCBI4na 2 (code 0 is `N`), NCBI8na 1 (codes from 16 the byte 0xff), IUPACna as it
     // is; cut to `inst.length`; the literals of a delta of the kind of the first one only
     // (`litType`); NCBIpna throws `CSeqportUtil`'s `runtime_error`.
@@ -1329,7 +760,7 @@ mod tests {
         assert_eq!(what, "Requested conversion not implemented");
     }
 
-    // serial/exception.cpp:86-150 (quoted at `choice_selection`); NCBI's rpsbproc printed the first
+    // serial/exception.cpp:86-150 (cited at `choice_selection`); NCBI's rpsbproc printed the first
     // one for a profile database with `lcl|` ids (PS16a probe 2).
     #[test]
     fn choice_selection_messages() {
@@ -1363,7 +794,7 @@ mod tests {
         );
     }
 
-    // serialobject.cpp:266-306 (quoted at `unassigned_member`); NCBI's rpsbproc printed it for a
+    // serialobject.cpp:266-306 (cited at `unassigned_member`); NCBI's rpsbproc printed it for a
     // query without `inst.length` (PS16a review oracle O3-9).
     #[test]
     fn unassigned_member_message() {
@@ -1379,7 +810,7 @@ mod tests {
         );
     }
 
-    // Seq_id.cpp:2292-2326 and biodata_core.cpp:1030-1046 (quoted at `query_accession`): the
+    // Seq_id.cpp:2292-2326 and biodata_core.cpp:1030-1046 (cited at `query_accession`): the
     // label of the best id, after its first `:`, then after its first `|`.
     #[test]
     fn query_labels() {

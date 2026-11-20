@@ -16,18 +16,6 @@ use crate::core::hspfilter_culling::{CullKey, CullingForest};
 /// query are its frames 1, 2, 3, -1, -2, -3 (`BLAST_GetAllTranslations`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1211-1220
-/// ```c
-/// Int4 BLAST_FrameToContext(Int2 frame, EBlastProgramType program)
-/// {
-///     if (Blast_QueryIsTranslated(program) ||
-///         Blast_SubjectIsTranslated(program)) {
-///         ASSERT(frame >= -3 && frame <= 3 && frame != 0);
-///         if (frame > 0) {
-///             return frame - 1;
-///         } else {
-///             return 2 - frame;
-///         }
-/// ```
 pub(crate) fn tblastx_context(frame: i32) -> usize {
     if frame > 0 {
         (frame - 1) as usize
@@ -40,22 +28,7 @@ pub(crate) fn tblastx_context(frame: i32) -> usize {
 /// query information holds it (`contexts[context].query_length`), in context order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:193-195
-/// ```c
-///             for (unsigned int i = 0; i < kNumContexts; i++) {
-///                 unsigned int prot_length =
-///                     static_cast<unsigned int>(BLAST_GetTranslatedProteinLength(length, i));
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:922-929
-/// ```c
-/// size_t
-/// BLAST_GetTranslatedProteinLength(size_t nucleotide_length, unsigned int context)
-/// {
-///     if (nucleotide_length == 0 || nucleotide_length <= context % CODON_LENGTH) {
-///         return 0;
-///     }
-///     return (nucleotide_length - context % CODON_LENGTH) / CODON_LENGTH;
-/// }
-/// ```
 /// TBLASTX's queries are searched on both strands (`eNa_strand_both`), so every context
 /// has this length.
 pub(crate) fn tblastx_context_lengths(nucleotide_length: usize) -> [i32; 6] {
@@ -87,33 +60,6 @@ impl CullingWriter {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:602-644
-    /// ```c
-    ///    for (i=0; i<hsp_list->hspcnt; ++i) {
-    ///       /* wrap the hsp with a LinkedHSP structure */
-    ///       A.hsp   = hsp_list->hsp_array[i];
-    ///       A.cid   = isBlastn ? (A.hsp->context  - A.hsp->context % NUM_STRANDS) : A.hsp->context;
-    ///       A.sid   = hsp_list->oid;
-    ///       A.merit = params->culling_max;
-    ///       qlen    = cull_data->query_info->contexts[A.hsp->context].query_length;
-    ///       if(isBlastn && (A.hsp->context % NUM_STRANDS)) {
-    ///     	  A.begin = qlen - A.hsp->query.end;
-    ///     	  A.end   = qlen -  A.hsp->query.offset;
-    ///       }
-    ///       else {
-    ///     	  A.begin = A.hsp->query.offset;
-    ///     	  A.end   = A.hsp->query.end;
-    ///       }
-    ///       A.next  = NULL;
-    ///
-    ///       if (! c_tree[A.cid]) {
-    ///          c_tree[A.cid] = s_CTreeNew(qlen);
-    ///       }
-    ///
-    ///       if(s_SaveHSP(c_tree[A.cid], &A)){
-    ///     	 hsp_list->hsp_array[i] = NULL;
-    ///       }
-    ///    }
-    /// ```
     /// TBLASTX is not BLASTN: the context is the HSP's own and the offsets are the frame
     /// offsets of `Blast_HSPInit` (`sort_query_offset`, `sort_query_end`). The HSPs of
     /// `hsp_list` come in its order; an HSP that is not saved is freed.
@@ -135,35 +81,6 @@ impl CullingWriter {
     /// list of the query (`CullingForest::finalize`; all six contexts are one query).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581
-    /// ```c
-    ///    for (cid=0; cid < cull_data->num_contexts; ++cid) {
-    ///       if (c_tree[cid]) {
-    /// ...
-    ///          cull_list = s_RipHSPOffCTree(c_tree[cid]);
-    /// ...
-    ///          while (cull_list) {
-    ///             p = cull_list;
-    ///             /* test to see if new hsplist has already been allocated */
-    ///             allocated = FALSE;
-    ///             for (sid=0; sid<hitlist->hsplist_count; ++sid) {
-    ///                 list = hitlist->hsplist_array[sid];
-    ///                 if (p->sid == list->oid) {
-    ///                    allocated = TRUE;
-    ///                    break;
-    ///                 }
-    ///             }
-    /// ...
-    ///             list->hsp_array[id] = p->hsp;
-    ///             list->hspcnt++;
-    /// ...
-    ///          for (sid=0; sid < hitlist->hsplist_count; ++sid) {
-    ///             list = hitlist->hsplist_array[sid];
-    ///             best_evalue = (double) INT4_MAX;
-    ///             for (id=0; id < list->hspcnt; ++id) {
-    ///                 best_evalue = MIN(list->hsp_array[id]->evalue, best_evalue);
-    ///             }
-    ///             Blast_HSPListSortByScore(list);
-    /// ```
     pub(crate) fn finalize(self) -> Vec<(u32, Vec<TblastxHsp>)> {
         self.forest
             .finalize(

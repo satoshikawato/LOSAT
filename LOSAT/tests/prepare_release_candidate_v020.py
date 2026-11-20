@@ -450,7 +450,6 @@ def check_smoke_record(record: object, contract: dict[str, object], label: str) 
 
 
 # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-# CATCH_ALL(status); return status;
 # Host compatibility only: the threaded Wasm artifact is published with the shared-memory
 # guard (`LOSAT/tests/wasi_shared_memory.js guard`, release v0.2.0 DECISIONS 52), so that
 # browser hosts run guarded bytes too. An artifact whose guard does not verify is refused.
@@ -543,7 +542,6 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
         if not runner.is_file():
             raise ReleaseFailure(f"WASI runner script is missing: {runner}")
         # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-        # CATCH_ALL(status); return status;
         # Reject a reactor or a wrong-threading artifact before running its entry point.
         inspection = subprocess.run(
             [

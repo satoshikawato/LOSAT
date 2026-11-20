@@ -3,15 +3,6 @@
 //! on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596
-//! ```c
-//!          while (nt_seq < (nt_seq_end-10)) {
-//!             byte_value1 = *(++nt_seq);
-//!             byte_value2 = *(++nt_seq);
-//!             byte_value3 = *(++nt_seq);
-//!             /* case 0: */
-//!             codon = (byte_value >> 2);
-//!             *prot_seq = translation[codon];
-//! ```
 //! The vector loop and the word loop give the frames of `x_generate_frames` (the unit test
 //! `x_packed_frames_read_from_the_bytes_are_the_frames_of_the_codes`), so the report does not
 //! depend on the switch. It is on by default and off with `LOSAT_X_TBNXLATESIMD=0`;

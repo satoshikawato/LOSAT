@@ -129,33 +129,14 @@ impl XWaitingBytes for u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:75-78
-// ```c
-// const char BLASTNA_TO_IUPACNA[BLASTNA_SIZE] = {
-//     'A', 'C', 'G', 'T', 'R', 'Y', 'M', 'K',
-//     'W', 'S', 'B', 'D', 'H', 'V', 'N', '-'
-// };
-// ```
 /// The IUPAC letter of a BLASTNA code.
 #[cfg(test)]
 const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:375,388-391
-// ```c++
-//         len = seqdb.GetSequence(oid, &buf);
-//     ...
-//     /* For preliminary stage, even though sequence buffer points to a memory
-//        mapped location, we still need to call ReleaseSequence. This can only be
-//        guaranteed by making the engine believe tat sequence is allocated.
-//     */
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1376-1378
-// ```c
-//     if ((status =
-//        s_BlastSetUpAuxStructures(seq_src, lookup_wrap, word_params,
-//           ext_options, hit_options, query, query_info, &aux_struct)) != 0)
-// ```
 // NCBI's preliminary stage reads each sequence in place in the mapped volume (`GetFileDataPtr`,
-// seqdbvol.cpp:1817, quoted above `block_subject`), and each search thread allocates its search
+// seqdbvol.cpp:1817, cited above `block_subject`), and each search thread allocates its search
 // structures once. LOSAT reads a block with one positioned read (`seqdb::file`, no mapping, so
 // that native builds and WebAssembly share the reader): each worker keeps one buffer for its
 // blocks, read again for each block. It is allocated once per worker and grows only for a larger
@@ -284,17 +265,6 @@ pub(super) struct SamLetterCache(RefCell<HashMap<u32, NucleotideAmbiguity>>);
 impl BlastnDatabase {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2645-2668
     // (`Blast_HSPListReevaluateUngapped`)
-    // ```c
-    //       	seq_arg.oid = subject_blk->oid;
-    //       	seq_arg.encoding =
-    //        	  (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
-    //         seq_arg.check_oid_exclusion = TRUE;
-    //       	seq_arg.seq = subject_blk;
-    //       	/* Return the packed sequence to the database */
-    //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-    //       	/* Get the unpacked sequence */
-    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-    // ```
     /// Calls `use_letters` with the letters of database sequence `ordinal` in BLASTNA, without
     /// the sentinel bytes: the subject that an ungapped (`-ungapped`) search re-evaluates its
     /// HSPs on in the preliminary stage (NCBI gets the sequence again, unpacked, for a sequence
@@ -325,9 +295,6 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:185
-    // ```c++
-    //             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
-    // ```
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -345,16 +312,6 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
-    // ```c++
-    //             	CRef<CBlast_def_line_set> bdlRef =
-    //             			CSeqDB::ExtractBlastDefline(subject_bh);
-    //             	if(setSubjectIds) {
-    //             		x_SetSubjectIds(subject_bh, bdlRef);
-    //             	}
-    //             	if(setSubjectTaxInfoAll) {
-    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
-    //             	}
-    // ```
     /// The taxonomy of the tabular fields (`staxid`, `staxids`;
     /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported sequences `ordinals`, by
     /// rank: from the definition lines of a sequence with parsed Seq-ids (`parsed[rank]`), else
@@ -418,9 +375,6 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
-    // ```c++
-    //             vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);
-    // ```
     /// The IUPAC letters `[from, to)` of database sequence `ordinal` (outfmt 17 with `SQ`):
     /// only the bytes of the range are read, and the sequence's length and ambiguity runs are
     /// read once per call and kept in `cache` (NCBI's `CSeqVector` also keeps them).
@@ -452,24 +406,7 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
-    // ```c++
-    //         /*** Initialize the database/subject ***/
-    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-    //         CRef<CLocalDbAdapter> db_adapter;
-    //         CRef<CScope> scope;
-    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-    //                          db_adapter, scope);
-    //         _ASSERT(db_adapter && scope);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:182-187
-    // ```c++
-    // static Int8
-    // s_SeqDbGetTotLen(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetTotalLength();
-    // }
-    // ```
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors. The total length is NCBI's `Int8`, which the engine holds
     /// as such (`SubjectMetadata::db_len_total`) on every target.
@@ -510,35 +447,7 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:665-675,792-797
-    // ```c++
-    // void CIndexedDb_New::AddIndexInfo(
-    //         const std::string & vol_name, bool & partial )
-    // {
-    //     ...
-    //     try {
-    //         shdr.Reset( GetIndexSuperHeader( vol_name + ".shd" ) );
-    // ...
-    //         if( !has_index ) {
-    //             NCBI_THROW( CDbIndex_Exception, eBadOption,
-    //                         "no database volume has an index" );
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:950-968,998-1003
-    // ```c++
-    //         while( start != string::npos ) {
-    //             end = indexnames.find_first_of( " ", start );
-    //             dbnames.push_back( indexnames.substr( start, end - start ) );
-    //             start = indexnames.find_first_not_of( " ", end );
-    //         }
-    // ...
-    //             end = indexname.find_first_of( ",", start );
-    //             string index_base = indexname.substr( start, end );
-    // ...
-    //                 for( long i = start_vol; (unsigned long)i <= stop_vol; ++i ) {
-    //                     ostringstream os;
-    //                     os << index_base << "." << setw( 2 ) << setfill( '0' )
-    //                        << i << ".idx";
-    //                     string name = SeqDB_ResolveDbPath( os.str() );
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:950-1005
     /// A file of a MegaBLAST index of this database that NCBI's index loader would find for the
     /// `-db` value `index_name` (`DbIndexInit`): a new-style superheader `<volume>.shd` of one of
     /// its volumes, or an old-style volume `<name>.NN.idx` (00 to 99, NCBI's range without the
@@ -708,10 +617,6 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:307-308
-    // ```c++
-    //     case C_Segs::e_Dendiag:
-    //         return GetSegs().GetDendiag().front()->GetSeqStrand(row);
-    // ```
     // A gapped search makes a Seq-align of each HSP; an ungapped one makes one Seq-align of a
     // subject's HSPs, a Dense-diag each (`shared::subject_seq_aligns`), whose strand is its
     // first one's: the subject's first HSP (probe of line DBID pfwarn, `R/pfwarn` W4). BLASTN's
@@ -943,7 +848,7 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:197-218 and
-    // c++/include/objtools/blast/seqdb_reader/seqdb.hpp:286-306 (quoted at
+    // c++/include/objtools/blast/seqdb_reader/seqdb.hpp:286-306 (cited at
     // `core::subject_split::complement_masks`): the complement of the masks in the order they
     // are stored, nothing sorted or merged (decision D3 of M4a-2).
     /// The ranges (`seq_ranges`) of database sequence `ordinal` of length `length`, read in the
@@ -968,16 +873,6 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
-    // ```c++
-    //     CSeqDB::TSequenceRanges ranges;
-    //     m_iSeqDb->GetMaskData(index, m_FilteringAlgoId, ranges);
-    //     ITERATE(CSeqDB::TSequenceRanges, itr, ranges) {
-    //         for (size_t it=0; it<target.size(); it++) {
-    //             if (target[it] != TSeqRange::GetEmpty() &&
-    //                 target[it].IntersectingWith(*itr)) {
-    //                 CRef<CSeq_interval> si
-    //                     (new CSeq_interval(*id, itr->first, itr->second-1));
-    // ```
     /// The stored masks of database sequence `ordinal` for the algorithm `algo_id`, in the order
     /// they are stored (`[start, end)`), which the reports of a masked search show in lowercase
     /// where they meet an HSP (`pairwise::Rows`); `masks` is the reports' block buffer.
@@ -1043,44 +938,8 @@ impl BlastnDatabase {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538
-// ```c++
-// static void s_SeqDBMaskSequence(char                    * seq,
-//                                 CSeqDB::TSequenceRanges * masks,
-//                                 char                      mask_letter,
-//                                 const SSeqDBSlice       & range)
-// {
-//     if (!masks || masks->empty()) return;
-//
-//     // TODO This could be optimized with binary search
-//     unsigned int i(0);
-//     unsigned int begin(range.begin);
-//     unsigned int end(range.end);
-//
-//     while (i < masks->size() && (*masks)[i].second <= begin) ++i;
-//
-//     while (i < masks->size() && (*masks)[i].first < end) {
-//         for (size_t j = max((*masks)[i].first, begin);
-//                  j < min((*masks)[i].second, end); ++j) {
-//             seq[j] = mask_letter;
-//         }
-//         ++i;
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1665-1673
-// ```c++
-//         if (!use_range_set) {
-//             s_SeqDBMapNA2ToNA8(tmp, seq, range);
-//             s_SeqDBRebuildDNA_NA8(seq, ambchars, range);
-//             s_SeqDBMaskSequence(seq, masks, (char)14, range);
-//             if (sentinel) s_SeqDBMapNcbiNA8ToBlastNA8(seq, range);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:590-606
-// ```c++
-// unsigned SeqDB_ncbina8_to_blastna8[] = {
-//     ...
-//     10, /* B,  14 */
-// ```
 /// BLASTNA 'B' (NCBI4na 14 mapped to BLASTNA).
 const HARD_MASK_BLASTNA: u8 = 10;
 
@@ -1110,30 +969,7 @@ fn mask_hard_letters(blastna: &mut [u8], masks: &[(u32, u32)], ranges: &[(usize,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1401-1405
-// ```c
-//     memset((void*) &seq_arg, 0, sizeof(seq_arg));
-//
-//     /* Encoding is set so there are no sentinel bytes, and protein/nucleotide
-//        sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
-//     seq_arg.encoding = eBlastEncodingProtein;
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1838
-// ```c++
-//     } else if ('n' == seqtype) {
-//         // The last byte is partially full; the last two bits of the
-//         // last byte store the number of nucleotides in the last byte
-//         // (0 to 3).
-//     ...
-//         *buffer = m_Seq->GetFileDataPtr(start_offset);
-//     ...
-//         int whole_bytes = int(end_offset - start_offset - 1);
-//
-//         char last_char = (*buffer)[whole_bytes];
-//
-//         int remainder = last_char & 3;
-//         length = (whole_bytes * 4) + remainder;
-//     }
-// ```
 // The preliminary stage searches the stored 2-bit data as makeblastdb wrote it (its
 // ambiguous bases already replaced by makeblastdb's random bases), in the layout of the
 // subject set's packed letters (four bases per byte from the high bits down, the count of
@@ -1161,25 +997,7 @@ fn block_subject<'a>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
-// ```c
-//     db_length = BlastSeqSrcGetTotLen(seq_src);
-//
-//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-//        Int4 stat_length;
-//        if (seq_arg.oid == BLAST_SEQSRC_ERROR)
-//            break;
-//        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0)
-//            continue;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554
-// ```c
-//           /* Save the results. */
-//           status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-// ```
 /// The preliminary stage of a database search: every sequence, in the order of its
 /// ordinal id, through `search` (the per-subject kernel), and what it keeps of a sequence
 /// (`Some`) through `merge` in that order (NCBI's loop with one thread; `merge` puts the
@@ -1260,7 +1078,7 @@ where
 }
 
 // No NCBI counterpart (scheduling only): the rounds of LOSAT's parallel stage; the merges in
-// ordinal order are NCBI's one-thread order (blast_engine.c:1553-1554, quoted above
+// ordinal order are NCBI's one-thread order (blast_engine.c:1553-1554, cited above
 // `search_blocks`).
 /// The rounds of `search_blocks_of` with `parallel` (without LOSAT_X_BNDBSTREAM):
 /// `blocks_per_thread` blocks of at most `block_bytes` per thread
@@ -1416,50 +1234,9 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:196-203
-// ```c
-//    /* sort in order of decreasing subject OID. HSPLists will be
-//       read out from the end of hsplist_array later */
-//
-//    hsp_stream->num_hsplists = num_hsplists;
-//    if (num_hsplists > 1) {
-//       qsort(hsp_stream->sorted_hsplists, num_hsplists,
-//                     sizeof(BlastHSPList *), s_SortHSPListByOid);
-//    }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:819-828
-// ```c
-// EBlastEncoding Blast_TracebackGetEncoding(EBlastProgramType program_number)
-// {
-//     if (Blast_SubjectIsProtein(program_number)) {
-//         return eBlastEncodingProtein;
-//     } else if (Blast_SubjectIsTranslated(program_number)) {
-//         return eBlastEncodingNcbi4na;
-//     } else {
-//         return eBlastEncodingNucleotide;
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1573
-// ```c
-//                 seq_arg.oid = batch->hsplist_array[0]->oid;
-//                 seq_arg.encoding = encoding;
-//                 seq_arg.check_oid_exclusion = TRUE;
-//                 seq_arg.reset_ranges = FALSE;
-//                 seq_arg.ranges = ranges;
-//
-//                 if (BlastSeqSrcGetSequence(seqsrc, &seq_arg) < 0) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
-// ```c++
-//     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,
-//                                                   m_InternalData,
-//                                                   m_Opts,
-//                                                   seqinfo_src,
-//                                                   search_msgs));
-//     ...
-//     m_TbackSearch->SetNumberOfThreads(GetNumberOfThreads());
-//     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
-// ```
 // The sequence comes in BLASTNA with its ambiguity codes, as the whole sequence (NCBI's
 // partial fetch of the HSP ranges with fences gives the same alignments; decision 87 of
 // the campaign: the whole sequence first).
@@ -1514,19 +1291,6 @@ where
     let x_ranged = super::x_bn_tb_range();
     let x_min = super::x_tb_range_min();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-353
-    // ```c++
-    //     if (datap->mask_type != eNoSubjMasking) {
-    //         ASSERT(datap->mask_algo_id != -1);
-    //         seqdb.GetMaskData(oid, datap->mask_algo_id, datap->seq_ranges);
-    //     }
-    //     ...
-    //           len = seqdb.GetAmbigSeqAlloc(oid,
-    //                                  const_cast<char **>(&buf),
-    //                                  has_sentinel_byte,
-    //                                  eMalloc,
-    //                                  ((datap->mask_type == eHardSubjMasking) ?
-    //                                 		 &(datap->seq_ranges) : NULL));
-    // ```
     // The masks are read before the letters, and outside the handler of the preliminary
     // search's read errors, as the letters are.
     let hard_masks = |ordinal: u32, algo_id: i32| -> Result<Vec<(u32, u32)>> {
@@ -1664,32 +1428,6 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seqsrc.c:467-519
-// ```c
-//     begin = MAX(0, begin - BLAST_SEQSRC_OVERHANG);
-//     end = MIN(end + BLAST_SEQSRC_OVERHANG, len);
-//     arg->ranges[arg->num_ranges++] = begin;
-//     arg->ranges[arg->num_ranges++] = end;
-// ...
-//     arg->num_ranges /= 2;
-//     if (arg->num_ranges <= 1) return;
-//     qsort(arg->ranges, arg->num_ranges, 2*sizeof(Int4), BeginCompareHSPs);
-//     i=0;
-//     for (j=1; j<arg->num_ranges; ++j) {
-//         Int4 begin = arg->ranges[j*2];
-//         Int4 end = arg->ranges[j*2+1];
-//         ASSERT(begin >= arg->ranges[2*i]);
-//         if (begin > arg->ranges[2*i+1] + BLAST_SEQSRC_MINGAP) {
-//             /* insert as a new range */
-//             ++i;
-//             arg->ranges[i*2] = begin;
-//             arg->ranges[i*2+1] = end;
-//         } else if (end > arg->ranges[2*i+1]) {
-//             /* merge into the previous range */
-//             arg->ranges[i*2+1] = end;
-//         }
-//     }
-//     arg->num_ranges = i+1;
-// ```
 // (blast_seqsrc.h:203-204: BLAST_SEQSRC_MINGAP 1024, BLAST_SEQSRC_OVERHANG 1024.) The ranges
 // come from every HSP that the batch keeps of the sequence (`BLAST_SetupPartialFetching`,
 // blast_traceback.c:1320-1370); the merged ranges do not depend on the order of equal starts.
@@ -1810,37 +1548,7 @@ pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
-// ```c++
-//     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
-//
-//     vector<TSeqLocInfoVector> subj_masks;
-//     TSeqAlignVector aligns =
-//         LocalBlastResults2SeqAlign(hsp_results,
-//                                    *qdata,
-//                                    *m_SeqInfoSrc,
-//                                    m_OptsMemento->m_ProgramType,
-//                                    m_Options->GetGappedMode(),
-//                                    m_Options->GetOutOfFrameMode(),
-//                                    subj_masks,
-//                                    m_ResultType);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1582
-// ```c++
-//     for (int index = 0; index < hit_list->hsplist_count; index++) {
-//         BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-//         if (!hsp_list)
-//             continue;
-//
-//         // Sort HSPs with e-values as first priority and scores as
-//         // tie-breakers, since that is the order we want to see them in
-//         // in Seq-aligns.
-//         Blast_HSPListSortByEvalue(hsp_list);
-//
-//         const Uint4 kOid = hsp_list->oid;
-//         TSeqPos subj_length = 0;
-//         CRef<CSeq_id> subject_id;
-//         GetSequenceLengthAndId(seqinfo_src, kOid, subject_id, &subj_length);
-// ```
 // NCBI first reads a header file (and opens it, c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:127-133) when the traceback's
 // results become Seq-aligns: after the batch's traceback, for the final hit lists only
 // (after their sort by e-value and their cut to the hit list size, before the HSPs of
@@ -1944,7 +1652,7 @@ pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -
         .sum()
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (cited at
 // `common::database::prefetch_may_be_off`: `s_PreFetchSeqs` counts the Seq-aligns of one batch's
 // results against `PRE_FETCH_SEQS_LIMIT`)
 /// Whether the batch of each query of `hit_lists` (final hit lists by query) prefetches
@@ -2170,24 +1878,7 @@ fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubje
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1406-1414
-// ```c++
-//             x_GetAmbChar(oid, ambchars);
-//
-//             if (ambchars.empty()) {
-//                 // keep as 2 bit
-//                 s_SeqDBWriteSeqDataNucl(seqinst, seq_buffer, length);
-//             } else {
-//                 // translate to 4 bit
-//                 s_SeqDBWriteSeqDataNucl(seqinst, seq_buffer, length, ambchars);
-//             }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:80-83
-// ```c
-// const char NCBI4NA_TO_IUPACNA[BLASTNA_SIZE] = {
-//     '-', 'A', 'C', 'M', 'G', 'R', 'S', 'V',
-//     'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N'
-// };
-// ```
 // The formatter reads a database sequence from its Bioseq: the stored 2-bit data, or with
 // ambiguity codes their NCBI4na values (`x_GetAmbigSeq`'s letters before their mapping to
 // BLASTNA). LOSAT keeps the stored 2-bit data and ambiguity runs (`reported_store`), and a
@@ -2506,7 +2197,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
     }
 
-    // blast_util.c:197-218 and seqdb.hpp:286-306 (quoted at `seq_ranges_into`): the soft ranges
+    // blast_util.c:197-218 and seqdb.hpp:286-306 (cited at `seq_ranges_into`): the soft ranges
     // of a masked database sequence are the complement of its masks in stored order, inverted
     // members included; a sequence without masks has the one range of its letters.
     #[test]
@@ -2538,7 +2229,7 @@ mod tests {
     // of the block that holds the sequence (one read for all its sequences, review 1 F3 of
     // M4a-2a), the soft ranges in stored order, the display masks as stored.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538,
-    // 1665-1673, 1694-1700 (quoted at `mask_hard_letters`)
+    // 1665-1673, 1694-1700 (cited at `mask_hard_letters`)
     // `-db_hard_mask`'s traceback letters (series NP, M4a-2b decision H2): after the decode, every
     // masked position of a decoded part is BLASTNA 'B' (10), as `s_SeqDBMaskSequence` writes
     // NCBI4na 14 before `SeqDB_ncbina8_to_blastna8`, on the whole sequence and on each slice of
@@ -2809,16 +2500,7 @@ mod tests {
         assert_eq!(database.name(), fixture("nucl_mv"));
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-910
-    // ```c
-    //    Int8 total_length = -1;
-    //    Int4 num_seqs = -1;
-    //
-    //    if (seq_src) {
-    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
-    //       if (total_length <= 0)
-    //           total_length = BlastSeqSrcGetTotLen(seq_src);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-911
     // An alias file's `LENGTH` of 2^32 letters or more over the 16 sequences of
     // `tests/db_search/taxfilter/tfn` (`tests/db_search/dbcounts`, rows db.cnt.l4295.bn and
     // db.cnt.avg2p32.bn) is NCBI's `Int8` on every target, wasm32's 32-bit `usize` included: the

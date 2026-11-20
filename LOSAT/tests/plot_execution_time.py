@@ -10,7 +10,6 @@ import pandas as pd
 import seaborn as sns
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-# const string kArgNumThreads("num_threads");
 # Thread suffixes describe requested counts, not inferred worker utilization.
 from comparison_data import (
     CUSTOM_PALETTE, HUE_ORDER, LOSAT_THREADS, MODE_ORDER, PLOT_DIR,
@@ -44,7 +43,6 @@ def parse_time(filepath):
 def main():
     data = []
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
-    # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
     #     m_NumThreads != CThreadable::kMinNumThreads) m_NumThreads = ...;
     # Timing uses each successful recorded invocation independently. Output
     # equality belongs to the separately selected hit-distribution oracle and
@@ -87,7 +85,6 @@ def main():
         "Execution Time: BLAST+ vs LOSAT Native/Wasm\n"
         "One run per condition; includes startup and Wasm compilation\n"
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239
-        # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
         #     m_NumThreads != CThreadable::kMinNumThreads) { m_NumThreads = ...; }
         f"BLAST+ n1/n{LOSAT_THREADS}: prebuilt -db searches; database construction excluded",
         y=1.12, fontsize=12,
@@ -97,7 +94,6 @@ def main():
     print(f"Plot saved to {OUTPUT_IMAGE}")
     summary = df.pivot(index=["Mode", "Task"], columns="Tool", values="Time (s)")
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-    # const string kArgNumThreads("num_threads");
     ratios = list(dict.fromkeys([(WASM_SINGLE, NATIVE_SINGLE),
                                  (WASM_THREADED_SINGLE, NATIVE_SINGLE),
                                  (WASM_MULTI, NATIVE_MULTI)]))
@@ -111,6 +107,5 @@ def main():
 
 if __name__ == "__main__":
     # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-    # CATCH_ALL(status) ... return status;
     require_plot_run()
     main()

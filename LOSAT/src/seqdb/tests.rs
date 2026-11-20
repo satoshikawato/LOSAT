@@ -734,7 +734,7 @@ fn alias_nseq_and_length_that_equal_the_sums_are_read() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1575-1595
-// (`WalkNodes`, quoted at `alias::walk_nodes`): a node with the key gives its value and is not
+// (`WalkNodes`, cited at `alias::walk_nodes`): a node with the key gives its value and is not
 // descended into; NCBI's `NStr` functions convert it, and a value that does not convert is the
 // `CStringException` of `Error: <what()>` (exit status 255).
 #[test]
@@ -881,7 +881,7 @@ fn alias_count_keys_follow_ncbis_walks() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:110-139
-// (quoted at `SeqDb::read_alias_tree`): without a list the walks run in the order NSEQ, LENGTH,
+// (cited at `SeqDb::read_alias_tree`): without a list the walks run in the order NSEQ, LENGTH,
 // MIN_SEQ_LENGTH, STATS_NSEQ, STATS_TOTLEN after the ranges; with one NCBI scans the totals and
 // walks STATS_* only, and the reports' database, opened again without the list, meets the
 // others (probes p2_err_order and p3_q1 of remaining-gaps-20261112/D).
@@ -942,7 +942,7 @@ fn alias_value_errors_come_in_ncbis_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:131-206
-// (quoted at `alias::range_mask`): a node's range is ANDed with its parent's, the paths to one
+// (cited at `alias::range_mask`): a node's range is ANDed with its parent's, the paths to one
 // volume are ORed, and the OIDs count the whole volume set.
 #[test]
 fn alias_oid_ranges_select_ncbis_oids() {
@@ -1597,19 +1597,6 @@ fn one_name_is_not_a_list() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:831-841
-// ```c++
-//         // Always check local copy first unless full path is given
-//         if (!m_SkipLocal[i]) {
-//             // GCC 3.0.4 requires the extra parentheses below.
-//             CSeqDB_BasePath local_base((CSeqDB_DirName(CDir::GetCwd())),
-//                                    CSeqDB_BaseName(m_DBList[i].FindBaseName()));
-//             CSeqDB_Path new_local_vol_path(local_base, prot_nucl, 'i', 'n' );
-//             if (m_Atlas.DoesFileExist(new_local_vol_path)) {
-//                 bp = CSeqDB_BasePath(new_local_vol_path.FindBasePath());
-//                 found = true;
-//             }
-//         }
-// ```
 /// A volume that an alias file names is taken from the current directory
 /// when a volume of that name is there (NCBI's rule, for reading). The
 /// removal of a database before a build must not follow it: it lists the
@@ -2238,7 +2225,7 @@ fn relative_directories_are_used_as_they_are_written() {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5932-5946 and
-// c++/src/app/blast/blast_app_util.hpp:185-203 (quoted at `DbFile::open` and
+// c++/src/app/blast/blast_app_util.hpp:185-203 (cited at `DbFile::open` and
 // at `SeqDbError::ncbi_message`).
 /// `expected/search_path/open_cases.tsv`: files without read permission and a
 /// directory that cannot be searched. LOSAT opens a volume's files at other
@@ -2361,7 +2348,7 @@ fn the_search_path_string_and_its_errors() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-// (the texts of `eTooManyOpenFiles` and `eMemoryMappingFailure`, quoted at
+// (the texts of `eTooManyOpenFiles` and `eMemoryMappingFailure`, cited at
 // `SeqDbError::ncbi_message`).
 /// Which errors are NCBI's own, and their texts.
 #[test]

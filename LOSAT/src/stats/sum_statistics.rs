@@ -798,10 +798,6 @@ pub fn uneven_gap_sum_e(
 /// e-values differ from NCBI's in the last digits otherwise). TBLASTX and BLASTX use it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4560-4561
-/// ```c
-///       xsum -= num*log(lcl_subject_length*lcl_query_length)
-///         - BLAST_LnFactorial((double) num);
-/// ```
 pub fn ncbi_large_gap_sum_e(
     num_hsps: i16,
     xsum: f64,

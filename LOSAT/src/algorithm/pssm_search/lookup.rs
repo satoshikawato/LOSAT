@@ -2,27 +2,7 @@
 //! against the position's PSSM rows (no exact-word rule), finalized into the table that blastp's
 //! subject scan reads (`BlastAaLookupTable<BackboneCell>`).
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:84-99
-//! ```c
-//!    case eAaLookupTable:
-//!        {
-//!        Int4** matrix = NULL;
-//!        Boolean has_pssm = FALSE;
-//!        if (sbp->psi_matrix && sbp->psi_matrix->pssm) {
-//!            matrix = sbp->psi_matrix->pssm->data;
-//!            has_pssm = TRUE;
-//!        } else {
-//!            matrix = sbp->matrix->data;
-//!        }
-//!        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-//!                              &lookup_wrap->lut);
-//!        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-//!        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-//!                                  query, lookup_segments, 0);
-//!        /* if query length less than 64k, we can save cache by using small bone */
-//!        bone_type = ( query->length >= INT2_MAX*2) ? eBackbone: eSmallbone;
-//!        BlastAaLookupFinalize((BlastAaLookupTable*) lookup_wrap->lut, bone_type);
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:83-100
 //! NCBI's small backbone (`Uint2` cells, for queries below 65,534 letters) holds the same hits in
 //! the same order as the large one; LOSAT keeps `Int4` cells (`BackboneCell`) for every length,
 //! the table blastp's scan reads (`x_seed_fused::x_scan_two_hit`). Storage width only.
@@ -59,18 +39,6 @@ struct PssmNeighbors<'a, R: PssmRows> {
 /// and `BlastAaLookupFinalize`. `threshold` is `(Int4)opt->threshold`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:236-247
-/// ```c
-///     lookup->charsize = ilog2(BLASTAA_SIZE) + 1;
-///     lookup->word_length = opt->word_size;
-///
-///     for (i = 0; i < lookup->word_length; i++)
-///         lookup->backbone_size |= (BLASTAA_SIZE - 1) << (i * lookup->charsize);
-///     lookup->backbone_size++;
-///
-///     lookup->mask = (1 << (opt->word_size * lookup->charsize)) - 1;
-///     lookup->alphabet_size = BLASTAA_SIZE;
-///     lookup->threshold = (Int4)opt->threshold;
-/// ```
 #[cfg(test)]
 pub(crate) fn build_pssm_lookup<R: PssmRows>(
     rows: &R,
@@ -113,43 +81,6 @@ pub(crate) fn build_pssm_lookup_in<R: PssmRows>(
 /// `s_AddPSSMNeighboringWords` over the lookup segments `locations`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:623-658
-/// ```c
-///     for (loc = location; loc; loc = loc->next) {
-///         Int4 from = loc->ssr->left;
-///         Int4 to = loc->ssr->right - wordsize + 1;
-///         Int4 **row = matrix + from;
-///
-///         /* prepare to start another run of adjacent query words. Find the
-///            maximum possible score for the first wordsize-1 rows of the PSSM */
-///
-///         if (to >= from) {
-///             for (i = 0; i < wordsize - 1; i++) {
-///                 row_max[i] = row[i][0];
-///                 for (j = 1; j < lookup->alphabet_size; j++)
-///                     row_max[i] = MAX(row_max[i], row[i][j]);
-///             }
-///         }
-///
-///         for (offset = from; offset <= to; offset++, row++) {
-///             /* find the maximum score of the next PSSM row */
-///
-///             row_max[wordsize - 1] = row[wordsize - 1][0];
-///             for (i = 1; i < lookup->alphabet_size; i++)
-///                 row_max[wordsize - 1] = MAX(row_max[wordsize - 1],
-///                                             row[wordsize - 1][i]);
-///
-///             /* find all neighboring words */
-///
-///             s_AddPSSMWordHits(lookup, row, offset + query_bias, row_max);
-///
-///             /* shift the list of maximum scores over by one, to make room for
-///                the next maximum in the next loop iteration */
-///
-///             for (i = 0; i < wordsize - 1; i++)
-///                 row_max[i] = row_max[i + 1];
-///         }
-///     }
-/// ```
 fn add_pssm_neighboring_words<R: PssmRows>(
     thin: &mut ThinBackbone,
     rows: &R,
@@ -188,18 +119,7 @@ fn add_pssm_neighboring_words<R: PssmRows>(
 
 /// `s_AddPSSMWordHits`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:681-692
-/// ```c
-///     /* compute the largest possible score that any neighboring word can have;
-///        this maximum will gradually be replaced by exact scores as subject
-///        words are built up */
-///
-///     score = row_max[0];
-///     for (i = 1; i < lookup->word_length; i++)
-///         score += row_max[i];
-///
-///     s_AddPSSMWordHitsCore(&info, score, 0);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:681-693
 fn add_pssm_word_hits<R: PssmRows>(
     thin: &mut ThinBackbone,
     rows: &R,
@@ -229,29 +149,6 @@ fn add_pssm_word_hits<R: PssmRows>(
 /// words whose exact score reaches the threshold.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:695-748
-/// ```c
-///     score -= info->row_max[current_pos];
-///     row = info->matrix[current_pos];
-///
-///     if (current_pos == info->wordsize - 1) {
-///         ...
-///         for (i = 0; i < alphabet_size; i++) {
-///             if (score + row[i] >= threshold) {
-///                 subject_word[current_pos] = i;
-///                 BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
-///                                       charsize, subject_word, offset);
-///             }
-///         }
-///         return;
-///     }
-///
-///     for (i = 0; i < alphabet_size; i++) {
-///         if (score + row[i] >= threshold) {
-///             subject_word[current_pos] = i;
-///             s_AddPSSMWordHitsCore(info, score + row[i], current_pos + 1);
-///         }
-///     }
-/// ```
 /// `info->matrix` is the PSSM from the word's first position (`row = matrix + from` advanced to
 /// the offset), so `matrix[current_pos]` is the row of query position `offset + current_pos`.
 fn add_pssm_word_hits_core<R: PssmRows>(
@@ -288,12 +185,6 @@ fn add_pssm_word_hits_core<R: PssmRows>(
 /// `BlastLookupAddWordHit`: the offset appended to the chain of the word's index.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:33-77
-/// ```c
-///     index = ComputeTableIndex(wordsize, charsize, seq);
-///     ...
-///     chain[chain[1] + 2] = query_offset;
-///     chain[1]++;
-/// ```
 /// NCBI's chain header (its allocated size and count) is the `Vec`'s; the offsets are the same.
 fn blast_lookup_add_word_hit(
     thin: &mut ThinBackbone,
@@ -312,40 +203,7 @@ fn blast_lookup_add_word_hit(
 /// `BlastAaLookupFinalize` with the large backbone (`Int4` cells): the presence vector, the cells
 /// with up to `AA_HITS_PER_CELL` hits in place, the others in the overflow array in index order.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:285-366
-/// ```c
-///     /* find out how many cells need the overflow array */
-///     for (i = 0; i < lookup->backbone_size; i++) {
-///         if (lookup->thin_backbone[i]) {
-///             if (lookup->thin_backbone[i][1] > AA_HITS_PER_CELL){
-///                 overflow_cells_needed += lookup->thin_backbone[i][1];
-///             }
-///             if (lookup->thin_backbone[i][1] > longest_chain)
-///                 longest_chain = lookup->thin_backbone[i][1];
-///         }
-///     }
-///     ...
-///       for (i = 0; i < lookup->backbone_size; i++) {
-///         /* if there are hits there, */
-///         if (lookup->thin_backbone[i] ) {
-///             Int4 * dest = NULL;
-///             /* set the corresponding bit in the pv_array */
-///             PV_SET(pv, i, PV_ARRAY_BTS);
-///             bbc[i].num_used = lookup->thin_backbone[i][1];
-///             /* if there are three or fewer hits, */
-///             if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
-///                 /* copy them into the thick_backbone cell */
-///                 dest = bbc[i].payload.entries;
-///             else /* more than three hits; copy to overflow array */
-///             {
-///                 bbc[i].payload.overflow_cursor = overflow_cursor;
-///                 dest = (Int4 *) lookup->overflow;
-///                 dest += overflow_cursor;
-///                 overflow_cursor += lookup->thin_backbone[i][1];
-///             }
-///             for (j=0; j <lookup->thin_backbone[i][1]; j++)
-///                 dest[j] = lookup->thin_backbone[i][j + 2];
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:282-366
 fn finalize(
     thin: ThinBackbone,
     query_length: usize,

@@ -6,23 +6,6 @@
 //! module hands them the caller's inputs and outputs.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:195-295
-//! ```c
-//! CRef<CLocalDbAdapter> db_adapter;
-//! CRef<CScope> scope;
-//! InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//!                  db_adapter, scope);
-//! CBlastFormat formatter(opt, *db_adapter,
-//!                        fmt_args->GetFormattedOutputChoice(), ...);
-//! formatter.PrintProlog();
-//! for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!         CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//!         results = lcl_blast.Run();
-//!         ITERATE(CSearchResultSet, result, *results) {
-//!             formatter.PrintOneResultSet(**result, query_batch);
-//!         }
-//! }
-//! formatter.PrintEpilog(opt);
-//! ```
 #![warn(missing_docs, unused)]
 
 use std::io::{self, Write};
@@ -83,15 +66,6 @@ pub enum Strand {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1061-1067
-// ```c++
-//         if(x_IsFieldRequested(eSubjectStrand))
-//         {
-//         	if(!subject_is_na)
-//         		m_SubjectStrand = NA;
-//         	else
-//         		m_SubjectStrand = ((s_start - s_end) > 0 )? "minus":"plus";
-//         }
-// ```
 /// The strand that NCBI's `sstrand` column gives a row of a nucleotide sequence, and no strand
 /// for a protein: an end before the start is the minus strand.
 fn strand(protein: bool, start: usize, end: usize) -> Option<Strand> {
@@ -103,21 +77,9 @@ fn strand(protein: bool, start: usize, end: usize) -> Option<Strand> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
-// ```c
-// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-// ```
 // Every output format prints from the same final result set, so a position in that result
 // identifies an HSP in every format (`HspIndex`).
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:126-132
-// ```c
-// typedef struct BlastHSP {
-//    Int4 score;           /**< This HSP's raw score */
-//    Int4 num_ident;       /**< Number of identical base pairs in this HSP */
-//    double bit_score;     /**< Bit score, calculated from score */
-//    double evalue;        /**< This HSP's e-value */
-//    BlastSeg query;       /**< Query sequence info. */
-//    BlastSeg subject;     /**< Subject sequence info. */
-// ```
 /// One HSP of the final, sorted hit list of a search, with the engine's values. Each field that
 /// names a column of `-outfmt 6` holds the number that the column prints for the HSP's row, not
 /// rounded (`tests/library_api.rs` holds them to the columns); the text of a report is its
@@ -217,34 +179,12 @@ pub struct HspRecord {
 
 impl HspRecord {
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-442
-    // ```c++
-    // inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
-    // {
-    //     double perc_ident =
-    //         (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
-    //     m_Ostream << NStr::DoubleToString(perc_ident, 3);
-    // }
-    // ```
     /// The percentage of identical columns (`pident`), not rounded.
     pub fn percent_identity(&self) -> f64 {
         crate::report::outfmt6::percent_identity_ncbi(self.num_ident, self.length)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1109-1120
-    // ```c
-    // Blast_HSPGetAdjustedOffsets(EBlastProgramType program, BlastHSP* hsp,
-    //                             Int4 query_length, Int4 subject_length,
-    //                             Int4* q_start, Int4* q_end,
-    //                             Int4* s_start, Int4* s_end)
-    // {
-    //    if (!hsp->gap_info) {
-    //       *q_start = hsp->query.offset + 1;
-    //       *q_end = hsp->query.end;
-    //       *s_start = hsp->subject.offset + 1;
-    //       *s_end = hsp->subject.end;
-    //       return;
-    //    }
-    // ```
     // The reports' coordinates are 1-based offsets of a `BlastSeg`, whose `offset` and `end` are
     // a 0-based half-open interval; the methods below give that form, on the plus strand.
     /// The query interval as a 0-based half-open range on the record's plus strand, whichever
@@ -261,16 +201,6 @@ impl HspRecord {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_results.hpp:115-122
-// ```c++
-//     /// Retrieve the search space for this query sequence. If the
-//     /// results correspond to a blastx search, the search space will
-//     /// refer to protein letters
-//     Int8 GetSearchSpace() const {
-//         return m_SearchSpace;
-//     }
-//     /// Retrieve the length adjustment for boundary conditions
-//     Int8 GetLengthAdjustment() const {
-// ```
 /// The statistics of one query of a search (NCBI's `CBlastAncillaryData`): the values that the
 /// `Statistics` of the query's `Iteration` in outfmt 5 shows. The E-values of the query's HSPs
 /// follow from them and the raw scores, so they say what an E-value of this search means.
@@ -304,31 +234,7 @@ impl QueryStats {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_iteration.cpp:76-91
-// ```c++
-//     // if the most current list of ids is empty, that means that no new
-//     // sequences were found and therefore we have converged.
-//     if ( !m_PreviousData.empty() && m_CurrentData.empty() ) {
-//         return true;
-//     }
-//
-//     // Element by element comparison: has every element in the current Seq-id
-//     // list been found in the previous iterations?
-//     bool retval = true;
-//     ITERATE(TSeqIds, current_id, m_CurrentData) {
-//         if (m_PreviousData.find(*current_id) == m_PreviousData.end()) {
-//             retval = false;
-//             break;
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_results.hpp:211-215
-// ```c++
-//     /// Accessor for the query's search ancillary
-//     CRef<CBlastAncillaryData> GetAncillaryData() const
-//     {
-//         return m_AncillaryData;
-//     }
-// ```
 // Each round of psiblast is a result set of its own, with its own ancillary data: a PSSM round's
 // Karlin-Altschul values are the PSSM's.
 /// The rounds of one query of a search: psiblast's rounds (`-num_iterations` other than 1),
@@ -396,29 +302,7 @@ impl Write for CountingWriter {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
-// ```c++
-// void CDisplaySeqalign::x_ShowAlnvecInfo(CNcbiOstream& out,
-//                                            SAlnInfo* aln_vec_info,
-//                                            bool show_defline)
-// {
-// 	bool showSortControls = false;
-//     if(show_defline) {
-// 		...
-// 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
-// 				out<< deflines;
-// 		...
-// 			out << "\n";
-// ```
 /// Records, for every report of one search, the byte range of each HSP's row or section and
 /// of the heading of each HSP's subject, from the formatter's observer events; and the parts of
 /// the search's results (`Parts`: with psiblast's rounds, each round's call numbers its HSPs
@@ -565,18 +449,6 @@ impl FormatObserver for RangeRecorder {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155
-// ```c++
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-//         catch (const exception&) {
-//             continue; //SB-2307. ignore well formed, not found accession
-//         }
-// ```
 /// The index in the inputs of each query that the engine searches: NCBI's batch reader skips a
 /// query whose `-query_loc` interval starts more than one letter past its end
 /// (`seq_range::cut_queries`), so the engine's `q_idx` counts the searched queries, and the
@@ -614,14 +486,6 @@ fn query_loc(command: &Commands) -> Option<&str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
 /// The `-query_loc` interval of the program's arguments. A value that the search will refuse
 /// has no interval here.
 pub(super) fn query_range_of(command: &Commands) -> Option<SequenceRange> {
@@ -668,18 +532,6 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
-// ```c
-//     int hitlist_size = opt.GetHitlistSize();
-//     if(m_OutputFormat <= eFlatQueryAnchoredNoIdentities) {
-//     	 m_NumDescriptions = m_DfltNumDescriptions;
-//     	 m_NumAlignments = m_DfltNumAlignments;
-//     	 if (args.Exist(kArgNumDescriptions) && args[kArgNumDescriptions]) {
-//     	    m_NumDescriptions = args[kArgNumDescriptions].AsInteger();
-//     	 }
-//          if (args.Exist(kArgNumAlignments) && args[kArgNumAlignments]) {
-//     		m_NumAlignments = args[kArgNumAlignments].AsInteger();
-//     	}
-// ```
 /// The hit list size that the command line derives for the output format `number` from the
 /// options of `command` (`report_counts`).
 fn hit_list_size(command: &Commands, number: i32) -> usize {
@@ -723,34 +575,9 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-// ```c++
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
-// ```c
-//     // Setup some debugging features from environment variables.
-//     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-//         SetDiagTrace(eDT_Enable, eDT_Enable);
-//     }
-//     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
-// ```c++
-// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
-//                                 SSeqDBTaxInfo  & info  )
-// {
-// 	static CTaxDBFileInfo t;
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
-// ```c++
-// void CBlastTabularInfo::x_CheckTaxDB()
-// {
-//    	if( x_IsFieldRequested(eSubjectSciNames) ||
-//     ...
-//    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-133
 // The formatters of the plural names (`x_CheckTaxDB`) and the organism report (outfmt 18) look
 // the taxonomy database up themselves, through the search path of NCBI's databases: a search of
 // records reads the application settings for them, as the command line does, and the search asks
@@ -807,14 +634,6 @@ pub(super) fn run_local(
         return Err(error);
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
-    // ```c++
-    //     catch (const CIOException& e) {                                         \
-    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
-    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
-    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
-    //         }                                                                   \
-    //     }                                                                       \
-    // ```
     // `CATCH_ALL`'s silent end (`cli::NativeError::silent_end`: the `-in_pssm` reader's
     // `CEofException`, the object manager's failed write after its diagnostic stream failed): NCBI's
     // run returns 0 without a word, so the call succeeds with what it wrote (tblastn's error
@@ -876,24 +695,12 @@ fn run_local_entry(
         Commands::Blastn(mut args) => {
             args.taxdb_setting = taxdb_setting(outputs, start)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
-            // ```c++
-            //     if (args.Exist(kArgWindowMaskerDatabase) &&
-            //         args[kArgWindowMaskerDatabase]) {
-            //         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
-            // ```
             // The counts file of `-window_masker_db` is read from the file system, as on the
             // command line (LOSAT Web's host gives its own source).
             if args.window_masker_db.is_some() {
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:381-388
-            // ```c++
-            //     CRef<CNcbiRegistry> reg(new CNcbiRegistry(empty_stream,
-            //                                               IRegistry::fWithNcbirc));
-            //     ...
-            //     reg->Add(*env_reg, CNcbiRegistry::ePriority_MaxUser);
-            //     retval = reg->Get(kSection, kEnvVar);
-            // ```
             // The directory of `-window_masker_taxid` is looked for by NCBI's library itself, in
             // the environment and `.ncbirc`; LOSAT reads it with the application settings, as
             // a database search of the library does.
@@ -938,17 +745,6 @@ fn run_local_entry(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:233-241
-// ```c++
-//     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
-//             CRef<CPsiBlast> psiblast;
-//             if (run_token & 2)
-//             {
-//                 _ASSERT(psi_opts.NotEmpty());
-//                 if (pssm.NotEmpty()) {
-//                     psiblast.Reset(new CPsiBlast(pssm, db_adapter, psi_opts));
-//                 } else {
-//                     psiblast.Reset(new CPsiBlast(query_factory, db_adapter, psi_opts));
-// ```
 /// blastp's arguments for psiblast's search and its rounds (`algorithm::psiblast`,
 /// `PsiblastArgs::into_blastp_args`), after LOSAT's refusals of each requested format.
 fn psiblast_args(
@@ -962,11 +758,6 @@ fn psiblast_args(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-// ```c
-// if (args[kArgOutputFormat]) {
-//     string fmt_choice =
-//         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-// ```
 // No NCBI counterpart: NCBI's application reads its records itself, with the option.
 /// The refusal of records read without their ids for a search with `-parse_deflines`: the
 /// reports would show the local ids of a search without the option.
@@ -1044,11 +835,6 @@ fn pssm_file_option(command: &Commands) -> Option<&'static str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:286-288
-// ```c++
-//                 ITERATE(CSearchResultSet, result, *results) {
-//                     formatter.PrintOneResultSet(**result, query_batch);
-//                 }
-// ```
 // The formatters print to their streams as each result comes; here the streams are the caller's.
 /// Runs the search and writes each report to its writer as the search makes it, and the command
 /// line's warnings to `diagnostics`. `reports` holds an `-outfmt` value and a writer per report.
@@ -1113,17 +899,7 @@ pub fn run(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
-// ```c++
-//     else {
-//         m_OutputStream = &args[kArgOutput].AsOutputFile();
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:255-257
-// ```c++
-//         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
-//         	formatter.SetBaseFile(args[kArgOutput].AsString());
-//         }
-// ```
 /// Runs the search and writes the report of one `-outfmt` to the file `path`, as the command
 /// line's `-out path` does, and the command line's warnings to `diagnostics`. Outfmt 13 and 14
 /// come through here: the file is the master file, which names the side files that the search
@@ -1270,33 +1046,11 @@ pub(super) fn query_ordinal(ordinals: Option<&[usize]>, q_idx: usize) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1071-1077
-// ```c++
-//     int query_frame = 1, subject_frame = 1;
-//     if (kTranslated) {
-//         if (x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eFrames)) {
-//             query_frame = CAlignFormatUtil::
-//                 GetFrame (q_start - 1, ds.GetSeqStrand(kQueryRow),
-//                           scope.GetBioseqHandle(align.GetSeq_id(0)));
-//         }
-// ```
 // The `-outfmt` columns print a frame for every row (1 for an untranslated row of BLASTP and
 // BLASTN, the row's strand for BLASTN's subject, 0 for the protein row of BLASTX and TBLASTN); a
 // translation frame exists where the program translates, the rest is the strand.
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:880-887
-// ```c++
-//     if (x_IsFieldRequested(eQueryLength) && m_QueryLength == 0) {
-//         ...
-//     	if(m_QueryRange.NotEmpty())
-//     		m_QueryLength = m_QueryRange.GetLength();
-//     	else
-//     		m_QueryLength = sequence::GetLength(align.GetSeq_id(0), &scope);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-// ```c++
-// const char* kDfltArgTabularOutputFmt =
-//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-//     "evalue bitscore";
-// ```
 // `shown_id` and `subject_tabular_id` are the first two columns of the default report, whose
 // bytes `Id` keeps (`api::id`).
 /// The id of a record, read once: many HSPs show it.

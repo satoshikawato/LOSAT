@@ -20,14 +20,6 @@ use std::cmp::Ordering;
 /// This structure stores HSPs after extension but before coordinate conversion.
 /// Coordinates are stored as absolute positions in the concatenated buffer.
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:150-155
-// ```c
-// typedef struct BlastInitHSP {
-//     BlastOffsetPair offsets; /**< Offsets in query and subject, or, in PHI
-//                                 BLAST, start and end of pattern in subject. */
-//     BlastUngappedData* ungapped_data; /**< Pointer to a structure holding
-//                                          ungapped alignment information */
-// } BlastInitHSP;
-// ```
 // The added PartialEq, Eq and Debug derives are used by the shadow modes and unit tests to
 // compare two lists of these initial HSPs field by field. They do not change any value NCBI computes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -116,24 +108,6 @@ pub fn trace_init_hsp_if_match(stage: &str, init: &InitHSP, contexts: &[QueryCon
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-304
-// ```c
-// static int score_compare_match(const void *v1, const void *v2)
-// {
-//     ...
-//     if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
-//                                  h1->ungapped_data->score)) &&
-//         0 == (result = BLAST_CMP(h1->ungapped_data->s_start,
-//                                  h2->ungapped_data->s_start)) &&
-//         0 == (result = BLAST_CMP(h2->ungapped_data->length,
-//                                  h1->ungapped_data->length)) &&
-//         0 == (result = BLAST_CMP(h1->ungapped_data->q_start,
-//                                  h2->ungapped_data->q_start))) {
-//         result = BLAST_CMP(h2->ungapped_data->length,
-//                            h1->ungapped_data->length);
-//     }
-//     return result;
-// }
-// ```
 // `q_start` is still the absolute offset in the concatenated query buffer here
 // (s_AdjustInitialHSPOffsets runs later, in BLAST_GetUngappedHSPList), so this
 // comparator orders HSPs that have identical context-relative coordinates in
@@ -148,18 +122,7 @@ pub(crate) fn score_compare_init_hsps_ncbi(a: &InitHSP, b: &InitHSP) -> Ordering
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
-// ```c
-// void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
-// {
-//     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-//           sizeof(BlastInitHSP), score_compare_match);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
-// ```c
-// Blast_InitHitListSortByScore(init_hitlist);
-// return status;
-// ```
 // (end of BlastAaWordFinder, the tblastx word finder, once per subject chunk.)
 // glibc's qsort is a stable merge sort and `slice::sort_by` is stable, so
 // comparator-equal records keep their scan order in both.
@@ -172,18 +135,7 @@ pub(crate) fn sort_init_hsps_by_score_ncbi(init_hsps: &mut [InitHSP]) {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
 ///
 /// NCBI code:
-/// ```c
-/// static NCBI_INLINE void
-/// s_AdjustInitialHSPOffsets(BlastInitHSP* init_hsp, Int4 query_start)
-/// {
-///     init_hsp->offsets.qs_offsets.q_off -= query_start;
-///     if (init_hsp->ungapped_data) {
-///         init_hsp->ungapped_data->q_start -= query_start;
-///     }
-///     ASSERT(init_hsp->ungapped_data == NULL ||
-///            init_hsp->ungapped_data->q_start >= 0);
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2383-2391
 ///
 /// Converts absolute coordinates to context-relative coordinates.
 /// This is called in BLAST_GetUngappedHSPList (blast_gapalign.c:4756-4758).
@@ -211,20 +163,6 @@ pub fn adjust_initial_hsp_offsets(
 /// by Blast_HSPListReevaluateUngapped equivalent.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768
-/// ```c
-/// context = s_GetUngappedHSPContext(query_info, init_hsp);
-/// s_AdjustInitialHSPOffsets(init_hsp, query_info->contexts[context].query_offset);
-/// ungapped_data = init_hsp->ungapped_data;
-/// Blast_HSPInit(ungapped_data->q_start,
-///               ungapped_data->length+ungapped_data->q_start,
-///               ungapped_data->s_start,
-///               ungapped_data->length+ungapped_data->s_start,
-///               init_hsp->offsets.qs_offsets.q_off,
-///               init_hsp->offsets.qs_offsets.s_off,
-///               context, query_info->contexts[context].frame,
-///               subject->frame, ungapped_data->score, NULL, &new_hsp);
-/// Blast_HSPListSaveHSP(hsp_list, new_hsp);
-/// ```
 pub fn get_ungapped_hsp_list(
     init_hsps: Vec<InitHSP>,
     contexts: &[QueryContext],
@@ -234,11 +172,6 @@ pub fn get_ungapped_hsp_list(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4730-4732
-// ```c
-//    /* The BlastHSPList structure can be allocated and passed from outside */
-//    if (*hsp_list_ptr != NULL)
-//       hsp_list = *hsp_list_ptr;
-// ```
 // `get_ungapped_hsp_list` with the list passed in by the caller, as NCBI's caller may pass its own
 // list; `get_ungapped_hsp_list` passes `Vec::new()`. EXPERIMENT (LOSAT_X_SEEDCOMPACT,
 // x_pair_par.rs) passes a Vec reserved at `init_hsps.len()` (one hit per init HSP), so the list is
@@ -287,7 +220,6 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
 
         // NCBI: s_AdjustInitialHSPOffsets (c++/src/algo/blast/core/blast_gapalign.c:2384-2392)
         // Convert absolute coordinates to context-relative coordinates
-        // NCBI: init_hsp->ungapped_data->q_start -= query_start;
         // where query_start = query_info->contexts[context].query_offset
         let q_start_relative =
             adjust_initial_hsp_offsets(init_hsp.q_start_absolute, ctx.frame_base);
@@ -295,23 +227,11 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
         let q_seed_relative = adjust_initial_hsp_offsets(init_hsp.q_seed_absolute, ctx.frame_base);
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
-        // ```c
-        // ASSERT(init_hsp->ungapped_data == NULL ||
-        //        init_hsp->ungapped_data->q_start >= 0);
-        // ```
         assert!(
             q_start_relative >= 0,
             "NCBI BLAST requires context-relative ungapped q_start >= 0"
         );
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4767
-        // ```c
-        // Blast_HSPInit(ungapped_data->q_start,
-        //               ungapped_data->length+ungapped_data->q_start,
-        //               ungapped_data->s_start,
-        //               ungapped_data->length+ungapped_data->s_start,
-        //               init_hsp->offsets.qs_offsets.q_off,
-        //               init_hsp->offsets.qs_offsets.s_off, ...);
-        // ```
         if !INT4_ENDS {
             assert!(
                 q_end_relative > q_start_relative,
@@ -390,11 +310,6 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             s_aa_start: ss_l,
             s_aa_end: se_l,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768
-            // ```c
-            // Blast_HSPInit(...,
-            //               init_hsp->offsets.qs_offsets.q_off,
-            //               init_hsp->offsets.qs_offsets.s_off, ...);
-            // ```
             q_seed_off: q_seed,
             s_seed_off: s_seed,
             q_orig_len: u32::try_from(init_hsp.q_orig_len)
@@ -405,44 +320,19 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             e_value: f64::INFINITY,
             num_ident: 0, // Will be computed during reevaluation
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719-4724
-            // ```c
-            // for (index=0;index<init_hsp_array->total;index++) {
-            //     init_hsp = init_hsp_array->init_hsp_array[index];
-            //     ...
-            //     Blast_HSPListSaveHSP(hsp_list, new_hsp);
-            // ```
             hsp_list_order,
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-480
-            // ```c
-            // link_hsp_array =
-            //    (LinkHSPStruct**) malloc(total_number_of_hsps*sizeof(LinkHSPStruct*));
-            // for (index = 0; index < total_number_of_hsps; ++index) {
-            //    link_hsp_array[index] = (LinkHSPStruct*) calloc(1, sizeof(LinkHSPStruct));
-            // ```
             link_id: 0,
             chain_next_link_id: None,
             hsp_link_num: 0,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:141-145,162
-            // ```c
-            // BlastHSP* Blast_HSPNew(void)
-            // {
-            //      BlastHSP* new_hsp = (BlastHSP*) calloc(1, sizeof(BlastHSP));
-            //      return new_hsp;
-            // }
-            // ...
-            //    new_hsp = Blast_HSPNew();
-            // ```
             num: 0,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:170-173 (in
         // `Blast_HSPInit`)
-        // ```c
-        //    new_hsp->query.end = query_end;
-        //    new_hsp->subject.end = subject_end;
-        // ```
         // The one-hit word finder's ends, `start + length` as NCBI stores them (at or before the
         // start for an HSP of length 0 or less).
         if INT4_ENDS {
@@ -457,40 +347,15 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
 /// The final sort of `get_ungapped_hsp_list_into` (`Blast_HSPListSortByScore`).
 fn sort_converted_hsps_by_score_ncbi(ungapped_hits: &mut [UngappedHit]) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719-4775
-    // ```c
-    // Blast_HSPListSaveHSP(hsp_list, new_hsp);
-    // ...
-    // Blast_HSPListSortByScore(hsp_list);
-    // ```
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
-    // ```c
-    // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-    //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-    //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-    //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-    //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1349-1369
-    // ```c
-    // if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-    //     qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //           ScoreCompareHSPs);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
     if !ungapped_hits_is_sorted_by_score_ncbi(ungapped_hits) {
         sort_ungapped_hits_by_score_ncbi(ungapped_hits);
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
-// ```c
-// int ScoreCompareHSPs(const void* h1, const void* h2)
-// {
-//     ...
-// }
-// ```
 pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit) -> Ordering {
     b.raw_score
         .cmp(&a.raw_score)
@@ -501,37 +366,12 @@ pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1355
-// ```c
-// if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-//     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-//     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-//     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-//     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-// }
-// return result;
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1366-1377
-// ```c
-// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//       ScoreCompareHSPs);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1366-1377,1380-1381
 pub(crate) fn sort_ungapped_hits_by_score_ncbi(hits: &mut [UngappedHit]) {
     sort_ungapped_hits_by_score_with(hits, score_compare_ungapped_hits_ncbi);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1383
-// ```c
-// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
-// {
-//     if (!hsp_list || hsp_list->hspcnt <= 1)
-//         return;
-//
-//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-//     }
-// }
-// ```
 // The sort of `sort_ungapped_hits_by_score_ncbi` (the `u32` ends of the two-hit word finder's
 // HSPs) and `sort_ungapped_hits_by_score_int4` (the one-hit word finder's `Int4` ends), with the
 // comparator given: the is-sorted check, then the stable index-replay sort (glibc's qsort is a
@@ -548,21 +388,10 @@ where
         return;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
-    // ```c
-    // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
-    // {
-    //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //               ScoreCompareHSPs);
-    // ```
     if ungapped_hits_is_sorted_by_score_with(hits, compare) {
         return;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
-    // ```c
-    // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //       ScoreCompareHSPs);
-    // ```
     // `ScoreCompareHSPs` is a partial comparator for TBLASTX HSPs. Do not add
     // frame or per-frame insertion-order keys when it returns equality; NCBI
     // delegates comparator-equal rows to the platform qsort implementation.
@@ -570,14 +399,6 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353
-// ```c
-//    if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-//        0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-//        0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-//        0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-//        result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-//    }
-// ```
 // `ScoreCompareHSPs` with the ends read as NCBI's `Int4` (`UngappedHit::q_end_int4`): the
 // comparator of the one-hit word finder's lists, whose HSPs of length 0 or less may end below 0
 // (`chaining.rs`, the impl of `UngappedHit`), and of the chunk merge of every list. On ends of 0
@@ -592,18 +413,6 @@ pub(crate) fn score_compare_ungapped_hits_int4(a: &UngappedHit, b: &UngappedHit)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1383
-// ```c
-// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
-// {
-//     if (!hsp_list || hsp_list->hspcnt <= 1)
-//         return;
-//
-//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-//     }
-// }
-// ```
 // `sort_ungapped_hits_by_score_ncbi` with `score_compare_ungapped_hits_int4`.
 /// Sorts a list by score, its ends read as `Int4`.
 pub(crate) fn sort_ungapped_hits_by_score_int4(hits: &mut [UngappedHit]) {
@@ -611,21 +420,6 @@ pub(crate) fn sort_ungapped_hits_by_score_int4(hits: &mut [UngappedHit]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4772
-// ```c
-//       Blast_HSPInit(ungapped_data->q_start,
-//                     ungapped_data->length+ungapped_data->q_start,
-//                     ungapped_data->s_start,
-//                     ungapped_data->length+ungapped_data->s_start,
-//                     init_hsp->offsets.qs_offsets.q_off,
-//                     init_hsp->offsets.qs_offsets.s_off,
-//                     context, query_info->contexts[context].frame,
-//                     subject->frame, ungapped_data->score, NULL, &new_hsp);
-//       Blast_HSPListSaveHSP(hsp_list, new_hsp);
-//    }
-//
-//    /* Sort the HSP array by score */
-//    Blast_HSPListSortByScore(hsp_list);
-// ```
 // `get_ungapped_hsp_list` for the one-hit word finder (`-window_size 0`), whose initial HSPs may
 // have a length of 0 or less (aa_ungapped.c:1054,1083): `Blast_HSPInit` stores their ends,
 // `start + length`, as they are (`convert_init_hsps_unsorted` with `INT4_ENDS`), and the list is
@@ -643,38 +437,11 @@ pub(crate) fn get_ungapped_hsp_list_int4(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1355-1369
-// ```c
-// Boolean Blast_HSPListIsSortedByScore(const BlastHSPList* hsp_list)
-// {
-//     ...
-//     if (ScoreCompareHSPs(&hsp_list->hsp_array[index],
-//                          &hsp_list->hsp_array[index+1]) > 0) {
-//         return FALSE;
-//     }
-// }
-// ```
 pub(crate) fn ungapped_hits_is_sorted_by_score_ncbi(hits: &[UngappedHit]) -> bool {
     ungapped_hits_is_sorted_by_score_with(hits, score_compare_ungapped_hits_ncbi)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1355-1369
-// ```c
-// Boolean Blast_HSPListIsSortedByScore(const BlastHSPList* hsp_list)
-// {
-//     Int4 index;
-//
-//     if (!hsp_list || hsp_list->hspcnt <= 1)
-//         return TRUE;
-//
-//     for (index = 0; index < hsp_list->hspcnt - 1; ++index) {
-//         if (ScoreCompareHSPs(&hsp_list->hsp_array[index],
-//                              &hsp_list->hsp_array[index+1]) > 0) {
-//             return FALSE;
-//         }
-//     }
-//     return TRUE;
-// }
-// ```
 /// `Blast_HSPListIsSortedByScore` with `compare` as `ScoreCompareHSPs`.
 fn ungapped_hits_is_sorted_by_score_with<C>(hits: &[UngappedHit], compare: C) -> bool
 where
@@ -762,10 +529,6 @@ mod tests {
             e_value: 0.0,
             num_ident: 0,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
-            // ```c
-            // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-            //       ScoreCompareHSPs);
-            // ```
             hsp_list_order: u32::try_from(hsp_list_order).expect("hsp_list_order fits u32"),
             ordering_method: 0,
             linked_set: false,
@@ -833,12 +596,7 @@ mod tests {
         );
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1355-1369
-    // ```c
-    // if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-    //     qsort(..., ScoreCompareHSPs);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379
     #[test]
     fn test_get_ungapped_hsp_list_preserves_insertion_order_when_score_sorted() {
         let contexts = vec![
@@ -914,14 +672,6 @@ mod tests {
     #[test]
     fn test_ncbi_score_sort_preserves_current_hsp_list_order_for_equal_hits() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1355
-        // ```c
-        // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-        //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-        //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-        //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-        //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-        // }
-        // ```
         let mut hits = vec![
             make_ungapped_for_sort(90, 0),
             make_ungapped_for_sort(100, 2),
@@ -938,10 +688,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
-    // ```c
-    // ASSERT(init_hsp->ungapped_data == NULL ||
-    //        init_hsp->ungapped_data->q_start >= 0);
-    // ```
     #[test]
     #[should_panic(expected = "NCBI BLAST requires context-relative ungapped q_start >= 0")]
     fn test_get_ungapped_hsp_list_fails_fast_on_negative_context_relative_query_start() {
@@ -979,11 +725,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4730-4732
-    // ```c
-    //    /* The BlastHSPList structure can be allocated and passed from outside */
-    //    if (*hsp_list_ptr != NULL)
-    //       hsp_list = *hsp_list_ptr;
-    // ```
     // The list passed in by the caller (LOSAT_X_SEEDCOMPACT reserves one hit per init HSP) gives
     // the list of `get_ungapped_hsp_list`, every field (Debug, so E-values by their shortest
     // round-trip text), in the caller's allocation; an empty input keeps the reservation.
@@ -1034,14 +775,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4772
-    // ```c
-    //       Blast_HSPInit(ungapped_data->q_start,
-    //                     ungapped_data->length+ungapped_data->q_start,
-    //                     ungapped_data->s_start,
-    //                     ungapped_data->length+ungapped_data->s_start,
-    // ...
-    //    Blast_HSPListSortByScore(hsp_list);
-    // ```
     // The one-hit conversion keeps the ends `start + length` of HSPs of length 0, -1 and -2 (one
     // ending at -2, below the frame's start) and sorts with the `Int4` comparator: of two HSPs of
     // score 9 that start at subject 0, the one ending at 3 comes before the one ending at -2

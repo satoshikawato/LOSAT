@@ -6,14 +6,6 @@
 //! with these indices (`lookup.rs` `build_disc_mb_lookup`).
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:184-189
-// ```c
-// /** General types of discontiguous word templates */
-// typedef enum {
-//    eMBWordCoding = 0,
-//    eMBWordOptimal = 1,
-//    eMBWordTwoTemplates = 2
-// } EDiscWordType;
-// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiscWordType {
     Coding = 0,
@@ -22,46 +14,6 @@ pub enum DiscWordType {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:191-235
-// ```c
-// /** Enumeration of all discontiguous word templates; the enumerated values
-//  * encode the weight, template length and type information
-//  *
-//  * <PRE>
-//  *  Optimal word templates:
-//  * Number of 1's in a template is word size (weight);
-//  * total number of 1's and 0's - template length.
-//  *   1,110,110,110,110,111      - 12 of 16
-//  *   1,110,010,110,110,111      - 11 of 16
-//  * 111,010,110,010,110,111      - 12 of 18
-//  * 111,010,010,110,010,111      - 11 of 18
-//  * 111,010,010,110,010,010,111  - 12 of 21
-//  * 111,010,010,100,010,010,111  - 11 of 21
-//  *  Coding word templates:
-//  *    111,110,110,110,110,1     - 12 of 16
-//  *    110,110,110,110,110,1     - 11 of 16
-//  * 10,110,110,110,110,110,1     - 12 of 18
-//  * 10,110,110,010,110,110,1     - 11 of 18
-//  * 10,010,110,110,110,010,110,1 - 12 of 21
-//  * 10,010,110,010,110,010,110,1 - 11 of 21
-//  * </PRE>
-//  ...
-//  */
-// typedef enum {
-//    eDiscTemplateContiguous = 0,
-//    eDiscTemplate_11_16_Coding = 1,
-//    eDiscTemplate_11_16_Optimal = 2,
-//    eDiscTemplate_12_16_Coding = 3,
-//    eDiscTemplate_12_16_Optimal = 4,
-//    eDiscTemplate_11_18_Coding = 5,
-//    eDiscTemplate_11_18_Optimal = 6,
-//    eDiscTemplate_12_18_Coding = 7,
-//    eDiscTemplate_12_18_Optimal = 8,
-//    eDiscTemplate_11_21_Coding = 9,
-//    eDiscTemplate_11_21_Optimal = 10,
-//    eDiscTemplate_12_21_Coding = 11,
-//    eDiscTemplate_12_21_Optimal = 12
-// } EDiscTemplateType;
-// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiscTemplateType {
     Contiguous = 0,
@@ -102,17 +54,6 @@ impl DiscTemplateType {
     /// The second template of a two-template search: the next enumerated value.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:707-715
-    /// ```c
-    ///    /* For now leave only one possibility for the second template.
-    ///       Note that the intention here is to select both the coding
-    ///       and the optimal templates for one combination of word size
-    ///       and template length. */
-    ///    if (kTwoTemplates) {
-    ///       /* Use the temporaray to avoid annoying ICC warning. */
-    ///       int temp_int = template_type + 1;
-    ///       second_template_type =
-    ///            mb_lt->second_template_type = (EDiscTemplateType) temp_int;
-    /// ```
     pub fn next(self) -> Self {
         Self::from_value(self as i32 + 1)
     }
@@ -122,49 +63,6 @@ impl DiscTemplateType {
 /// unsupported combination is the contiguous template.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:600-643
-/// ```c
-/// static EDiscTemplateType
-/// s_GetDiscTemplateType(Int4 weight, Uint1 length,
-///                       EDiscWordType type)
-/// {
-///    if (weight == 11) {
-///       if (length == 16) {
-///          if (type == eMBWordCoding || type == eMBWordTwoTemplates)
-///             return eDiscTemplate_11_16_Coding;
-///          else if (type == eMBWordOptimal)
-///             return eDiscTemplate_11_16_Optimal;
-///       } else if (length == 18) {
-///          if (type == eMBWordCoding || type == eMBWordTwoTemplates)
-///             return eDiscTemplate_11_18_Coding;
-///          else if (type == eMBWordOptimal)
-///             return eDiscTemplate_11_18_Optimal;
-///       } else if (length == 21) {
-///          if (type == eMBWordCoding || type == eMBWordTwoTemplates)
-///             return eDiscTemplate_11_21_Coding;
-///          else if (type == eMBWordOptimal)
-///             return eDiscTemplate_11_21_Optimal;
-///       }
-///    } else if (weight == 12) {
-///       if (length == 16) {
-///          if (type == eMBWordCoding || type == eMBWordTwoTemplates)
-///             return eDiscTemplate_12_16_Coding;
-///          else if (type == eMBWordOptimal)
-///             return eDiscTemplate_12_16_Optimal;
-///       } else if (length == 18) {
-///          if (type == eMBWordCoding || type == eMBWordTwoTemplates)
-///             return eDiscTemplate_12_18_Coding;
-///          else if (type == eMBWordOptimal)
-///             return eDiscTemplate_12_18_Optimal;
-///       } else if (length == 21) {
-///          if (type == eMBWordCoding || type == eMBWordTwoTemplates)
-///             return eDiscTemplate_12_21_Coding;
-///          else if (type == eMBWordOptimal)
-///             return eDiscTemplate_12_21_Optimal;
-///       }
-///    }
-///    return eDiscTemplateContiguous; /* All unsupported cases default to 0 */
-/// }
-/// ```
 pub fn get_disc_template_type(
     weight: i32,
     length: u8,
@@ -211,18 +109,6 @@ pub fn get_disc_template_type(
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:300-316
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_11_16_Coding(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     return ((lo & 0x00000003)      ) |
-//            ((lo & 0x000000f0) >>  2) |
-//            ((lo & 0x00003c00) >>  4) |
-//            ((lo & 0x000f0000) >>  6) |
-//            ((lo & 0x03c00000) >>  8) |
-//            ((lo & 0xf0000000) >> 10);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_11_16_coding(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -235,17 +121,6 @@ fn discontig_index_11_16_coding(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:318-333
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_11_16_Optimal(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     return ((lo & 0x0000003f)      ) |
-//            ((lo & 0x00000f00) >>  2) |
-//            ((lo & 0x0003c000) >>  4) |
-//            ((lo & 0x00300000) >>  6) |
-//            ((lo & 0xfc000000) >> 10);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_11_16_optimal(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -257,20 +132,6 @@ fn discontig_index_11_16_optimal(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:335-353
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_11_18_Coding(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     Uint4 hi = (Uint4)(accum >> 32);
-//     return ((lo & 0x00000003)      ) |
-//            ((lo & 0x000000f0) >>  2) |
-//            ((lo & 0x00003c00) >>  4) |
-//            ((lo & 0x00030000) >>  6) |
-//            ((lo & 0x03c00000) >> 10) |
-//            ((lo & 0xf0000000) >> 12) |
-//            ((hi & 0x0000000c) << 18);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_11_18_coding(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -285,20 +146,6 @@ fn discontig_index_11_18_coding(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:355-373
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_11_18_Optimal(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     Uint4 hi = (Uint4)(accum >> 32);
-//     return ((lo & 0x0000003f)      ) |
-//            ((lo & 0x00000300) >>  2) |
-//            ((lo & 0x0003c000) >>  6) |
-//            ((lo & 0x00300000) >>  8) |
-//            ((lo & 0x0c000000) >> 12) |
-//            ((lo & 0xc0000000) >> 14) |
-//            ((hi & 0x0000000f) << 18);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_11_18_optimal(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -313,21 +160,6 @@ fn discontig_index_11_18_optimal(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:375-394
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_11_21_Coding(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     Uint4 hi = (Uint4)(accum >> 32);
-//     return ((lo & 0x00000003)      ) |
-//            ((lo & 0x000000f0) >>  2) |
-//            ((lo & 0x00000c00) >>  4) |
-//            ((lo & 0x000f0000) >>  8) |
-//            ((lo & 0x00c00000) >> 10) |
-//            ((lo & 0xf0000000) >> 14) |
-//            ((hi & 0x0000000c) << 16) |
-//            ((hi & 0x00000300) << 12);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_11_21_coding(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -343,20 +175,6 @@ fn discontig_index_11_21_coding(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:396-414
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_11_21_Optimal(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     Uint4 hi = (Uint4)(accum >> 32);
-//     return ((lo & 0x0000003f)      ) |
-//            ((lo & 0x00000300) >>  2) |
-//            ((lo & 0x0000c000) >>  6) |
-//            ((lo & 0x00c00000) >> 12) |
-//            ((lo & 0x0c000000) >> 14) |
-//            ((hi & 0x00000003) << 14) |
-//            ((hi & 0x000003f0) << 12);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_11_21_optimal(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -371,17 +189,6 @@ fn discontig_index_11_21_optimal(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:416-431
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_12_16_Coding(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     return ((lo & 0x00000003)      ) |
-//            ((lo & 0x000000f0) >>  2) |
-//            ((lo & 0x00003c00) >>  4) |
-//            ((lo & 0x000f0000) >>  6) |
-//            ((lo & 0xffc00000) >>  8);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_12_16_coding(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -393,17 +200,6 @@ fn discontig_index_12_16_coding(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:433-448
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_12_16_Optimal(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     return ((lo & 0x0000003f)     ) |
-//            ((lo & 0x00000f00) >> 2) |
-//            ((lo & 0x0003c000) >> 4) |
-//            ((lo & 0x00f00000) >> 6) |
-//            ((lo & 0xfc000000) >> 8);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_12_16_optimal(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -415,20 +211,6 @@ fn discontig_index_12_16_optimal(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:450-468
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_12_18_Coding(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     Uint4 hi = (Uint4)(accum >> 32);
-//     return ((lo & 0x00000003)      ) |
-//            ((lo & 0x000000f0) >>  2) |
-//            ((lo & 0x00003c00) >>  4) |
-//            ((lo & 0x000f0000) >>  6) |
-//            ((lo & 0x03c00000) >>  8) |
-//            ((lo & 0xf0000000) >> 10) |
-//            ((hi & 0x0000000c) << 20);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_12_18_coding(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -443,20 +225,6 @@ fn discontig_index_12_18_coding(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:470-488
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_12_18_Optimal(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     Uint4 hi = (Uint4)(accum >> 32);
-//     return ((lo & 0x0000003f)      ) |
-//            ((lo & 0x00000f00) >>  2) |
-//            ((lo & 0x0000c000) >>  4) |
-//            ((lo & 0x00f00000) >>  8) |
-//            ((lo & 0x0c000000) >> 10) |
-//            ((lo & 0xc0000000) >> 12) |
-//            ((hi & 0x0000000f) << 20);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_12_18_optimal(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -471,21 +239,6 @@ fn discontig_index_12_18_optimal(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:490-509
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_12_21_Coding(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     Uint4 hi = (Uint4)(accum >> 32);
-//     return ((lo & 0x00000003)      ) |
-//            ((lo & 0x000000f0) >>  2) |
-//            ((lo & 0x00000c00) >>  4) |
-//            ((lo & 0x000f0000) >>  8) |
-//            ((lo & 0x03c00000) >> 10) |
-//            ((lo & 0xf0000000) >> 12) |
-//            ((hi & 0x0000000c) << 18) |
-//            ((hi & 0x00000300) << 14);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_12_21_coding(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -501,20 +254,6 @@ fn discontig_index_12_21_coding(accum: u64) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:511-529
-// ```c
-// static NCBI_INLINE Int4 DiscontigIndex_12_21_Optimal(Uint8 accum)
-// {
-//     Uint4 lo = (Uint4)accum;
-//     Uint4 hi = (Uint4)(accum >> 32);
-//     return ((lo & 0x0000003f)      ) |
-//            ((lo & 0x00000300) >>  2) |
-//            ((lo & 0x0000c000) >>  6) |
-//            ((lo & 0x00f00000) >> 10) |
-//            ((lo & 0x0c000000) >> 12) |
-//            ((hi & 0x00000003) << 16) |
-//            ((hi & 0x000003f0) << 14);
-// }
-// ```
 #[inline(always)]
 fn discontig_index_12_21_optimal(accum: u64) -> u32 {
     let lo = accum as u32;
@@ -532,28 +271,6 @@ fn discontig_index_12_21_optimal(accum: u64) -> u32 {
 /// low-order bits of `accum`.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:540-588
-/// ```c
-/// static NCBI_INLINE Int4 ComputeDiscontiguousIndex(Uint8 accum,
-///                                     EDiscTemplateType template_type)
-/// {
-///    Int4 index;
-///
-///    switch (template_type) {
-///    case eDiscTemplate_11_16_Coding:
-///       index = DiscontigIndex_11_16_Coding(accum);
-///       break;
-///    ...
-///    case eDiscTemplate_12_21_Optimal:
-///       index = DiscontigIndex_12_21_Optimal(accum);
-///       break;
-///    default:
-///       index = 0;
-///       break;
-///    }
-///
-///    return index;
-/// }
-/// ```
 #[inline(always)]
 pub fn compute_discontiguous_index(accum: u64, template_type: DiscTemplateType) -> u32 {
     match template_type {
@@ -576,19 +293,6 @@ pub fn compute_discontiguous_index(accum: u64, template_type: DiscTemplateType) 
 /// The scan routine NCBI chooses for a discontiguous table.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2617-2627
-/// ```c
-///     if (mb_lt->discontiguous) {
-///         if (mb_lt->two_templates)
-///             mb_lt->scansub_callback =
-///                        (void *)s_MB_DiscWordScanSubject_TwoTemplates_1;
-///         else if (mb_lt->template_type == eDiscTemplate_11_18_Coding)
-///             mb_lt->scansub_callback = (void *)s_MB_DiscWordScanSubject_11_18_1;
-///         else if (mb_lt->template_type == eDiscTemplate_11_21_Coding)
-///             mb_lt->scansub_callback = (void *)s_MB_DiscWordScanSubject_11_21_1;
-///         else
-///             mb_lt->scansub_callback = (void *)s_MB_DiscWordScanSubject_1;
-///     }
-/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiscScanSubjectKind {
     General,
@@ -677,81 +381,6 @@ pub(crate) fn disc_word_scan_subject_until(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2202-2273
-/// ```c
-/// static Int4 s_MB_DiscWordScanSubject_1(const LookupTableWrap* lookup_wrap,
-///        const BLAST_SequenceBlk* subject,
-///        BlastOffsetPair* NCBI_RESTRICT offset_pairs, Int4 max_hits,
-///        Int4* scan_range)
-/// {
-///    BlastMBLookupTable* mb_lt = (BlastMBLookupTable*) lookup_wrap->lut;
-///    Uint1* s = subject->sequence + scan_range[0] / COMPRESSION_RATIO;
-///    Int4 total_hits = 0;
-///    Int4 index;
-///    Uint8 accum = 0;
-///    EDiscTemplateType template_type = mb_lt->template_type;
-///    Int4 template_length = mb_lt->template_length;
-///
-///    ASSERT(lookup_wrap->lut_type == eMBLookupTable);
-///    max_hits -= mb_lt->longest_chain;
-///
-///    /* fill the accumulator */
-///    index = scan_range[0] - (scan_range[0] % COMPRESSION_RATIO);
-///    while(index < scan_range[0] + template_length) {
-///       accum = accum << 8 | *s++;
-///       index += COMPRESSION_RATIO;
-///    }
-///
-///    /* note that the part of the loop we jump to will
-///       depend on the number of extra bases (0-3) in the
-///       accumulator, and not on the value of scan_range[0] */
-///    switch (index - (scan_range[0] + template_length)) {
-///    case 1:
-///        goto base_3;
-///    case 2:
-///        goto base_2;
-///    case 3:
-///        /* this branch of the main loop adds another
-///           byte from s[], which is not needed in the
-///           initial value of the accumulator */
-///        accum = accum >> 8;
-///        s--;
-///        goto base_1;
-///    }
-///
-///    while (scan_range[0] <= scan_range[1]) {
-///
-///       index = ComputeDiscontiguousIndex(accum, template_type);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///
-/// base_1:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       accum = accum << 8 | *s++;
-///       index = ComputeDiscontiguousIndex(accum >> 6, template_type);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///
-/// base_2:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       index = ComputeDiscontiguousIndex(accum >> 4, template_type);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///
-/// base_3:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       index = ComputeDiscontiguousIndex(accum >> 2, template_type);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///    }
-///    return total_hits;
-/// }
-/// ```
 fn mb_disc_word_scan_subject_1(
     packed: &[u8],
     template_type: DiscTemplateType,
@@ -860,71 +489,6 @@ fn mb_disc_word_scan_subject_1(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2289-2367
-/// ```c
-/// static Int4 s_MB_DiscWordScanSubject_TwoTemplates_1(
-///        const LookupTableWrap* lookup_wrap,
-///        const BLAST_SequenceBlk* subject,
-///        BlastOffsetPair* NCBI_RESTRICT offset_pairs, Int4 max_hits,
-///        Int4* scan_range)
-/// {
-///    ...
-///    /* fill the accumulator */
-///    index = scan_range[0] - (scan_range[0] % COMPRESSION_RATIO);
-///    while(index < scan_range[0] + template_length) {
-///       accum = accum << 8 | *s++;
-///       index += COMPRESSION_RATIO;
-///    }
-///    ...
-///    switch (index - (scan_range[0] + template_length)) {
-///    case 1:
-///        goto base_3;
-///    case 2:
-///        goto base_2;
-///    case 3:
-///        ...
-///        accum = accum >> 8;
-///        s--;
-///        goto base_1;
-///    }
-///
-///    while (scan_range[0] <= scan_range[1]) {
-///
-///       index = ComputeDiscontiguousIndex(accum, template_type);
-///       index2 = ComputeDiscontiguousIndex(accum, second_template_type);
-///       MB_ACCESS_HITS2();
-///       scan_range[0]++;
-///
-/// base_1:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       accum = accum << 8 | *s++;
-///       index = ComputeDiscontiguousIndex(accum >> 6, template_type);
-///       index2 = ComputeDiscontiguousIndex(accum >> 6, second_template_type);
-///       MB_ACCESS_HITS2();
-///       scan_range[0]++;
-///
-/// base_2:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       index = ComputeDiscontiguousIndex(accum >> 4, template_type);
-///       index2 = ComputeDiscontiguousIndex(accum >> 4, second_template_type);
-///       MB_ACCESS_HITS2();
-///       scan_range[0]++;
-///
-/// base_3:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       index = ComputeDiscontiguousIndex(accum >> 2, template_type);
-///       index2 = ComputeDiscontiguousIndex(accum >> 2, second_template_type);
-///       MB_ACCESS_HITS2();
-///       scan_range[0]++;
-///    }
-///    return total_hits;
-/// }
-/// ```
 fn mb_disc_word_scan_subject_two_templates_1(
     packed: &[u8],
     template_type: DiscTemplateType,
@@ -1124,102 +688,6 @@ fn x_index_11_18_3(lo: u32, hi: u32) -> u32 {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2366-2479
-/// ```c
-/// static Int4 s_MB_DiscWordScanSubject_11_18_1(
-///        const LookupTableWrap* lookup_wrap,
-///        const BLAST_SequenceBlk* subject,
-///        BlastOffsetPair* NCBI_RESTRICT offset_pairs, Int4 max_hits,
-///        Int4* scan_range)
-/// {
-///    BlastMBLookupTable* mb_lt = (BlastMBLookupTable*) lookup_wrap->lut;
-///    Uint1* s = subject->sequence + scan_range[0] / COMPRESSION_RATIO;
-///    Int4 total_hits = 0;
-///    Int4 index;
-///    const Int4 kTemplateLength = 18;
-///    Uint4 lo = 0;
-///    Uint4 hi = 0;
-///    ...
-///    /* fill the accumulator */
-///    index = scan_range[0] - (scan_range[0] % COMPRESSION_RATIO);
-///    while(index < scan_range[0] + kTemplateLength) {
-///       hi = (hi << 8) | (lo >> 24);
-///       lo = lo << 8 | *s++;
-///       index += COMPRESSION_RATIO;
-///    }
-///
-///    switch (index - (scan_range[0] + kTemplateLength)) {
-///    case 1:
-///        goto base_3;
-///    case 2:
-///        goto base_2;
-///    case 3:
-///        s--;
-///        lo = (lo >> 8) | (hi << 24);
-///        hi = hi >> 8;
-///        goto base_1;
-///    }
-///
-///    while (scan_range[0] <= scan_range[1]) {
-///
-///       index = ((lo & 0x00000003)      ) |
-///               ((lo & 0x000000f0) >>  2) |
-///               ((lo & 0x00003c00) >>  4) |
-///               ((lo & 0x00030000) >>  6) |
-///               ((lo & 0x03c00000) >> 10) |
-///               ((lo & 0xf0000000) >> 12) |
-///               ((hi & 0x0000000c) << 18);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///
-/// base_1:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       hi = (hi << 8) | (lo >> 24);
-///       lo = lo << 8 | *s++;
-///
-///       index = ((lo & 0x000000c0) >>  6) |
-///               ((lo & 0x00003c00) >>  8) |
-///               ((lo & 0x000f0000) >> 10) |
-///               ((lo & 0x00c00000) >> 12) |
-///               ((lo & 0xf0000000) >> 16) |
-///               ((hi & 0x0000003c) << 14) |
-///               ((hi & 0x00000300) << 12);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///
-/// base_2:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       index = ((lo & 0x00000030) >>  4) |
-///               ((lo & 0x00000f00) >>  6) |
-///               ((lo & 0x0003c000) >>  8) |
-///               ((lo & 0x00300000) >> 10) |
-///               ((lo & 0x3c000000) >> 14) |
-///               ((hi & 0x0000000f) << 16) |
-///               ((hi & 0x000000c0) << 14);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///
-/// base_3:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       index = ((lo & 0x0000000c) >>  2) |
-///               ((lo & 0x000003c0) >>  4) |
-///               ((lo & 0x0000f000) >>  6) |
-///               ((lo & 0x000c0000) >>  8) |
-///               ((lo & 0x0f000000) >> 12) |
-///               ((lo & 0xc0000000) >> 14) |
-///               ((hi & 0x00000003) << 18) |
-///               ((hi & 0x00000030) << 16);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///    }
-///    return total_hits;
-/// }
-/// ```
 fn mb_disc_word_scan_subject_11_18_1(
     packed: &[u8],
     mut scan_range: [i32; 2],
@@ -1377,102 +845,6 @@ fn x_index_11_21_3(lo: u32, hi: u32) -> u32 {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2481-2598
-/// ```c
-/// static Int4 s_MB_DiscWordScanSubject_11_21_1(
-///        const LookupTableWrap* lookup_wrap,
-///        const BLAST_SequenceBlk* subject,
-///        BlastOffsetPair* NCBI_RESTRICT offset_pairs, Int4 max_hits,
-///        Int4* scan_range)
-/// {
-///    ...
-///    const Int4 kTemplateLength = 21;
-///    Uint4 lo = 0;
-///    Uint4 hi = 0;
-///    ...
-///    index = scan_range[0] - (scan_range[0] % COMPRESSION_RATIO);
-///    while(index < scan_range[0] + kTemplateLength) {
-///       hi = (hi << 8) | (lo >> 24);
-///       lo = lo << 8 | *s++;
-///       index += COMPRESSION_RATIO;
-///    }
-///
-///    switch (index - (scan_range[0] + kTemplateLength)) {
-///    case 1:
-///        goto base_3;
-///    case 2:
-///        goto base_2;
-///    case 3:
-///        s--;
-///        lo = (lo >> 8) | (hi << 24);
-///        hi = hi >> 8;
-///        goto base_1;
-///    }
-///
-///    while (scan_range[0] <= scan_range[1]) {
-///
-///       index = ((lo & 0x00000003)      ) |
-///               ((lo & 0x000000f0) >>  2) |
-///               ((lo & 0x00000c00) >>  4) |
-///               ((lo & 0x000f0000) >>  8) |
-///               ((lo & 0x00c00000) >> 10) |
-///               ((lo & 0xf0000000) >> 14) |
-///               ((hi & 0x0000000c) << 16) |
-///               ((hi & 0x00000300) << 12);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///
-/// base_1:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       hi = (hi << 8) | (lo >> 24);
-///       lo = lo << 8 | *s++;
-///
-///       index = ((lo & 0x000000c0) >>  6) |
-///               ((lo & 0x00003c00) >>  8) |
-///               ((lo & 0x00030000) >> 10) |
-///               ((lo & 0x03c00000) >> 14) |
-///               ((lo & 0x30000000) >> 16) |
-///               ((hi & 0x0000003c) << 12) |
-///               ((hi & 0x00000300) << 10) |
-///               ((hi & 0x0000c000) <<  6);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///
-/// base_2:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       index = ((lo & 0x00000030) >>  4) |
-///               ((lo & 0x00000f00) >>  6) |
-///               ((lo & 0x0000c000) >>  8) |
-///               ((lo & 0x00f00000) >> 12) |
-///               ((lo & 0x0c000000) >> 14) |
-///               ((hi & 0x0000000f) << 14) |
-///               ((hi & 0x000000c0) << 12) |
-///               ((hi & 0x00003000) <<  8);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///
-/// base_3:
-///       if (scan_range[0] > scan_range[1])
-///          break;
-///
-///       index = ((lo & 0x0000000c) >>  2) |
-///               ((lo & 0x000003c0) >>  4) |
-///               ((lo & 0x00003000) >>  6) |
-///               ((lo & 0x003c0000) >> 10) |
-///               ((lo & 0x03000000) >> 12) |
-///               ((lo & 0xc0000000) >> 16) |
-///               ((hi & 0x00000003) << 16) |
-///               ((hi & 0x00000030) << 14) |
-///               ((hi & 0x00000c00) << 10);
-///       MB_ACCESS_HITS();
-///       scan_range[0]++;
-///    }
-///    return total_hits;
-/// }
-/// ```
 fn mb_disc_word_scan_subject_11_21_1(
     packed: &[u8],
     mut scan_range: [i32; 2],
@@ -1579,9 +951,6 @@ fn mb_disc_word_scan_subject_11_21_1(
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:83
-// ```c
-// #define COMPRESSION_RATIO 4
-// ```
 const COMPRESSION_RATIO_I32: i32 = 4;
 
 #[cfg(test)]

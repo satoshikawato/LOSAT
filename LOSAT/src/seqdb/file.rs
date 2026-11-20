@@ -40,66 +40,11 @@ pub struct DbFile {
 
 impl DbFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:123-129
-    // ```c++
-    //     if (! m_File.Open(CSeqDB_Path(m_FileName))) {
-    //         //m_Atlas.Unlock(locked);
-    //
-    //         string msg = string("Error: File (") + m_FileName + ") not found.";
-    //
-    //         NCBI_THROW(CSeqDBException, eFileErr, msg);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:93-105
-    // ```c++
-    //     bool Open(const CSeqDB_Path & name)
-    //     {
-    //         _ASSERT(name.Valid());
-    //
-    //         // FIXME: should use path even in atlas code
-    //         bool success = m_Atlas.GetFileSizeL(name.GetPathS(), m_Length);
-    //
-    //         if (success) {
-    //             m_FileName = name.GetPathS();
-    //         }
-    //
-    //         return success;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5932-5946
-    // ```c++
-    //         // Open file
-    //         errno = 0;
-    //         m_Handle->hMap = NcbiSys_open(_T_XCSTRING(m_FileName), m_Attrs->file_access);
-    //         if ( m_Handle->hMap < 0 ) {
-    //             errmsg = NcbiSys_strerror(errno);
-    //             break;
-    //         }
-    // #endif
-    //         // Success
-    //         return;
-    //     }
-    //     // Error: close and cleanup
-    //     x_Close();
-    //     NCBI_THROW(CFileException, eMemoryMap,
-    //                "CMemoryFile: Cannot memory map file '" + m_FileName + "':" + errmsg);
-    // ```
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-720
-    // ```c++
-    //             try {
-    //                 m_MappedFile = m_Atlas.GetMemoryFile(m_Filename);
-    //             }
-    //             catch (const CFileException& e) {
-    //                 if (e.GetErrCode() == CFileException::eMemoryMap &&
-    //                     NStr::Find(e.GetMsg(), "Too many open files") != NPOS) {
-    //                     NCBI_THROW(CSeqDBException, eTooManyOpenFiles, e.GetMsg());
-    //                 }
-    //                 else {
-    //                     NCBI_THROW(CSeqDBException, eMemoryMappingFailure, e.GetMsg());
-    //                 }
-    //             }
-    // ```
     // NCBI first asks whether the file exists (`GetFileSizeL`: `stat`
-    // succeeds and names a regular file, quoted at `alias::exists`) and gives
+    // succeeds and names a regular file, cited at `alias::exists`) and gives
     // "not found" otherwise; it then opens the file to map it, and an `open`
     // that fails is its memory-mapping error. LOSAT takes the same two steps
     // with a plain `open` in place of the mapping.
@@ -150,11 +95,6 @@ impl DbFile {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1802-1817
-    // ```c++
-    //         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
-    //         ...
-    //         *buffer = m_Seq->GetFileDataPtr(start_offset);
-    // ```
     // NCBI returns a pointer at `offset` of the mapped file; LOSAT fills `buf`
     // from the same offset. A range that passes the end of the file, which
     // NCBI would read past its mapping, is an explicit format error.

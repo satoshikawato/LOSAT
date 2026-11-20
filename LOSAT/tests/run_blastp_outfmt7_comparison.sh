@@ -3,18 +3,8 @@
 set -euo pipefail
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# ```c
-# const string kArgQuery("query");
-# const string kArgOutput("out");
-# const string kArgSubject("subject");
-# const string kArgEvalue("evalue");
-# const string kArgMaxTargetSequences("max_target_seqs");
-# ```
 #
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:37
-# ```c
-# const int kDfltArgOutputFormat = 0;
-# ```
 
 LOSAT_BIN="../target/debug/losat"
 REF_DIR="./blast_out/blastp_outfmt7"
@@ -22,9 +12,6 @@ FASTA_DIR="./fasta"
 source ./blastp_parity_options.sh
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# ```c
-# const string kArgOutput("out");
-# ```
 #
 # Comparison-harness note: keep LOSAT outputs in a temporary directory so
 # tracked `losat_out/` artifacts cannot mask current-source divergence.

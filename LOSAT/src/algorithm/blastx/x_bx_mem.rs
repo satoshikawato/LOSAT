@@ -6,15 +6,6 @@
 //! `tblastx/lookup/x_lut_direct.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-271
-//! ```c
-//!         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
-//! ...
-//!                 if (IsMultiThreaded()) {
-//!                      x_LaunchMultiThreadedSearch(*chunk_data);
-//!                 } else {
-//!                     retval =
-//!                         CPrelimSearchRunner(*chunk_data, opts_memento.get())();
-//! ```
 //! NCBI builds one lookup table per query chunk and searches the chunks one after another; with
 //! `-subject` it runs one thread. LOSAT searches query batches (`LOSAT_X_BXFLOW`) and the chunks of
 //! a split query (`LOSAT_X_BXPAR`) side by side, one per thread, each with a lookup table of its
@@ -667,11 +658,6 @@ impl XScratch<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-// ```c
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-// ```
 // NCBI scans a chunk's subjects one after another on one diagonal table. Here they are tasks of
 // consecutive subjects on the pool, each task on its thread's table (module comment: the table's
 // history does not change a subject's computation), and the results are kept in subject order.

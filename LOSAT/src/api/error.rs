@@ -10,24 +10,7 @@
 //! command line writes one.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
-//! ```c++
-//!     catch (const CArgException& e) {                                        \
-//!         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//!         exit_code = BLAST_INPUT_ERROR;                                      \
-//!     }                                                                       \
-//!     catch (const CObjReaderParseException& e) {                             \
-//!         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-//!         exit_code = BLAST_INPUT_ERROR;                                      \
-//!     }                                                                       \
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-230
-//! ```c++
-//!     catch (const blast::CBlastException& e) {                               \
-//!         const string& msg = e.GetMsg();                                     \
-//!         if (e.GetErrCode() == CBlastException::eInvalidOptions) {           \
-//!             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
-//!             exit_code = BLAST_INPUT_ERROR;                                  \
-//! ```
 #![warn(missing_docs, unused)]
 
 use std::borrow::Cow;

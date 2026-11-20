@@ -22,38 +22,8 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::utils::x87::X87;
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1312-1319
-// ```c++
-//     // For consistency make additional check on incorrect leading symbols.
-//     // Because strtod() may just skip such symbols.
-//     if (!(flags & NStr::fAllowLeadingSymbols)) {
-//         char c = str[pos];
-//         if ( !isdigit((unsigned char)c)  &&  !s_IsDecimalPoint(c,flags)  &&  c != '-'  &&  c != '+') {
-//             S2N_CONVERT_ERROR_INVAL(double);
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1342-1349
-// ```c++
-//     if ( !endptr  ||  endptr == begptr ) {
-//         S2N_CONVERT_ERROR(double, kEmptyStr, EINVAL, s_DiffPtr(endptr, begptr) + pos);
-//     }
-//     // some libs set ERANGE, others do not
-//     // here, we do not consider ERANGE as error
-//     if ( errno_ref && errno_ref != ERANGE ) {
-//         S2N_CONVERT_ERROR(double, kEmptyStr, errno_ref, s_DiffPtr(endptr, begptr) + pos);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1367-1375
-// ```c++
-//     pos += s_DiffPtr(endptr, begptr);
-//
-//     // Skip allowed trailing symbols
-//     if (flags & NStr::fAllowTrailingSymbols) {
-//         ...
-//     }
-//     CHECK_ENDPTR(double);
-//     return n;
-// ```
 // The errors are thrown in `s_StringToDouble` (`double ncbi::s_StringToDouble(const char*,
 // size_t, ...)`, whose class part is `ncbi` for `CDiagCompileInfo::ParseCurrFunctName`,
 // ncbidiag.cpp:826-888) at lines 1317 (the first byte), 1343 (no number) and 1374
@@ -64,39 +34,8 @@ const STRING_TO_DOUBLE_NO_NUMBER: ThrowSite = convert_site(1343, "ncbi::s_String
 const STRING_TO_DOUBLE_ENDPTR: ThrowSite = convert_site(1374, "ncbi::s_StringToDouble");
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1386-1403
-// ```c++
-// double NStr::StringToDouble(const CTempStringEx str, TStringToNumFlags flags)
-// {
-//     size_t size = str.size();
-//     if ( str.HasZeroAtEnd() ) {
-//         // string has zero at the end already
-//         return s_StringToDouble(str.data(), size, flags);
-//     }
-//     char buf[256]; // small temporary buffer on stack for appending zero char
-//     if ( size < sizeof(buf) ) {
-//         memcpy(buf, str.data(), size);
-//         buf[size] = '\0';
-//         return s_StringToDouble(buf, size, flags);
-//     }
-//     else {
-//         // use std::string() to allocate memory for appending zero char
-//         return s_StringToDouble(string(str).c_str(), size, flags);
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1283-1285
-// ```c++
-// static double s_StringToDouble(const char* str, size_t size,
-//                                NStr::TStringToNumFlags flags)
-// {
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:422-433
-// ```c++
-// CTempString::CTempString(const char* str)
-// ...
-//     m_String = str;
-//     m_Length = strlen(str);
-// ```
 // `str` of `s_StringToDouble` is the C string, so `strtod` and the end check (`str[pos]`) stop
 // at its first 0 byte ("12\0x" is 12), and the message of an error, `Message(str, ...)`, quotes
 // the text before that byte (the other conversions quote the whole `CTempString`).
@@ -121,35 +60,7 @@ pub(crate) fn string_to_double(s: &[u8]) -> Result<f64, NcbiException> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:724-737
-// ```c++
-// bool s_IsDecimalPoint(unsigned char ch, NStr::TStringToNumFlags  flags)
-// {
-//     if ( ch != '.' && ch != ',') {
-//         return false;
-//     }
-//     if (flags & NStr::fDecimalPosix) {
-//         return ch == '.';
-//     }
-//     else if (flags & NStr::fDecimalPosixOrLocal) {
-//         return ch == '.' || ch == ',';
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1331-1341
-// ```c++
-//     if (flags & NStr::fDecimalPosix) {
-//         n = NStr::StringToDoublePosix(begptr, &endptr, flags);
-//     } else {
-//         n = strtod(begptr, &endptr);
-//     }
-//     if (flags & NStr::fDecimalPosixOrLocal) {
-//         char* endptr2 = 0;
-//         double n2 = NStr::StringToDoublePosix(begptr, &endptr2, flags);
-//         if (!endptr || (endptr2 && endptr2 > endptr)) {
-//             n = n2;
-//             endptr = endptr2;
-//         }
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1329-1341
 // `StringToDoublePosix` reads further than glibc's `strtod` for a decimal mantissa followed by an
 // `e` or `E` that ends the text (`1e`, `2.5E`: it keeps the mark when nothing follows it and steps
 // back to it before a sign or another byte; an exponent with digits `strtod` reads as well), and
@@ -202,19 +113,7 @@ pub(crate) struct PosixDouble {
 /// `Hsp_evalue` `nan`: `-nan` on the SESSION and DOMAINS lines). `StringToDoublePosix` gives it
 /// for `nan` whatever the sign before it.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1082-1087
-// ```c++
-//                 if ( !dot && (c == 'n' || c == 'N') &&
-//                      NStr::strncasecmp(ptr,"nan",3)==0) {
-//                     if (endptr) {
-//                         *endptr = (char*)(ptr+3);
-//                     }
-//                     return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
-// ```
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:810-811
-// ```c++
-//         } else if (NStr::strncasecmp(tmp.data(),"NOT-A-NUMBER", 12) == 0) {
-// 	    return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
-// ```
 pub(crate) const NCBI_NAN: f64 = f64::from_bits(0xfff8_0000_0000_0000);
 
 /// The x87 `long double` constant `1e<n>L` of `StringToDoublePosix` (`NCBI_CONST_LONGDOUBLE`):
@@ -227,266 +126,6 @@ fn long_double_pow10(n: i64) -> X87 {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:985-1278
-// ```c++
-// double NStr::StringToDoublePosix(const char* ptr, char** endptr, TStringToNumFlags flags)
-// {
-//     S2N_CONVERT_GUARD(NStr::fConvErr_NoThrow);
-//
-//     const char* start = ptr;
-//     char c = *ptr++;
-//
-//     // skip leading whitespace
-//     while ( isspace((unsigned char)c) ) {
-//         c = *ptr++;
-//     }
-//
-//     int sign = 0;
-//     if ( c == '-' ) {
-//         sign = -1;
-//         c = *ptr++;
-//     }
-//     else if ( c == '+' ) {
-//         sign = +1;
-//         c = *ptr++;
-//     }
-//
-//     if (c == 0) {
-//         if (endptr) {
-//             *endptr = (char*)start;
-//         }
-//         err_guard.Set(EINVAL);
-//         return 0.;
-//     }
-//
-//     // short-cut - single digit
-//     if ( !*ptr && c >= '0' && c <= '9' ) {
-//         if (endptr) {
-//             *endptr = (char*)ptr;
-//         }
-//         double result = c-'0';
-//         // some compilers fail to negate zero
-//         return sign < 0 ? (c == '0' ? -0. : -result) : result;
-//     }
-//
-//     bool         dot = false, expn = false, anydigits = false;
-//     int          digits = 0, dot_position = 0;
-//     unsigned int first=0, second=0, first_mul=1;
-//     long double  second_mul = NCBI_CONST_LONGDOUBLE(1.),
-//                  third      = NCBI_CONST_LONGDOUBLE(0.);
-//
-//     // up to exponent
-//     for ( ; ; c = *ptr++ ) {
-//         if (c >= '0' && c <= '9') {
-//             // digits: accumulate
-//             c = (char)(c - '0');
-//             anydigits = true;
-//             ++digits;
-//             if (first == 0) {
-//                 first = c;
-//                 if ( first == 0 ) {
-//                     // omit leading zeros
-//                     --digits;
-//                     if (dot) {
-//                         --dot_position;
-//                     }
-//                 }
-//             } else if (digits <= 9) {
-//                 // first 9 digits come to 'first'
-//                 first = first*10 + c;
-//             } else if (digits <= 18) {
-//                 // next 9 digits come to 'second'
-//                 first_mul *= 10;
-//                 second = second*10 + c;
-//             } else {
-//                 // other digits come to 'third'
-//                 second_mul *= NCBI_CONST_LONGDOUBLE(10.);
-//                 third = third * NCBI_CONST_LONGDOUBLE(10.) + c;
-//             }
-//         }
-//         else if (c == '.') {
-//             // dot
-//             // if second dot, stop
-//             if (dot) {
-//                 --ptr;
-//                 break;
-//             }
-//             dot_position = digits;
-//             dot = true;
-//         }
-//         else if (c == 'e' || c == 'E') {
-//             // if exponent, stop
-//             if (!anydigits) {
-//                 --ptr;
-//                 break;
-//             }
-//             expn = true;
-//             break;
-//         }
-//         else {
-//             --ptr;
-//             if (!anydigits) {
-//                 if ( !dot && (c == 'n' || c == 'N') &&
-//                      NStr::strncasecmp(ptr,"nan",3)==0) {
-//                     if (endptr) {
-//                         *endptr = (char*)(ptr+3);
-//                     }
-//                     return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
-//                 }
-//                 if ( (c == 'i' || c == 'I') ) {
-//                     if ( NStr::strncasecmp(ptr,"inf",3)==0) {
-//                         ptr += 3;
-//                         if ( NStr::strncasecmp(ptr,"inity",5)==0) {
-//                             ptr += 5;
-//                         }
-//                         if (endptr) {
-//                             *endptr = (char*)ptr;
-//                         }
-//                         return sign < 0 ? -HUGE_VAL : HUGE_VAL;
-//                     }
-//                 }
-//             }
-//             break;
-//         }
-//     }
-//     // if no digits, stop now - error
-//     if (!anydigits) {
-//         if (endptr) {
-//             *endptr = (char*)start;
-//         }
-//         err_guard.Set(EINVAL);
-//         return 0.;
-//     }
-//     int exponent = dot ? dot_position - digits : 0;
-//
-//     // read exponent
-//     if (expn && *ptr) {
-//         int expvalue = 0;
-//         bool expsign = false, expnegate= false;
-//         int expdigits= 0;
-//         for( ; ; ++ptr) {
-//             c = *ptr;
-//             // sign: should be no digits at this point
-//             if (c == '-' || c == '+') {
-//                 // if there was sign or digits, stop
-//                 if (expsign || expdigits) {
-//                     break;
-//                 }
-//                 expsign = true;
-//                 expnegate = c == '-';
-//             }
-//             // digits: accumulate
-//             else if (c >= '0' && c <= '9') {
-//                 ++expdigits;
-//                 int newexpvalue = expvalue*10 + (c-'0');
-//                 if (newexpvalue > expvalue) {
-//                     expvalue = newexpvalue;
-//                 }
-//             }
-//             else {
-//                 break;
-//             }
-//         }
-//         // if no digits, rollback
-//         if (!expdigits) {
-//             // rollback sign
-//             if (expsign) {
-//                 --ptr;
-//             }
-//             // rollback exponent
-//             if (expn) {
-//                 --ptr;
-//             }
-//         }
-//         else {
-//             exponent = expnegate ? exponent - expvalue : exponent + expvalue;
-//         }
-//     }
-//     long double ret;
-//     if ( first_mul > 1 ) {
-//         _ASSERT(first);
-//         ret = ((long double)first * first_mul + second)* second_mul + third;
-//     }
-//     else {
-//         _ASSERT(first_mul == 1);
-//         _ASSERT(second == 0);
-//         _ASSERT(second_mul == 1);
-//         _ASSERT(third == 0);
-//         ret = first;
-//     }
-//     // calculate exponent
-//     if ( first && exponent ) {
-//         // multiply by power of 10 only non-zero mantissa
-//         if (exponent > 2*DBL_MAX_10_EXP) {
-//             ret = (flags & fDecimalPosixFinite) ? DBL_MAX :  HUGE_VAL;
-//             err_guard.Set(ERANGE);
-//         } else if (exponent < 2*DBL_MIN_10_EXP) {
-//             ret = (flags & fDecimalPosixFinite) ? DBL_MIN : 0.;
-//             err_guard.Set(ERANGE);
-//         } else {
-//             if ( exponent > 0 ) {
-//                 static const double mul1[16] = {
-//                     1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7,
-//                     1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15
-//                 };
-//                 ret *= mul1[exponent&15];
-//                 if ( exponent >>= 4 ) {
-//                     static const long double mul2[16] = {
-//                         NCBI_CONST_LONGDOUBLE(1e0),
-//                         NCBI_CONST_LONGDOUBLE(1e16),
-//                         ...
-//                         NCBI_CONST_LONGDOUBLE(1e240)
-//                     };
-//                     ret *= mul2[exponent&15];
-//                     for ( exponent >>= 4; exponent; --exponent ) {
-//                         ret *= NCBI_CONST_LONGDOUBLE(1e256);
-//                     }
-//                 }
-//                 if (!finite(double(ret))) {
-//                     if (flags & fDecimalPosixFinite) {
-//                         ret = DBL_MAX;
-//                     }
-//                     err_guard.Set(ERANGE);
-//                 }
-//             }
-//             else {
-//                 exponent = -exponent;
-//                 static const long double mul1[16] = {
-//                     NCBI_CONST_LONGDOUBLE(1e-0),
-//                     ...
-//                     NCBI_CONST_LONGDOUBLE(1e-15)
-//                 };
-//                 ret *= mul1[exponent&15];
-//                 if ( exponent >>= 4 ) {
-//                     static const long double mul2[16] = {
-//                         NCBI_CONST_LONGDOUBLE(1e-0),
-//                         NCBI_CONST_LONGDOUBLE(1e-16),
-//                         ...
-//                         NCBI_CONST_LONGDOUBLE(1e-240)
-//                     };
-//                     ret *= mul2[exponent&15];
-//                     for ( exponent >>= 4; exponent; --exponent ) {
-//                         ret *= NCBI_CONST_LONGDOUBLE(1e-256);
-//                     }
-//                 }
-//                 if ( ret < DBL_MIN ) {
-//                     if (flags & fDecimalPosixFinite) {
-//                         ret = DBL_MIN;
-//                     }
-//                     err_guard.Set(ERANGE);
-//                 }
-//             }
-//         }
-//     }
-//     if ( sign < 0 ) {
-//         ret = -ret;
-//     }
-//     // done
-//     if (endptr) {
-//         *endptr = (char*)ptr;
-//     }
-//     return (double)ret;
-// }
-// ```
 /// `NStr::StringToDoublePosix(text, &endptr, flags)`, `finite` for `fDecimalPosixFinite`: NCBI's
 /// own reader of a decimal number, for the C string `text` (its first 0 byte, or its end, ends
 /// it). The `long double` arithmetic of NCBI's x86-64 build is the x87 unit's (`X87`, rounded to

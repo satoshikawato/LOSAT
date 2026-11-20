@@ -79,27 +79,6 @@ pub fn print_summary() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127
-// ```c
-// index = ComputeTableIndex(word_length - 1, lookup->charsize, s_first);
-// for (s = s_first; s <= s_last; s++) {
-//     index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
-//     if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-//         numhits = bbc[index].num_used;
-//         if (numhits <= (array_size - totalhits)) {
-//             ...
-//             for (i = 0; i < numhits; i++) {
-//                 offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-//                 offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-//             }
-//             totalhits += numhits;
-//         } else {
-//             s_range[1] = (Int4)(s - subject->sequence);
-//             return totalhits;
-//         }
-//     }
-// }
-// s_range[1] = (Int4)(s - subject->sequence);
-// ```
 /// `s_blast_aa_scan_subject_one_range` with the presence test
 /// made branch-free (see the module text). Same arguments, same result, same `s_range`;
 /// `offset_pairs` must hold `array_size + X_SCAN_BF_SLACK` entries.
@@ -221,9 +200,6 @@ fn x_candidates_w3c5(
     let mut position = (block.0 as u64) << 32;
     for k in 0..words {
         // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:121-127
-        // ```c
-        // return ((index << charsize) | word[wordsize - 1]) & mask;
-        // ```
         // SAFETY: as above.
         let new_char = unsafe { *letters.add(k) } as usize;
         ix = ((ix << 5) | new_char) & X_MASK_W3C5;
@@ -284,9 +260,6 @@ fn x_candidates<const WORD: usize, const CHARSIZE: usize>(
     let mut n = 0usize;
     for s in block.0..=block.1 {
         // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:121-127
-        // ```c
-        // return ((index << charsize) | word[wordsize - 1]) & mask;
-        // ```
         // SAFETY: `s <= s_last`, the positions NCBI's loop reads.
         let new_char = unsafe { *subject.get_unchecked(s + word_length - 1) } as usize;
         ix = ((ix << charsize) | new_char) & mask;

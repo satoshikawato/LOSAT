@@ -153,13 +153,6 @@ impl<'a> XmlHit<'a> {
 /// been asked (`s_SeqAlignToXMLHit`, blastxml2_format.cpp:380-386; DECISIONS 28).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-386
-/// ```c++
-///             if (data->HasTaxDB()) {
-///                 SSeqDBTaxInfo taxinfo;
-///                 CSeqDB::GetTaxInfo(taxid, taxinfo);
-///                 hit_descr->SetSciname(taxinfo.scientific_name);
-///             }
-/// ```
 /// (`GetTaxInfo` throws when the taxid is not found; the `catch` of the hit replaces its
 /// description by the sequence id alone.)
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

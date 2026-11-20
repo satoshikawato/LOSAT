@@ -5,26 +5,6 @@
 //! runs).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1107-1122,1143-1147,1171
-//! ```c
-//!         if (a_index % RESTRICT_SIZE != 0) {
-//! ...
-//!             for (b_index = first_b_index; b_index < b_size; b_index++) {
-//!
-//!                 b_ptr += b_increment;
-//!                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-//!
-//!                 if (b_index != b_gap) {
-//! ...
-//!                     if (best_score - score > x_dropoff) {
-//! ...
-//!                     b_gap += RESTRICT_SIZE;
-//!                     score_gap_col = score_array[b_index].best_gap;
-//!
-//!                     if (score < score_gap_col)
-//!                         score = score_gap_col;
-//! ...
-//!             score_gap_row = score;
-//! ```
 //!
 //! What the reference computes. Row `a` of the alignment holds the cells `first_b_index ..
 //! b_size`; cell `b` takes the diagonal `D(b)` = the previous row's `best` of cell `b - 1` plus
@@ -144,10 +124,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1096-1097
-// ```c
-//         score = MININT;
-//         score_gap_row = MININT;
-// ```
 // The reference's minus infinity (`GAP_MININT`, as in `restricted_gapped_align_protein_impl`).
 const MININT: i32 = GAP_MININT;
 /// No NCBI counterpart: cells kept before cell 0 of the two rows (the eight-cell block of the first
@@ -259,16 +235,6 @@ impl XRestrictedScratch {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1078-1083,1115
-// ```c
-//         if (!(gap_align->positionBased)) {
-//             if(reverse_sequence)
-//                 matrix_row = matrix[ A[ M - a_index ] ];
-//             else
-//                 matrix_row = matrix[ A[ a_index ] ];
-//         }
-// ...
-//                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-// ```
 /// `matrix[q][s]` for the letters `q, s < 28`, read through the reference's own functions; for
 /// the vector kernel each row also as four 16-byte tables (low and high bytes of entries 0-15,
 /// then of entries 16-31).
@@ -280,12 +246,6 @@ struct XScoreTables {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1078-1083
-// ```c
-//             if(reverse_sequence)
-//                 matrix_row = matrix[ A[ M - a_index ] ];
-//             else
-//                 matrix_row = matrix[ A[ a_index ] ];
-// ```
 // Built once per matrix. None: an entry does not fit 16 bits (the reference runs).
 fn x_score_tables(score_matrix: BlastpScoreMatrix<'_>) -> Option<&'static XScoreTables> {
     fn build<const BLOSUM62: bool>(
@@ -341,21 +301,6 @@ fn x_score_tables(score_matrix: BlastpScoreMatrix<'_>) -> Option<&'static XScore
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4273-4278,4307-4316
-// ```c
-//          if (restricted_alignment) {
-//             score_left = s_RestrictedGappedAlign(query, subject+subject_shift,
-//                                    q_length, s_length,
-//                                    &private_q_start, &private_s_start,
-//                                    gap_align, score_params,
-//                                    init_hsp->offsets.qs_offsets.q_off, TRUE);
-// ...
-//          if (restricted_alignment) {
-//             score_right = s_RestrictedGappedAlign(
-//                                    query+init_hsp->offsets.qs_offsets.q_off,
-//                                    subject+init_hsp->offsets.qs_offsets.s_off,
-//                                    query_length-q_length,
-//                                    subject_length-s_length,
-// ```
 /// Dispatch point of the two `s_RestrictedGappedAlign` calls of `s_BlastProtGappedAlignment`: the
 /// reference function or this module. The arguments are those of
 /// `restricted_gapped_align_protein`.
@@ -529,14 +474,6 @@ fn x_rows() -> Option<XRows> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1096-1098,1250-1251
-// ```c
-//         score = MININT;
-//         score_gap_row = MININT;
-//         last_b_index = first_b_index;
-// ...
-//         if (first_b_index == b_size)
-//             break;
-// ```
 /// The band and the best cell, the variables of `s_RestrictedGappedAlign` that live across rows.
 struct XBand {
     first: usize,
@@ -560,39 +497,7 @@ enum XStop {
     Decline,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1028-1038,1053-1067,1076-1098
-// ```c
-//     gap_open = score_params->gap_open;
-//     gap_extend = score_params->gap_extend;
-//     gap_open_extend = gap_open + gap_extend;
-//     x_dropoff = gap_align->gap_x_dropoff;
-//
-//     if (x_dropoff < gap_open_extend)
-//         x_dropoff = gap_open_extend;
-//
-//     if(N <= 0 || M <= 0)
-//         return 0;
-// ...
-//     score = -gap_open_extend;
-//     score_array[0].best = 0;
-//     score_array[0].best_gap = -gap_open_extend;
-//
-//     for (i = 1; i <= N; i++) {
-//         if (score < -x_dropoff)
-//             break;
-//
-//         score_array[i].best = score;
-//         score_array[i].best_gap = score - gap_open_extend;
-//         score -= gap_extend;
-//     }
-//
-//     b_size = i;
-//     best_score = 0;
-//     first_b_index = 0;
-//     b_gap = 0;
-// ...
-//     for (a_index = 1; a_index <= M; a_index++) {
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1028-1098
 /// `s_RestrictedGappedAlign` on the arrays of `sc`. `rows` selects the rows (the AVX2 rows only
 /// when the CPU has AVX2, BMI1 and LZCNT, the 128-bit rows only when it has SSSE3 and SSE4.1 or
 /// on wasm32 simd128); with the AVX2 rows, `narrow` (LOSAT_X_BPGAP16) runs the sixteen-bit rows
@@ -638,20 +543,6 @@ unsafe fn restricted_fast(
     let tables = x_score_tables(score_matrix)?;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1040-1051
-    // ```c
-    //     if (gap_extend > 0)
-    //         num_extra_cells = x_dropoff / gap_extend + 3;
-    //     else
-    //         num_extra_cells = N + 3;
-    //
-    //     if (num_extra_cells > gap_align->dp_mem_alloc) {
-    //         gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
-    //                                       2 * gap_align->dp_mem_alloc);
-    //         sfree(gap_align->dp_mem);
-    //         gap_align->dp_mem = (BlastGapDP *)malloc(gap_align->dp_mem_alloc *
-    //                                                   sizeof(BlastGapDP));
-    //     }
-    // ```
     // LOSAT_X_BPGAPBAND: `ahead` bounds the cells past a row's `b_size` that the row and its band
     // extension touch: the row reads `ROW_AHEAD` cells past `b_size`; the extension starts at
     // `b_size` and adds at most `(x_dropoff + 2 * max) / gap_extend + 1` cells and the `MININT`
@@ -857,9 +748,6 @@ unsafe fn restricted_fast(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1076
-// ```c
-//     for (a_index = 1; a_index <= M; a_index++) {
-// ```
 /// The rows with the vector kernel, compiled for AVX2 as a whole (no call per row).
 ///
 /// # Safety
@@ -892,28 +780,7 @@ unsafe fn restricted_rows_avx2(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1053-1067,1076-1098
-// ```c
-//     score = -gap_open_extend;
-//     score_array[0].best = 0;
-//     score_array[0].best_gap = -gap_open_extend;
-//
-//     for (i = 1; i <= N; i++) {
-//         if (score < -x_dropoff)
-//             break;
-//
-//         score_array[i].best = score;
-//         score_array[i].best_gap = score - gap_open_extend;
-//         score -= gap_extend;
-//     }
-//
-//     b_size = i;
-//     best_score = 0;
-//     first_b_index = 0;
-//     b_gap = 0;
-// ...
-//     for (a_index = 1; a_index <= M; a_index++) {
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1053-1098
 /// Row 0 and the row loop of `s_RestrictedGappedAlign` (`AVX2`: the vector rows; the caller
 /// guarantees the CPU features and has sized the arrays of `sc` for the cells the band reaches:
 /// `len2`, or with LOSAT_X_BPGAPBAND the letters `col` holds, `fill_col`). `COL`: the instance of
@@ -1005,29 +872,6 @@ fn restricted_rows<const AVX2: bool, const COL: u8>(
         );
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1250-1251,1271-1296
-        // ```c
-        //         if (first_b_index == b_size)
-        //             break;
-        // ...
-        //         if (last_b_index < b_size - 1) {
-        //             b_size = last_b_index + 1;
-        //         }
-        //         else {
-        // ...
-        //             while (score_gap_row >= (best_score - x_dropoff) && b_size <= N) {
-        //                 score_array[b_size].best = score_gap_row;
-        //                 score_array[b_size].best_gap = score_gap_row - gap_open_extend;
-        //                 score_gap_row -= gap_extend;
-        //                 b_size++;
-        //             }
-        //         }
-        //
-        //         if (b_size <= N) {
-        //             score_array[b_size].best = MININT;
-        //             score_array[b_size].best_gap = MININT;
-        //             b_size++;
-        //         }
-        // ```
         // The next `b_gap` (lines 1256-1259) is the first multiple of RESTRICT_SIZE at or after
         // `first_b_index`, which the rows find from `first_b_index` itself.
         if band.first == band.b_size {
@@ -1108,17 +952,6 @@ fn band_col(col: &mut Vec<u8>, banded: bool, held: usize, ahead: usize, len2: us
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1261-1269
-// ```c
-//         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
-//
-//             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
-//                                           2 * gap_align->dp_mem_alloc);
-//             score_array = (BlastGapDP *)realloc(score_array,
-//                                                gap_align->dp_mem_alloc *
-//                                                sizeof(BlastGapDP));
-//             gap_align->dp_mem = score_array;
-//         }
-// ```
 // LOSAT_X_BPGAPBAND: the 32-bit arrays grown to twice the `held` cells (at most `full`, where the
 // rows copy every letter), as NCBI's `2 * dp_mem_alloc` (`held` is at least `ahead + 100`, so it
 // is also past NCBI's first term).
@@ -1182,15 +1015,6 @@ const COL16: u8 = 1;
 const COL16_W128: u8 = 2;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1091-1094,1114-1115
-// ```c
-//         if(reverse_sequence)
-//             b_ptr = &B[N - first_b_index];
-//         else
-//             b_ptr = &B[first_b_index];
-// ...
-//                 b_ptr += b_increment;
-//                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-// ```
 /// `col[c]` for `c` in `from..to`: the letter the reference reads for `next_score` at
 /// `b_index = c - 1` (`blastp_subject_residue`, sentinels included); 0 for cell 0 and past cell
 /// `len2 + 1`, which no cell of the reference reads. The cells whose letter lies inside `subject`
@@ -1270,11 +1094,6 @@ fn fill_col<const ROWS: u8>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1107,1173
-// ```c
-//         if (a_index % RESTRICT_SIZE != 0) {
-// ...
-//         else {
-// ```
 /// One row: the vector kernel when `AVX2`, else the scalar loops. Returns `score_gap_row` after
 /// the row.
 #[inline(always)]
@@ -1318,48 +1137,6 @@ fn run_row<const AVX2: bool>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1112-1171
-// ```c
-//             for (b_index = first_b_index; b_index < b_size; b_index++) {
-//
-//                 b_ptr += b_increment;
-//                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-//
-//                 if (b_index != b_gap) {
-//                     if (best_score - score > x_dropoff) {
-//                         score_array[b_index].best = MININT;
-//                         if (b_index == first_b_index)
-//                             first_b_index++;
-//                     }
-//                     else {
-//                         last_b_index = b_index;
-//                         if (score > best_score) {
-//                             best_score = score;
-//                             *a_offset = a_index;
-//                             *b_offset = b_index;
-//                         }
-//                         score_array[b_index].best = score;
-//                     }
-//                 }
-//                 else {
-//                     b_gap += RESTRICT_SIZE;
-//                     score_gap_col = score_array[b_index].best_gap;
-//
-//                     if (score < score_gap_col)
-//                         score = score_gap_col;
-//
-//                     if (best_score - score > x_dropoff) {
-// ...
-//                         score_gap_col -= gap_extend;
-//                         score_array[b_index].best_gap =
-//                                    MAX(score - gap_open_extend, score_gap_col);
-//                         score_array[b_index].best = score;
-//                     }
-//                 }
-//                 score = next_score;
-//             }
-//
-//             score_gap_row = score;
-// ```
 /// A row where no gap opens in A, cell by cell (`b_gap` steps over the multiples of 10 from the
 /// first one at or after `first_b_index`, as in the reference; `e10[gk]` is its column gap).
 fn row_nogap_scalar(
@@ -1438,41 +1215,6 @@ fn row_nogap_scalar(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1177-1247
-// ```c
-//             for (b_index = first_b_index; b_index < b_size; b_index++) {
-//
-//                 b_ptr += b_increment;
-//                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-//
-//                 if (b_index != b_gap) {
-//                     if (score < score_gap_row)
-//                         score = score_gap_row;
-//
-//                     if (best_score - score > x_dropoff) {
-// ...
-//                         score_gap_row -= gap_extend;
-//                         score_gap_row = MAX(score - gap_open_extend,
-//                                             score_gap_row);
-//                         score_array[b_index].best = score;
-//                     }
-//                 }
-//                 else {
-//                     b_gap += RESTRICT_SIZE;
-//                     score_gap_col = score_array[b_index].best_gap;
-//
-//                     if (score < score_gap_col)
-//                         score = score_gap_col;
-//                     if (score < score_gap_row)
-//                         score = score_gap_row;
-// ...
-//                         score_gap_row -= gap_extend;
-//                         score_gap_col -= gap_extend;
-//                         score_array[b_index].best_gap =
-//                                  MAX(score - gap_open_extend, score_gap_col);
-//                         score_gap_row = MAX(score - gap_open_extend,
-//                                             score_gap_row);
-//                         score_array[b_index].best = score;
-// ```
 /// A row where a gap may open in A, cell by cell.
 fn row_gap_scalar(
     band: &mut XBand,
@@ -1561,26 +1303,6 @@ fn row_gap_scalar(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
-// ```c
-//             for (b_index = first_b_index; b_index < b_size; b_index++) {
-//
-//                 b_ptr += b_increment;
-//                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-// ...
-//                     if (best_score - score > x_dropoff) {
-//                         score_array[b_index].best = MININT;
-//                         if (b_index == first_b_index)
-//                             first_b_index++;
-//                     }
-//                     else {
-//                         last_b_index = b_index;
-//                         if (score > best_score) {
-//                             best_score = score;
-// ...
-//                         score_gap_row -= gap_extend;
-//                         score_gap_row = MAX(score - gap_open_extend,
-//                                             score_gap_row);
-// ```
 // The two row loops eight cells at a time (AVX2); the module comment gives the argument.
 #[cfg(target_arch = "x86_64")]
 mod x_avx2 {
@@ -1864,28 +1586,6 @@ trait XRows16 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1053-1067,1076-1098,1250-1287
-// ```c
-//     for (i = 1; i <= N; i++) {
-//         if (score < -x_dropoff)
-//             break;
-//
-//         score_array[i].best = score;
-//         score_array[i].best_gap = score - gap_open_extend;
-//         score -= gap_extend;
-//     }
-// ...
-//         if (last_b_index < b_size - 1) {
-//             b_size = last_b_index + 1;
-//         }
-//         else {
-//             while (score_gap_row >= (best_score - x_dropoff) && b_size <= N) {
-// ...
-//         if (b_size <= N) {
-//             score_array[b_size].best = MININT;
-//             score_array[b_size].best_gap = MININT;
-//             b_size++;
-//         }
-// ```
 /// LOSAT_X_BPGAP16: `restricted_rows` with the rows, the column gaps and the row gap
 /// in 16 bits, one step of the kernel `K` at a time. `i16::MIN` stands for `MININT`; every other
 /// stored value is the 32-bit rows' value (module comment, "Sixteen-bit rows").
@@ -2030,9 +1730,6 @@ unsafe fn restricted_rows16<K: XRows16>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1076
-// ```c
-//     for (a_index = 1; a_index <= M; a_index++) {
-// ```
 /// LOSAT_X_BPGAP16: `restricted_rows16` with the AVX2 rows (`x_avx2_16`), compiled for AVX2 as a
 /// whole.
 ///
@@ -2068,9 +1765,6 @@ unsafe fn restricted_rows16_avx2(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1076
-// ```c
-//     for (a_index = 1; a_index <= M; a_index++) {
-// ```
 /// LOSAT_X_BPGAP128: `restricted_rows16` with the rows of `x_w128_16`, eight cells per step,
 /// written once over the 128-bit layer of `utils/xdrop_simd.rs` for x86_64 (SSSE3 and SSE4.1) and
 /// wasm32 (simd128), compiled for those instructions as a whole.
@@ -2110,26 +1804,6 @@ unsafe fn restricted_rows16_w128(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
-// ```c
-//             for (b_index = first_b_index; b_index < b_size; b_index++) {
-//
-//                 b_ptr += b_increment;
-//                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-// ...
-//                     if (best_score - score > x_dropoff) {
-//                         score_array[b_index].best = MININT;
-//                         if (b_index == first_b_index)
-//                             first_b_index++;
-//                     }
-//                     else {
-//                         last_b_index = b_index;
-//                         if (score > best_score) {
-//                             best_score = score;
-// ...
-//                         score_gap_row -= gap_extend;
-//                         score_gap_row = MAX(score - gap_open_extend,
-//                                             score_gap_row);
-// ```
 // The two row loops sixteen 16-bit cells at a time (AVX2); the module comment ("Sixteen-bit rows")
 // gives the argument.
 #[cfg(target_arch = "x86_64")]
@@ -2378,26 +2052,6 @@ mod x_avx2_16 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
-// ```c
-//             for (b_index = first_b_index; b_index < b_size; b_index++) {
-//
-//                 b_ptr += b_increment;
-//                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
-// ...
-//                     if (best_score - score > x_dropoff) {
-//                         score_array[b_index].best = MININT;
-//                         if (b_index == first_b_index)
-//                             first_b_index++;
-//                     }
-//                     else {
-//                         last_b_index = b_index;
-//                         if (score > best_score) {
-//                             best_score = score;
-// ...
-//                         score_gap_row -= gap_extend;
-//                         score_gap_row = MAX(score - gap_open_extend,
-//                                             score_gap_row);
-// ```
 // LOSAT_X_BPGAP128: the two row loops of `x_avx2_16` with eight 16-bit cells per step, over the
 // 128-bit layer of `utils/xdrop_simd.rs` (`arch`: x86_64 SSSE3 and SSE4.1, wasm32 simd128). A step
 // does for its eight cells what a block of `x_avx2_16::row` does for its sixteen: the same lane

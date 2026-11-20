@@ -6,27 +6,7 @@
 //! entry of `docs/agents/diagnostics.md`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-//! 	    BLAST_PROF_START( APP.LOOP.PRE );
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-146
-//! ```c++
-//! CRef<CBlastQueryVector>
-//! CBlastInput::GetNextSeqBatch(CScope& scope)
-//! {
-//!     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
-//!     TSeqPos size_read = 0;
-//!
-//!     while (size_read < GetBatchSize()) {
-//!
-//!         if (End())
-//!             break;
-//!
-//!         CRef<CBlastSearchQuery> q;
-//!         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//! ```
 //!
 //! Without the switch `search_cli` reads every record of the query file before the search
 //! (`read_queries`) and the loop cuts its batches from them. LOSAT needs, before its first batch,
@@ -333,21 +313,6 @@ impl Rule {
 /// whose reading failed, as `read_queries` keeps them).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-152
-/// ```c++
-///     while (size_read < GetBatchSize()) {
-///
-///         if (End())
-///             break;
-///
-///         CRef<CBlastSearchQuery> q;
-///         try { q.Reset(m_Source->GetNextSequence(scope)); }
-///         catch (const CObjReaderParseException& e) {
-///             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-///                 break;
-///             }
-///             throw;
-///         }
-/// ```
 fn scan<R: Read>(source: &mut FastaInputSource<R>) -> (Vec<usize>, QueryEnd) {
     let mut lengths = Vec::new();
     loop {

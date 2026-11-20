@@ -196,24 +196,6 @@ fn list_reaches(list: &Option<Box<BlastCompoAlignment>>, n: usize) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:980-995
-// ```c
-//     for (align = alignments;  align != NULL;  align = align->next ) {
-//         /* for all elements of alignments */
-//         if (KAPPA_SIGN(in_align->frame) == KAPPA_SIGN(align->frame)) {
-//             /* hsp1 and hsp2 are in the same query/subject frame */
-//             if (KAPPA_CONTAINED_IN_HSP
-//                 (align->queryStart, align->queryEnd, query_offset,
-//                  align->matchStart, align->matchEnd, subject_offset) &&
-//                 KAPPA_CONTAINED_IN_HSP
-//                 (align->queryStart, align->queryEnd, query_end,
-//                  align->matchStart, align->matchEnd, subject_end) &&
-//                 scoreThresh <= align->score) {
-//                 return 1;
-//             }
-//         }
-//     }
-//     return 0;
-// ```
 // The same test, over the alignments of a frame of the same sign whose match start lies in
 // [subject_end - dmax, subject_offset] only: an `align` that passes has matchStart <= subject_offset
 // and matchEnd >= subject_end, so matchStart >= subject_end - (matchEnd - matchStart) >=
@@ -257,41 +239,6 @@ fn x_contains_indexed(set: &XAlignIndex, in_align: &BlastCompoAlignment, lambda:
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:401-446
-// ```c
-//     for (align = oldAlignments;  align != NULL;  align = align->next) {
-//         ...
-//         if (align->frame == newAlign->frame &&
-//             ((is_same_adjustment && s_IsSameEndPoint(newAlign, align)) ||
-//              (!is_same_adjustment && s_IsSimilarEndPoint(newAlign, align)))) {
-//             ...
-//             if (newAlign->score <= align->score) {
-//                 /* newAlign cannot be added to the list. */
-//                 include_new_align = 0;
-//                 break;
-//             }
-//         }
-//     }
-//     if (include_new_align) {
-//         ...
-//         while (align != NULL) {
-//             ...
-//             if (align->frame == newAlign->frame &&
-//                 ((align->queryStart == newAlign->queryStart &&
-//                   align->matchStart == newAlign->matchStart)
-//                  || (align->queryEnd == newAlign->queryEnd &&
-//                      align->matchEnd == newAlign->matchEnd))) {
-//                 /* The alignment shares an end with newAlign; */
-//                 /* delete it. */
-//                 BlastCompo_AlignmentsFree(&align, free_align_context);
-//             } else { /* The alignment does not share an end with newAlign; */
-//                 /* add it to the output list. */
-//                 *tail =  align;
-//                 tail  = &align->next;
-//             }
-//             align = align_next;
-//         } /* end while align != NULL */
-//         *p_oldAlignments = newAlign;
-// ```
 // Both loops, over the alignments of the same frame whose match start lies in
 // [min(ms, ms - dmax, me - dmax), max(ms, me, me - dmin)] only (ms, me: the new alignment's match
 // start and end): a shared start has matchStart == ms; a shared end has matchStart == me -

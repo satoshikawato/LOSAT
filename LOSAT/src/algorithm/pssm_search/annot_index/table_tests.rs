@@ -86,7 +86,7 @@ fn data_then_default() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-581 (quoted at
+// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-581 (cited at
 // `Indexer::sparse_index_at`)
 #[test]
 fn sparse_indexes() {
@@ -137,7 +137,7 @@ fn sparse_indexes() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:138-169 (quoted at
+// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:138-169 (cited at
 // `Indexer::delta_sum`)
 #[test]
 fn int_delta_sums_read_whole_blocks() {
@@ -186,7 +186,7 @@ fn int_delta_sums_read_whole_blocks() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqtable/Scaled_int_multi_data.cpp:77-84 (quoted at
+// NCBI reference (598d8ae6): c++/src/objects/seqtable/Scaled_int_multi_data.cpp:77-84 (cited at
 // `Indexer::x_try_get_int8`)
 #[test]
 fn int_scaled_values() {

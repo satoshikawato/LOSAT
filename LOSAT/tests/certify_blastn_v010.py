@@ -12,11 +12,6 @@ from pathlib import Path
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-# ```c
-# const char* kDfltArgTabularOutputFmt =
-#     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-#     "evalue bitscore";
-# ```
 DEFAULT_FIELDS = (
     "query",
     "subject",
@@ -165,13 +160,6 @@ def _coord_key(fields: list[bytes]) -> tuple[bytes, ...]:
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2387
-# ```c
-# if (h1->subject.end < h2->subject.end)
-#    return 1;
-# if (h1->subject.end > h2->subject.end)
-#    return -1;
-# return 0;
-# ```
 # The comparator returns equality without examining gap_info. Certification
 # therefore permits only the four reviewed edit-script-derived output fields;
 # coordinates, scores, order, headers, delimiters, and line endings stay exact.

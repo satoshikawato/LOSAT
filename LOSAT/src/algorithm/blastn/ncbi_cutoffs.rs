@@ -13,12 +13,10 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 
 /// Default gap trigger bit score for nucleotide searches
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:140
-/// #define BLAST_GAP_TRIGGER_NUCL 27.0
 pub const GAP_TRIGGER_BIT_SCORE_NUCL: f64 = 27.0;
 
 /// Default cutoff E-value for blastn ungapped extension
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:76
-/// #define CUTOFF_E_BLASTN 0.05
 pub const CUTOFF_E_BLASTN: f64 = 0.05;
 
 /// Smallest float to avoid floating point exception
@@ -39,9 +37,6 @@ pub fn gap_trigger_raw_score(gap_trigger_bits: f64, ungapped_params: &KarlinPara
 /// Calculate cutoff_score_max from E-value using GAPPED Karlin params.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943
-/// ```c
-/// BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-/// ```
 ///
 /// CRITICAL: Uses GAPPED params (kbp_gap) for gapped mode.
 ///
@@ -93,16 +88,7 @@ pub fn cutoff_score_max_from_evalue(
 
 /// Calculate cutoff_score for blastn ungapped extension.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:368-373
-/// ```c
-/// } else {
-///     new_cutoff = gap_trigger;
-/// }
-/// new_cutoff *= (Int4)sbp->scale_factor;
-/// new_cutoff = MIN(new_cutoff,
-///                  hit_params->cutoffs[context].cutoff_score_max);
-/// curr_cutoffs->cutoff_score = new_cutoff;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:368-374
 ///
 /// For blastn in gapped mode:
 /// 1. Start with gap_trigger
@@ -134,22 +120,6 @@ pub fn cutoff_score_for_ungapped_extension(
 /// Calculate cutoff_score for ungapped extension when !gapped_calculation || matrix_only_scoring.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-367
-/// ```c
-/// if (!gapped_calculation || sbp->matrix_only_scoring) {
-///     double cutoff_e = s_GetCutoffEvalue(program_number);
-///     Int4 query_length = query_info->contexts[context].query_length;
-///     if (program_number == eBlastTypeBlastn ||
-///         program_number == eBlastTypeMapping)
-///        query_length *= 2;
-///     kbp = kbp_array[context];
-///     BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
-///                   MIN((Uint8)subj_length,
-///                       (Uint8)query_length)*((Uint8)subj_length),
-///                   TRUE, gap_decay_rate);
-///     if (program_number != eBlastTypeBlastn)  
-///        new_cutoff = MIN(new_cutoff, gap_trigger);
-/// }
-/// ```
 ///
 /// This function is used for ungapped blastn or matrix_only_scoring mode.
 /// Uses CUTOFF_E_BLASTN = 0.05 (fixed) and searchsp without length adjustment.

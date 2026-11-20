@@ -54,13 +54,6 @@ pub(crate) use x_lut_direct::{
 // tblastx/x_pair_par.rs.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
-// ```c
-// BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-//                       &lookup_wrap->lut);
-// ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-// BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-//                           query, lookup_segments, 0);
-// ```
 pub(crate) use x_lut_direct::x_pair_lut;
 
 fn blosum62_ideal_karlin_params() -> KarlinParams {
@@ -85,19 +78,8 @@ pub(crate) fn matrix_score_bounds(matrix: ScoringMatrix) -> (i32, i32) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2848:
-// stdrfp = Blast_ResFreqNew(sbp); Blast_ResFreqStdComp(sbp, stdrfp);
-// sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-// BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
 fn ideal_karlin_params_for_matrix(matrix: ScoringMatrix, bounds: (i32, i32)) -> KarlinParams {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2848
-    // ```c
-    // stdrfp = Blast_ResFreqNew(sbp);
-    // Blast_ResFreqStdComp(sbp, stdrfp);
-    // sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-    // BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
-    // sbp->kbp_ideal = Blast_KarlinBlkNew();
-    // Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
-    // ```
     let std_comp = compute_std_aa_composition();
     let sfp =
         compute_score_freq_profile_for_matrix(&std_comp, &std_comp, bounds.0, bounds.1, matrix);
@@ -119,24 +101,7 @@ pub(crate) fn ideal_karlin_params_of(matrix: ScoringMatrix) -> KarlinParams {
     ideal_karlin_params_for_matrix(matrix, bounds)
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:53-64
-// ```c
-// typedef struct AaLookupBackboneCell {
-//     Int4 num_used;       /**< number of hits stored for this cell */
-//
-//     union {
-//       Int4 overflow_cursor; /**< integer offset into the overflow array
-//                               where the list of hits for this cell begins */
-//       Int4 entries[AA_HITS_PER_CELL];  /**< if the number of hits for this
-//                                             cell is AA_HITS_PER_CELL or less,
-//                                             the hits are all stored directly in
-//                                             the cell */
-//     } payload;  /**< union that specifies either entries stored right on
-//                      the backbone if fewer than AA_HITS_PER_CELL are
-//                      present or a pointer to where the hits are stored
-//                      (off-backbone). */
-// } AaLookupBackboneCell;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:53-67
 /// NCBI AaLookupBackboneCell. A cell of more than `AA_HITS_PER_CELL` hits keeps the cursor of its
 /// run in the overflow array in `entries[0]` (low 32 bits) and `entries[1]` (high 32 bits), read
 /// and written only by [`BackboneCell::cursor`], [`BackboneCell::set_cursor`] and
@@ -278,10 +243,6 @@ pub trait XHit: Copy + Default + Send + Sync + 'static {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
     // of a cell's hits, read in order)
-    // ```c
-    //                     for (i = 0; i < numhits; i++) {
-    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-    // ```
     /// EXPERIMENT (LOSAT_X_BXCROSS128): the first `n` (at most 24) hits from `p` as the `i32` lanes of
     /// six vectors of the 128-bit layer (`utils/xdrop_simd.rs` `arch`), four hits each in order;
     /// the lanes past `n` are not used by the caller. `i32`: a 16-byte load for each four hits
@@ -358,10 +319,6 @@ impl XHit for i32 {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
     // of a cell's hits, read in order)
-    // ```c
-    //                     for (i = 0; i < numhits; i++) {
-    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-    // ```
     #[cfg(any(
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128")
@@ -457,10 +414,6 @@ impl XHit for u16 {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
     // of a cell's hits, read in order)
-    // ```c
-    //                     for (i = 0; i < numhits; i++) {
-    //                         offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-    // ```
     #[cfg(any(
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128")
@@ -517,7 +470,7 @@ pub trait XCell: Copy + Default + Send + Sync + 'static {
     }
 
     /// The cell's hits: its own entries, or the `count()` hits from its cursor in `overflow`.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:60-99 (cited at `x_scan_cells`,
     // blastp/x_seed_fused.rs)
     fn hits<'a>(&'a self, overflow: &'a [Self::Hit]) -> &'a [Self::Hit];
 
@@ -728,7 +681,6 @@ impl XCell for BackboneCell16 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-603:
-// row = info->matrix[query_word[current_pos]];
 // score + row[i] controls neighboring word inclusion.
 #[inline(always)]
 fn lookup_matrix_score(matrix: ScoringMatrix, query: usize, subject: usize) -> i32 {
@@ -755,20 +707,8 @@ pub struct BlastAaLookupTable<C: XCell = BackboneCell> {
     pub frame_bases: Vec<i32>,
     pub num_contexts: usize,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:246-250
-    // ```c
-    // Uint4 QueryInfo_GetSeqBufLen(const BlastQueryInfo* qinfo)
-    // {
-    //     BlastContextInfo * cinfo = & qinfo->contexts[qinfo->last_context];
-    //     return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
-    // }
-    // ```
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:112-127
-    // ```c
-    // (*seq_blk)->sequence_start = (Uint1 *) buffer;
-    // (*seq_blk)->sequence = (*seq_blk)->sequence_start+1;
-    // (*seq_blk)->length = length;
-    // ```
     pub query_length: i32,
     pub word_length: i32,
     pub alphabet_size: i32,
@@ -821,42 +761,15 @@ impl BlastAaLookupTable {
 // held; only where the block lives changes. Everything is released when the backbone is dropped.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:48-72
-// ```c
-// if (backbone[index] == NULL) {
-//     chain_size = 8;
-//     hits_in_chain = 0;
-//     chain = (Int4 *) malloc(chain_size * sizeof(Int4));
-// ...
-//     backbone[index] = chain;
-// ...
-// if ((hits_in_chain + 2) == chain_size) {
-//     chain_size = chain_size * 2;
-//     chain = (Int4 *) realloc(chain, chain_size * sizeof(Int4));
-// ...
-//     backbone[index] = chain;
-//     chain[0] = chain_size;
-// ```
 // NCBI makes one malloc for each new chain and one realloc for each doubling. The arena changes
 // where those blocks live and nothing else: a new chain still has 8 Int4, a full chain still
 // doubles, and every chain holds the same integers in the same order (placement only).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360
-// ```c
-// for (j=0; j <lookup->thin_backbone[i][1]; j++)
-//     dest[j] = lookup->thin_backbone[i][j + 2];
-// /* done with this chain- free it */
-// sfree(lookup->thin_backbone[i]);
-// lookup->thin_backbone[i] = NULL;
-// ```
 // NCBI frees each chain when it has been copied into the final backbone. The arena frees all its
 // blocks together when the backbone is dropped. Reuse of memory only.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:52,67
-// ```c
-// chain = (Int4 *) malloc(chain_size * sizeof(Int4));
-// ...
-// chain = (Int4 *) realloc(chain, chain_size * sizeof(Int4));
-// ```
 // The blocks of the arena take the place of the malloc and realloc of the C code above. Their size
 // classes are 8, 16, 32, ... Int4, the sizes the chain has in C.
 /// Power-of-two blocks of `Int4` for the chains of one backbone.
@@ -1001,16 +914,6 @@ impl XChainArena {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:49-56
-// ```c
-// if (backbone[index] == NULL) {
-//     chain_size = 8;
-//     hits_in_chain = 0;
-//     chain = (Int4 *) malloc(chain_size * sizeof(Int4));
-//     ASSERT(chain != NULL);
-//     chain[0] = chain_size;
-//     chain[1] = hits_in_chain;
-//     backbone[index] = chain;
-// ```
 // A chain is the C array: chain[0] = allocated size, chain[1] = number of hits, then the hits.
 // It is a block of the arena of the backbone that holds it.
 /// One chain of a thin backbone: `chain[0]` = allocated ints, `chain[1]` =
@@ -1024,15 +927,6 @@ struct LookupChain {
 
 impl LookupChain {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:49-56
-    // ```c
-    // chain_size = 8;
-    // hits_in_chain = 0;
-    // chain = (Int4 *) malloc(chain_size * sizeof(Int4));
-    // ASSERT(chain != NULL);
-    // chain[0] = chain_size;
-    // chain[1] = hits_in_chain;
-    // backbone[index] = chain;
-    // ```
     // The new chain comes from the arena: chain_size 8, all ints zero.
     /// The 8-int chain of blast_lookup.c:50-56. NCBI `malloc`s it and sets `chain[0..2]`; the
     /// arena block is zeroed in all 8 ints.
@@ -1044,14 +938,6 @@ impl LookupChain {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:65-72
-    // ```c
-    // if ((hits_in_chain + 2) == chain_size) {
-    //     chain_size = chain_size * 2;
-    //     chain = (Int4 *) realloc(chain, chain_size * sizeof(Int4));
-    // ...
-    //     backbone[index] = chain;
-    //     chain[0] = chain_size;
-    // ```
     // A chain is copied into a block of twice the size and the old block is given back. The
     // first old_size ints are the same, the rest are zero.
     /// `Vec::resize(new_size, 0)` for a chain that doubles.
@@ -1092,10 +978,6 @@ impl std::ops::DerefMut for LookupChain {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:246-247
-// ```c
-// lookup->thin_backbone =
-//     (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
-// ```
 // The backbone of chains is the calloc of `backbone_size` pointers in the C code (here all None).
 /// The chains of one thin backbone (NCBI `Int4 **`), with the memory of the
 /// pooled ones. `cells` is declared first so that it is dropped first.
@@ -1178,10 +1060,6 @@ struct NeighborInfo<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:96-97
-// ```c
-// BlastAaLookupIndexQuery((BlastAaLookupTable*) lookup_wrap->lut, matrix,
-//                         query, lookup_segments, 0);
-// ```
 struct PreparedLookupQuery {
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
@@ -1191,21 +1069,6 @@ struct PreparedLookupQuery {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1032-1114
-// ```c
-// start_offset = query_info->contexts[context].query_offset;
-// end_offset = query_info->contexts[context].query_length + start_offset - 1;
-// ...
-// if (mask_loc == NULL || mask_loc->seqloc_array[context] == NULL) {
-//     tail = BlastSeqLocNew(tail ? &tail : complement_mask,
-//                           start_offset, end_offset);
-//     continue;
-// }
-// ...
-// filter_start = start_offset + seq_range->left;
-// filter_end = start_offset + seq_range->right;
-// ...
-// tail = BlastSeqLocNew((tail ? &tail : complement_mask), left, right);
-// ```
 /// The lookup segments of one protein context at `query_offset` of `query_length` letters whose
 /// filtering locations are `seg_masks` (half-open, letter offsets of the context): NCBI's
 /// complement of the masks, as inclusive ranges, without the empty intervals NCBI makes where a
@@ -1274,17 +1137,8 @@ pub(crate) fn build_lookup_segments_for_context(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:96-100
-// ```c
-// if (word_length > to - from + 1)
-//     continue;
-// ```
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:102-128
-// ```c
-// seq = query->sequence + from;
-// word_target = seq + lut_word_length;
-// for (offset = from; offset <= to; offset++, seq++) { ... }
-// ```
 #[inline]
 fn count_lookup_positions(lookup_segments: &[(i32, i32)], word_length: usize) -> usize {
     lookup_segments
@@ -1298,40 +1152,12 @@ fn count_lookup_positions(lookup_segments: &[(i32, i32)], word_length: usize) ->
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-314
-// ```c
-// info->contexts[i].query_offset = new_offsets[i];
-// distance = new_offsets[i+1] - new_offsets[i];
-// info->contexts[i].query_length = distance ? distance-1 : 0;
-// ```
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-636
-// ```c
-// if (!mask_at_hash) {
-//     BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc, program_number);
-// }
-// if (lookup_segments) {
-//     BLAST_ComplementMaskLocations(program_number, query_info,
-//                                   filter_maskloc, lookup_segments);
-// }
-// ```
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1098-1101
-// ```c
-// /* Increment offset by 1 extra byte for the sentinel NULLB
-//    between frames. */
-// offset += length + 1;
-// frame_offsets[context+1] = offset;
-// ```
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
-// ```c
-// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-// ...
-// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// ...
-// if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
-//    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-// ```
 // prepare_lookup_query calls x_prepare_lookup_query with x_with_karlin = true: every context gets
 // its Karlin block.
 fn prepare_lookup_query(
@@ -1356,14 +1182,6 @@ fn prepare_lookup_query(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
-// ```c
-// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-// ...
-// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// ...
-// if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
-//    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-// ```
 // NCBI computes the per-context Karlin blocks from the query composition, separately from the
 // lookup table (the table is built in lookup_wrap.c from the query and its lookup segments only).
 // This function runs the same preparation (prepare_lookup_query) and returns only the contexts.
@@ -1402,9 +1220,6 @@ pub(crate) fn x_lookup_contexts_for_profile(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797 (see
 // `x_lookup_contexts_for_profile`)
-// ```c
-// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// ```
 /// `x_lookup_contexts_for_profile`'s contexts when the diagnostics are on: those of the compressed
 /// lookup table (word sizes 5 to 7), which the diagnostics, counting the standard table's words,
 /// do not build. Cold, so that `x_lookup_contexts_for_profile` keeps its code.
@@ -1506,13 +1321,6 @@ pub(crate) fn x_lookup_table_for_profile(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
-// ```c
-// BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-//                       &lookup_wrap->lut);
-// ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-// BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-//                           query, lookup_segments, 0);
-// ```
 // The table is built from the concatenated query, its lookup segments, the matrix and the
 // threshold; it reads no Karlin parameter. This function skips the Karlin computation and builds
 // the same table (the contexts it fills carry default Karlin parameters, which the table build
@@ -1625,12 +1433,6 @@ pub fn x_tbn_lut_print_summary() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:104-108
-// ```c
-//    case eCompressedAaLookupTable:
-//       BlastCompressedAaLookupTableNew(query, lookup_segments,
-//                          (BlastCompressedAaLookupTable* *) &(lookup_wrap->lut),
-//                          lookup_options, sbp);
-// ```
 /// The concatenated query and the lookup segments that `x_lookup_table_for_profile` builds its
 /// table from (BLOSUM62, no Karlin blocks), for a table of another kind: TBLASTN's compressed
 /// table (`tblastn/search_seed.rs`).
@@ -1653,18 +1455,6 @@ pub(crate) fn x_lookup_query_for_profile(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
-// ```c
-// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-// ...
-// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// if (loop_status) {
-//     contexts[context].is_valid = FALSE;
-//     ...
-//     continue;
-// }
-// if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
-//     Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-// ```
 /// A context's validity and Karlin block, from its frame alone (the statements of
 /// `x_prepare_lookup_query`'s loop).
 fn x_context_karlin(
@@ -1681,17 +1471,6 @@ fn x_context_karlin(
     let sfp =
         compute_score_freq_profile_for_matrix(&ctx_comp, std_comp, bounds.0, bounds.1, matrix);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
-    // ```c
-    // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    // if (loop_status) {
-    //     contexts[context].is_valid = FALSE;
-    //     sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
-    //     sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
-    //     continue;
-    // }
-    // if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
-    //     Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-    // ```
     match compute_karlin_params_ungapped(&sfp) {
         Ok(computed_params) => {
             let final_params = if check_ideal {
@@ -1711,14 +1490,6 @@ fn x_context_karlin(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
-// ```c
-// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-// ...
-// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// ...
-// if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
-//    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-// ```
 // This is prepare_lookup_query with a flag: x_with_karlin = true runs the code of the reference
 // path unchanged (the Karlin computation of `x_context_karlin`); false skips it (for
 // `x_lookup_table_for_profile` and for `x_prepare_blosum62_lookup_query_in_pool`, which computes it
@@ -1757,13 +1528,6 @@ fn x_prepare_lookup_query(
                 .extend_from_slice(&lookup_segments);
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
-            // ```c
-            // BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-            //                       &lookup_wrap->lut);
-            // ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-            // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-            //                           query, lookup_segments, 0);
-            // ```
             // The table build reads only the query, the lookup segments, the matrix and the threshold, so
             // the contexts can skip the Karlin parameters here.
             // A caller that only wants the table (`x_lookup_table_for_profile`).
@@ -1783,9 +1547,6 @@ fn x_prepare_lookup_query(
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
-            // ```c
-            // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-            // ```
             let (is_valid, final_params) =
                 x_context_karlin(frame, std_comp, bounds, matrix, check_ideal, ideal_params);
 
@@ -1809,18 +1570,8 @@ fn x_prepare_lookup_query(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-636
-// ```c
-// if (lookup_segments) {
-//     BLAST_ComplementMaskLocations(program_number, query_info,
-//                                   filter_maskloc, lookup_segments);
-// }
-// ```
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1349-1351
-// ```c
-// s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                 query, locations);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1349-1353
 pub(crate) fn prepare_blosum62_lookup_query_for_word_size(
     queries: &[Vec<QueryFrame>],
     word_length: usize,
@@ -1846,9 +1597,6 @@ pub(crate) fn prepare_blosum62_lookup_query_for_word_size(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (cited at
 // `x_context_karlin`)
-// ```c
-//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// ```
 /// [`prepare_blosum62_lookup_query_for_word_size`] for another matrix than BLOSUM62 (BLASTP's
 /// compressed table, item SC2b): the contexts' Karlin blocks from the matrix's scores, its score
 /// bounds and its ideal block, as `build_ncbi_lookup_for_profile(.., matrix, word_length)`
@@ -1914,16 +1662,7 @@ pub(crate) fn prepare_matrix_lookup_query_for_word_size(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803
-// ```c
-//    for (context = query_info->first_context;
-//         context <= query_info->last_context; ++context) {
-//       ...
-//       if ( !contexts[context].is_valid )
-//           continue;
-//       ...
-//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2762-2803
 // NCBI computes the contexts' Karlin blocks one after the other; each reads only its own context's
 // letters (`x_context_karlin`), so computing them on several threads gives each context the same
 // block. Scheduling only.
@@ -1983,11 +1722,6 @@ pub(crate) struct XBlosum62LookupQuery {
 impl XBlosum62LookupQuery {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2852 (the ideal block, as
     // `prepare_blosum62_lookup_query_for_word_size` reads it)
-    // ```c
-    //    Blast_ResFreqStdComp(sbp, stdrfp);
-    //    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
-    //    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
-    // ```
     pub(crate) fn new(check_ideal: bool) -> Self {
         Self {
             ideal_params: blosum62_ideal_karlin_params(),
@@ -1998,12 +1732,6 @@ impl XBlosum62LookupQuery {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:634-637 (the lookup segments,
     // `prepare_blosum62_lookup_query_for_word_size`)
-    // ```c
-    //     if (lookup_segments) {
-    //         BLAST_ComplementMaskLocations(program_number, query_info,
-    //                                       filter_maskloc, lookup_segments);
-    //     }
-    // ```
     /// The query, the lookup segments and the contexts of
     /// `prepare_blosum62_lookup_query_for_word_size`, each context valid with the default Karlin
     /// parameters until the caller sets them from `context_karlin` of its frame.
@@ -2030,9 +1758,6 @@ impl XBlosum62LookupQuery {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803 (`x_context_karlin`)
-    // ```c
-    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    // ```
     /// The validity and Karlin block of the context of `frame`.
     pub(crate) fn context_karlin(&self, frame: &QueryFrame) -> (bool, KarlinParams) {
         x_context_karlin(
@@ -2058,25 +1783,6 @@ fn lookup_chain_entries(chain: &[i32]) -> &[i32] {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:33-77
-// ```c
-// index = ComputeTableIndex(wordsize, charsize, seq);
-// if (backbone[index] == NULL) {
-//     chain_size = 8;
-//     hits_in_chain = 0;
-//     chain = (Int4 *) malloc(chain_size * sizeof(Int4));
-//     chain[0] = chain_size;
-//     chain[1] = hits_in_chain;
-//     backbone[index] = chain;
-// }
-// if ((hits_in_chain + 2) == chain_size) {
-//     chain_size = chain_size * 2;
-//     chain = (Int4 *) realloc(chain, chain_size * sizeof(Int4));
-//     backbone[index] = chain;
-//     chain[0] = chain_size;
-// }
-// chain[chain[1] + 2] = query_offset;
-// chain[1]++;
-// ```
 #[inline]
 fn blast_lookup_add_word_hit(
     backbone: &mut LookupBackboneChains,
@@ -2091,19 +1797,6 @@ fn blast_lookup_add_word_hit(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:48-72
-    // ```c
-    // if (backbone[index] == NULL) {
-    //     chain_size = 8;
-    //     hits_in_chain = 0;
-    //     chain = (Int4 *) malloc(chain_size * sizeof(Int4));
-    // ...
-    // if ((hits_in_chain + 2) == chain_size) {
-    //     chain_size = chain_size * 2;
-    //     chain = (Int4 *) realloc(chain, chain_size * sizeof(Int4));
-    // ...
-    //     backbone[index] = chain;
-    //     chain[0] = chain_size;
-    // ```
     // The chain is created and grown through x_zeroed8 and x_resize, which use the arena. The
     // statements that follow are the C ones.
     let LookupBackboneChains { cells, arena } = backbone;
@@ -2127,28 +1820,6 @@ fn blast_lookup_add_word_hit(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:79-132
-// ```c
-// for (loc = locations; loc; loc = loc->next) {
-//     Int4 from = loc->ssr->left;
-//     Int4 to = loc->ssr->right;
-//     if (word_length > to - from + 1)
-//         continue;
-//     seq = query->sequence + from;
-//     word_target = seq + lut_word_length;
-//     for (offset = from; offset <= to; offset++, seq++) {
-//         if (seq >= word_target) {
-//             BlastLookupAddWordHit(backbone, lut_word_length, charsize,
-//                                   seq - lut_word_length, offset - lut_word_length);
-//         }
-//         if (*seq & invalid_mask)
-//             word_target = seq + lut_word_length + 1;
-//     }
-//     if (seq >= word_target) {
-//         BlastLookupAddWordHit(backbone, lut_word_length, charsize,
-//                               seq - lut_word_length, offset - lut_word_length);
-//     }
-// }
-// ```
 fn blast_lookup_index_query_exact_matches(
     backbone: &mut LookupBackboneChains,
     word_length: i32,
@@ -2208,43 +1879,15 @@ fn blast_lookup_index_query_exact_matches(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:546-606
-// ```c
-// score -= info->row_max[query_word[current_pos]];
-// row = info->matrix[query_word[current_pos]];
-// if (current_pos == info->wordsize - 1) {
-//     for (i = 0; i < alphabet_size; i++) {
-//         if (score + row[i] >= threshold) {
-//             subject_word[current_pos] = i;
-//             for (j = 0; j < offset_list[1]; j++) {
-//                 BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
-//                                       charsize, subject_word,
-//                                       query_bias + offset_list[j + 2]);
-//             }
-//         }
-//     }
-//     return;
-// }
-// for (i = 0; i < alphabet_size; i++) {
-//     if (score + row[i] >= threshold) {
-//         subject_word[current_pos] = i;
-//         s_AddWordHitsCore(info, score + row[i], current_pos + 1);
-//     }
-// }
-// ```
 fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_pos: usize) {
     let query_residue = info.query_word[current_pos] as usize;
     let score = score - info.row_max[query_residue];
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563:
-    // row = info->matrix[query_word[current_pos]];
     let matrix = info.matrix;
 
     if current_pos == info.wordsize - 1 {
         for residue in 0..info.alphabet_size {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-582
-            // ```c
-            // for (i = 0; i < alphabet_size; i++) {
-            //     if (score + row[i] >= threshold) {
-            // ```
             let residue_score = lookup_matrix_score(matrix, query_residue, residue);
             if score + residue_score >= info.threshold {
                 info.subject_word[current_pos] = residue as u8;
@@ -2266,12 +1909,6 @@ fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_
 
     for residue in 0..info.alphabet_size {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:600-603
-        // ```c
-        // for (i = 0; i < alphabet_size; i++) {
-        //     if (score + row[i] >= threshold) {
-        //         subject_word[current_pos] = i;
-        //         s_AddWordHitsCore(info, score + row[i], current_pos + 1);
-        // ```
         let residue_score = lookup_matrix_score(matrix, query_residue, residue);
         if score + residue_score >= info.threshold {
             info.subject_word[current_pos] = residue as u8;
@@ -2281,25 +1918,6 @@ fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:472-544
-// ```c
-// w = query + offset_list[2];
-// score = matrix[w[0]][w[0]];
-// for (i = 1; i < lookup->word_length; i++)
-//     score += matrix[w[i]][w[i]];
-// if (lookup->threshold == 0 || score < lookup->threshold) {
-//     for (i = 0; i < offset_list[1]; i++) {
-//         BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
-//                               lookup->charsize, w,
-//                               query_bias + offset_list[i + 2]);
-//     }
-// }
-// if (lookup->threshold == 0)
-//     return;
-// score = row_max[w[0]];
-// for (i = 1; i < lookup->word_length; i++)
-//     score += row_max[w[i]];
-// s_AddWordHitsCore(&info, score, 0);
-// ```
 fn blast_aa_add_word_hits(
     thin_backbone: &mut LookupBackboneChains,
     alphabet_size: usize,
@@ -2316,11 +1934,6 @@ fn blast_aa_add_word_hits(
     let query_word = &query[query_offset..];
     let query_residue = query_word[0] as usize;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:492-496
-    // ```c
-    // score = matrix[w[0]][w[0]];
-    // for (i = 1; i < lookup->word_length; i++)
-    //     score += matrix[w[i]][w[i]];
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:492-496:
     // score = matrix[w[0]][w[0]]; then add each matrix[w[i]][w[i]].
     let mut self_score = lookup_matrix_score(matrix, query_residue, query_residue);
@@ -2381,15 +1994,7 @@ fn blast_aa_add_word_hits(
 /// Neighbor words are always precomputed in the lookup table (no lazy mode).
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-543
 ///
-/// NCBI reference (fixed alphabet and neighbor precomputation):
-/// c++/src/algo/blast/core/blast_aalookup.c:436-456
-/// ```c
-/// ASSERT(lookup->alphabet_size <= BLASTAA_SIZE);
-/// ...
-/// BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-///                                   lookup->charsize, lookup->word_length,
-///                                   query, location);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:436-456 (fixed alphabet and neighbor precomputation)
 /// (The tests' reference; every search builds its table with `build_ncbi_lookup_for_profile` or a
 /// builder without chains.)
 #[cfg(test)]
@@ -2410,15 +2015,6 @@ pub fn build_ncbi_lookup(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
-// ```c
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-//             sfree(exact_backbone[i]);
-//         }
-//     }
-// ```
 /// `build_ncbi_lookup` (the BLOSUM62 3-letter table of [`build_ncbi_lookup_for_profile`]) for BLASTP:
 /// the table is filled in place from the per-cell counts, in
 /// the same append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the
@@ -2447,13 +2043,6 @@ pub(crate) fn x_bp_build_ncbi_lookup_as(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360
-// ```c
-// for (j=0; j <lookup->thin_backbone[i][1]; j++)
-//     dest[j] = lookup->thin_backbone[i][j + 2];
-// /* done with this chain- free it */
-// sfree(lookup->thin_backbone[i]);
-// lookup->thin_backbone[i] = NULL;
-// ```
 /// EXPERIMENT (LOSAT_X_TBXLUT): [`build_ncbi_lookup_for_profile`] for the full table of a TBLASTX
 /// query batch, of the words of the search's `matrix` and word size (`word_length`). With the
 /// switch the table is filled in place from the per-cell counts, in the same append order as the
@@ -2481,8 +2070,6 @@ pub(crate) fn x_tbx_build_ncbi_lookup(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
-// lookup->word_length = opt->word_size; lookup->threshold = opt->threshold;
-// row_max[i] = MAX(row_max[i], matrix[i][j]);
 // s_AddWordHits(lookup, matrix, query->sequence, ...);
 pub(crate) fn build_ncbi_lookup_for_profile(
     queries: &[Vec<QueryFrame>],
@@ -2510,32 +2097,6 @@ pub(crate) fn build_ncbi_lookup_for_profile(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
-// ```c++
-//     /* create an empty backbone */
-//
-//     exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
-//
-//     /* find all the exact matches, grouping together all offsets of identical
-//        query words. The query bias is not used here, since the next stage
-//        will need real offsets into the query sequence */
-//
-//     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-//                                       lookup->charsize, lookup->word_length,
-//                                       query, location);
-//
-//     /* walk though the list of exact matches previously computed. Find
-//        neighboring words for entire lists at a time */
-//
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-//             sfree(exact_backbone[i]);
-//         }
-//     }
-//
-//     sfree(exact_backbone);
-// ```
 /// BLASTX's lookup table of a prepared query; `parts` above 1: a pooled build's passes on that many tasks of the pool it runs on
 /// (`LOSAT_X_BXBUILDPAR`, `x_lut_direct.rs` `x_partitioned_passes`); the table is the same.
 ///
@@ -2624,15 +2185,6 @@ fn build_ncbi_lookup_with(
         skipped_seg_mask: 0,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
-    // ```c
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    //             sfree(exact_backbone[i]);
-    //         }
-    //     }
-    // ```
     // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
     // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines, a backbone index
     // wider than 16 bits takes the joint builder below and diagnostics mode the reference builder
@@ -2723,27 +2275,6 @@ pub(crate) fn x_reference_table_from_prepared(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245
-// ```c++
-// Int4 BlastAaLookupTableNew(const LookupTableOptions * opt,
-//                            BlastAaLookupTable * *lut)
-// {
-//     Int4 i;
-//     BlastAaLookupTable *lookup = *lut =
-//         (BlastAaLookupTable *) calloc(1, sizeof(BlastAaLookupTable));
-//
-//     ASSERT(lookup != NULL);
-//
-//     lookup->charsize = ilog2(BLASTAA_SIZE) + 1;
-//     lookup->word_length = opt->word_size;
-//
-//     for (i = 0; i < lookup->word_length; i++)
-//         lookup->backbone_size |= (BLASTAA_SIZE - 1) << (i * lookup->charsize);
-//     lookup->backbone_size++;
-//
-//     lookup->mask = (1 << (opt->word_size * lookup->charsize)) - 1;
-//     lookup->alphabet_size = BLASTAA_SIZE;
-//     lookup->threshold = (Int4)opt->threshold;
-// ```
 fn build_lookup_from_prepared(
     prepared: PreparedLookupQuery,
     threshold: i32,
@@ -2768,27 +2299,10 @@ fn build_lookup_from_prepared(
         skipped_seg_mask: _,
     } = prepared;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:246-250
-    // ```c
-    // Uint4 QueryInfo_GetSeqBufLen(const BlastQueryInfo* qinfo)
-    // {
-    //     BlastContextInfo * cinfo = & qinfo->contexts[qinfo->last_context];
-    //     return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
-    // }
-    // ```
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,654
-    // ```c
-    // int buflen = QueryInfo_GetSeqBufLen(qinfo);
-    // TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
-    // ...
-    // BlastSeqBlkSetSequence(*seqblk, buf.release(), buflen - 2);
-    // ```
     //
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:147-160
-    // ```c
-    // seq_blk->sequence = (Uint1*) sequence + 1;
-    // seq_blk->length = seqlen;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:147-161
     //
     // `concat_query` keeps the trailing NULLB so the scan/extension code can
     // read sentinel bytes just like NCBI's allocated buffer. However
@@ -2801,8 +2315,6 @@ fn build_lookup_from_prepared(
         .unwrap_or(0);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:438-444:
-    // row_max[i] = matrix[i][0];
-    // for (j = 1; j < alphabet_size; j++) row_max[i] = MAX(row_max[i], matrix[i][j]);
     let row_max: Vec<i32> = (0..alphabet_size)
         .map(|i| {
             (0..alphabet_size)
@@ -2813,23 +2325,8 @@ fn build_lookup_from_prepared(
         .collect();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
-    // ```c
-    // exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
-    // BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-    //                                   lookup->charsize, lookup->word_length,
-    //                                   query, location);
-    // for (i = 0; i < lookup->backbone_size; i++) {
-    //     if (exact_backbone[i] != NULL) {
-    //         s_AddWordHits(lookup, matrix, query->sequence,
-    //                       exact_backbone[i], query_bias, row_max);
-    //     }
-    // }
-    // ```
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:448
-    // ```c
-    // exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
-    // ```
     // Same empty backbone as the C code; its chains come from an arena.
     let mut exact_backbone = LookupBackboneChains::new(backbone_size);
     build_stats.total_exact_positions = blast_lookup_index_query_exact_matches(
@@ -2872,10 +2369,6 @@ fn build_lookup_from_prepared(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-543
     let residue_mask: usize = (1usize << charsize) - 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:246-247
-    // ```c
-    // lookup->thin_backbone =
-    //     (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
-    // ```
     // Same empty thin backbone as the C code; its chains come from an arena.
     let mut thin_backbone = LookupBackboneChains::new(backbone_size);
     let mut counts: Vec<u32> = vec![0; backbone_size];
@@ -3047,16 +2540,6 @@ fn build_lookup_from_prepared(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:282-299
-    // ```c
-    // for (i = 0; i < lookup->backbone_size; i++) {
-    //     if (lookup->thin_backbone[i]) {
-    //         if (lookup->thin_backbone[i][1] > AA_HITS_PER_CELL)
-    //             overflow_cells_needed += lookup->thin_backbone[i][1];
-    //         if (lookup->thin_backbone[i][1] > longest_chain)
-    //             longest_chain = lookup->thin_backbone[i][1];
-    //     }
-    // }
-    // ```
     let mut overflow_size = 0usize;
     for &count in &counts {
         let count = count as usize;
@@ -3076,23 +2559,6 @@ fn build_lookup_from_prepared(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-360
-    // ```c
-    // for (i = 0; i < lookup->backbone_size; i++) {
-    //     if (lookup->thin_backbone[i]) {
-    //         PV_SET(pv, i, PV_ARRAY_BTS);
-    //         bbc[i].num_used = lookup->thin_backbone[i][1];
-    //         if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
-    //             dest = bbc[i].payload.entries;
-    //         else {
-    //             bbc[i].payload.overflow_cursor = overflow_cursor;
-    //             dest = (Int4 *) lookup->overflow + overflow_cursor;
-    //             overflow_cursor += lookup->thin_backbone[i][1];
-    //         }
-    //         for (j = 0; j < lookup->thin_backbone[i][1]; j++)
-    //             dest[j] = lookup->thin_backbone[i][j + 2];
-    //     }
-    // }
-    // ```
     for idx in 0..backbone_size {
         let Some(chain) = thin_backbone[idx].as_deref() else {
             continue;
@@ -3239,12 +2705,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:87-129
-    // ```c
-    // if (seq >= word_target) {
-    //     BlastLookupAddWordHit(backbone, lut_word_length, charsize,
-    //                           seq - lut_word_length, offset - lut_word_length);
-    // }
-    // ```
     fn make_poly_a_query_frame() -> QueryFrame {
         QueryFrame {
             frame: 1,
@@ -3417,17 +2877,8 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-314
-    // ```c
-    // info->contexts[i].query_offset = new_offsets[i];
-    // distance = new_offsets[i+1] - new_offsets[i];
-    // info->contexts[i].query_length = distance ? distance-1 : 0;
-    // ```
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1098-1101
-    // ```c
-    // offset += length + 1;
-    // frame_offsets[context+1] = offset;
-    // ```
     #[test]
     fn test_prepare_lookup_query_shares_single_boundary_sentinel_and_context_offsets() {
         let prepared = prepare_lookup_for_test(vec![
@@ -3460,24 +2911,9 @@ mod tests {
         assert_eq!(prepared.contexts[1].frame_base, 4);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1045-1056
-    // ```c
-    // start_offset = query_info->contexts[context].query_offset;
-    // end_offset = query_info->contexts[context].query_length + start_offset - 1;
-    // if (mask_loc == NULL || mask_loc->seqloc_array[context] == NULL) {
-    //     tail = BlastSeqLocNew(tail ? &tail : complement_mask,
-    //                           start_offset, end_offset);
-    //     continue;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1045-1057
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1067-1114
-    // ```c
-    // filter_start = start_offset + seq_range->left;
-    // filter_end = start_offset + seq_range->right;
-    // ...
-    // tail = BlastSeqLocNew((tail ? &tail : complement_mask), left, right);
-    // ```
     #[test]
     fn test_prepare_lookup_query_converts_seg_masks_to_absolute_inclusive_segments() {
         let prepared = prepare_lookup_for_test(vec![
@@ -3502,16 +2938,7 @@ mod tests {
         assert_eq!(prepared.skipped_seg_mask, 4);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2789
-    // ```c
-    // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    // if (loop_status) {
-    //     contexts[context].is_valid = FALSE;
-    //     sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
-    //     sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
-    //     continue;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2791
     #[test]
     fn test_prepare_lookup_query_marks_failed_ungapped_ka_context_invalid() {
         let prepared = prepare_lookup_for_test(vec![vec![make_query_frame(
@@ -3524,15 +2951,8 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:246-250
-    // ```c
-    // return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
-    // ```
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:112-127
-    // ```c
-    // (*seq_blk)->sequence = (*seq_blk)->sequence_start+1;
-    // (*seq_blk)->length = length;
-    // ```
     #[test]
     fn test_build_ncbi_lookup_query_length_matches_ncbi_sequence_length() {
         let lookup = build_lookup_for_test(
@@ -3553,13 +2973,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:102-128
-    // ```c
-    // seq = query->sequence + from;
-    // word_target = seq + lut_word_length;
-    // ...
-    // BlastLookupAddWordHit(backbone, lut_word_length, charsize,
-    //                       seq - lut_word_length, offset - lut_word_length);
-    // ```
     #[test]
     fn test_build_ncbi_lookup_multiple_queries_do_not_cross_shared_boundary_sentinel() {
         let lookup = build_lookup_for_test(
@@ -3588,16 +3001,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:340-357
-    // ```c
-    // if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
-    //     dest = bbc[i].payload.entries;
-    // else {
-    //     bbc[i].payload.overflow_cursor = overflow_cursor;
-    //     dest = (Int4 *) lookup->overflow + overflow_cursor;
-    // }
-    // for (j = 0; j < lookup->thin_backbone[i][1]; j++)
-    //     dest[j] = lookup->thin_backbone[i][j + 2];
-    // ```
     #[test]
     fn test_build_ncbi_lookup_preserves_overflow_query_offset_append_order() {
         let lookup = build_lookup_for_test(vec![vec![make_poly_a_query_frame()]], 0);
@@ -3614,21 +3017,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:504-543
-    // ```c
-    // if (lookup->threshold == 0 || score < lookup->threshold) {
-    //     for (i = 0; i < offset_list[1]; i++) {
-    //         BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
-    //                               lookup->charsize, w,
-    //                               query_bias + offset_list[i + 2]);
-    //     }
-    // }
-    // ...
-    // for (j = 0; j < offset_list[1]; j++) {
-    //     BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
-    //                           charsize, subject_word,
-    //                           query_bias + offset_list[j + 2]);
-    // }
-    // ```
     #[test]
     fn test_build_ncbi_lookup_preserves_neighbor_query_offset_append_order() {
         let lookup = build_lookup_for_test(vec![vec![make_poly_a_query_frame()]], 11);
@@ -3645,13 +3033,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:96-128
-    // ```c
-    // if (word_length > to - from + 1)
-    //     continue;
-    // ...
-    // if (*seq & invalid_mask)
-    //     word_target = seq + lut_word_length + 1;
-    // ```
     #[test]
     fn test_build_ncbi_lookup_skips_words_crossing_invalid_residue() {
         let lookup = build_lookup_for_test(
@@ -3680,13 +3061,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:92-100
-    // ```c
-    // for (loc = locations; loc; loc = loc->next) {
-    //     Int4 from = loc->ssr->left;
-    //     Int4 to = loc->ssr->right;
-    //     if (word_length > to - from + 1)
-    //         continue;
-    // ```
     #[test]
     fn test_build_ncbi_lookup_respects_interval_boundaries() {
         let lookup = build_lookup_for_test(
@@ -3714,7 +3088,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:57 (`Int4
-    // overflow_cursor`, quoted at `BackboneCell`). A cursor below 2^31 is NCBI's `Int4` in
+    // overflow_cursor`, cited at `BackboneCell`). A cursor below 2^31 is NCBI's `Int4` in
     // `entries[0]` (and 0 in `entries[1]`); a cursor of 2^31 or more, which NCBI's `Int4` cannot
     // hold (`-threshold 3e9`: 21,952 entries per word position, so 97,827 positions fill 2^31),
     // reads back whole, as every scanner reads it (`cursor`, `x_cursor_at`), where
@@ -3780,16 +3154,6 @@ mod tests {
     }
 
     // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:222-244 DebruijnSequenceTest
-    // ```c
-    // for(i=0;i<lookup->backbone_size;i++) {
-    //   Int4 num_used = ((AaLookupSmallboneCell *)(lookup->thick_backbone))[i].num_used;
-    //   if (((i & 0x1F) >= BLASTAA_SIZE) || (((i & 0x3E0) >> 5) >= BLASTAA_SIZE)
-    //       || ((((i & 0x7C00) >> 10) >= BLASTAA_SIZE)))
-    //       BOOST_REQUIRE_EQUAL(num_used, 0);
-    //   else
-    //       BOOST_REQUIRE_EQUAL(num_used, 1);
-    // }
-    // ```
     #[test]
     fn test_build_ncbi_lookup_debruijn_exact_words_match_ncbi_counts() {
         let seq = debruijn(BLASTAA_SIZE, LOOKUP_WORD_LENGTH);
@@ -3811,13 +3175,6 @@ mod tests {
     }
 
     // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:253-277 NeighboringWordsTest
-    // ```c
-    // for each possible 3-mer:
-    //   find its neighbors by brute force
-    //   if (score >= 11) || exact-match
-    //       count++;
-    //   ensure that the number of neighbors matches the lookup table
-    // ```
     #[test]
     fn test_build_ncbi_lookup_representative_neighbor_counts_match_bruteforce() {
         let seq = debruijn(BLASTAA_SIZE, LOOKUP_WORD_LENGTH);

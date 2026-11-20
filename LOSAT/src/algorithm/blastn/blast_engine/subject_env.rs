@@ -38,11 +38,6 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressFinish, ProgressStyle};
 /// is cleared too, so nothing of it stays on the terminal.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
-/// ```c++
-///         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-/// 	    BLAST_PROF_START( APP.LOOP.PRE );
-///             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-/// ```
 /// No NCBI counterpart: NCBI's blastn writes nothing to its standard error while it searches its
 /// query batches. The bar writes only to a terminal and is cleared when the batch's search ends,
 /// so the terminal then shows what NCBI leaves on it.
@@ -146,10 +141,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         search_karlin,
     } = inputs;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1409
-    // ```c
-    // db_length = BlastSeqSrcGetTotLen(seq_src);
-    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    // ```
     let subject_count = subjects.num_subjects() as u64;
     // The bar is the command line's (`BlastnArgs::progress_bar`): a search from memory
     // (`run_local`: the library API, the web entries) writes nothing to standard error.
@@ -157,28 +148,8 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         .then(|| batch_progress_bar(subject_count, ProgressDrawTarget::stderr()));
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
-    // ```c
-    // if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
-    //    hitlist_size = args[kArgMaxTargetSequences].AsInteger();
-    // }
-    // m_NumDescriptions = hitlist_size;
-    // m_NumAlignments = hitlist_size;
-    // ```
     let hitlist_size = args.report_counts.hitlist_size;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
-    // ```c
-    // Int4
-    // GetPrelimHitlistSize(Int4 hitlist_size, Int4 compositionBasedStats,
-    //                      Boolean gapped_calculation)
-    // {
-    //     ...
-    //     else if (gapped_calculation) {
-    //          prelim_hitlist_size = MIN(MAX(2 * prelim_hitlist_size, 10),
-    //                                   prelim_hitlist_size + 50);
-    //     }
-    //     return prelim_hitlist_size;
-    // }
-    // ```
     let prelim_hitlist_size =
         usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !UNGAPPED))
             .map_err(|_| anyhow::anyhow!("the preliminary hit list size overflows"))?;
@@ -188,21 +159,8 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // BLASTN-specific debug mode: set LOSAT_DEBUG_BLASTN=1 to enable detailed hit loss diagnostics
     let blastn_debug = std::env::var("LOSAT_DEBUG_BLASTN").is_ok();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:350-692
-    // ```c
-    // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
-    // ...
-    // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., FALSE);
-    // ...
-    // Blast_IntervalTreeReset(tree);
-    // ```
     let blastn_trace_enabled = blastn_trace::enabled();
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3267-3282
-    // ```c
-    // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-    //                  true);
-    // ...
-    // m_DebugOutput = static_cast<bool>(args["verbose"]);
-    // ```
     let verbose = args.verbose;
     let debug_window: Option<(usize, usize, usize, usize)> =
         crate::utils::xdiag::var("BLEMIR_DEBUG_WINDOW")
@@ -242,12 +200,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
-    // ```c
-    // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking)
-    //     ? bool(args[kArgUseLCaseMasking])
-    //     : kDfltArgUseLCaseMasking;
-    // m_Scope = ReadSequencesToBlast(... use_lcase_masks, subjects, ...);
-    // ```
     let lcase_masking = args.lcase_masking;
 
     // Capture config values for use in closure
@@ -260,14 +212,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     let gap_open = config.gap_open;
     let gap_extend = config.gap_extend;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-463
-    // ```c
-    //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
-    //       params->gap_x_dropoff = (Int4)
-    //           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-    //     ...
-    //       params->gap_x_dropoff_final = (Int4)
-    //           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
-    // ```
     let (x_drop_gapped, x_drop_final) =
         gap_x_dropoffs(context_karlin, config.x_drop_gapped, config.x_drop_final);
     if !UNGAPPED {
@@ -323,37 +267,16 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         crate::utils::xreach::x_reach!("LOSAT_X_QGROUPPAR", false);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
-    // ```c
-    // return ((hsp->num_ident * 100.0 <
-    //         align_length * hit_options->percent_identity) ||
-    //         align_length < hit_options->min_hit_length) ;
-    // ```
     let percent_identity = args.percent_identity_value();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1052-1130 (BlastScoreBlkNuclMatrixCreate)
     let score_matrix = build_blastna_matrix(reward, penalty);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:236-259
-    // ```c
-    // for (i = 0; i < 256; i++) {
-    //    Int4 score = 0;
-    //    if (i & 3) score += penalty; else score += reward;
-    //    if ((i >> 2) & 3) score += penalty; else score += reward;
-    //    if ((i >> 4) & 3) score += penalty; else score += reward;
-    //    if (i >> 6) score += penalty; else score += reward;
-    //    table[i] = score;
-    // }
-    // ```
     let nucl_score_table = build_nucl_score_table(reward, penalty);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:218-221
-    // ```c
-    // p->cutoffs[context].x_dropoff_init =
-    //     (Int4)(sbp->scale_factor *
-    //            ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
-    // m_InitWordOpts.Reset((BlastInitialWordOptions*)calloc(1, sizeof(BlastInitialWordOptions)));
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
     // SetInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
     // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
@@ -492,8 +415,6 @@ fn subject_schedule(inputs: &ScheduleInputs<'_>) -> SubjectSchedule {
         crate::utils::xreach::x_reach!("LOSAT_X_BNFEWSUBJ", x_serial_subjects);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // (*thread)->Run(); (*thread)->Join(&result);
     let use_parallel = subjects_parallel && !x_serial_subjects;
     crate::utils::threading::report_stage(
         "blastn",

@@ -10,10 +10,6 @@
 
 mod backbone;
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:186-267
-// ```c
-// /* ------------ compressed alphabet protein blast defines ---------------*/
-// typedef struct BlastCompressedAaLookupTable { ... } BlastCompressedAaLookupTable;
-// ```
 pub mod compressed;
 
 // Re-export public types and functions
@@ -63,14 +59,7 @@ use crate::utils::matrix::BLASTAA_SIZE;
 /// - `blast_aalookup.c`: `BlastAaLookupTableNew`
 ///
 /// NCBI uses BLASTAA_SIZE = 28 for all amino acid lookup operations.
-// NCBI reference (NCBISTDAA alphabet includes stop codon):
-// c++/src/algo/blast/core/blast_encoding.c:115-118
-// ```c
-// const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
-// '-','A','B','C','D','E','F','G','H','I','K','L','M',
-// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*',
-// 'O', 'J'};
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-118 (NCBISTDAA alphabet includes stop codon)
 pub const LOOKUP_WORD_LENGTH: usize = 3;
 pub const LOOKUP_ALPHABET_SIZE: usize = BLASTAA_SIZE; // 28 (NCBI standard)
 
@@ -143,15 +132,7 @@ pub struct QueryContext {
     pub aa_len: usize,
     pub orig_len: usize,
     pub frame_base: i32,
-    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_query_info.h:60-69
-    // ```c
-    // typedef struct BlastContextInfo {
-    //     Int4 query_offset;
-    //     Int4 query_length;
-    //     ...
-    //     Boolean is_valid; /**< Determine if this context is valid or not. */
-    // } BlastContextInfo;
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_query_info.h:60-73
     pub is_valid: bool,
     /// NCBI: `kbp[context]` - Karlin parameters for this context
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c line 750-752, 866-867
@@ -159,16 +140,6 @@ pub struct QueryContext {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-453
-// ```c++
-//     /* create an empty backbone */
-//
-//     exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
-//
-//     /* find all the exact matches, grouping together all offsets of identical
-//        query words. The query bias is not used here, since the next stage
-//        will need real offsets into the query sequence */
-//
-// ```
 pub(crate) use backbone::{build_ncbi_lookup_from_prepared, build_ncbi_lookup_from_prepared_of};
 // BLASTP's table built in place (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export
 // itself.
@@ -201,11 +172,6 @@ pub(crate) use backbone::{x_tbx_build_ncbi_lookup, x_tbxlut_reach_stub};
 // path's group tables (lookup/x_pair_lut.rs); no NCBI counterpart for the re-export itself.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456
-// ```c
-//     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-//                                       lookup->charsize, lookup->word_length,
-//                                       query, location);
-// ```
 pub(crate) use backbone::x_pair_lut;
 // The reference builder's table of a BLASTX lookup query, for blastx::seed's tests (item SC9 of line
 // NP, a test of threaded builds); no NCBI counterpart for the re-export itself.

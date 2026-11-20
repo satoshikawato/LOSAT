@@ -4,58 +4,8 @@
 //! `>`, its first word included, as bytes), and `CShowBlastDefline::GetSeqIdList` over it.
 //!
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3952-3962
-//! ```c
-//!     if (! m_Reconstruct) {
-//!         // x_SetFlags set m_MainTitle from a suitable descriptor, if any;
-//!         // now strip trailing periods, commas, semicolons, and spaces.
-//!         size_t pos = m_MainTitle.find_last_not_of (".,;~ ");
-//!         if (pos != NPOS) {
-//!             m_MainTitle.erase (pos + 1);
-//!         }
-//!         if (! m_MainTitle.empty()) {
-//!             capitalize = false;
-//!         }
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4050-4073
-//! ```c
-//!     if (! (flags & fLeavePrefixSuffix)) {
-//!         // remove TPA or TSA prefix, will rely on other data in record to set
-//!         for (size_t i = 0; i < sizeof (s_tpaPrefixList) / sizeof (const char*); i++) {
-//!             string str = s_tpaPrefixList [i];
-//!             if (NStr::StartsWith (m_MainTitle, str, NStr::eNocase)) {
-//!                 m_MainTitle.erase (0, str.length());
-//!                 // strip leading spaces remaining after removal of old MAG before TPA or TSA prefixes
-//!                 m_MainTitle.erase (0, m_MainTitle.find_first_not_of (' '));
-//!             }
-//!         }
-//!     }
-//!
-//!     // strip leading spaces remaining after removal of old TPA or TSA prefixes
-//!     m_MainTitle.erase (0, m_MainTitle.find_first_not_of (' '));
-//!
-//!     CStringUTF8 decoded = NStr::HtmlDecode (m_MainTitle);
-//!
-//!     // strip trailing commas, semicolons, and spaces (period may be an sp.
-//!     // species)
-//!     size_t pos = decoded.find_last_not_of (",;~ ");
-//!     if (pos != NPOS) {
-//!         decoded.erase (pos + 1);
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4092-4101
-//! ```c
-//!     // produce final result
-//!     string penult = mag + prefix + decoded + suffix;
-//!
-//!     x_CleanAndCompress (final, penult, m_IsAA);
-//!
-//!     if (! m_IsPDB && ! m_IsPatent && ! m_IsAA && ! m_IsSeg) {
-//!         if (!final.empty() && islower ((unsigned char) final[0]) && capitalize) {
-//!             final [0] = toupper ((unsigned char) final [0]);
-//!         }
-//!     }
-//! ```
 //! A local FASTA record has no MolInfo, source or metagenome data, so `mag`, `prefix` and
 //! `suffix` are empty, and only an empty title is generated (`capitalize` stays true only
 //! then): a protein's is `unnamed protein product` (`x_SetTitleFromProtein`), a nucleotide's
@@ -69,24 +19,6 @@
 //! the end of the string there (approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
 
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3431-3446
-/// ```c
-/// static const char* s_tpaPrefixList [] = {
-///   "MAG ",
-///   "MAG:",
-///   "MULTISPECIES:",
-///   "TLS:",
-///   "TPA:",
-///   "TPA_exp:",
-///   "TPA_inf:",
-///   "TPA_reasm:",
-///   "TPA_asm:",
-///   "TSA:",
-///   "UNVERIFIED_ORG:",
-///   "UNVERIFIED_ASMBLY:",
-///   "UNVERIFIED_CONTAM:",
-///   "UNVERIFIED:"
-/// };
-/// ```
 const TPA_PREFIXES: [&str; 14] = [
     "MAG ",
     "MAG:",
@@ -107,10 +39,6 @@ const TPA_PREFIXES: [&str; 14] = [
 /// The title that NCBI generates for a protein record without one.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2508-2509
-/// ```c
-///     if (m_MainTitle.empty()  &&  !m_LocalAnnotsOnly) {
-///         m_MainTitle = "unnamed protein product";
-/// ```
 /// (`x_SetTitleFromProtein`, called for an empty title of a protein at
 /// create_defline.cpp:4020-4021.)
 const UNNAMED_PROTEIN_PRODUCT: &[u8] = b"unnamed protein product";
@@ -120,15 +48,6 @@ const UNNAMED_PROTEIN_PRODUCT: &[u8] = b"unnamed protein product";
 /// the bytes 0x81, 0x8D, 0x8F, 0x90 and 0x9D).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4528-4534
-/// ```c
-///     if (encoding == eEncoding_Unknown) {
-///         encoding = CUtf8::GuessEncoding(str);
-///         if (encoding == eEncoding_Unknown) {
-///             NCBI_THROW2(CStringException, eBadArgs,
-///                         "Unable to guess the source string encoding", 0);
-///         }
-///     }
-/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UnknownEncoding;
 
@@ -158,86 +77,13 @@ pub fn generate_defline(
 /// read from FASTA, whose id is local): the Bioseq of a database sequence with parsed Seq-ids
 /// has the ids of one definition line (`report::db_subject`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:745-824
-/// ```c++
-///     FOR_EACH_SEQID_ON_BIOSEQ_HANDLE (sid_itr, bsh) {
-///         CSeq_id_Handle sid = *sid_itr;
-///         switch (sid.Which()) {
-///             case NCBI_SEQID(Tpg):
-///             case NCBI_SEQID(Tpe):
-///             case NCBI_SEQID(Tpd):
-///                 m_ThirdParty = true;
-///                 // fall through
-///             case NCBI_SEQID(Other):
-///             case NCBI_SEQID(Genbank):
-///             case NCBI_SEQID(Embl):
-///             case NCBI_SEQID(Ddbj):
-///             {
-///                 ...
-///                     } else if (type == NCBI_ACCN(refseq_chromosome)) {
-///                         m_IsNC = true;
-///                     } else if (type == NCBI_ACCN(refseq_mrna)) {
-///                         m_IsNM = true;
-///                     } else if (type == NCBI_ACCN(refseq_mrna_predicted)) {
-///                         m_IsNM = true;
-///                     } else if (type == NCBI_ACCN(refseq_ncrna)) {
-///                         m_IsNR = true;
-///                     ...
-///             case NCBI_SEQID(Pdb):
-///             {
-///                 m_IsPDB = true;
-///                 CConstRef<CSeq_id> id = sid.GetSeqId();
-///                 const CPDB_seq_id& pdb_id = id->GetPdb ();
-///                 if (pdb_id.IsSetChain_id()) {
-///                     m_PDBChainID = pdb_id.GetChain_id();
-///                 } else if (pdb_id.IsSetChain()) {
-///                     m_PDBChain = pdb_id.GetChain();
-///                 }
-///                 break;
-///             }
-///             case NCBI_SEQID(Patent):
-///             {
-///                 m_IsPatent = true;
-///                 CConstRef<CSeq_id> id = sid.GetSeqId();
-///                 const CPatent_seq_id& pat_id = id->GetPatent();
-///                 if (pat_id.IsSetSeqid()) {
-///                     m_PatentSequence = pat_id.GetSeqid();
-///                 }
-///                 if (pat_id.IsSetCit()) {
-///                     const CId_pat& cit = pat_id.GetCit();
-///                     m_PatentCountry = cit.GetCountry();
-///                     m_PatentNumber = cit.GetSomeNumber();
-///                 }
-///                 break;
-///             }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:745-829
 /// The other flags of `x_SetFlags` come from descriptors that the Bioseq of a database
 /// sequence does not have (MolInfo, user objects, GenBank and EMBL blocks), or change no title
 /// that a search writes.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1004-1011
-/// ```c++
-///         case CSeqdesc::e_Source:
-///             {
-///             if ((needed_desc_choices & fSource) != 0) {
-///                 m_Source.Reset(&desc_it->GetSource());
-///                 // take first, then skip remainder
-///                 needed_desc_choices &= ~fSource;
-///             }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1264-1274
-/// ```c++
-/// void CDeflineGenerator::x_SetBioSrc (
-///     const CBioseq_Handle& bsh
-/// )
-///
-/// {
-///     if (m_Source.NotEmpty()) {
-///         // get organism name
-///         if (m_Source->IsSetTaxname()) {
-///             m_Taxname = m_Source->GetTaxname();
-///         }
-/// ```
 /// The Bioseq of a database sequence has a source for each definition line with a positive
 /// taxid (`CSeqDBVol::x_GetTaxonomy`, seqdbvol.cpp:1136-1180), whose Org-ref has only the taxid's
 /// dbtag and, where the taxonomy database names the taxid, its names: no genome, subsource or
@@ -312,19 +158,7 @@ pub static UNNAMED_SOURCE: SourceTaxname = SourceTaxname::Unnamed;
 
 impl SourceTaxname {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1165-1169
-    // ```c++
-    //                 CRef<COrg_ref> org(new COrg_ref);
-    //                 if (found_taxid_in_taxonomy_blastdb) {
-    //                     org->SetTaxname().swap(tnames.scientific_name);
-    //                     org->SetCommon().swap(tnames.common_name);
-    //                 }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1271-1273
-    // ```c++
-    //         if (m_Source->IsSetTaxname()) {
-    //             m_Taxname = m_Source->GetTaxname();
-    //         }
-    // ```
     /// The source of a Bioseq whose first source's taxid the taxonomy database gives `names`
     /// (`seqdb::taxdb::TaxCache::names`): its scientific name, none where the lookup found none or
     /// it is empty (an empty `m_Taxname` makes the title of a Bioseq without one,
@@ -408,28 +242,8 @@ impl BioseqFacts {
 /// record (alignment heading only, as the other prefixes), and the first letter of a nucleotide
 /// title made from nothing upper-cased.
 ///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4076-4092
-/// ```c++
-///     string mag;
-///     if (! (flags & fLeavePrefixSuffix)) {
-///         // calculate prefix
-///         x_SetPrefix(prefix, bsh);
-///         ...
-///     }
-///
-///     // produce final result
-///     string penult = mag + prefix + decoded + suffix;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4075-4093
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2815-2840
-/// ```c++
-///     } else if (m_ThirdParty) {
-///         if (m_TPAExp) {
-///             prefix = "TPA_exp: ";
-///         ...
-///         if (prefix.empty()) {
-///             prefix = "TPA: ";
-///         }
-/// ```
 pub fn generate_bioseq_defline(
     title: &[u8],
     protein: bool,
@@ -448,25 +262,7 @@ pub fn generate_bioseq_defline(
     }
     let (mut text, reads_past_end) = clean_and_compress(&decoded, protein);
     // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3934-3962
-    // ```c++
-    //     bool capitalize = true;
-    //     ...
-    //         size_t pos = m_MainTitle.find_last_not_of (".,;~ ");
-    //         if (pos != NPOS) {
-    //             m_MainTitle.erase (pos + 1);
-    //         }
-    //         if (! m_MainTitle.empty()) {
-    //             capitalize = false;
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4095-4099
-    // ```c++
-    //     if (! m_IsPDB && ! m_IsPatent && ! m_IsAA && ! m_IsSeg) {
-    //         if (!final.empty() && islower ((unsigned char) final[0]) && capitalize) {
-    //             final [0] = toupper ((unsigned char) final [0]);
-    //         }
-    //     }
-    // ```
     // A title of punctuation is not erased, so `capitalize` stays true only for an empty one;
     // the Bioseq of a database sequence is raw (`m_IsSeg` false). `islower` and `toupper` are
     // the C locale's: ASCII only.
@@ -499,44 +295,6 @@ pub fn bioseq_title_from_source(title: &[u8], ids: impl FnOnce() -> BioseqFacts)
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1815-1858
-// ```c++
-// void CDeflineGenerator::x_SetTitleFromPatent (void)
-//
-// {
-//     string seqno = NStr::IntToString(m_PatentSequence);
-//     CTextJoiner<6, CTempString> joiner;
-//     joiner.Add("Sequence ").Add(seqno).Add(" from Patent ")
-//         .Add(m_PatentCountry).Add(" ").Add(m_PatentNumber);
-//     joiner.Join(&m_MainTitle);
-// }
-//
-// void CDeflineGenerator::x_SetTitleFromPDB (void)
-//
-// {
-//     if (! m_PDBChainID.empty()) {
-//       string chain(m_PDBChainID);
-//       CTextJoiner<4, CTempString> joiner;
-//       if (m_UsePDBCompoundForDefline) {
-//           joiner.Add("Chain ").Add(chain).Add(", ").Add(m_PDBCompound);
-//       } else {
-//           std::size_t found = m_Comment.find_first_not_of("0123456789");
-//           if (found != std::string::npos && found < m_Comment.length() && m_Comment[found] == ' ') {
-//               joiner.Add("Chain ").Add(chain).Add(", ").Add(m_Comment.substr (found));
-//           } else {
-//               joiner.Add("Chain ").Add(chain).Add(", ").Add(m_Comment);
-//           }
-//       }
-//       joiner.Join(&m_MainTitle);
-//     } else if (isprint ((unsigned char) m_PDBChain)) {
-//         string chain(1, (char) m_PDBChain);
-//         ...
-//             joiner.Add("Chain ").Add(chain).Add(", ").Add(m_Comment);
-//         ...
-//     } else {
-//         m_MainTitle = m_PDBCompound;
-//     }
-// }
-// ```
 // The Bioseq of a database sequence has no PDB block and no comment: `m_PDBCompound` and
 // `m_Comment` are empty.
 /// The title that `x_SetTitleFromPDB` or `x_SetTitleFromPatent` makes for an empty one (empty
@@ -574,71 +332,9 @@ fn pdb_or_patent_title(ids: &BioseqFacts) -> Vec<u8> {
 /// an exception; RP-20).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:787-789
-/// ```c
-///         if((m_IsBl2Seq && (!m_BelieveQuery))|| m_IsRemoteSearch) {
-///         	tabinfo.SetParseSubjectDefline(true);
-///         }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:522-532
-/// ```c
-/// void CBlastTabularInfo::SetSubjectId(const CBioseq_Handle& bh)
-/// {
-///     m_SubjectId.clear();
-///
-///     vector<CConstRef<objects::CSeq_id> > subject_id_list;
-///     ITERATE(CBioseq_Handle::TId, itr, bh.GetId()) {
-///     	CRef<CSeq_id> next_id = s_ReplaceLocalId(bh, itr->GetSeqId(), !m_ParseSubjectDefline );
-///     	subject_id_list.push_back(next_id);
-///     }
-///     CShowBlastDefline::GetSeqIdList(bh, subject_id_list, m_SubjectId);
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
-/// ```c
-///         if (sid_in->IsLocal()) {
-///             string id_token;
-///             vector<string> title_tokens;
-///             title_tokens =
-///                 NStr::Split(CAlignFormatUtil::GetTitle(bh), " ", title_tokens);
-///             if(title_tokens.empty()){
-///                 id_token = NcbiEmptyString;
-///             } else {
-///                 id_token = title_tokens[0];
-///             }
-///
-///             if (id_token == NcbiEmptyString || parse_local) {
-///                 const CObject_id& obj_id = sid_in->GetLocal();
-///                 if (obj_id.IsStr())
-///                     id_token = obj_id.GetStr();
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-242
-/// ```c
-///     ITERATE(vector< CConstRef<CSeq_id> >, itr, original_seqids) {
-///         CRef<CSeq_id> next_seqid(new CSeq_id());
-///         string id_token = NcbiEmptyString;
-///
-///         if (((*itr)->IsGeneral() &&
-///             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
-///             != string::npos) ||
-/// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
-///             vector<string> title_tokens;
-///             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
-///             if (defline != NcbiEmptyString) {
-///                 id_token =
-///                     NStr::Split(defline, " ", title_tokens)[0];
-///             }
-///         }
-///         if (id_token != NcbiEmptyString) {
-///             // Create a new local id with a label containing the extracted
-///             // token and save it in the next_seqid instead of the original
-///             // id.
-///             CObject_id* obj_id = new CObject_id();
-///             obj_id->SetStr(id_token);
-///             next_seqid->SetLocal(*obj_id);
-///         } else {
-///             next_seqid->Assign(**itr);
-///         }
-/// ```
 /// A local ID is written `lcl|` and its text (`CSeq_id::WriteAsFasta`, Seq_id.cpp:2164-2196,
 /// `CObject_id::AsString`, Object_id.cpp:202-210). Of `lcl|` and the text, `lcl|Subject_` is
 /// found where the text starts with `Subject_` or holds it all: the `lcl|` before the text takes
@@ -696,47 +392,7 @@ pub(crate) use punctuation_title;
 /// `x_CleanAndCompress` reads past the end of (NCBI crashes).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-242
-/// ```c++
-///     ITERATE(vector< CConstRef<CSeq_id> >, itr, original_seqids) {
-///         CRef<CSeq_id> next_seqid(new CSeq_id());
-///         string id_token = NcbiEmptyString;
-///
-///         if (((*itr)->IsGeneral() &&
-///             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
-///             != string::npos) ||
-/// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
-///             vector<string> title_tokens;
-///             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
-///             if (defline != NcbiEmptyString) {
-///                 id_token =
-///                     NStr::Split(defline, " ", title_tokens)[0];
-///             }
-///         }
-///         if (id_token != NcbiEmptyString) {
-///             // Create a new local id with a label containing the extracted
-///             // token and save it in the next_seqid instead of the original
-///             // id.
-///             CObject_id* obj_id = new CObject_id();
-///             obj_id->SetStr(id_token);
-///             next_seqid->SetLocal(*obj_id);
-///         } else {
-///             next_seqid->Assign(**itr);
-///         }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:522-532
-/// ```c++
-/// void CBlastTabularInfo::SetSubjectId(const CBioseq_Handle& bh)
-/// {
-///     m_SubjectId.clear();
-///
-///     vector<CConstRef<objects::CSeq_id> > subject_id_list;
-///     ITERATE(CBioseq_Handle::TId, itr, bh.GetId()) {
-///     	CRef<CSeq_id> next_id = s_ReplaceLocalId(bh, itr->GetSeqId(), !m_ParseSubjectDefline );
-///     	subject_id_list.push_back(next_id);
-///     }
-///     CShowBlastDefline::GetSeqIdList(bh, subject_id_list, m_SubjectId);
-/// }
-/// ```
 /// The Bioseq of a database sequence carries its stored title as its title descriptor
 /// (seqdbvol.cpp:1445-1463) and the source of its taxid (`ids`, `BioseqFacts::of_source`), so
 /// `GenerateDefline` reads the title as it reads the one of a FASTA record, and makes an empty
@@ -794,30 +450,6 @@ fn contains(text: &[u8], pattern: &[u8]) -> bool {
 /// generated from the id, else from the source (`source_title`) (`generate_bioseq_defline`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3994-4022
-/// ```c++
-///     if (m_MainTitle.empty()) {
-///
-///         // PDB and patent records do not normally need source data
-///         if (m_IsPDB) {
-///             x_SetTitleFromPDB ();
-///         } else if (m_IsPatent) {
-///             x_SetTitleFromPatent ();
-///         }
-///
-///         if (m_MainTitle.empty()) {
-///             ...
-///             // several record types have specific methods
-///             if (m_IsNC) {
-///                 x_SetTitleFromNC ();
-///             } else if (m_IsNM  &&  !m_LocalAnnotsOnly) {
-///                 x_SetTitleFromNM (bsh);
-///             } else if (m_IsNR) {
-///                 x_SetTitleFromNR (bsh);
-///             } else if (m_IsAA && m_Idx) {
-///                 x_SetTitleFromProteinIdx (bsh);
-///             } else if (m_IsAA) {
-///                 x_SetTitleFromProtein (bsh);
-/// ```
 fn title_before_decoding_of(
     title: &[u8],
     protein: bool,
@@ -827,16 +459,6 @@ fn title_before_decoding_of(
     let mut main_title = title.to_vec();
     trim_end_of(&mut main_title, b".,;~ ");
     // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3964-3972
-    // ```c++
-    //     // adjust protein partial/organelle/taxname suffix, if necessary
-    //     if ( m_IsAA && (! m_MainTitle.empty()) && (! (flags & fLeavePrefixSuffix)) ) {
-    //         if (m_Idx) {
-    //             x_AdjustProteinTitleSuffixIdx (bsh);
-    //         } else {
-    //             x_AdjustProteinTitleSuffix (bsh);
-    //         }
-    //     }
-    // ```
     // `CDeflineGenerator()` has no feature index (`m_Idx` null). The adjustment comes after the
     // trim and before a title is made for an empty one (which is never adjusted), the prefixes
     // are removed and the title is decoded; it returns at once without a source.
@@ -864,52 +486,7 @@ fn title_before_decoding_of(
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3090-3110
-// ```c++
-// static size_t s_TitleEndsInOrganism (
-//     string& title,
-//     CTempString taxname
-// )
-//
-// {
-//     size_t  pos, idx;
-//     size_t  len1, len2;
-//
-//     len1 = title.length();
-//     len2 = taxname.length();
-//
-//     idx = len1 - len2 - 3;
-//     if (len1 > len2 + 4 && title [idx] == ' ' && title [idx + 1] == '[' && title [len1 - 1] == ']') {
-//         pos = NStr::Find(title, taxname, NStr::eNocase, NStr::eReverseSearch);
-//         if (pos == idx + 2) {
-//             return pos - 1;
-//         }
-//     }
-//
-//     return NPOS;
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2933-2967 (`NStr::Find`, `eNocase`)
-// ```c++
-//         // A set of lower/upper characters for pattern[0].
-//         string x_first(pattern, 0, 1);
-//         if (isupper((unsigned char)x_first[0])) {
-//             x_first += (char)tolower((unsigned char)x_first[0]);
-//         } else if (islower((unsigned char)x_first[0])) {
-//             x_first += (char)toupper((unsigned char)x_first[0]);
-//         }
-//         ...
-//             search_pos = slen - plen;
-//             do {
-//                 pos = str.find_last_of(x_first, search_pos);
-//                 while (pos != NPOS  &&  pos
-//                        &&  CompareNocase(str, pos, plen, pattern) != 0) {
-//                     if (pos == 0) {
-//                         return NPOS;
-//                     }
-//                     pos = str.find_last_of(x_first, pos - 1);
-//                 }
-//                 current_pos = pos;
-// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2933-2977 (`NStr::Find`, `eNocase`)
 // The reverse search gives the last place at or before `slen - plen` where the pattern matches
 // without case (ASCII: the C locale): an empty pattern has no first letter, so `find_last_of`
 // finds nothing (an empty name never matches), and a stop at 0 without a match is never
@@ -931,33 +508,6 @@ fn title_ends_in_organism(title: &[u8], taxname: &[u8]) -> Option<usize> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2123-2147
-// ```c++
-// static const char* s_proteinOrganellePrefix [] = {
-//   "",                  // "",
-//   "",                  // "",
-//   "chloroplast",       // "chloroplast",
-//   "chromoplast",       // "chromoplast",
-//   "kinetoplast",       // "kinetoplast",
-//   "mitochondrion",     // "mitochondrion",
-//   "plastid",           // "plastid",
-//   "macronuclear",      // "macronuclear",
-//   "",                  // "extrachromosomal",
-//   "plasmid",           // "plasmid",
-//   "",                  // "",
-//   "",                  // "",
-//   "cyanelle",          // "cyanelle",
-//   "",                  // "proviral",
-//   "",                  // "virus",
-//   "nucleomorph",       // "nucleomorph",
-//   "apicoplast",        // "apicoplast",
-//   "leucoplast",        // "leucoplast",
-//   "protoplast",        // "protoplast",
-//   "endogenous virus",  // "endogenous virus",
-//   "hydrogenosome",     // "hydrogenosome",
-//   "",                  // "chromosome",
-//   "chromatophore"      // "chromatophore"
-// };
-// ```
 // The commented-out names are not used: `(virus)` stays (probe of line RG T5c, `nu (x)(virus)
 // [Bacillus sp.]` unchanged).
 /// `s_proteinOrganellePrefix` from `chloroplast` (2) to `chromatophore` (22), the non-empty ones.
@@ -980,128 +530,8 @@ const PROTEIN_ORGANELLE_PREFIXES: [&[u8]; 15] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3263-3414
-// ```c++
-// void CDeflineGenerator::x_AdjustProteinTitleSuffix (
-//     const CBioseq_Handle& bsh
-// )
-//
-// {
-//     ...
-//     if (m_Source.Empty()) return;
-//
-//     if (m_Source->IsSetTaxname()) {
-//         m_Taxname = m_Source->GetTaxname();
-//     }
-//     if (m_Source->IsSetGenome()) {
-//         m_Genome = m_Source->GetGenome();
-//     }
-//     if (m_Source->IsSetOrgname()) {
-//         ... (m_Genus and m_Species of a binomial name)
-//     }
-//
-//     s_TrimMainTitle (m_MainTitle);
-//
-//     len1 = (int) m_MainTitle.length();
-//     len2 = (int) m_Taxname.length();
-//
-//     // find [taxname]
-//
-//     if (len1 > len2 + 4) {
-//         tpos = s_TitleEndsInOrganism(m_MainTitle, m_Taxname);
-//         if (tpos == NPOS) {
-//             string binomial = m_Genus;
-//             binomial += " ";
-//             binomial += m_Species;
-//             tpos = s_TitleEndsInOrganism(m_MainTitle, binomial);
-//             if (tpos == NPOS) {
-//                 if (m_IsCrossKingdom) {
-//                     ...
-//                 }
-//             }
-//         }
-//     }
-//
-//     /* do not change unless [genus species] was at the end */
-//     if (tpos == NPOS) return;
-//
-//     m_MainTitle.erase (tpos);
-//     s_TrimMainTitle (m_MainTitle);
-//     len1 = (int) m_MainTitle.length();
-//
-//     // find (organelle)
-//
-//     if (len1 > 2 && m_MainTitle [len1 - 1] == ')') {
-//         pos = m_MainTitle.find_last_of ("(");
-//         if (pos != NPOS) {
-//             for ( genome = NCBI_GENOME(chloroplast); genome <= NCBI_GENOME(chromatophore); genome++ ) {
-//                 string str = s_proteinOrganellePrefix [genome];
-//                 if ( ! str.empty() ) {
-//                     string paren = "(" + str + ")";
-//                     if (NStr::EndsWith (m_MainTitle, paren )) {
-//                         opos = pos;
-//                         break;
-//                     }
-//                 }
-//             }
-//         }
-//         s_TrimMainTitle (m_MainTitle);
-//         len1 = (int) m_MainTitle.length();
-//     }
-//
-//     if (opos != NPOS) {
-//         m_MainTitle.erase (opos);
-//         s_TrimMainTitle (m_MainTitle);
-//         len1 = (int) m_MainTitle.length();
-//     }
-//
-//     if ( NStr::EndsWith (m_MainTitle, ", partial")) {
-//         m_MainTitle.erase(m_MainTitle.length() - 9);
-//         s_TrimMainTitle (m_MainTitle);
-//     }
-//
-//     // then reconstruct partial (organelle) [taxname] suffix
-//
-//     if ( !x_IsComplete()) {
-//         m_MainTitle += ", partial";
-//     }
-//
-//     if (m_OmitTaxonomicName) return;
-//
-//     CTempString taxname = m_Taxname;
-//
-//     if (m_Genome >= NCBI_GENOME(chloroplast) && m_Genome <= NCBI_GENOME(chromatophore)) {
-//         ...
-//     }
-//
-//     // check for special taxname, go to overlapping source feature
-//     if ((taxname.empty()  ||
-//          (!NStr::EqualNocase (taxname, "synthetic construct")  && ...))  &&
-//         !m_LocalAnnotsOnly) {
-//         ...
-//             src = x_GetSourceFeatViaCDS (bsh);
-//             if (src.NotEmpty()  &&  src->IsSetTaxname()) {
-//                 taxname = src->GetTaxname();
-//             }
-//     }
-//
-//     if (m_IsCrossKingdom && ! m_FirstSuperKingdom.empty() && ! m_SecondSuperKingdom.empty()) {
-//         m_MainTitle += " [" + string(m_FirstSuperKingdom) + "][" + string(m_SecondSuperKingdom) + "]";
-//     } else if (! taxname.empty() /* && m_MainTitle.find(taxname) == NPOS */) {
-//         m_MainTitle += " [" + string(taxname) + "]";
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3049-3055 (`s_TrimMainTitle`,
 // `trim_end_of(.., b".,;~ ")`)
-// ```c++
-// static inline void s_TrimMainTitle (string& str)
-// {
-//     size_t pos = str.find_last_not_of (".,;~ ");
-//     if (pos != NPOS) {
-//         str.erase (pos + 1);
-//     }
-// }
-// ```
 // The source of a database Bioseq (`CSeqDBVol::x_GetTaxonomy`, seqdbvol.cpp:1161-1176) has the
 // taxid's dbtag and, where the taxonomy database names the taxid, its names: no genome and no
 // orgname, so no genus or species (the binomial is `" "`, which matches a title ending in
@@ -1173,7 +603,7 @@ pub fn protein_title_suffix_adjustable(title: &[u8]) -> bool {
         .is_some_and(|end| title[end] == b']')
 }
 
-// No NCBI counterpart: which titles `x_AdjustProteinTitleSuffix` (quoted at
+// No NCBI counterpart: which titles `x_AdjustProteinTitleSuffix` (cited at
 // `adjust_protein_title_suffix`) cannot change the first word of; it changes no value NCBI
 // computes. Let M be the main title after `s_TrimMainTitle`, ending in `]`, w its bytes before its
 // first space (at s) and c the byte after that space. The adjustment changes M only in two ways:
@@ -1237,75 +667,12 @@ pub fn protein_title_word_needs_source(title: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1545-1550
-// ```c++
-// void CDeflineGenerator::x_SetTitleFromBioSrc (void)
-//
-// {
-//     CDefLineJoiner joiner;
-//
-//     joiner.Add("organism", m_Taxname, eHideType);
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1598-1600
-// ```c++
-//     joiner.Join(&m_MainTitle);
-//     NStr::TruncateSpacesInPlace(m_MainTitle);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:91-99 (`CDefLineJoiner::Add`)
-// ```c++
-//             if (eHideNone == hide && !name.empty()) {
-//                 m_Joiner.Add(" ").Add(name);
-//             }
-//             if (!value.empty()) {
-//                 m_Joiner.Add(" ").Add(value);
-//             }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3197-3234 (`NStr::TruncateSpacesInPlace`
 // with `eTrunc_Both`: the `isspace` bytes at both ends, of the C locale)
-// ```c++
-//         while ( isspace((unsigned char) str.data()[beg]) ) {
-//         ...
-//         while (isspace((unsigned char) str.data()[--end])) {
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2508-2510, 2532-2541, 2572-2574
-// ```c++
-//     if (m_MainTitle.empty()  &&  !m_LocalAnnotsOnly) {
-//         m_MainTitle = "unnamed protein product";
-//         gene = x_GetGeneRefViaCDS (mapped_cds);
-//         ...
-//     }
-//     ...
-//     // strip trailing periods, commas, and spaces
-//     SIZE_TYPE pos = m_MainTitle.find_last_not_of (".,;~ ");
-//     if (pos != NPOS) {
-//         m_MainTitle.erase (pos + 1);
-//     }
-//
-//     if (! x_IsComplete() /* && m_MainTitle.find(", partial") == NPOS */) {
-//         m_MainTitle += ", partial";
-//     }
-//     ...
-//     } else if (! taxname.empty() /* && m_MainTitle.find(taxname) == NPOS */) {
-//         m_MainTitle += " [" + string(taxname) + "]";
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1603-1610, 1715-1716, 1763-1764
-// ```c++
-// void CDeflineGenerator::x_SetTitleFromNC (void)
-//
-// {
-//     if (m_MIBiomol != NCBI_BIOMOL(genomic) &&
-//          m_MIBiomol != NCBI_BIOMOL(other_genetic)) return;
-//
-//     // require taxname to be set
-//     if (m_Taxname.empty()) return;
-//     ...
-//     // require taxname to be set (x_SetTitleFromNM)
-//     if (m_Taxname.empty()) return;
-//     ...
-//     // require taxname to be set (x_SetTitleFromNR)
-//     if (m_Taxname.empty()) return;
-// ```
 // The Bioseq of a database sequence has no features, no MolInfo (so `x_IsComplete()` holds:
 // no `, partial`), no genome (no organelle), no CDS (so no source feature for `synthetic
 // construct` and the like) and no orgname (not cross-kingdom); of `x_SetTitleFromBioSrc`'s
@@ -1350,18 +717,6 @@ fn source_title(protein: bool, ids: &BioseqFacts) -> Vec<u8> {
 /// The entities of `NStr::HtmlDecode`, in NCBI's order.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4221-4232
-/// ```c
-/// static struct tag_HtmlEntities
-/// {
-///     TUnicodeSymbol u;
-///     const char*    s;
-/// }
-/// const s_HtmlEntities[] = {
-///     {    9, "Tab" },
-///     {   10, "NewLine" },
-///     {   33, "excl" },
-///     {   34, "quot" },
-/// ```
 /// (and the rows after them, to `{ 9830, "diams" }` at ncbistr.cpp:4508.)
 #[rustfmt::skip]
 const NCBI_HTML_ENTITIES: [(u32, &str); 280] = [
@@ -1429,100 +784,6 @@ const NCBI_HTML_ENTITIES: [(u32, &str); 280] = [
 /// surrogate's bytes).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4523-4618
-/// ```c
-/// string NStr::HtmlDecode(const CTempString str, EEncoding encoding, THtmlDecode* result_flags)
-/// {
-///     string ustr;
-///     THtmlDecode result = 0;
-///
-///     if (encoding == eEncoding_Unknown) {
-///         encoding = CUtf8::GuessEncoding(str);
-///         if (encoding == eEncoding_Unknown) {
-///             NCBI_THROW2(CStringException, eBadArgs,
-///                         "Unable to guess the source string encoding", 0);
-///         }
-///     }
-///     ...
-///     for (i = str.begin(); i != e;) {
-///         ch = *(i++);
-///         //check for HTML entities and character references
-///         if (i != e && ch == '&') {
-///             CTempString::const_iterator start_of_entity, end_of_entity, itmp;
-///             end_of_entity = itmp = i;
-///             bool ent, dec, hex, parsed=false;
-///             ent = isalpha((unsigned char)(*itmp)) != 0;
-///             dec = !ent && *itmp == '#' && ++itmp != e &&
-///                   isdigit((unsigned char)(*itmp)) != 0;
-///             hex = !dec && itmp != e &&
-///                   (*itmp == 'x' || *itmp == 'X') && ++itmp != e &&
-///                    isxdigit((unsigned char)(*itmp)) != 0;
-///             start_of_entity = itmp;
-///
-///             if (itmp != e && (ent || dec || hex)) {
-///                 // do not look too far
-///                 for (int len=0; len<16 && itmp != e; ++len, ++itmp) {
-///                     if (*itmp == '&' || *itmp == '#') {
-///                         break;
-///                     }
-///                     if (*itmp == ';') {
-///                         end_of_entity = itmp;
-///                         break;
-///                     }
-///                     ent = ent && isalnum( (unsigned char)(*itmp)) != 0;
-///                     dec = dec && isdigit( (unsigned char)(*itmp)) != 0;
-///                     hex = hex && isxdigit((unsigned char)(*itmp)) != 0;
-///                 }
-///                 if (end_of_entity != i && (ent || dec || hex)) {
-///                     uch = 0;
-///                     if (ent) {
-///                         string entity(start_of_entity, end_of_entity);
-///                         const struct tag_HtmlEntities* p = s_HtmlEntities;
-///                         for ( ; p->u != 0; ++p) {
-///                             if (entity.compare(p->s) == 0) {
-///                                 uch = p->u;
-///                                 parsed = true;
-///                                 result |= fHtmlDec_CharRef_Entity;
-///                                 break;
-///                             }
-///                         }
-///                     } else {
-///                         parsed = true;
-///                         result |= fHtmlDec_CharRef_Numeric;
-///                         for (itmp = start_of_entity; itmp != end_of_entity; ++itmp) {
-///                             TUnicodeSymbol ud = *itmp;
-///                             if (dec) {
-///                                 uch = 10 * uch + (ud - '0');
-///                             } else if (hex) {
-///                                 if (ud >='0' && ud <= '9') {
-///                                     ud -= '0';
-///                                 } else if (ud >='a' && ud <= 'f') {
-///                                     ud -= 'a';
-///                                     ud += 10;
-///                                 } else if (ud >='A' && ud <= 'F') {
-///                                     ud -= 'A';
-///                                     ud += 10;
-///                                 }
-///                                 uch = 16 * uch + ud;
-///                             }
-///                         }
-///                     }
-///                     if (parsed) {
-///                         ustr += CUtf8::AsUTF8(&uch,1);
-///                         i = ++end_of_entity;
-///                         continue;
-///                     }
-///                 }
-///             }
-///         }
-///         // no entity - append as is
-///         if (encoding == eEncoding_UTF8 || encoding == eEncoding_Ascii) {
-///             ustr.append( 1, ch );
-///         } else {
-///             result |= fHtmlDec_Encoding_Changed;
-///             ustr += CUtf8::AsUTF8(CTempString(&ch,1), encoding);
-///         }
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:5729-5759 (`CUtf8::x_Append` of a
 /// `TUnicodeSymbol` buffer: `x_TCharToUnicodeSymbol` takes the symbol as it is for a
 /// 4-byte character, then `x_AppendChar( u8str, ch )`).
@@ -1632,63 +893,6 @@ enum Encoding {
 /// continuation bytes only (not the ranges of the second byte after E0, ED, F0 and F4).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:6711-6769
-/// ```c
-/// EEncoding CUtf8::GuessEncoding(const CTempString& src)
-/// {
-///     SIZE_TYPE more = 0;
-///     CTempString::const_iterator i = src.begin();
-///     CTempString::const_iterator end = src.end();
-///     bool cp1252, iso1, ascii, utf8, cesu8;
-///     for (cp1252 = iso1 = ascii = utf8 = true, cesu8=false; i != end; ++i) {
-///         Uint1 ch = *i;
-///         bool skip = false;
-///         if (more != 0) {
-///             if (x_EvalNext(ch)) {
-///                 --more;
-///                 if (more == 0) {
-///                     ascii = false;
-///                 }
-///                 skip = true;
-///             } else {
-///                 more = 0;
-///                 utf8 = false;
-///             }
-///         }
-///         if (ch > 0x7F) {
-///             ascii = false;
-///             if (ch < 0xA0) {
-///                 iso1 = false;
-///                 if (ch == 0x81 || ch == 0x8D || ch == 0x8F ||
-///                     ch == 0x90 || ch == 0x9D) {
-///                     cp1252 = false;
-///                 }
-///             }
-///             if (!skip && utf8 && !x_EvalFirst(ch, more)) {
-///                 utf8 = false;
-///             }
-///             if (utf8 && !cesu8 && ch == 0xED && (end - i) > 5) {
-///                 uint8_t c1 = *(i+1);
-///                 uint8_t c3 = *(i+3);
-///                 uint8_t c4 = *(i+4);
-///                 if ( ((c1 & 0xA0) == 0xA0) && (c3 == (uint8_t)0xED) && ((c4 & 0xB0) == 0xB0) ) {
-///                     cesu8 = true;
-///                 }
-///             }
-///         }
-///     }
-///     if (more != 0) {
-///         utf8 = false;
-///     }
-///     if (ascii) {
-///         return eEncoding_Ascii;
-///     } else if (utf8) {
-///         return cesu8 ? eEncoding_CESU8 : eEncoding_UTF8;
-///     } else if (cp1252) {
-///         return iso1 ? eEncoding_ISO8859_1 : eEncoding_Windows_1252;
-///     }
-///     return eEncoding_Unknown;
-/// }
-/// ```
 fn guess_encoding(src: &[u8]) -> Encoding {
     let mut more = 0;
     let (mut cp1252, mut iso1, mut ascii, mut utf8, mut cesu8) = (true, true, true, true, false);
@@ -1750,32 +954,6 @@ fn guess_encoding(src: &[u8]) -> Encoding {
 }
 
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7143-7166
-/// ```c
-/// bool CUtf8::x_EvalFirst(char ch, SIZE_TYPE& more)
-/// {
-///     more = 0;
-///     if ((ch & 0x80) != 0) {
-///         if ((ch & 0xE0) == 0xC0) {
-///             if ((ch & 0xFE) == 0xC0) {
-///                 // C0 and C1 are not valid UTF-8 chars
-///                 return false;
-///             }
-///             more = 1;
-///         } else if ((ch & 0xF0) == 0xE0) {
-///             more = 2;
-///         } else if ((ch & 0xF8) == 0xF0) {
-///             if ((unsigned char)ch > (unsigned char)0xF4) {
-///                 // F5-FF are not valid UTF-8 chars
-///                 return false;
-///             }
-///             more = 3;
-///         } else {
-///             return false;
-///         }
-///     }
-///     return true;
-/// }
-/// ```
 fn eval_first(ch: u8, more: &mut usize) -> bool {
     *more = 0;
     if ch & 0x80 != 0 {
@@ -1799,12 +977,6 @@ fn eval_first(ch: u8, more: &mut usize) -> bool {
 }
 
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7169-7172
-/// ```c
-/// bool CUtf8::x_EvalNext(char ch)
-/// {
-///     return (ch & 0xC0) == 0x80;
-/// }
-/// ```
 fn eval_next(ch: u8) -> bool {
     ch & 0xC0 == 0x80
 }
@@ -1815,58 +987,7 @@ fn eval_next(ch: u8) -> bool {
 /// (`CharToSymbol`, then `x_AppendChar`).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7062-7115
-/// ```c
-/// CStringUTF8& CUtf8::x_Append( CStringUTF8& self, const CTempString& src,
-///     EEncoding encoding, EValidate validate)
-/// {
-///     ...
-///     if (encoding == eEncoding_CESU8) {
-///         ...
-///         for (; i != end; ++i) {
-///             Uint1 ch = *i;
-///             if (ch == 0xED && (end - i) > 5) {
-///             ...
-///             }
-///             self.append(1, ch);
-///         }
-///         return self;
-///     }
-///     ...
-///     for (i = src.begin(); i != end; ++i) {
-///         x_AppendChar( self, CharToSymbol( *i, encoding ) );
-///     }
-///     return self;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:6851-6881
-/// ```c
-/// // cp1252, codepoints for chars 0x80 to 0x9F
-/// static const TUnicodeSymbol s_cp1252_table[] = {
-///     0x20AC, 0x003F, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
-///     0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x003F, 0x017D, 0x003F,
-///     0x003F, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-///     0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x003F, 0x017E, 0x0178
-/// };
-///
-/// TUnicodeSymbol CUtf8::CharToSymbol(char c, EEncoding encoding)
-/// {
-///     Uint1 ch = c;
-///     switch (encoding)
-///     {
-///     ...
-///     case eEncoding_Ascii:
-///     case eEncoding_ISO8859_1:
-///         break;
-///     case eEncoding_Windows_1252:
-///         if (ch > 0x7F && ch < 0xA0) {
-///             return s_cp1252_table[ ch - 0x80 ];
-///         }
-///         break;
-///     ...
-///     }
-///     return (TUnicodeSymbol)ch;
-/// }
-/// ```
 fn append_as_utf8(out: &mut Vec<u8>, ch: u8, encoding: Encoding) {
     const CP1252_TABLE: [u32; 32] = [
         0x20AC, 0x003F, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160,
@@ -1883,29 +1004,6 @@ fn append_as_utf8(out: &mut Vec<u8>, ch: u8, encoding: Encoding) {
 }
 
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7040-7060
-/// ```c
-/// CStringUTF8& CUtf8::x_AppendChar( CStringUTF8& self, TUnicodeSymbol c)
-/// {
-///     Uint4 ch = c;
-///     if (ch < 0x80) {
-///         self.append(1, Uint1(ch));
-///     }
-///     else if (ch < 0x800) {
-///         self.append(1, Uint1( (ch >>  6)         | 0xC0));
-///         self.append(1, Uint1( (ch        & 0x3F) | 0x80));
-///     } else if (ch < 0x10000) {
-///         self.append(1, Uint1( (ch >> 12)         | 0xE0));
-///         self.append(1, Uint1(((ch >>  6) & 0x3F) | 0x80));
-///         self.append(1, Uint1(( ch        & 0x3F) | 0x80));
-///     } else {
-///         self.append(1, Uint1( (ch >> 18)         | 0xF0));
-///         self.append(1, Uint1(((ch >> 12) & 0x3F) | 0x80));
-///         self.append(1, Uint1(((ch >>  6) & 0x3F) | 0x80));
-///         self.append(1, Uint1( (ch        & 0x3F) | 0x80));
-///     }
-///     return self;
-/// }
-/// ```
 fn append_char(out: &mut Vec<u8>, ch: u32) {
     if ch < 0x80 {
         out.push(ch as u8);
@@ -1949,70 +1047,6 @@ fn trim_leading_spaces(text: &mut Vec<u8>) {
 /// matter, because every pattern ends with an ASCII byte.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:219-312
-/// ```c
-///     char curr = *in++; // initialize with first character
-///     left--;
-///
-///     char next = 0;
-///     Uint2 two_chars = curr; // this is two bytes storage where we see current and previous symbols
-///
-///     while (left > 0) {
-///         next = *in++;
-///
-///         two_chars = Uint2((two_chars << 8) | next);
-///
-///         switch (two_chars)
-///         {
-///         case twocommas: // replace double commas with comma+space
-///             *out++ = curr;
-///             next = ' ';
-///             break;
-///         case twospaces: // skip multispaces (only print last one)
-///             break;
-///         case bracket_space: // skip space after bracket
-///             next = curr;
-///             two_chars = curr;
-///             break;
-///         case space_bracket: // skip space before bracket
-///             break;
-///         case space_comma:
-///         case space_semicolon: // swap characters
-///             *out++ = next;
-///             next = curr;
-///             two_chars = curr;
-///             break;
-///         case comma_space:
-///             *out++ = curr;
-///             *out++ = ' ';
-///             while (next == ' ' || next == ',') {
-///                 next = *in;
-///                 in++;
-///                 left--;
-///             }
-///             two_chars = next;
-///             break;
-///         case semicolon_space:
-///     ...
-///         default:
-///             *out++ = curr;
-///             break;
-///         }
-///
-///         curr = next;
-///         left--;
-///     }
-///
-///     if (curr > 0 && curr != ' ') {
-///         *out++ = curr;
-///     }
-///
-///     dest.resize(out - dest.c_str());
-///
-///     if (isProt) {
-///         NStr::ReplaceInPlace (dest, ". [", " [");
-///         NStr::ReplaceInPlace (dest, ", [", " [");
-///     }
-/// ```
 fn clean_and_compress(input: &[u8], is_protein: bool) -> (Vec<u8>, bool) {
     let mut start = 0;
     let mut end = input.len();
@@ -2092,20 +1126,6 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> (Vec<u8>, bool) {
 /// occurrence): each search resumes after the text just put in.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
-/// ```c
-///     if ( start_pos + search.size() > src.size()  ||  search == replace )
-///         return src;
-///
-///     bool equal_len = (search.size() == replace.size());
-///     for (SIZE_TYPE count = 0; !(max_replace && count >= max_replace); count++){
-///         start_pos = src.find(search, start_pos);
-///         if (start_pos == NPOS)
-///             break;
-///         ...
-///             src.replace(start_pos, search.size(), replace);
-///         ...
-///         start_pos += replace.size();
-/// ```
 fn replace_in_place(src: &[u8], search: &[u8], replace: &[u8]) -> Vec<u8> {
     let mut src = src.to_vec();
     let mut start_pos = 0;

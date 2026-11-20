@@ -7,18 +7,6 @@
 //! is out of line and cold: blastp's default path only tests `psi_search`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:186-214
-//! ```c++
-//!     // Set up the score block (some of this code is duplicated in
-//!     // blast_setup_cxx.cpp:s_InitScoreBlk, as well as here)
-//!     ...
-//!     if (pssm.NotEmpty()) {
-//!         PsiBlastSetupScoreBlock(score_blk, pssm, messages, options);
-//!     }
-//!     ...
-//!     // Create the lookup table
-//!     ...
-//!     lookup_table.Reset(LookupTableWrapInit(query_data, ... , score_blk, ...));
-//! ```
 
 use anyhow::Result;
 use std::cell::RefCell;
@@ -57,39 +45,9 @@ use crate::stats::{BlastGumbelBlk, KarlinParams};
 /// of the query's letters unmasked (`psi_round::next_pssm`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:170-214
-/// ```c++
-///     BlastSeqLoc* lookup_segments = NULL;
-///     BlastScoreBlk* sbp = NULL;
-///     try {
-///         sbp =
-///         CSetupFactory::CreateScoreBlock(opts_memento.get(), query_data,
-///                                         &lookup_segments, retval->m_Messages,
-///     ...
-///     if (pssm.NotEmpty()) {
-///     ...
-///         PsiBlastSetupScoreBlock(sbp, pssm, retval->m_Messages, options);
-///     }
-///     ...
-///     // 5. Create the lookup table
-///     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
-///         LookupTableWrap* lut =
-///             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
-///                                              sbp, lookup_segments_wrap,
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-637 (the masked letters,
 /// then the complement of the masks)
-/// ```c
-///     if (!mask_at_hash) {
-///         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
-///                              program_number);
-///     }
-///     ...
-///     if (lookup_segments) {
-///         BLAST_ComplementMaskLocations(program_number, query_info,
-///                                       filter_maskloc, lookup_segments);
-///     }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-95 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-95 (cited at
 /// `pssm_search::lookup`)
 #[cold]
 #[inline(never)]
@@ -102,7 +60,7 @@ pub(super) fn pssm_lookup(
         .as_deref()
         .expect("the lookup table of a PSSM search");
     let (lookup_segments, mut contexts) = psi_query(args, query_frames);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (quoted above:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (cited above:
     // no lookup table for a split query)
     // A later round of a query that NCBI splits: its chunks search without the PSSM
     // (`search_split_query_batches`), so the PSSM's table indexes no word, and the round reads
@@ -137,19 +95,7 @@ pub(super) fn pssm_lookup(
 /// its Karlin blocks), and its validity.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-515
-/// ```c
-///     status = Blast_ScoreBlkMatrixInit(program_number, scoring_options, sbp, get_path);
-///     ...
-///        status = Blast_ScoreBlkKbpUngappedCalc(program_number, sbp, query_blk->sequence,
-///                query_info, blast_message);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2791
-/// ```c
-///       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-///       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-///       if (loop_status) {
-///           contexts[context].is_valid = FALSE;
-/// ```
 pub(super) fn psi_contexts(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
@@ -190,13 +136,7 @@ pub(super) struct PsiKarlin {
 /// letters, has been NCBI's engine error before the search ("The average subject length is too
 /// short").
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1885-1889
-/// ```c
-///           /* Get effective search space from the query information block */
-///           hsp->evalue =
-///               BLAST_KarlinStoE_simple(score, kbp[kbp_context],
-///                                query_info->contexts[hsp->context].eff_searchsp);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1885-1890
 fn psi_stats<'a>(
     gumbel: Option<&'a BlastGumbelBlk>,
     exact_search_spaces: &[Option<i64>],
@@ -271,7 +211,7 @@ pub(super) struct PsiSubjectStatistics {
 /// The preliminary and final gapped X-drops of a PSSM search (raw scores): the search's X-drops in
 /// bits at the smallest gapped Lambda of the query batch, the PSSM's `kbp_gap_psi` (one query).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:454-463 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:454-463 (cited at
 /// `core::x_drop::gapped_x_dropoffs`)
 fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32, i32) {
     crate::core::x_drop::gapped_x_dropoffs(
@@ -294,7 +234,7 @@ fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32,
 /// (`BLAST_GapAlignSetUp`), and the update for each subject does not reach them
 /// (blast_traceback.c:1596-1628 updates the thread's copy).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976 (cited at
 /// `blast_engine::sum_stats_hit_cutoff`)
 fn psi_hit_cutoffs(
     args: &ResolvedBlastpArgs,
@@ -344,12 +284,6 @@ fn psi_link_context(
 /// counterpart is `blast_engine::blastp_prelim_cutoffs`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:625-646
-/// ```c
-///    if (gapped_calculation) {
-///       /* FIXME, is this correct?? */
-///       hit_params->link_hsp_params->cutoff_small_gap =
-///                                 word_params->cutoff_score_min;
-/// ```
 #[allow(clippy::too_many_arguments)]
 fn psi_prelim_cutoffs(
     args: &ResolvedBlastpArgs,
@@ -388,56 +322,10 @@ fn psi_prelim_cutoffs(
 /// subjects' lists go to the culling writer `culling` in place of the collector, as blastp's do.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:204-221
-/// ```c
-///       kbp= sbp->kbp[context];
-///       ...
-///         p->cutoffs[context].x_dropoff_init =
-///             (Int4)(sbp->scale_factor *
-///                    ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:338-345
-/// ```c
-///       if (sbp->kbp_std) {     /* this may not be set for gapped blastn */
-///          kbp = sbp->kbp_std[context];
-///          if (s_BlastKarlinBlkIsValid(kbp)) {
-///             gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 +
-///                                      kbp->logK) / kbp->Lambda);
-///          }
-///       }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:914-943
-/// ```c
-///          kbp = kbp_array[context];
-///          ASSERT(s_BlastKarlinBlkIsValid(kbp));
-///          searchsp = query_info->contexts[context].eff_searchsp;
-///          ...
-///          if (sbp->gbp && sbp->gbp->filled) {
-///              /* If cbs greater than 1 (2 or 3), then increase expect value by 5 for preliminary search. */
-///              int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
-///              params->prelim_evalue = cbs_stretch*evalue;
-///              new_cutoff = BLAST_SpougeEtoS(cbs_stretch*evalue, kbp, sbp->gbp,
-///                          query_info->contexts[context].query_length,
-///                          avg_subject_length);
-///          } else {
-///              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-///          }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-463
-/// ```c
-///    if (sbp->kbp_gap) {
-///       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
-///       params->gap_x_dropoff = (Int4)
-///           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:152-169
-/// ```c
-///    if (ewp->diag_table->offset >= INT4_MAX / 4) {
-///        ewp->diag_table->offset = ewp->diag_table->window;
-///        s_BlastDiagClear(ewp->diag_table);
-///    } else {
-///        ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-///    }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:152-172
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -472,11 +360,6 @@ pub(super) fn pssm_prelim(
         args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats,
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
-    // ```c++
-    //     if (query_splitter->IsQuerySplit()) {
-    //
-    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
-    // ```
     // A later round of a query that NCBI splits: only its chunks are searched
     // (`search_split_query_batches`); the whole query scans no subject (its table is empty,
     // `pssm_lookup`). The X-drops above are the PSSM's, which NCBI's traceback converts.
@@ -527,7 +410,7 @@ pub(super) fn pssm_prelim(
             return;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
-        // c++/src/algo/blast/core/blast_setup.c:1015-1025 (quoted at `call_setup`'s
+        // c++/src/algo/blast/core/blast_setup.c:1015-1025 (cited at `call_setup`'s
         // `subject_parameters`): the statistics of each subject, with the subject's length in the
         // hit-saving cutoff (no stretch of the e-value; with psiblast's `-sum_stats true` lowered
         // at the subject's length) and in the effective lengths, which the linking reads with the
@@ -671,11 +554,7 @@ pub(super) fn pssm_prelim(
 /// traceback's hit-saving cutoff (`psi_hit_cutoffs`, `redo1::RedoLink`), whose `-evalue`
 /// and subject length (`cutoff_subject_length`) are the preliminary stage's.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:464-467
-/// ```c
-///       params->gap_x_dropoff_final = (Int4)
-///           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:462-467
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -759,21 +638,7 @@ pub(super) fn pssm_traceback(
 /// then the redo of every list.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1497
-/// ```c
-///     if (ext_params->options->compositionBasedStats > 0 ||
-///         ext_params->options->eTbackExt == eSmithWatermanTbck) {
-///         status =
-///             Blast_RedoAlignmentCore_MT(program_number, ...);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3254-3258
-/// ```c
-///         sbp_tld[i] = s_BlastScoreBlk_Copy(
-///                 program_number,
-///                 sbp,
-///                 sbp->alphabet_code,
-///                 sbp->number_of_contexts
-///         );
-/// ```
 /// The copy's matrix information reads its frequency ratios (zero where the PSSM has none: then
 /// every column takes the matrix's), its ideal block and `kbp_gap_std[0]`'s K.
 #[cold]
@@ -860,13 +725,7 @@ fn pssm_redo(
 /// `PsiBlastSetupScoreBlock` (`PsiSearch::setup_messages`), which NCBI keeps with the query's
 /// others (sorted, `report::query_warnings::sorted_query_messages`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:188-190
-/// ```c++
-///         CRef<CSearchMessage> sm(new CSearchMessage(eBlastSevWarning, 0,
-///                                                    os.str()));
-///         _ASSERT(messages.size() == 1); // PSI-BLAST only works with one query
-///         messages.front().push_back(sm);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:188-193
 #[cold]
 #[inline(never)]
 pub(super) fn pssm_query_warning(

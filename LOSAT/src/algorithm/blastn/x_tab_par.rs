@@ -2,13 +2,6 @@
 //! pool.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832
-//! ```c
-//! ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-//!         const CSeq_align& s = **itr;
-//!         tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
-//!         tabinfo.Print();
-//! }
-//! ```
 //! NCBI prints the rows of a query's alignments one after another, and the queries of a batch one
 //! after another, on the thread of the application's loop. `write_output_blastn_hitlists_to_writer`
 //! (`hsp.rs`) does the same on the thread of `run_in_pool`'s batch loop, while the other threads of
@@ -391,15 +384,6 @@ mod tests {
     use super::*;
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
-    // ```c
-    // typedef struct BlastHSP {
-    //    Int4 score;
-    //    double evalue;
-    //    BlastSeg query;
-    //    BlastSeg subject;
-    //    Int4 context;
-    // } BlastHSP;
-    // ```
     struct Rng(u64);
 
     impl Rng {

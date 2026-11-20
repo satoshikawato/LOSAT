@@ -7,35 +7,10 @@
 //! `x_pair_par.rs` is), so it names the unit path's type without changing it.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
-//! ```c
-//! if ((status = BlastExtendWordNew(query->length, word_params,
-//!                                 &aux_struct->ewp)) != 0)
-//!   return status;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
-//! ```c
-//! word_params = BlastInitialWordParametersFree(word_params);
-//! s_BlastCoreAuxStructFree(aux_struct);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:110-113
-//! ```c
-//! static BlastCoreAuxStruct*
-//! s_BlastCoreAuxStructFree(BlastCoreAuxStruct* aux_struct)
-//! {
-//!     BlastExtendWordFree(aux_struct->ewp);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:214-215
-//! ```c
-//! retval->m_InternalData->m_LookupTable.Reset
-//!     (new TLookupTableWrap(lut, LookupTableWrapFree));
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:239-242
-//! ```c
-//! case eAaLookupTable:
-//!    lookup->lut = (void*)
-//!       BlastAaLookupTableDestruct((BlastAaLookupTable*)lookup->lut);
-//!    break;
-//! ```
 //! NCBI creates the diagonal table (`BlastCoreAuxStruct.ewp`) before the subject loop of the
 //! preliminary search and frees it after the loop (blast_engine.c:1605, after every subject has
 //! been linked inside the loop); its lookup table belongs to the search's internal data and is
@@ -148,11 +123,6 @@ pub fn print_summary() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
-// ```c
-//     /* scan the subject sequence for hits */
-//     hits = scansub(lookup_wrap, subject,
-//                               offset_pairs, array_size, scan_range);
-// ```
 // The tables the seed stage of a batch scans with, in two holders: `lookup` is NCBI's
 // `lookup_wrap->lut` (the full table of the reference frame loop, or the stub of
 // PAIRLUT), read by the frame loop; `units` is the unit path with its per-group tables
@@ -195,16 +165,6 @@ impl<M: TbxScore> XSeedBatch<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-60
-    // ```c
-    // diag_array_length = 1;
-    // /* What power of 2 is just longer than the query? */
-    // while (diag_array_length < (qlen+window_size))
-    // {
-    //         diag_array_length = diag_array_length << 1;
-    // }
-    // ...
-    // diag_table->diag_array_length = diag_array_length;
-    // ```
     // `cells` is that length. NCBI always allocates it (the word finder always runs on it). In
     // LOSAT the unit path scans on tables of its own, so a worker of a batch that never runs the
     // reference frame loop holds a table nobody reads; it is not allocated.
@@ -259,12 +219,6 @@ impl<T> XSeedState<T> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
-    // ```c
-    // if (seq_arg.seq->length < min_subj_seq_length) {
-    //     BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-    //     continue;
-    // }
-    // ```
     // One stage per iteration of NCBI's subject loop, opened before this length test (the stage
     // of a subject that is not searched ends when it is dropped). NCBI's iterations all read the
     // one lookup table of the search; here each takes its own hold on it.
@@ -332,12 +286,6 @@ impl<T> XSeedStage<'_, T> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
-    // ```c
-    // if (hit_params->link_hsp_params) {
-    //     status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
-    //               subject->length, gap_align->sbp, hit_params->link_hsp_params,
-    //               score_options->gapped_calculation);
-    // ```
     // Called before this linking call, which reads neither the lookup table nor the diagonal
     // table (NCBI keeps both allocated through it): the units stage when the subject's units
     // have run, the lookup stage after the seed stage.
@@ -370,18 +318,6 @@ impl<T> Drop for XSeedStage<'_, T> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:203-212
-// ```c
-// Blast_ExtendWord *BlastExtendWordFree(Blast_ExtendWord * ewp)
-// {
-//
-//     if (ewp == NULL)
-//         return NULL;
-//
-//     s_BlastDiagTableFree(ewp->diag_table);
-//     s_BlastDiagHashFree(ewp->hash_table);
-//     sfree(ewp);
-//     return NULL;
-// ```
 // NCBI frees the diagonal table after the subject loop (c++/src/algo/blast/core/blast_engine.c:1605). The worker that
 // ended the last lookup stage of the batch frees its table here, before it links that subject;
 // it gets no further subject (module doc, item 7).

@@ -487,7 +487,6 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
         command_prefix = [str(binary)]
     else:
         # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-        # CATCH_ALL(status); return status;
         # The frozen release scope is serial command WASI. Reject a reactor or
         # threaded artifact before running its entry point or assembling it.
         inspection = subprocess.run(

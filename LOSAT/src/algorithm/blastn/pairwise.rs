@@ -239,21 +239,8 @@ impl Rows<'_> {
                 displayed_rows(hsp, query.seq(), subject_length, |from, to| {
                     subjects.upper_letters(s_idx, from, to)
                 })?;
-            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1796-1798
-            // ```c++
-            //     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
-            //                        aln_vec_info->alnRowInfo->sequence[1],
-            //                        aln_vec_info->match,
-            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1794-1798
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2127-2140
-            // ```c++
-            //     int min_length=min<int>((int)sequence_standard.size(), (int)sequence.size());
-            //     ...
-            //     for(int i=0; i<min_length; i++){
-            //         if(sequence_standard[i]==sequence[i]){
-            //     ...
-            //             match ++;
-            // ```
             // The identities that outfmt 0 shows are those of the displayed rows (the stored
             // letters in upper case, before the masks' lower case), counted again (series NP,
             // M4a-2b decision H6): with `-db_hard_mask` the engine's `num_ident` counts a masked
@@ -313,22 +300,7 @@ impl Rows<'_> {
 // The rows of one HSP as NCBI shows them: the query on its plus strand.
 //
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1852-1858
-// ```c++
-//         if((ds->IsSetStrands()
-//             && ds->GetStrands().front()==eNa_strand_minus)
-//            && !(ds->IsSetWidths() && ds->GetWidths()[0] == 3)){
-//             //show plus strand if master is minus for non-translated case
-//             finalDenseg->Reverse();
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:43-61
-// ```c
-// typedef enum EGapAlignOpType {
-//    eGapAlignDel = 0, /**< Deletion: a gap in query */
-//    ...
-//    eGapAlignSub = 3, /**< Substitution */
-//    ...
-//    eGapAlignIns = 6, /**< Insertion: a gap in subject */
-// ```
 // The HSP offsets and its edit script are those of the query context (the reverse
 // complement of the query for a minus-strand HSP) against the plus-strand subject.
 // Reversing the alignment of a minus-strand HSP reverse-complements both rows. The
@@ -460,38 +432,7 @@ fn context_rows_into(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:878-892
-// ```c++
-//         const TSeqRange kTarget((*query_interval)->GetFrom(),
-//                                 (*query_interval)->GetTo());
-//         ...
-//             TSeqRange range(Map(kTarget, masked_range));
-//             if (range.NotEmpty() && range != kTarget) {
-//                 ...
-//                 CRef<CSeqLocInfo> seqlocinfo
-//                     (new CSeqLocInfo(seqint, CSeqLocInfo::eFrameNotSet));
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:825-842
-// ```c++
-// template <class Position>
-// CRange<Position> Map(const CRange<Position>& target,
-//                      const CRange<Position>& range)
-// {
-//     if (target.Empty()) {
-//         throw std::runtime_error("Target range is empty");
-//     }
-//
-//     if (range.Empty() ||
-//         (range.GetFrom() > target.GetTo()) ||
-//         ((range.GetFrom() + target.GetFrom()) > target.GetTo())) {
-//         return target;
-//     }
-//
-//     CRange<Position> retval;
-//     retval.SetFrom(max(target.GetFrom() + range.GetFrom(), target.GetFrom()));
-//     retval.SetTo(min(target.GetFrom() + range.GetTo(), target.GetTo()));
-//     return retval;
-// }
-// ```
 // A mask that covers the whole query (its searched interval, `kTarget`) is not reported,
 // so it is not shown. The masks of the search lie in the searched letters (`query_length`
 // of them); `Map` moves them by the start of the query's interval (`offset`, 0 without
@@ -511,58 +452,8 @@ pub(crate) fn shown_query_masks(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
-// ```c++
-//         // Union subject sequence ranges
-//         vector <TSeqRange> ranges;
-//         for (int i=0; i<hsp_list->hspcnt; i++) {
-//             const BlastHSP* hsp = hsp_list->hsp_array[i];
-//             TSeqRange rg;
-//             rg.SetFrom(hsp->subject.offset);
-//             rg.SetTo(hsp->subject.end);
-//             ranges.push_back(rg);
-//         }
-//
-//         // Extract subject masks
-//         TMaskedSubjRegions masks;
-//         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:109-125
-// ```c++
-// static void
-// s_SeqIntervalToSeqLocInfo(CRef<CSeq_interval> interval,
-//                           const vector <TSeqRange>& target_ranges,
-//                           const CSeqLocInfo::ETranslationFrame frame,
-//                           TMaskedSubjRegions& retval)
-// {
-//     TSeqRange loc(interval->GetFrom(), interval->GetTo());
-//
-//     for (size_t ir=0; ir< target_ranges.size(); ir++) {
-//         if (target_ranges[ir] != TSeqRange::GetEmpty() &&
-//            loc.IntersectingWith(target_ranges[ir])) {
-//            CRef<CSeqLocInfo> sli(new CSeqLocInfo(interval, frame));
-//            retval.push_back(sli);
-//            return;
-//         }
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
-// ```c++
-//     CSeqDB::TSequenceRanges ranges;
-//     m_iSeqDb->GetMaskData(index, m_FilteringAlgoId, ranges);
-//     ITERATE(CSeqDB::TSequenceRanges, itr, ranges) {
-//         for (size_t it=0; it<target.size(); it++) {
-//             if (target[it] != TSeqRange::GetEmpty() &&
-//                 target[it].IntersectingWith(*itr)) {
-//                 CRef<CSeq_interval> si
-//                     (new CSeq_interval(*id, itr->first, itr->second-1));
-//                 CRef<CSeqLocInfo> sli(new CSeqLocInfo(si, kFrame));
-//                 retval.push_back(sli);
-//                 break;
-//             }
-//         }
-//     }
-// ```
 // The subject masks shown with the HSPs of one subject (`GetMasks` of the subject set's
 // `CSeqVecSeqInfoSrc` or of the database's `CSeqDbSeqInfoSrc`): each mask `[start, end)` that
 // holds a letter (a stored database mask `TSeqRange(first, second-1)` of none is empty) and meets
@@ -608,14 +499,6 @@ fn merged(masks: &[MaskedInterval]) -> Vec<MaskedInterval> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2495-2521
-// ```c++
-//         if(id.Which() != CSeq_id::e_not_set){
-//             /*only do this for sequence but not for others like middle line,
-//               features*/
-//             ...
-//                 } else if (m_SeqLocChar==eLowerCase){
-//                     actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-// ```
 // The row's residue positions start at `first` (1-based) and move by `step`; a residue
 // whose position lies in a mask is shown in lowercase. `masks` are disjoint and in order
 // (`merged`), so the masks that overlap the row's span are found by binary search.
@@ -652,36 +535,8 @@ fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedIn
 /// when NCBI cannot compute it and marks the query invalid.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2792
-/// ```c
-///       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-///       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-///       BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
-///       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-///       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-///       if (loop_status) {
-///           contexts[context].is_valid = FALSE;
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2004-2013
-/// ```c
-///    for (lp = str, lpmax = lp+length; lp < lpmax; lp++)
-///    {
-///       ++rcp->comp[(int)(*lp & mask)];
-///    }
-///
-///    /* Don't count ambig. residues. */
-///    for (index=0; index<sbp->ambig_occupy; index++)
-///    {
-///       rcp->comp[sbp->ambiguous_res[index]] = 0;
-///    }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:346-350
-/// ```c
-///     if (program_number == eBlastTypeBlastn ||
-///         program_number == eBlastTypeMapping) {
-///
-///         BLAST_ScoreSetAmbigRes(sbp, 'N');
-///         BLAST_ScoreSetAmbigRes(sbp, '-');
-/// ```
 /// The residues are counted in BLASTNA without `N` and the gap, normalized, and paired
 /// with the standard composition (A, C, G, T at 0.25; `Blast_ResFreqStdComp`) through the
 /// BLASTNA matrix (`BlastScoreFreqCalc`, blast_stat.c:2151-2205). The minus strand of a
@@ -783,7 +638,7 @@ mod tests {
         }
     }
 
-    // seqinfosrc_seqdb.cpp:121-133 (quoted at `shown_subject_masks`): a stored mask is shown
+    // seqinfosrc_seqdb.cpp:121-133 (cited at `shown_subject_masks`): a stored mask is shown
     // when it holds a letter and meets the closed range `[offset, end]` of an HSP (the end one
     // past the HSP); overlapping and nested masks (hand-made masks of the M4a-2 edge databases)
     // are merged for the display. A subject set's merged lowercase is kept as it is.

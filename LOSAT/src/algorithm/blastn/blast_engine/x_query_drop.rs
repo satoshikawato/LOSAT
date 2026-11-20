@@ -8,11 +8,6 @@
 //! the same time and memory, see `docs/agents/diagnostics.md`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-//! 	    BLAST_PROF_START( APP.LOOP.PRE );
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//! ```
 //! NCBI holds a batch's Bioseqs in its scope until the batch is formatted, beside the search's
 //! own encoded copy (`SetupQueries_OMF`). No NCBI counterpart for the drop: it is memory only.
 //!

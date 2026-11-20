@@ -73,7 +73,6 @@ class GateTests(unittest.TestCase):
         self.assertIsNone(median["peak_rss_bytes"])
 
     # NCBI c++/src/algo/blast/api/prelim_stage.cpp:178-188:
-    # (*thread)->Join(&result);
     # Synthetic exact bytes isolate timing admission from the independent raw gate.
     def test_clock_consistency_gates_cold_warm_but_preserves_raw_audit(self):
         for phase, consistent in [("benchmark", False), ("benchmark", True),
@@ -192,7 +191,6 @@ class GateTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "BAD_EXIT")
         # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-        # (*thread)->Join(&result);
         # Exact recorded endpoints cover the same process lifetime on failure.
         self.assertGreater(result["monotonic_end"], result["monotonic_start"])
         self.assertEqual(result["wall_seconds"], result["monotonic_end"] - result["monotonic_start"])
@@ -209,7 +207,6 @@ class GateTests(unittest.TestCase):
         self.assertGreater(result["wall_seconds"], 0)
 
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-    # (*thread)->Join(&result);
     # An early host timer wake must not terminate a search before its deadline.
     def test_early_watchdog_wake_preserves_success_and_cancellation(self):
         timer = perf.threading.Timer
@@ -223,7 +220,6 @@ class GateTests(unittest.TestCase):
         self.assertNotIn("fired", result["watchdog_clocks"])
 
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-    # (*thread)->Join(&result);
     # The same early wake still terminates a hung child at the monotonic deadline.
     def test_early_watchdog_wake_still_expires_at_monotonic_deadline(self):
         timer = perf.threading.Timer
@@ -307,7 +303,6 @@ if __name__ == "__main__":
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
-# (*thread)->Run(); (*thread)->Join(&result);
 class ThreadEvidenceTests(unittest.TestCase):
     def record(self):
         import json

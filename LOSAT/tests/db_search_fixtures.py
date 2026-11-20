@@ -353,7 +353,7 @@ def clean_env(base: dict[str, str], home: str) -> dict[str, str]:
     return env
 
 
-# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_usage_report.cpp:195-220 (the
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:195-220 (the
 # report's parameters, sent to NCBI's server when the application ends unless BLAST_USAGE_REPORT, in the
 # environment or the registry, is a false value)
 NCBI_RUN_ENV = {"BLAST_USAGE_REPORT": "false"}

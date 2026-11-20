@@ -53,14 +53,6 @@ pub(super) fn print_hsp_saving_stats(
         cutoff_score_min,
     } = stats;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
-    // ```c
-    // #if _BLAST_DEBUG
-    // ...
-    //     arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-    //                      true);
-    // ...
-    // #endif /* _BLAST_DEBUG */
-    // ```
     // DEBUG: Print HSP statistics for long sequences only when requested.
     if collect_hsp_saving_stats {
         eprintln!(
@@ -141,14 +133,6 @@ pub(super) fn count_chain_roles(linked: &[UngappedHit], debug_output_filter: boo
     let mut stats_chain_members = 0usize;
     if debug_output_filter {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
-        // ```c
-        // #if _BLAST_DEBUG
-        // ...
-        //     arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-        //                      true);
-        // ...
-        // #endif /* _BLAST_DEBUG */
-        // ```
         // DEBUG: Collect statistics before filtering only when requested.
         for h in linked {
             if h.linked_set && !h.start_of_chain {
@@ -184,14 +168,6 @@ pub(super) fn print_output_filter(
         stats_chain_members,
     } = roles;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
-    // ```c
-    // #if _BLAST_DEBUG
-    // ...
-    //     arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-    //                      true);
-    // ...
-    // #endif /* _BLAST_DEBUG */
-    // ```
     // DEBUG: Print output filtering statistics.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1018-1020 - continue is NOT an output filter
     // Chain members are included in output via link pointer traversal.
@@ -254,16 +230,7 @@ pub(super) fn trace_hsp_masks<S: TbxScore>(sc: S, trace: &MaskTrace<'_>) {
         s_end,
     } = trace;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1379-1404
-    // ```c
-    // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
-    // query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
-    // Blast_MaskTheResidues(buffer, query_length, kIsNucl, ...);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:699-700
-    // ```c
-    // sum += matrix[*query & kResidueMask][*subject];
-    // query++;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:699-701
     // Diagnostic only: compare the traced HSP's masked working-query
     // score against the preserved unmasked query copy used for identity
     // reporting. Normal runtime behavior is unchanged unless both

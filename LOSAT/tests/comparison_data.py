@@ -17,7 +17,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:48,75
-# const string kArgOutput("out"); const string kArgNumThreads("num_threads");
 # This harness selects recorded output and settings; it never changes searches.
 def plot_run_settings():
     selected_id = None
@@ -36,7 +35,6 @@ def plot_run_settings():
 
 # Recording a new run must not load settings from a previous plotting run.
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:48
-# const string kArgOutput("out");
 RESULT_DIR, RUN_MANIFEST, SELECTED_RUN_ID = (
     (SCRIPT_DIR, {}, None) if __name__ == "__main__" else plot_run_settings()
 )
@@ -44,7 +42,6 @@ RUN_ENVIRONMENT = RUN_MANIFEST.get("environment", {})
 PLOT_DIR = RESULT_DIR / "plots"
 
 # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-# CATCH_ALL(status) ... return status;
 # A failed/latest attempt must not silently select older successful evidence.
 def require_plot_run():
     if not RUN_MANIFEST:
@@ -54,8 +51,6 @@ def require_plot_run():
     if RUN_MANIFEST.get("status") != "COMPLETE":
         raise SystemExit(f"Comparison at {RESULT_DIR} did not complete (failed or still running); no plots generated.")
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51,75
-    # const string kArgDb("db"); const string kArgSubject("subject");
-    # const string kArgNumThreads("num_threads");
     # Previous mixed-target or single-oracle runs cannot acquire the current labels.
     if RUN_MANIFEST.get("schema") != "losat-simple-comparison-v5":
         raise SystemExit(f"Comparison at {RESULT_DIR} uses the previous target/thread protocol; rerun ./run_comparison.sh for the current BLAST+ target and n1/nN plots.")
@@ -63,7 +58,6 @@ def require_plot_run():
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-# const string kArgNumThreads("num_threads");
 LOSAT_THREADS = int(
     os.environ.get("LOSAT_THREADS")
     or os.environ.get("LOSATP_THREADS")
@@ -77,11 +71,9 @@ NATIVE_SINGLE = "LOSAT native n1"
 NATIVE_MULTI = f"LOSAT native n{LOSAT_THREADS}"
 WASM_SINGLE = "LOSAT wasm serial n1"
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-# const string kArgNumThreads("num_threads");
 WASM_THREADED_SINGLE = "LOSAT wasm threads n1"
 WASM_MULTI = f"LOSAT wasm threads n{LOSAT_THREADS}"
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-# const string kArgNumThreads("num_threads");
 NCBI_SINGLE = "BLAST+ n1"
 NCBI_MULTI = f"BLAST+ n{LOSAT_THREADS}"
 HUE_ORDER = list(dict.fromkeys([
@@ -94,15 +86,12 @@ CUSTOM_PALETTE = dict(zip(
 MODE_ORDER = ["TBLASTX", "Megablast", "BLASTN", "BLASTP"]
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-# const char* kDfltArgTabularOutputFmt =
 #     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-#     "evalue bitscore";
 COLUMNS = "qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore".split()
 
 
 def comparison_cases():
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51
-    # const string kArgQuery("query"); const string kArgSubject("subject");
     # Plot the recorded input selection unless the user requests another subset.
     programs = os.environ.get("BENCHMARK_PROGRAMS", RUN_ENVIRONMENT.get("BENCHMARK_PROGRAMS", "tblastx,megablast,blastn,blastp")).split(",")
     if set(programs) - {"tblastx", "megablast", "blastn", "blastp"}:
@@ -127,7 +116,6 @@ def result_paths(case, extension="out"):
     if case["task"] == "tblastx":
         single += ".n1"
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-    # const string kArgNumThreads("num_threads");
     paths = {NCBI_SINGLE: f"{ncbi}.n1"}
     if LOSAT_THREADS != 1:
         paths[NCBI_MULTI] = f"{ncbi}.n{LOSAT_THREADS}"
@@ -136,7 +124,6 @@ def result_paths(case, extension="out"):
         paths[NATIVE_MULTI] = f"{native}.n{LOSAT_THREADS}"
     paths[WASM_SINGLE] = f"{native}.wasm"
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-    # const string kArgNumThreads("num_threads");
     if LOSAT_THREADS != 1:
         paths[WASM_THREADED_SINGLE] = f"{native}.wasm.n1"
     paths[WASM_MULTI] = f"{native}.wasm.n{LOSAT_THREADS}"
@@ -144,9 +131,7 @@ def result_paths(case, extension="out"):
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054,3225-3236
-# if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
 #     (program == eTblastn || program == eTblastx)) opt.SetDbGeneticCode(...);
-# if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
 #     m_NumThreads != CThreadable::kMinNumThreads) m_NumThreads = ...;
 # Use the DB oracle for TBLASTX distributions, but preserve local-subject
 # NCBI distributions for BLASTN and BLASTP independently of timing targets.
@@ -200,8 +185,6 @@ def successful_output(path):
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-48,75
-# const string kArgQuery("query"); const string kArgSubject("subject");
-# const string kArgOutput("out"); const string kArgNumThreads("num_threads");
 # Harness metadata never supplies implementation behavior or expected bytes.
 def record_cli(argv):
     action, directory, *rest = argv
@@ -209,7 +192,6 @@ def record_cli(argv):
     if action == "init":
         directory.mkdir(parents=True, exist_ok=False)
         # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-        # CATCH_ALL(status) ... return status;
         # Register the attempt before metadata collection can fail. Only the
         # default runner supplies a pointer; explicit output roots stay isolated.
         run_id = uuid.uuid4().hex
@@ -220,14 +202,11 @@ def record_cli(argv):
             pending.replace(latest)
         (directory / "run.json").write_text(json.dumps({
             # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51,75
-            # const string kArgDb("db"); const string kArgSubject("subject");
-            # const string kArgNumThreads("num_threads");
             "schema": "losat-simple-comparison-v5", "run_id": run_id,
             "status": "RUNNING",
             "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "node_argv": [os.environ.get("NODE_BIN", "node"), *node_args()],
             # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
-            # const string kArgQuery("query"); const string kArgSubject("subject");
             # Compilation settings are host argv, separate from unchanged search argv.
             "node_argv_by_program": {program: [os.environ.get("NODE_BIN", "node"), *node_args(program)]
                                      for program in ("tblastx", "blastn", "blastp")},
@@ -238,7 +217,6 @@ def record_cli(argv):
             "node_versions": (subprocess.check_output([os.environ.get("NODE_BIN", "node"), "-p", "JSON.stringify(process.versions)"], text=True).strip()
                               if (os.environ.get("RUN_LOSAT_WASM") or "0") == "1" or (os.environ.get("RUN_LOSAT_WASM_THREADED") or "1") == "1" else None),
             # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-            # const string kArgNumThreads("num_threads");
             "enabled_runners": {name: (os.environ.get(name) or default) == "1" for name, default in
                                 [("RUN_NATIVE", "1"), ("RUN_NCBI", "1"), ("RUN_LOSAT_WASM", "0"), ("RUN_LOSAT_WASM_THREADED", "1")]},
             "environment": {k:v for k,v in os.environ.items() if k.startswith(("LOSAT_", "RAYON_", "NODE_", "BENCHMARK_", "RUN_", "BUILD_")) or k in {"LC_ALL", "BL2SEQ_LEGACY"}},
@@ -247,13 +225,11 @@ def record_cli(argv):
         }, indent=2) + "\n")
         (directory / "node-args.bin").write_bytes(b"".join(x.encode() + b"\0" for x in node_args()))
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
-        # const string kArgQuery("query"); const string kArgSubject("subject");
         # Preserve argument boundaries for the program-specific host profile.
         (directory / "node-tblastx-args.bin").write_bytes(b"".join(x.encode() + b"\0" for x in node_args("tblastx")))
         return
     manifest = json.loads((directory / "run.json").read_text())
     # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-    # CATCH_ALL(status) ... return status;
     # The shell reaches this only after every selected invocation succeeds.
     if action == "complete":
         manifest.update(status="COMPLETE", ended_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
@@ -265,7 +241,6 @@ def record_cli(argv):
     record_path = stem.with_suffix(stem.suffix + ".run.json")
     if action == "database":
         # NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:236-247
-        # arg_desc->SetConstraint(kArgDbType, &(*new CArgAllow_Strings, "nucl", "prot"));
         # arg_desc->AddFlag("parse_seqids", ...);
         source, executable, dbtype = rest[1:]
         if dbtype not in {"nucl", "prot"}:
@@ -299,7 +274,6 @@ def record_cli(argv):
                   "ordered_argv": command, "output": str(output), "cwd": str(Path.cwd()),
                   "argv_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(),
                   # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-48
-                  # const string kArgQuery("query"); const string kArgSubject("subject");
                   # Identify the selected comparison oracle before its search invocation.
                   "oracle_version": (subprocess.check_output([executable, "-version"], text=True).strip()
                                      if executable and Path(command[0]).name in {"blastn", "blastp", "tblastx"} else None),
@@ -317,7 +291,6 @@ def record_cli(argv):
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
-# const string kArgQuery("query"); const string kArgSubject("subject");
 # Host compilation does not change search arguments or NCBI behavior. The user
 # approved the measured TBLASTX memory tradeoff; other programs retain their flags.
 def node_args(program=None):
@@ -339,7 +312,6 @@ def load_case(case):
 
     paths = distribution_result_paths(case)
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-    # const string kArgNumThreads("num_threads");
     if not successful_output(paths[NCBI_SINGLE]):
         print(f"[Skip] {case['name']} ({case['mode']}): missing/failed NCBI output")
         return {}

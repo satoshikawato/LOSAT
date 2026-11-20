@@ -17,20 +17,8 @@ pub(crate) mod x_fence;
 // base per byte, or on a one-byte copy of the whole subject (see its doc for the NCBI references).
 pub mod x_greedy_prelim;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:385-389
-// ```c
-//           query = query_blk->sequence +
-//               query_info->contexts[hsp->context].query_offset;
-//           query_nomask = query_blk->sequence_nomask +
-//               query_info->contexts[hsp->context].query_offset;
-//           query_length = query_info->contexts[hsp->context].query_length;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:385-390
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:466-469
-// ```c
-//              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
-//                                 query_length, &start_shift);
-//              adjusted_subject = subject + start_shift;
-// ```
 /// NCBI's pointer into a larger buffer with the `Int4` length NCBI gives with it: the pointer is
 /// `buf` from `start`, the length `len`. NCBI's `Int4` offsets relative to the pointer (`at`) read
 /// the buffer outside `0..len` too, before the pointer for a negative offset and past `len` for one

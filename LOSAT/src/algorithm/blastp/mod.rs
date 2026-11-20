@@ -8,7 +8,6 @@ pub(crate) mod archive;
 pub mod args;
 pub mod blast_engine;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:382-385:
-// if (Blast_QueryIsProtein(program_number)) BLAST_ScoreSetAmbigRes(sbp, 'X');
 // BLASTP and TBLASTN both encode an untranslated protein query in NCBISTDAA.
 pub(crate) mod encoding;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:217-228
@@ -50,12 +49,6 @@ mod x_redo_par;
 // The redo of a `-db` search reads each match's subject from the database.
 pub(crate) mod x_redo_subjects;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-3691
-// ```c
-// static void s_HSPListNormalizeScores(...);
-// static void s_HitlistReapContained(...);
-// static int s_HitlistEvaluateAndPurge(...);
-// static void s_ComputeNumIdentities(...);
-// ```
 mod kappa;
 // The subject scan and the two-hit test in one loop.
 pub(crate) mod x_seed_fused;

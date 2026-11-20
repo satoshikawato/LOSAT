@@ -31,11 +31,6 @@ pub(crate) mod x_drop;
 pub mod blast_seg;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:49-190
-// ```c
-// typedef struct BlastCompo_Alignment { ... } BlastCompo_Alignment;
-// typedef struct BlastCompo_GappingParams { ... } BlastCompo_GappingParams;
-// typedef struct BlastCompo_SequenceRange { ... } BlastCompo_SequenceRange;
-// ```
 pub mod composition_adjustment;
 
 // HSP Management

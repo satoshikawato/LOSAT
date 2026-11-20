@@ -38,28 +38,7 @@ fn cull_key(linked: &LinkedHsp) -> CullKey {
 
 /// The hit list that `s_BlastHSPCullingFinal` makes of the lists the trees keep for one query.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581
-/// ```c
-///          if (!results->hitlist_array[qid]) {
-///             results->hitlist_array[qid] = Blast_HitListNew(params->prelim_hitlist_size);
-///          }
-/// ...
-///          worst_evalue = 0.0;
-///          low_score = INT4_MAX;
-///          for (sid=0; sid < hitlist->hsplist_count; ++sid) {
-///             list = hitlist->hsplist_array[sid];
-///             best_evalue = (double) INT4_MAX;
-///             for (id=0; id < list->hspcnt; ++id) {
-///                 best_evalue = MIN(list->hsp_array[id]->evalue, best_evalue);
-///             }
-///             Blast_HSPListSortByScore(list);
-///             list->best_evalue = best_evalue;
-///             worst_evalue = MAX(worst_evalue, best_evalue);
-///             low_score = MIN(list->hsp_array[0]->score, low_score);
-///          }
-///          hitlist->worst_evalue = worst_evalue;
-///          hitlist->low_score = low_score;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-587
 /// The hit list is made with `max` as its maximum but is not cut to it and is not
 /// heapified (`Blast_HitListNew` does not heapify); the merge of a split query's chunks
 /// (`hit_list_merge`) and the lists read through `lists()` use only the lists.
@@ -111,21 +90,6 @@ pub(in crate::algorithm::tblastn) struct PrelimCulling {
 
 impl PrelimCulling {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:318-342
-    /// ```c
-    ///         else if (filt_opts->culling_opts &&
-    ///                  (filt_opts->culling_stage & ePrelimSearch))
-    ///         {
-    ///             BlastHSPCullingParams* params =
-    ///                 BlastHSPCullingParamsNew(opts_memento->m_HitSaveOpts,
-    ///                      filt_opts->culling_opts,
-    ///                      opts_memento->m_ExtnOpts->compositionBasedStats,
-    ///                      opts_memento->m_ScoringOpts->gapped_calculation);
-    ///             if(params->culling_max > 1){
-    ///             	params->culling_max += 3;
-    ///             }
-    ///             writer_info = BlastHSPCullingInfoNew(params);
-    ///         }
-    /// ```
     pub(in crate::algorithm::tblastn) fn new(
         query_lengths: &[i32],
         prelim_size: usize,
@@ -142,24 +106,6 @@ impl PrelimCulling {
     /// the order of the subject's list.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:602-644
-    /// ```c
-    ///    for (i=0; i<hsp_list->hspcnt; ++i) {
-    ///       /* wrap the hsp with a LinkedHSP structure */
-    ///       A.hsp   = hsp_list->hsp_array[i];
-    ///       A.cid   = isBlastn ? (A.hsp->context  - A.hsp->context % NUM_STRANDS) : A.hsp->context;
-    ///       A.sid   = hsp_list->oid;
-    ///       A.merit = params->culling_max;
-    ///       qlen    = cull_data->query_info->contexts[A.hsp->context].query_length;
-    /// ...
-    ///       if (! c_tree[A.cid]) {
-    ///          c_tree[A.cid] = s_CTreeNew(qlen);
-    ///       }
-    ///
-    ///       if(s_SaveHSP(c_tree[A.cid], &A)){
-    ///     	 hsp_list->hsp_array[i] = NULL;
-    ///       }
-    ///    }
-    /// ```
     /// An HSP that is not saved is freed.
     pub(in crate::algorithm::tblastn) fn add(
         &mut self,
@@ -206,40 +152,6 @@ impl KappaResultHitList {
     /// `BlastSeqSrcGetTotLen`, blast_traceback.c:1768-1772).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:699-733
-    /// ```c
-    /// static int
-    /// s_BlastHSPCullingPipeRun(void* data, BlastHSPResults* results)
-    /// {
-    ///    int qid, sid, num_list;
-    ///    BlastHSPList* hsp_list = NULL;
-    ///    s_BlastHSPCullingInit(data, results);
-    ///    for (qid = 0; qid < results->num_queries; ++qid) {
-    ///          if (!(results->hitlist_array[qid])) continue;
-    ///          num_list = results->hitlist_array[qid]->hsplist_count;
-    ///          for (sid = 0; sid < num_list; ++sid) {
-    ///         	 hsp_list = results->hitlist_array[qid]->hsplist_array[sid];
-    ///         	 Blast_HSPListSortByEvalue(hsp_list);
-    ///         	 hsp_list->best_evalue = hsp_list->hsp_array[0]->evalue;
-    ///          }
-    ///          Blast_HitListSortByEvalue(results->hitlist_array[qid]);
-    ///    }
-    ///
-    ///    for (qid = 0; qid < results->num_queries; ++qid) {
-    ///       if (!(results->hitlist_array[qid])) continue;
-    ///       num_list = results->hitlist_array[qid]->hsplist_count;
-    ///       for (sid = 0; sid < num_list; ++sid) {
-    ///          s_BlastHSPCullingRun(data,
-    ///                    results->hitlist_array[qid]->hsplist_array[sid]);
-    ///          results->hitlist_array[qid]->hsplist_array[sid] = NULL;
-    ///       }
-    ///       results->hitlist_array[qid]->hsplist_count = 0;
-    ///       Blast_HitListFree(results->hitlist_array[qid]);
-    ///       results->hitlist_array[qid] = NULL;
-    ///    }
-    ///    s_BlastHSPCullingFinal(data, results);
-    ///    return 0;
-    /// }
-    /// ```
     /// The trees are per query, so the pipe of a batch is this function for each of its
     /// queries. `query_length` is the length of the query (`contexts[0].query_length`).
     pub(in crate::algorithm::tblastn) fn cull(

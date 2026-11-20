@@ -89,19 +89,7 @@ fn subjects(path: &std::path::Path) -> Vec<FastaRecord> {
     reader_records(path, ReaderConfig::subject("TBLASTX", false, true))
 }
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
 #[test]
 #[cfg_attr(
     not(feature = "parallel"),
@@ -125,12 +113,6 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-// ```c
-// arg_desc.AddDefaultKey(kArgOutputFormat, "format",
-//                        kOutputFormatDescription,
-//                        CArgDescriptions::eString,
-//                        NStr::IntToString(dft_outfmt));
-// ```
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
@@ -263,14 +245,6 @@ fn run_local_outputs(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1318
-// ```c
-//     if (options->word_size <= 0)
-//     {
-//         if ( !Blast_ProgramIsRpsBlast(program_number)) {
-//             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-//                                      "Word-size must be greater than zero");
-//             return BLASTERR_OPTION_VALUE_INVALID;
-// ```
 // The command line's `-word_size` is at least 2 (clap's `protein_word_size`); a caller of
 // `run_local` that sets the field itself gets the error of NCBI's core. A word size of 0 with
 // `-lcase_masking` and a lowercase subject took the reference scan, whose loop over the first
@@ -328,7 +302,7 @@ fn a_word_size_of_zero_is_ncbis_core_error() {
     assert!(sink.is_empty());
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1325 (quoted above):
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1325 (cited above):
 // NCBI's core refuses a word size of 0 or less, and below 4 only for a nucleotide comparison,
 // which TBLASTX (translated, `Blast_ProgramIsNucleotide`, blast_program.c:82-84) is not. So a
 // caller of `run_local` that sets a word size of 1 (the command line's `-word_size` is at least 2)
@@ -444,12 +418,6 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
-// ```c
-//     // Validate that at least one query context is valid
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
 // A batch whose queries all have fewer letters than a codon stops NCBI after the prolog
 // when one of them has no letters, with one message per query without letters; a batch of
 // queries of one or two letters only is not searched.
@@ -503,20 +471,6 @@ fn a_batch_without_valid_contexts_and_with_queries_without_letters_stops() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-// ```c
-//    if (sbp->gbp) {
-//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-//        if (Blast_SubjectIsTranslated(program_number)) {
-//            min_subject_length/=3;
-//        }
-//    } else {
-//        min_subject_length = (Int4) (total_length/num_seqs);
-//    }
-//
-//    if(min_subject_length <=0) {
-// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-//    }
-// ```
 // Subjects with fewer letters than subjects (every subject without residues; AUTHORITY
 // §E3, BI-44) stop NCBI when it searches the first batch with a valid context, after the
 // subjects' warnings and the prolog.
@@ -556,11 +510,6 @@ fn subjects_with_fewer_letters_than_subjects_stop_the_search() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
-// ```c++
-//     // set sequence range
-//     retval->SetInt().SetFrom(from);
-//     retval->SetInt().SetTo((to > 0 && to < seqlen) ? to : (seqlen-1));
-// ```
 // A range that starts just past a record's end gives an interval without letters, which
 // NCBI sets up as a record without residues.
 #[test]

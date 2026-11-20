@@ -18,7 +18,6 @@ def main():
     for name in ['native', 'threaded', 'oracle', 'output-dir']:
         parser.add_argument('--'+name, type=Path, required=True)
     # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
     parser.add_argument('--serial', type=Path, help='opt in to serial compatibility checks')
     parser.add_argument('--node', default='node')
     args = parser.parse_args(); out = args.output_dir.resolve(); out.mkdir(parents=True, exist_ok=True)
@@ -35,7 +34,6 @@ def main():
     env.update(LC_ALL='C',NODE_NO_WARNINGS='1')
     records=[]
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
-    # (*thread)->Run(); (*thread)->Join(&result);
     prefixes = [
         ('native',1,[str(args.native.resolve())]),
         ('threaded',4,[args.node,str(TESTS/'run_losat_wasi_threads.js'),str(args.threaded.resolve())]),

@@ -17,12 +17,6 @@ const ROWS_LIMIT: i32 = 10_000_000;
 
 // The places of NCBI's exceptions (line RG D3-1 `om/SPEC.md` §7.1, NCBI BLAST+ 2.17.0 runs).
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:351-357 (`SetColumn`)
-// ```c++
-//     if ( field ) {
-//         NCBI_THROW_FMT(CAnnotException, eBadLocation,
-//                        "Duplicate "<<m_FieldName<<" column");
-//     }
-// ```
 const SET_COLUMN: ThrowSite = ThrowSite {
     file: "src/objmgr/seq_table_info.cpp",
     line: 355,
@@ -30,7 +24,7 @@ const SET_COLUMN: ThrowSite = ThrowSite {
     function: Some("ncbi::objects::CSeqTableLocColumns::SetColumn"),
 };
 
-/// The throws of `CSeqTableLocColumns::ParseDefaults` (seq_table_info.cpp:459-521, quoted at
+/// The throws of `CSeqTableLocColumns::ParseDefaults` (seq_table_info.cpp:459-521, cited at
 /// `LocColumns::parse_defaults`) at `line`.
 const fn parse_defaults_site(line: u32) -> ThrowSite {
     ThrowSite {
@@ -76,19 +70,6 @@ const SINGLE_SELECTION: ThrowSite = ThrowSite {
 };
 
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:435-444, 557-561
-// ```c++
-//     v = DstInt(value);
-//     if ( Int8(v) != value ) {
-//         NCBI_THROW_FMT(CSeqTableException, eIncompatibleValueType,
-//                        "CSeqTable_multi_data::TryGet"<<type_name<<"(): "
-//                        "value is too big for requested type: "<<value);
-//     }
-// ...
-//     default:
-//         NCBI_THROW_FMT(CSeqTableException, eIncompatibleValueType,
-//                        "CSeqTable_multi_data::TryGet"<<type_name<<"(): "
-//                        "value cannot be converted to requested type");
-// ```
 const MULTI_TOO_BIG: ThrowSite = ThrowSite {
     file: "src/objects/seq/../seqtable/SeqTable_multi_data.cpp",
     line: 441,
@@ -101,24 +82,6 @@ const MULTI_CANNOT_CONVERT: ThrowSite = ThrowSite {
 };
 
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_single_data.cpp:54-70
-// ```c++
-// void CSeqTable_single_data::ThrowOverflowError(Int8 value,
-//                                                const char* type_name)
-// {
-//     NCBI_THROW_FMT(CSeqTableException, eIncompatibleValueType,
-//                    "CSeqTable_single_data::GetValue("<<type_name<<"&): "
-//                    "value is too big for requested type: "<<value);
-// }
-//
-//
-// void CSeqTable_single_data::ThrowConversionError(const char* type_name) const
-// {
-//     NCBI_THROW_FMT(CSeqTableException, eIncompatibleValueType,
-//                    "CSeqTable_single_data::GetValue("<<type_name<<"&): "
-//                    <<SelectionName(Which())<<
-//                    " value cannot be converted to requested type");
-// }
-// ```
 const SINGLE_TOO_BIG: ThrowSite = ThrowSite {
     file: "src/objects/seq/../seqtable/SeqTable_single_data.cpp",
     line: 58,
@@ -264,7 +227,7 @@ impl<'a> LocColumns<'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:351-372 (`SetColumn`, quoted at
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:351-372 (`SetColumn`, cited at
     // `SET_COLUMN`; `AddExtraColumn` sets `m_Is_set` too)
     fn set(&self, slot: Option<Column<'a>>, column: Column<'a>) -> Result<Column<'a>, Stop> {
         if slot.is_some() {
@@ -276,74 +239,7 @@ impl<'a> LocColumns<'a> {
         Ok(column)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:375-454
-    // ```c++
-    // bool CSeqTableLocColumns::AddColumn(const CSeqTable_column& column)
-    // {
-    //     const CSeqTable_column_info& type = column.GetHeader();
-    //     if ( type.IsSetField_id() ) {
-    //         int field = type.GetField_id() - m_BaseValue +
-    //             CSeqTable_column_info::eField_id_location;
-    //         if ( field < CSeqTable_column_info::eField_id_location ||
-    //              field >= CSeqTable_column_info::eField_id_product ) {
-    //             return false;
-    //         }
-    //         switch ( field ) {
-    //         case CSeqTable_column_info::eField_id_location:
-    //             SetColumn(m_Loc, column);
-    //             return true;
-    //         ...  (location-id m_Id, location-gi m_Gi, location-from m_From, location-to m_To,
-    //               location-strand m_Strand, the two fuzz limits AddExtraColumn)
-    //         default:
-    //             break;
-    //         }
-    //     }
-    //     if ( !type.IsSetField_name() ) {
-    //         return false;
-    //     }
-    //
-    //     CTempString field(type.GetField_name());
-    //     if ( field == m_FieldName ) {
-    //         SetColumn(m_Loc, column);
-    //         return true;
-    //     }
-    //     else if ( NStr::StartsWith(field, m_FieldName) &&
-    //               field[m_FieldName.size()] == '.' ) {
-    //         CTempString extra = field.substr(m_FieldName.size()+1);
-    //         if ( extra == "id" || NStr::EndsWith(extra, ".id") ) {
-    //             SetColumn(m_Id, column);
-    //             return true;
-    //         }
-    //         else if ( extra == "gi" || NStr::EndsWith(extra, ".gi") ) {
-    //             SetColumn(m_Gi, column);
-    //             return true;
-    //         }
-    //         else if ( extra == "pnt.point" || extra == "int.from" ) {
-    //             SetColumn(m_From, column);
-    //             return true;
-    //         }
-    //         else if ( extra == "int.to" ) {
-    //             SetColumn(m_To, column);
-    //             return true;
-    //         }
-    //         else if ( extra == "strand" ||
-    //                   NStr::EndsWith(extra, ".strand") ) {
-    //             SetColumn(m_Strand, column);
-    //             return true;
-    //         }
-    //         else if ( extra == "int.fuzz-from.lim" ||
-    //                   extra == "pnt.fuzz.lim" ) {
-    //             AddExtraColumn(column, new CSeqTableSetLocFuzzFromLim());
-    //             return true;
-    //         }
-    //         else if ( extra == "int.fuzz-to.lim" ) {
-    //             AddExtraColumn(column, new CSeqTableSetLocFuzzToLim());
-    //             return true;
-    //         }
-    //     }
-    //     return false;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:371-454
     // `GetField_id() - m_BaseValue` is `int` arithmetic: below `INT_MIN + 10` the product's
     // overflows (undefined behaviour), refused.
     fn add_column(&mut self, column: Column<'a>) -> Result<bool, Stop> {
@@ -405,73 +301,6 @@ impl<'a> LocColumns<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:457-521
-    // ```c++
-    // void CSeqTableLocColumns::ParseDefaults(void)
-    // {
-    //     if ( !m_Is_set ) {
-    //         return;
-    //     }
-    //     if ( m_Loc ) {
-    //         m_Is_real_loc = true;
-    //         if ( m_Id || m_Gi || m_From || m_To || m_Strand ||
-    //              !m_ExtraColumns.empty() ) {
-    //             NCBI_THROW_FMT(CAnnotException, eBadLocation,
-    //                            "Conflicting "<<m_FieldName<<" columns");
-    //         }
-    //         return;
-    //     }
-    //
-    //     if ( !m_Id && !m_Gi ) {
-    //         NCBI_THROW_FMT(CAnnotException, eBadLocation,
-    //                        "No "<<m_FieldName<<".id column");
-    //     }
-    //     if ( m_Id && m_Gi ) {
-    //         NCBI_THROW_FMT(CAnnotException, eBadLocation,
-    //                        "Conflicting "<<m_FieldName<<" columns");
-    //     }
-    //     if ( m_Id ) {
-    //         if ( m_Id->IsSetDefault() ) {
-    //             m_DefaultIdHandle =
-    //                 CSeq_id_Handle::GetHandle(m_Id->GetDefault().GetId());
-    //         }
-    //     }
-    //     if ( m_Gi ) {
-    //         if ( m_Gi->IsSetDefault() ) {
-    //             TIntId gi;
-    //             m_Gi->GetDefault().GetValue(gi);
-    //             m_DefaultIdHandle = CSeq_id_Handle::GetGiHandle(GI_FROM(TIntId, gi));
-    //         }
-    //     }
-    //
-    //     if ( m_To ) {
-    //         // interval
-    //         if ( !m_From ) {
-    //             NCBI_THROW_FMT(CAnnotException, eBadLocation,
-    //                            "column "<<m_FieldName<<".to without "<<
-    //                            m_FieldName<<".from");
-    //         }
-    //         m_Is_simple_interval = true;
-    //     }
-    //     else if ( m_From ) {
-    //         // point
-    //         m_Is_simple_point = true;
-    //     }
-    //     else {
-    //         // whole
-    //         if ( m_Strand || !m_ExtraColumns.empty() ) {
-    //             NCBI_THROW_FMT(CAnnotException, eBadLocation,
-    //                            "extra columns in whole "<<m_FieldName);
-    //         }
-    //         m_Is_simple_whole = true;
-    //     }
-    //     if ( m_ExtraColumns.empty() ) {
-    //         m_Is_simple = true;
-    //     }
-    //     else {
-    //         m_Is_probably_simple = true;
-    //     }
-    // }
-    // ```
     fn parse_defaults(&mut self, handles: &mut LiveHandles) -> Result<(), Stop> {
         if !self.is_set {
             return Ok(());
@@ -541,22 +370,6 @@ pub(super) struct TableInfo<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:750-764
-// ```c++
-// bool CSeqTableInfo::IsGoodFeatTable(const CSeq_table& table)
-// {
-//     if ( !table.IsSetFeat_type() ||
-//          table.GetFeat_type() <= CSeqFeatData::e_not_set ||
-//          table.GetFeat_type() >= CSeqFeatData::e_MaxChoice ) {
-//         return false; // not a feature table
-//     }
-//     if ( table.IsSetFeat_subtype() &&
-//          (table.GetFeat_subtype() <= CSeqFeatData::eSubtype_bad ||
-//           table.GetFeat_subtype() >= CSeqFeatData::eSubtype_max) ) {
-//         return false; // bad subtype
-//     }
-//     return true;
-// }
-// ```
 // `e_MaxChoice` is 23 (SeqFeatData_.hpp:174), `eSubtype_max` 106 (SeqFeatData.hpp:237).
 fn is_good_feat_table(table: V<'_>) -> bool {
     let feat_type = table.field("feat-type").int();
@@ -570,127 +383,6 @@ fn is_good_feat_table(table: V<'_>) -> bool {
 
 impl Indexer<'_> {
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:784-947
-    // ```c++
-    //     ITERATE ( CSeq_table::TColumns, it, feat_table.GetColumns() ) {
-    //         const CSeqTable_column& col = **it;
-    //         const CSeqTable_column_info& type = col.GetHeader();
-    //         ...
-    //         if ( type.IsSetField_name() ) {
-    //             string name = type.GetField_name();
-    //             ...
-    //             if ( name == "Seq-table location" ) {
-    //                 if ( m_TableLocation ) {
-    //                     ERR_POST("Duplicate 'Seq-table location' column");
-    //                 }
-    //                 try {
-    //                     CSeqTableColumnInfo info(col);
-    //                     m_TableLocation = info.GetSeq_loc(0);
-    //                 }
-    //                 NCBI_CATCH("Bad 'Seq-table location' column");
-    //             }
-    //         }
-    //         if ( !IsFeatTable() ) {
-    //             continue;
-    //         }
-    //
-    //         if ( m_Location.AddColumn(col) || m_Product.AddColumn(col) ) {
-    //             continue;
-    //         }
-    //         CConstRef<CSeqTableSetFeatField> setter;
-    //         if ( type.IsSetField_id() ) {
-    //             int id = type.GetField_id();
-    //             switch ( id ) {
-    //             case CSeqTable_column_info::eField_id_partial:
-    //                 if ( m_Partial ) {
-    //                     NCBI_THROW_FMT(CAnnotException, eOtherError,
-    //                                    "Duplicate partial column");
-    //                 }
-    //                 m_Partial = CSeqTableColumnInfo(col);
-    //                 continue;
-    //             case CSeqTable_column_info::eField_id_comment:
-    //                 setter = new CSeqTableSetComment();
-    //                 break;
-    //             ...  (data-imp-key, data-region, ext-type: setters)
-    //             case CSeqTable_column_info::eField_id_ext:
-    //                 setter = new CSeqTableSetExt(type.GetField_name());
-    //                 break;
-    //             ...  (dbxref, qual: the same with the field name)
-    //             default:
-    //                 if ( !type.IsSetField_name() ) {
-    //                     ERR_POST_X(8, "SeqTable-column-info.field-id = "<<id);
-    //                     continue;
-    //                 }
-    //                 break;
-    //             }
-    //         }
-    //         else if ( !type.IsSetField_name() ) {
-    //             ERR_POST_X(9, "SeqTable-column-info: "
-    //                        "neither field-id nor field-name is set");
-    //             continue;
-    //         }
-    //         if ( !setter && type.IsSetField_name() ) {
-    //             CTempString name(type.GetField_name());
-    //             if ( name.empty() ) {
-    //                 ERR_POST_X(10, "SeqTable-column-info.field-name is empty");
-    //                 continue;
-    //             }
-    //             else if ( name[0] == 'E' ) {
-    //                 setter = new CSeqTableSetExt(name);
-    //             }
-    //             ...  ('D' dbxref, 'Q' qual)
-    //             else if ( name == "partial" ) {
-    //                 if ( m_Partial ) {
-    //                     NCBI_THROW_FMT(CAnnotException, eOtherError,
-    //                                    "Duplicate partial column");
-    //                 }
-    //                 m_Partial = CSeqTableColumnInfo(col);
-    //                 continue;
-    //             }
-    //             else if ( name == "disabled" ) {
-    //                 if ( m_Disabled ) {
-    //                     NCBI_THROW_FMT(CAnnotException, eOtherError,
-    //                                    "Duplicate disabled column ");
-    //                 }
-    //                 m_Disabled = CSeqTableColumnInfo(col);
-    //                 continue;
-    //             }
-    //             else if ( name == "Seq-table location" ) {
-    //                 // already processed above
-    //                 continue;
-    //             }
-    //             else if ( name == "Sorted, max length" ) {
-    //                 if ( m_SortedMaxLength ) {
-    //                     ERR_POST("Duplicate 'Sorted, max length' column");
-    //                 }
-    //                 try {
-    //                     CSeqTableColumnInfo info(col);
-    //                     int value;
-    //                     if ( info.GetValue(0, value) ) {
-    //                         m_SortedMaxLength = value;
-    //                     }
-    //                 }
-    //                 NCBI_CATCH("Bad 'Sorted, max length' column");
-    //                 continue;
-    //             }
-    //             if ( !setter ) {
-    //                 try {
-    //                     setter = new CSeqTableSetAnyFeatField(name);
-    //                 }
-    //                 catch ( CAnnotException& /*exc*/ ) {
-    //                     // ignore invalid column names
-    //                 }
-    //             }
-    //         }
-    //         ...
-    //     }
-    //
-    //     if ( IsFeatTable() ) {
-    //         m_Location.ParseDefaults();
-    //         m_Product.ParseDefaults();
-    //     }
-    //
-    //     m_IsSorted = x_IsSorted();
-    // ```
     // The maps of the columns by id and by name and the setters of the feature fields make no
     // message (the setters' constructors only keep the name: `CSeqTableSetExt` and the others
     // cut it with `CTempString::substr`, `CSeqTableSetAnyFeatField` throws only the
@@ -835,20 +527,7 @@ impl Indexer<'_> {
             info.product.parse_defaults(&mut self.handles)?;
         }
         info.sorted = info.is_sorted(sorted_max);
-        // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:486-498 (`x_InitFeatTable`)
-        // ```c++
-        //         if ( IsSortedTable() ) {
-        //             ...
-        //             m_ObjectIndex.AddInfo(CAnnotObject_Info(*this, kWholeAnnotIndex, type));
-        //             return;
-        //         }
-        //
-        //         // index each row separately
-        //         TAnnotIndex rows = table.GetNum_rows();
-        //         for ( TAnnotIndex index = 0; index < rows; ++index ) {
-        //             m_ObjectIndex.AddInfo(CAnnotObject_Info(*this, index, type));
-        //         }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:486-499 (`x_InitFeatTable`)
         if is_feat && !info.sorted && info.num_rows > ROWS_LIMIT {
             return Err(Stop::Refuse(Refusal::TableRows));
         }
@@ -864,80 +543,6 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1028-1170 (`x_InitFeatTableKeys`)
-    // ```c++
-    //     if ( !m_Table_Info->IsFeatTable() ) {
-    //         // index whole Seq-table
-    //         ...
-    //         CConstRef<CSeq_loc> loc = m_Table_Info->GetTableLocation();
-    //         if ( !loc ) {
-    //             return;
-    //         }
-    //         hrmap.AddLocation(*loc);
-    //         ...
-    //         ITERATE ( CHandleRangeMap, hrit, hrmap ) {
-    //             const CHandleRange& hr = hrit->second;
-    //             key.m_Range = hr.GetOverlappingRange();
-    //             if ( key.m_Range.Empty() ) {
-    //                 ERR_POST_X(7, "Empty region in "<<GetDescription()<<
-    //                            " Seq-table location "<<MSerial_AsnText<<*loc);
-    //                 continue;
-    //             }
-    //             ...  (the circular location's two ranges, else the range, x_Map)
-    //         }
-    //         ...
-    //         return;
-    //     }
-    //     ...
-    //     for ( size_t row = 0; row < object_count; ++row, ++it ) {
-    //         CAnnotObject_Info& info = *it;
-    //         if ( info.GetAnnotIndex() == kWholeAnnotIndex ) {
-    //             ...
-    //             CConstRef<CSeq_loc> loc = m_Table_Info->GetTableLocation();
-    //             _ASSERT(loc && loc->IsInt()); // checked in x_InitFeatTable()
-    //             key.m_Handle = CSeq_id_Handle::GetHandle(loc->GetInt().GetId());
-    //             key.m_Range = loc->GetTotalRange();
-    //             x_Map(mapper, key, index);
-    //             x_UpdateObjectKeys(info, keys_begin);
-    //             continue;
-    //         }
-    //         ...
-    //         if ( m_Table_Info->RowIsDisabled(row) ) {
-    //             continue;
-    //         }
-    //         ...
-    //         bool partial = m_Table_Info->IsPartial(row);
-    //         for ( index.m_AnnotLocationIndex = 0;
-    //               index.m_AnnotLocationIndex < 2;
-    //               index.m_AnnotLocationIndex++ ) {
-    //             // index by location, then by product
-    //             const CSeqTableLocColumns& loc = ... GetLocation() : GetProduct();
-    //             if ( loc.IsSet() ) { // if this Seq-loc field is set
-    //                 if ( loc.IsRealLoc() ) { // full Seq-loc object
-    //                     CHandleRangeMap hrmap;
-    //                     hrmap.SetMasterSeq(master);
-    //                     hrmap.AddLocation(*loc.GetLoc(row));
-    //                     ...
-    //                     ITERATE ( CHandleRangeMap, hrit, hrmap ) {
-    //                         const CHandleRange& hr = hrit->second;
-    //                         key.m_Range = hr.GetOverlappingRange();
-    //                         if ( key.m_Range.Empty() ) {
-    //                             ERR_POST_X(8, "Empty region in "<<GetDescription()<<
-    //                                        " Seq-table row "<<row);
-    //                             continue;
-    //                         }
-    //                         ...  (the circular location's two ranges, else the range, x_Map)
-    //                     }
-    //                 }
-    //                 else { // simplified Seq-loc object
-    //                     loc.SetTableKeyAndIndex(row, key, index);
-    //                     index.SetPartial(partial);
-    //                     x_Map(mapper, key, index);
-    //                 }
-    //             }
-    //         }
-    //         ...
-    //     }
-    // ```
     /// `x_InitFeatTableKeys` of the table `info`.
     pub(super) fn index_table(&mut self, info: &TableInfo<'_>) -> Result<(), Stop> {
         if !info.is_feat {
@@ -963,20 +568,6 @@ impl Indexer<'_> {
         }
         for row in 0..info.num_rows.max(0) as u64 {
             // NCBI reference (598d8ae6): c++/include/objmgr/impl/seq_table_info.hpp:92-96,241-246
-            // ```c++
-            //     bool GetBool(size_t row) const
-            //         {
-            //             bool val = false;
-            //             return *this && m_Column->TryGetBool(row, val) && val;
-            //         }
-            // ...
-            //     bool RowIsDisabled(size_t row) const {
-            //         return m_Disabled.GetBool(row);
-            //     }
-            //     bool IsPartial(size_t row) const {
-            //         return m_Partial.GetBool(row);
-            //     }
-            // ```
             if let Some(disabled) = info.disabled {
                 if self.column_try_get(disabled, row, Want::Bool)? == Some(1) {
                     continue;
@@ -1017,74 +608,7 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:701-746 (`SetTableKeyAndIndex`)
-    // ```c++
-    //     key.m_Handle = GetIdHandle(row);
-    //     key.m_Range = GetRange(row);
-    //     ENa_strand strand = GetStrand(row);
-    //     ...
-    //     bool simple = m_Is_simple;
-    //     if ( !simple && m_Is_probably_simple ) {
-    //         simple = true;
-    //         ITERATE ( TExtraColumns, it, m_ExtraColumns ) {
-    //             if ( it->first.IsSet(row) ) {
-    //                 simple = false;
-    //                 break;
-    //             }
-    //         }
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:538-603
-    // ```c++
-    // CSeq_id_Handle CSeqTableLocColumns::GetIdHandle(size_t row) const
-    // {
-    //     _ASSERT(!m_Loc);
-    //     if ( m_Id ) {
-    //         _ASSERT(!m_Id->IsSetSparse());
-    //         if ( m_Id->IsSetData() ) {
-    //             const CSeq_id* id = m_Id.GetSeq_id(row);
-    //             if ( id ) {
-    //                 return CSeq_id_Handle::GetHandle(*id);
-    //             }
-    //         }
-    //     }
-    //     else {
-    //         _ASSERT(!m_Gi->IsSetSparse());
-    //         if ( m_Gi->IsSetData() ) {
-    //             TIntId gi;
-    //             if ( m_Gi.GetValue(row, gi) ) {
-    //                 return CSeq_id_Handle::GetGiHandle(GI_FROM(TIntId, gi));
-    //             }
-    //         }
-    //     }
-    //     return m_DefaultIdHandle;
-    // }
-    // ...
-    // CRange<TSeqPos> CSeqTableLocColumns::GetRange(size_t row) const
-    // {
-    //     _ASSERT(!m_Loc);
-    //     _ASSERT(m_From);
-    //     int from;
-    //     if ( !m_From || !m_From.GetValue(row, from) ) {
-    //         return CRange<TSeqPos>::GetWhole();
-    //     }
-    //     int to = from;
-    //     if ( m_To ) {
-    //         m_To.GetValue(row, to);
-    //     }
-    //     return CRange<TSeqPos>(from, to);
-    // }
-    //
-    //
-    // ENa_strand CSeqTableLocColumns::GetStrand(size_t row) const
-    // {
-    //     _ASSERT(!m_Loc);
-    //     int strand = eNa_strand_unknown;
-    //     if ( m_Strand ) {
-    //         m_Strand.GetValue(row, strand);
-    //     }
-    //     return ENa_strand(strand);
-    // }
-    // ```
     // The `_ASSERT`s are the debug build's: the release build reads a sparse index as any column.
     // The strand and the extra columns change no output, but their values are read (and can
     // throw).
@@ -1135,41 +659,8 @@ impl Indexer<'_> {
 }
 
 impl TableInfo<'_> {
-    // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:972-1004
-    // ```c++
-    // bool CSeqTableInfo::x_IsSorted(void) const
-    // {
-    //     ...
-    //     if ( m_Product.IsSet() ) {
-    //         return false;
-    //     }
-    //     if ( !m_Location.IsSet() || m_Location.IsRealLoc() || !m_Location.m_Id ) {
-    //         return false;
-    //     }
-    //     if ( !m_Location.m_Id.IsSingular() ) {
-    //         return false;
-    //     }
-    //     if ( !m_Location.m_Is_simple ||
-    //          !(m_Location.m_Is_simple_point || m_Location.m_Is_simple_interval) ) {
-    //         return false;
-    //     }
-    //     if ( !m_TableLocation || !m_TableLocation->IsInt() ) {
-    //         return false;
-    //     }
-    //     if ( !m_SortedMaxLength ||
-    //          m_SortedMaxLength > m_TableLocation->GetInt().GetLength()/16 ) {
-    //         return false;
-    //     }
-    //     return true;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:972-1005
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_interval.cpp:125-128
-    // ```c++
-    // TSeqPos CSeq_interval::GetLength(void) const
-    // {
-    //     return GetTo() >= GetFrom() ? ((GetTo() - GetFrom()) + 1) : 0;
-    // }
-    // ```
     fn is_sorted(&self, sorted_max: u32) -> bool {
         if self.product.is_set {
             return false;
@@ -1203,31 +694,7 @@ impl TableInfo<'_> {
 
 // The values of a column at a row.
 impl Indexer<'_> {
-    // NCBI reference (598d8ae6): c++/include/objects/seqtable/SeqTable_column.hpp:76-96
-    // ```c++
-    //     template<class Value>
-    //     bool TryGetValue(size_t row, Value& v) const {
-    //         size_t index = row;
-    //         if ( IsSetSparse() ) {
-    //             index = GetSparse().GetIndexAt(row);
-    //             if ( index == CSeqTable_sparse_index::kSkipped ) {
-    //                 if ( !IsSetSparse_other() ) {
-    //                     return false;
-    //                 }
-    //                 GetSparse_other().GetValue(v);
-    //                 return true;
-    //             }
-    //         }
-    //         if ( IsSetData() && GetData().TryGetValue(index, v) ) {
-    //             return true;
-    //         }
-    //         if ( IsSetDefault() ) {
-    //             GetDefault().GetValue(v);
-    //             return true;
-    //         }
-    //         return false;
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/include/objects/seqtable/SeqTable_column.hpp:75-96
     /// `CSeqTable_column::TryGetValue(row, v)` of the type `want` (a bool as 0 or 1).
     pub(super) fn column_try_get(
         &mut self,
@@ -1259,28 +726,7 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_column.cpp:62-75
-    // ```c++
-    // bool CSeqTable_column::IsSet(size_t row) const
-    // {
-    //     size_t index = row;
-    //     if ( IsSetSparse() ) {
-    //         index = GetSparse().GetIndexAt(row);
-    //         if ( index == CSeqTable_sparse_index::kSkipped ) {
-    //             return IsSetSparse_other();
-    //         }
-    //     }
-    //     if ( IsSetData() && GetData().IsSet(index) ) {
-    //         return true;
-    //     }
-    //     return IsSetDefault();
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/include/objects/seqtable/SeqTable_multi_data.hpp:71-73
-    // ```c++
-    //     bool IsSet(size_t row_index) const {
-    //         return row_index < GetSize();
-    //     }
-    // ```
     fn column_is_set(&mut self, column: Column<'_>, row: u64) -> Result<bool, Stop> {
         let mut index = row;
         if let Some(sparse) = column.sparse() {
@@ -1298,37 +744,6 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_column.cpp:126-174
-    // ```c++
-    // CConstRef<CSeq_id> CSeqTable_column::GetSeq_id(size_t row) const
-    // {
-    //     size_t index = row;
-    //     if ( IsSetSparse() ) {
-    //         index = GetSparse().GetIndexAt(row);
-    //         if ( index == CSeqTable_sparse_index::kSkipped ) {
-    //             if ( IsSetSparse_other() ) {
-    //                 return ConstRef(&GetSparse_other().GetId());
-    //             }
-    //             return null;
-    //         }
-    //     }
-    //     if ( IsSetData() ) {
-    //         const CSeqTable_multi_data::TId& arr = GetData().GetId();
-    //         if ( index < arr.size() ) {
-    //             return arr[index];
-    //         }
-    //     }
-    //     if ( IsSetDefault() ) {
-    //         return ConstRef(&GetDefault().GetId());
-    //     }
-    //     return null;
-    // }
-    //
-    //
-    // CConstRef<CSeq_loc> CSeqTable_column::GetSeq_loc(size_t row) const
-    // {
-    //     ... (the same with GetSparse_other().GetLoc(), GetData().GetLoc(), GetDefault().GetLoc())
-    // }
-    // ```
     /// `CSeqTable_column::GetSeq_loc(row)`.
     fn column_seq_loc<'a>(&mut self, column: Column<'a>, row: u64) -> Result<Option<V<'a>>, Stop> {
         self.column_object(column, row, "loc", "Loc")
@@ -1381,65 +796,8 @@ impl Indexer<'_> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:477-561
-    // ```c++
-    // bool CSeqTable_multi_data::x_TryGetInt8(size_t row, Int8& v,
-    //                                         const char* type_name) const
-    // {
-    //     switch ( Which() ) {
-    //     case e_Bit:
-    //     {
-    //         const TBit& bits = GetBit();
-    //         size_t i = row/8;
-    //         if ( i >= bits.size() ) {
-    //             return false;
-    //         }
-    //         size_t j = row%8;
-    //         Uint1 bb = bits[i];
-    //         v = ((bb<<j)&0x80) != 0;
-    //         return true;
-    //     }
-    //     case e_Bit_bvector:
-    //         return sx_TryGet(GetBit_bvector().GetBitVector(),
-    //                          static_cast<bm::bvector<>::size_type>(row), v);
-    //     case e_Int1:
-    //         return sx_TryGet(GetInt1(), row, v);
-    //     case e_Int2:
-    //         return sx_TryGet(GetInt2(), row, v);
-    //     case e_Int:
-    //         return sx_TryGet(GetInt(), row, v);
-    //     case e_Int8:
-    //         return sx_TryGet(GetInt8(), row, v);
-    //     case e_Int_delta:
-    //     {
-    //         const CSeqTable_multi_data& deltas = GetInt_delta();
-    //         if ( row >= deltas.GetSize() ) {
-    //             return false;
-    //         }
-    //         CMutexGuard guard(sx_PrepareMutex_multi_data);
-    //         v = x_GetIntDeltaCache().GetDeltaSum8(deltas, row);
-    //         return true;
-    //     }
-    //     case e_Int_scaled:
-    //         return GetInt_scaled().TryGetInt8(row, v);
-    //     default:
-    //         NCBI_THROW_FMT(CSeqTableException, eIncompatibleValueType,
-    //                        "CSeqTable_multi_data::TryGet"<<type_name<<"(): "
-    //                        "value cannot be converted to requested type");
-    //     }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:477-562
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/Scaled_int_multi_data.cpp:77-84
-    // ```c++
-    // bool CScaled_int_multi_data::TryGetInt8(size_t row, Int8& v) const
-    // {
-    //     if ( !GetData().TryGetInt8(row, v) ) {
-    //         return false;
-    //     }
-    //     v = v*GetMul()+GetAdd();
-    //     return true;
-    // }
-    // ```
     // A bit-bvector is BitMagic's serialized vector, which `GetBitVector()` decodes from the raw
     // bytes without a check (BVector_data.cpp:64-72): refused. An `int-scaled` value that leaves
     // `Int8` is a signed overflow: refused.
@@ -1492,33 +850,7 @@ impl Indexer<'_> {
         }))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:435-475
-    // ```c++
-    // template<class DstInt>
-    // static inline
-    // bool sx_DownCastInt8(DstInt& v, const Int8& value, const char* type_name)
-    // {
-    //     v = DstInt(value);
-    //     if ( Int8(v) != value ) {
-    //         NCBI_THROW_FMT(... "value is too big for requested type: "<<value);
-    //     }
-    //     return true;
-    // }
-    // ...
-    // bool CSeqTable_multi_data::TryGetBool(size_t row, bool& v) const
-    // {
-    //     Int8 value;
-    //     return x_TryGetInt8(row, value, "Bool") &&
-    //         sx_DownCastInt8(v, value, "Bool");
-    // }
-    // ...
-    // bool CSeqTable_multi_data::TryGetInt4(size_t row, Int4& v) const
-    // {
-    //     Int8 value;
-    //     return x_TryGetInt8(row, value, "Int4") &&
-    //         sx_DownCastInt8(v, value, "Int4");
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:435-516
     /// `CSeqTable_multi_data::TryGetValue(row, v)` of the type `want`.
     fn multi_try_get(&mut self, data: V<'_>, row: u64, want: Want) -> Result<Option<i64>, Stop> {
         // The multi-data values waiting for one inside them, from a list on the heap (to any depth
@@ -1605,54 +937,8 @@ impl Indexer<'_> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:81-94, 138-169,
+    // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:81-179,
     // 227-235, 305-316 (the sums of an `int-delta`, `USE_DELTA_CACHE` defined)
-    // ```c++
-    // CIntDeltaSumCache& CSeqTable_multi_data::x_GetIntDeltaCache(void) const
-    // {
-    //     CIntDeltaSumCache* info = m_Cache.GetNCPointerOrNull();
-    //     if ( !info ) {
-    //         if ( GetInt_delta().GetIntSize() <= sizeof(Int4) ) {
-    //             info = new CInt4DeltaSumCache(GetInt_delta().GetSize());
-    //         }
-    //         else {
-    //             info = new CInt8DeltaSumCache(GetInt_delta().GetSize());
-    //         }
-    //         m_Cache = info;
-    //     }
-    //     return *info;
-    // }
-    // ...
-    //     if ( block_index != m_CacheBlockIndex ) {
-    //         size_t size = deltas.GetSize();
-    //         size_t block_pos = block_index*kBlockSize;
-    //         ...
-    //         size_t block_size = min(kBlockSize, size-block_pos);
-    //         ...
-    //         TValue sum = block_index == 0? 0: m_Blocks[block_index-1];
-    //         for ( size_t i = 0; i < block_size; ++i ) {
-    //             TValue v;
-    //             if ( deltas.TryGetValue(block_pos+i, v) ) {
-    //                 sum += v;
-    //             }
-    //             m_CacheBlockInfo[i] = sum;
-    //         }
-    //         ...
-    //     }
-    //     return m_CacheBlockInfo[block_offset];
-    // ...
-    // Int4 CInt4DeltaSumCache::GetDeltaSum4(const TDeltas& deltas,
-    //                                       size_t index)
-    // {
-    //     _ASSERT(index < deltas.GetSize());
-    //     size_t block_index  = index / kBlockSize;
-    //     size_t block_offset = index % kBlockSize;
-    //     while ( block_index >= m_BlocksFilled ) {
-    //         x_GetDeltaSum2(deltas, m_BlocksFilled, 0);
-    //     }
-    //     return x_GetDeltaSum2(deltas, block_index, block_offset);
-    // }
-    // ```
     // The value of row `r` reads every element of the blocks of 128 up to `r`'s, in order (as
     // `Int4` with `TryGetInt4` when the elements fit in 4 bytes, else as `Int8`), so the first
     // element that throws there throws for `r`; a sum that leaves the accumulator's type is a
@@ -1729,48 +1015,6 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-581
-    // ```c++
-    // size_t CSeqTable_sparse_index::GetIndexAt(size_t row) const
-    // {
-    //     switch ( Which() ) {
-    //     case e_Indexes:
-    //     {
-    //         const TIndexes& indexes = GetIndexes();
-    //         TIndexes::const_iterator iter =
-    //             lower_bound(indexes.begin(), indexes.end(), row);
-    //         if ( iter != indexes.end() && *iter == row ) {
-    //             return iter - indexes.begin();
-    //         }
-    //         else {
-    //             return kSkipped;
-    //         }
-    //     }
-    //     case e_Indexes_delta:
-    //         return x_FindDeltaSum(row);
-    //     case e_Bit_set:
-    //     {
-    //         const TBit_set& bytes = GetBit_set();
-    //         size_t byte_index = row/8;
-    //         if ( byte_index >= bytes.size() ) {
-    //             return kSkipped;
-    //         }
-    //         Uint1 byte = bytes[byte_index];
-    //         size_t bit_index = row%8; // most significant bit has index 0
-    //         if ( !((byte<<bit_index)&0x80) ) {
-    //             return kSkipped;
-    //         }
-    //         size_t count = sx_CalcByteBitCount(Uint1(byte>>(8-bit_index)));
-    //         if ( byte_index ) {
-    //             count += x_GetBitSetCache(byte_index);
-    //         }
-    //         return count;
-    //     }
-    //     case e_Bit_set_bvector:
-    //     {
-    //         const bm::bvector<>& bv = GetBit_set_bvector().GetBitVector();
-    //         ...
-    //     }
-    // ```
     // `x_GetBitSetCache(byte_index)` counts the set bits of the bytes before it (in blocks of
     // 256, :180-224); `x_FindDeltaSum(row)` (`USE_DELTA_CACHE` not defined, :232, 292-426) finds
     // the first `indexes-delta` element whose prefix sum reaches `row`: that element when the sum
@@ -1840,42 +1084,9 @@ impl Indexer<'_> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:388-429
-// ```c++
-// size_t CSeqTable_multi_data::GetSize(void) const
-// {
-//     switch ( Which() ) {
-//     case e_Int:
-//         return GetInt().size();
-//     ...
-//     case e_Common_string:
-//         return GetCommon_string().GetIndexes().size();
-//     case e_Common_bytes:
-//         return GetCommon_bytes().GetIndexes().size();
-//     case e_Bit:
-//         return GetBit().size()*8;
-//     ...
-//     case e_Bit_bvector:
-//         return GetBit_bvector().GetSize();
-//     case e_Int_delta:
-//         return GetInt_delta().GetSize();
-//     case e_Int_scaled:
-//         return GetInt_scaled().GetData().GetSize();
-//     case e_Real_scaled:
-//         return GetReal_scaled().GetData().GetSize();
-//     default:
-//         break;
-//     }
-//     return 0;
-// }
-// ```
-// NCBI reference (598d8ae6): c++/include/objects/seqtable/BVector_data_.hpp:76, 97 (the generated
+// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:388-431
+// NCBI reference (598d8ae6): datatool's include/objects/seqtable/BVector_data_.hpp:76, 97 (the generated
 // getter of `BVector-data.size`, `unsigned` by seqtable.def:38-39)
-// ```c++
-//     typedef unsigned TSize;
-//     ...
-//     TSize GetSize(void) const;
-// ```
 // The size of a bit-bvector is its `size` member (a Uint4), read without decoding BitMagic's data
 // (`bm/` probes p01, p03: NCBI is silent where only the size is asked); only a value decodes
 // (`x_try_get_int8`, `sparse_index_at`, refused).
@@ -1892,42 +1103,8 @@ fn multi_size_step(data: V<'_>) -> Result<u64, V<'_>> {
     })
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:363-385
-// ```c++
-// size_t CSeqTable_multi_data::GetIntSize(void) const
-// {
-//     switch ( Which() ) {
-//     case e_Int:
-//         return sizeof(TInt::value_type);
-//     case e_Int1:
-//         return sizeof(TInt1::value_type);
-//     case e_Int2:
-//         return sizeof(TInt2::value_type);
-//     case e_Int8:
-//         return sizeof(TInt8::value_type);
-//     case e_Bit:
-//     case e_Bit_bvector:
-//         return 1; // one char is enough to store bit value
-//     case e_Int_delta:
-//         return GetInt_delta().GetIntSize();
-//     case e_Int_scaled:
-//         return GetInt_scaled().GetIntSize();
-//     default:
-//         return 0;
-//     }
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:363-386
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/Scaled_int_multi_data.cpp:57-64
-// ```c++
-// size_t CScaled_int_multi_data::GetIntSize(void) const
-// {
-//     if ( (IsSetMax() && GetMax() > kMax_Int) ||
-//          (IsSetMin() && GetMin() < kMin_Int) ) {
-//         return sizeof(Int8);
-//     }
-//     return sizeof(int);
-// }
-// ```
 /// One level of `GetIntSize()`: the size, or the multi-data whose size it is (`Err`).
 fn int_size_step(data: V<'_>) -> Result<u64, V<'_>> {
     let (variant, value) = data.choice();
@@ -1953,61 +1130,6 @@ fn int_size_step(data: V<'_>) -> Result<u64, V<'_>> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_single_data.cpp:85-180
-// ```c++
-// void CSeqTable_single_data::GetValue(bool& v) const
-// {
-//     static const char* const type_name = "bool";
-//     switch ( Which() ) {
-//     case e_Bit:
-//         v = GetBit();
-//         break;
-//     case e_Int:
-//         sx_DownCast(v, GetInt(), type_name);
-//         break;
-//     case e_Int8:
-//         sx_DownCast(v, GetInt8(), type_name);
-//         break;
-//     default:
-//         ThrowConversionError(type_name);
-//     }
-// }
-// ...
-// void CSeqTable_single_data::GetValue(int& v) const
-// {
-//     static const char* const type_name = "int";
-//     switch ( Which() ) {
-//     case e_Bit:
-//         v = GetBit();
-//         break;
-//     case e_Int:
-//         v = GetInt();
-//         break;
-//     case e_Int8:
-//         sx_DownCast(v, GetInt8(), type_name);
-//         break;
-//     default:
-//         ThrowConversionError(type_name);
-//     }
-// }
-//
-//
-// void CSeqTable_single_data::GetValue(Int8& v) const
-// {
-//     switch ( Which() ) {
-//     case e_Bit:
-//         v = GetBit();
-//         break;
-//     case e_Int:
-//         v = GetInt();
-//         break;
-//     case e_Int8:
-//         v = GetInt8();
-//         break;
-//     default:
-//         ThrowConversionError("Int8");
-//     }
-// }
-// ```
 // (`sx_DownCast` throws `ThrowOverflowError(value, type_name)` when the value does not fit, quoted
 // at `SINGLE_TOO_BIG`.)
 /// `CSeqTable_single_data::GetValue(v)` of the type `want` (a bool as 0 or 1).
@@ -2045,7 +1167,7 @@ fn single_get(single: V<'_>, want: Want) -> Result<i64, Stop> {
     Ok(cast)
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seq/../seqtable/SeqTable_single_data_.cpp (datatool's
+// NCBI reference (598d8ae6): src/objects/seqtable/SeqTable_single_data_.cpp (datatool's
 // `GetLoc()` and `GetId()`: `CheckSelected(e_Loc)` throws `ThrowInvalidSelection`; the place is
 // `SINGLE_SELECTION`'s)
 /// `CSeqTable_single_data::Get<getter>()`: the value of the variant `variant`.

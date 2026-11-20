@@ -7,7 +7,6 @@ const { createThreadHost } = require("./wasi_thread_host");
 const { runPair } = require("./check_wasi_reactor");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187
-// arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
 // Explicit unsupported requests and host limits fail before any worker starts.
 (async () => {
   const [artifact, kind, fixtures, output] = process.argv.slice(2);
@@ -15,7 +14,6 @@ const { runPair } = require("./check_wasi_reactor");
   let host;
   if (kind === "serial-reactor") {
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-    // CATCH_ALL(status); ... return status;
     // Reuse the validated module; reactor initialization and ownership are unchanged.
     const bytes=fs.readFileSync(artifact), {module}=prepareArtifact(bytes,kind);
     const wasi=new WASI({version:"preview1",env:process.env,preopens:{"/":"/"},returnOnExit:true});

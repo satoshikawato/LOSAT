@@ -3,49 +3,6 @@
 //! before its loop.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:164-241
-//! ```c
-//!     q_avail = query->length - q_off;
-//!     s_avail = subject->length - s_off;
-//! ...
-//!     if (q_off < s_off) {
-//!         start = subject0 + (s_off - q_off) / COMPRESSION_RATIO;
-//!         remainder = 3 - ((s_off - q_off) % COMPRESSION_RATIO);
-//!     } else {
-//!         start = subject0;
-//!         remainder = 3;
-//!     }
-//! ...
-//!     while ((s > start) || (s == start && base < remainder)) {
-//!         if (base == 3) {
-//!             s--;
-//!             base = 0;
-//!         } else {
-//!             ++base;
-//!         }
-//!         ch = *s;
-//!         if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-//! ...
-//!     if (q_avail < s_avail) {
-//!         sf = subject0 + (s_off + q_avail) / COMPRESSION_RATIO;
-//!         remainder = 3 - ((s_off + q_avail) % COMPRESSION_RATIO);
-//!     } else {
-//!         sf = subject0 + (subject->length) / COMPRESSION_RATIO;
-//!         remainder = 3 - ((subject->length) % COMPRESSION_RATIO);
-//!     }
-//! ...
-//!     while (s < sf || (s == sf && base > remainder)) {
-//!         ch = *s;
-//!         if ((sum += matrix[*q++][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-//! ...
-//!         if (base == 0) {
-//!             base = 3;
-//!             s++;
-//!         } else
-//!             base--;
-//!     }
-//!
-//!     ungapped_data->length = (Int4)(q_end - q_beg);
-//! ```
 //!
 //! Where it runs. `extension::extend_hit_ungapped_exact_ncbi` (every caller of the exact
 //! extension: blastn-short and other word sizes below 11, and the exact pass that follows
@@ -89,14 +46,7 @@ fn cell(matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE], code: u8, base: usize) -> i
     unsafe { *matrix.get_unchecked(((code as usize) << 4) | base) }
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:149-153
-/// ```c
-/// static void
-/// s_NuclUngappedExtendExact(BLAST_SequenceBlk * query,
-///                           BLAST_SequenceBlk * subject, Int4 ** matrix,
-///                           Int4 q_off, Int4 s_off, Int4 X,
-///                           BlastUngappedData * ungapped_data)
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:148-153
 /// The arguments are those of `extend_hit_ungapped_exact_ncbi`: the query buffer without its outer
 /// sentinels (BLASTNA, one byte a letter), the packed subject (ncbi2na, four bases a byte, at least
 /// `subject_len.div_ceil(4)` bytes), the offsets of the hit, the subject length, the X-drop as a
@@ -113,13 +63,6 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
 ) -> UngappedData {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
     // 913-917 and 1755-1759)
-    // ```c
-    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
-    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
-    //             }else {
-    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
-    //                                  -(cutoffs->x_dropoff), ungapped_data,
-    // ```
     // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
     // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
     // Such a walk can pass two of the query's sentinels (BLASTNA 15, `INT4_MIN / 2` against
@@ -210,13 +153,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:197 and
     // blast_stat.c:1124-1127
-    // ```c
-    //         if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-    // ...
-    //         matrix[BLASTNA_SIZE-1][index1] = INT4_MIN / 2;
-    // ...
-    //         matrix[index1][BLASTNA_SIZE-1] = INT4_MIN / 2;
-    // ```
     /// `-xdrop_ungap 1e10` (X-drop `INT_MIN`, which negates to itself): the left walk from the hit
     /// at 3 passes the two sentinels (`INT4_MIN / 2` each: `INT_MIN`) and the mismatch A/C (-3),
     /// where the `Int4` sum wraps to 2^31 - 3, above 0, as in NCBI's x86-64 build; the right walk

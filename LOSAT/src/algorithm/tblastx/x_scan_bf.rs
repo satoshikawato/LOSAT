@@ -106,7 +106,7 @@ pub(crate) fn x_reach_scan_byte_not_taken() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-130 (quoted at `x_scan_subject_bf`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-130 (cited at `x_scan_subject_bf`).
 /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): `s_blast_aa_scan_subject` with each range scanned by
 /// `x_scan_one_range_byte` on `presence` (`x_tbx_presence`). Same arguments, same result, same
 /// `s_range`; `offset_pairs` must hold `array_size + X_SCAN_BYTE_SLACK` entries.
@@ -185,9 +185,6 @@ fn x_table_sparse(lookup: &BlastAaLookupTable) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
-// ```c
-// hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-// ```
 /// EXPERIMENT (LOSAT_X_TBXSCANBF): `s_blast_aa_scan_subject`, or `x_scan_subject_bf` when
 /// `branch_free` (`x_scan_bf_for` of the table; the offset array then from `x_offset_pairs_len`).
 #[inline]
@@ -222,24 +219,6 @@ pub(crate) fn x_scan_subject(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-130
-// ```c
-// while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
-//     s_first=subject->sequence + s_range[1];
-//     s_last=subject->sequence + s_range[2];
-//     ...
-//     for (s = s_first; s <= s_last; s++) {
-//         ...
-//             if (numhits <= (array_size - totalhits)) {
-//                 ...
-//             } else {
-//                 s_range[1] = (Int4)(s - subject->sequence);
-//                 return totalhits;
-//             }
-//     }
-//     s_range[1] = (Int4)(s - subject->sequence);
-// }
-// return totalhits;
-// ```
 /// EXPERIMENT (LOSAT_X_TBXSCANBF): `s_blast_aa_scan_subject` with each range scanned by
 /// `x_scan_one_range_bf`. Same arguments, same result, same `s_range`; `offset_pairs` must hold
 /// `array_size + X_SCAN_BF_SLACK` entries.

@@ -3,7 +3,6 @@ set -euo pipefail
 
 # Comparison-only NCBI API build. Never call from a LOSAT build/runtime path.
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-613,629-646:
-#   FindGeneticCode(id) reads the NCBI genetic-code table;
 #   CAutomaticGenCodeSingleton registers the selected code.
 # NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193,287-305:
 #   InitializeSubject -> CLocalBlast::Run -> CBlastFormat::PrintOneResultSet.

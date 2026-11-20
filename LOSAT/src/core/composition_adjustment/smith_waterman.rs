@@ -15,51 +15,12 @@
 //! position without forbidden ranges passes that test, so one scan of each kind serves both.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:544-575
-//! ```c
-//! int
-//! Blast_SmithWatermanScoreOnly(int *score,
-//!                              int *matchSeqEnd, int *queryEnd,
-//!                              const Uint1 * subject_data, int subject_length,
-//!                              const Uint1 * query_data, int query_length,
-//!                              int **matrix,
-//!                              int gapOpen,
-//!                              int gapExtend,
-//!                              int positionSpecific,
-//!                              const Blast_ForbiddenRanges * forbiddenRanges )
-//! {
-//!     if (forbiddenRanges->isEmpty) {
-//!         return BLbasicSmithWatermanScoreOnly(score, matchSeqEnd,
-//!                                              queryEnd, subject_data,
-//!                                              subject_length,
-//!                                              query_data, query_length,
-//!                                              matrix, gapOpen,
-//!                                              gapExtend,
-//!                                              positionSpecific);
-//!     } else {
-//!         return BLspecialSmithWatermanScoreOnly(score, matchSeqEnd,
-//!                                                queryEnd, subject_data,
-//!                                                subject_length,
-//!                                                query_data,
-//!                                                query_length, matrix,
-//!                                                gapOpen, gapExtend,
-//!                                                forbiddenRanges->numForbidden,
-//!                                                forbiddenRanges->ranges,
-//!                                                positionSpecific);
-//!     }
-//! }
-//! ```
 
 use super::compo_scale::COMPO_SCORE_MIN;
 use crate::core::blast_util::BLASTAA_SIZE;
 use crate::utils::glibc_fma_libm::GlibcLibm;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:38-43
-// ```c
-// typedef struct SwGapInfo {
-//     int noGap;         /**< score if opening a gap */
-//     int gapExists;     /**< score if continuing a gap */
-// } SwGapInfo;
-// ```
 /// `SwGapInfo`: one column of the row that the scans keep.
 #[derive(Debug, Clone, Copy)]
 struct SwGapInfo {
@@ -114,13 +75,6 @@ impl SwScratch {
     /// `scoreVector` of `length` columns, each `{0, -gapOpen}`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:81-85
-    /// ```c
-    ///     newGapCost = gapOpen + gapExtend;
-    ///     for (matchSeqPos = 0;  matchSeqPos < matchSeqLength;  matchSeqPos++) {
-    ///         scoreVector[matchSeqPos].noGap = 0;
-    ///         scoreVector[matchSeqPos].gapExists = -gapOpen;
-    ///     }
-    /// ```
     ///
     /// With it the subject's letters as the scans read them (`padded_row`) and the cleared marks
     /// of the forbidden ranges (`blocked_row`).
@@ -149,7 +103,7 @@ type SwScan<'a> = (&'a [u8], &'a mut [SwGapInfo], &'a mut [bool]);
 
 /// Marks (`value` true) or clears (false) the subject positions that the forbidden ranges `ranges`
 /// of one query position hold, so that the row's cells test one flag each where NCBI's test every
-/// range (`forbidden = TRUE` where `ranges[2f] <= matchSeqPos <= ranges[2f + 1]`, quoted at
+/// range (`forbidden = TRUE` where `ranges[2f] <= matchSeqPos <= ranges[2f + 1]`, cited at
 /// `cell`): the same cells are forbidden.
 fn blocked_row(blocked: &mut [bool], ranges: &[(i32, i32)], value: bool) {
     let last = blocked.len() as i64 - 1;
@@ -164,17 +118,7 @@ fn blocked_row(blocked: &mut [bool], ranges: &[(i32, i32)], value: bool) {
 /// `Blast_ForbiddenRanges`: for each query position, the subject ranges `[start, end]` (both
 /// ends included) that the scans do not align it to, in the order they were pushed.
 ///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/smith_waterman.h:44-51
-/// ```c
-/// typedef struct Blast_ForbiddenRanges {
-///     int   isEmpty;             /**< True if there are no forbidden ranges */
-///     int  *numForbidden;        /**< how many forbidden ranges at each
-///                                     database position */
-///     int **ranges;              /**< forbidden ranges for each database
-///                                    position */
-///     int   capacity;         /**< length of the query sequence */
-/// } Blast_ForbiddenRanges;
-/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/smith_waterman.h:44-53
 #[derive(Debug, Default)]
 pub(crate) struct ForbiddenRanges {
     is_empty: bool,
@@ -194,20 +138,6 @@ impl ForbiddenRanges {
     /// allocates them once for each call of the redo, with the query's length).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:473-500
-    /// ```c
-    ///     self->capacity  = capacity;
-    ///     self->numForbidden = NULL;
-    ///     self->ranges       = NULL;
-    ///     self->isEmpty      = TRUE;
-    ///     ...
-    ///     for (f = 0;  f < capacity;  f++) {
-    ///         self->numForbidden[f] = 0;
-    ///         self->ranges[f]       = (int *) malloc(2 * sizeof(int));
-    ///         ...
-    ///         self->ranges[f][0]    = 0;
-    ///         self->ranges[f][1]    = 0;
-    ///     }
-    /// ```
     pub(crate) fn initialize(&mut self, capacity: usize) {
         self.ranges.truncate(capacity);
         self.ranges.resize_with(capacity, Vec::new);
@@ -217,16 +147,6 @@ impl ForbiddenRanges {
     /// `Blast_ForbiddenRangesClear`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:505-512
-    /// ```c
-    /// void Blast_ForbiddenRangesClear(Blast_ForbiddenRanges * self)
-    /// {
-    ///     int f;
-    ///     for (f = 0;  f < self->capacity;  f++) {
-    ///         self->numForbidden[f] = 0;
-    ///     }
-    ///     self->isEmpty = TRUE;
-    /// }
-    /// ```
     pub(crate) fn clear(&mut self) {
         for ranges in &mut self.ranges {
             ranges.clear();
@@ -238,24 +158,6 @@ impl ForbiddenRanges {
     /// position from `query_start` up to, not including, `query_end`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:516-540
-    /// ```c
-    ///     int f;
-    ///     for (f = queryStart;  f < queryEnd;  f++) {
-    ///         int last = 2 * self->numForbidden[f];
-    ///         if (0 != last) {    /* we must resize the array */
-    ///             int * new_ranges =
-    ///                 realloc(self->ranges[f], (last + 2) * sizeof(int));
-    ///             if (new_ranges == NULL)
-    ///                 return -1;
-    ///             self->ranges[f] = new_ranges;
-    ///         }
-    ///         self->ranges[f][last]     = matchStart;
-    ///         self->ranges[f][last + 1] = matchEnd;
-    ///
-    ///         self->numForbidden[f]++;
-    ///     }
-    ///     self->isEmpty = FALSE;
-    /// ```
     pub(crate) fn push(
         &mut self,
         query_start: i32,
@@ -302,45 +204,7 @@ pub(crate) struct SwStart {
 /// row, on exit this cell's score; `substitution` is the row's score of the subject letter, or
 /// `None` for a forbidden cell.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:291-331
-/// ```c
-///             /* testing scores with a gap in matchSeq, either starting
-///              * a new gap or extending an existing gap */
-///             if ((newScore = newScore - newGapCost) >
-///                 (prevScoreGapMatchSeq = prevScoreGapMatchSeq - gapExtend))
-///                 prevScoreGapMatchSeq = newScore;
-///             /* testing scores with a gap in query, either starting a
-///              * new gap or extending an existing gap */
-///             if ((newScore = scoreVector[matchSeqPos].noGap - newGapCost) >
-///                 (continueGapScore =
-///                  scoreVector[matchSeqPos].gapExists - gapExtend))
-///                 continueGapScore = newScore;
-///             /* compute new score extending one position in matchSeq
-///              * and query */
-///             forbidden = FALSE;
-///             for (f = 0;  f < numForbidden[queryPos];  f++) {
-///                 if ((matchSeqPos >= forbiddenRanges[queryPos][2 * f]) &&
-///                     (matchSeqPos <= forbiddenRanges[queryPos][2*f + 1])) {
-///                     forbidden = TRUE;
-///                     break;
-///                 }
-///             }
-///             if (forbidden)
-///                 newScore = COMPO_SCORE_MIN;
-///             else
-///                 newScore =
-///                     prevScoreNoGapMatchSeq + matrixRow[matchSeq[matchSeqPos]];
-///             if (newScore < 0)
-///                 newScore = 0; /* Smith-Waterman locality condition */
-///             /* test two alternatives */
-///             if (newScore < prevScoreGapMatchSeq)
-///                 newScore = prevScoreGapMatchSeq;
-///             if (newScore < continueGapScore)
-///                 newScore = continueGapScore;
-///             prevScoreNoGapMatchSeq = scoreVector[matchSeqPos].noGap;
-///             scoreVector[matchSeqPos].noGap = newScore;
-///             scoreVector[matchSeqPos].gapExists = continueGapScore;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:290-331
 /// (The basic scans, smith_waterman.c:96-119 and 190-213, are these lines without the forbidden
 /// test.)
 #[inline(always)]
@@ -520,36 +384,6 @@ fn find_start_row<const CHECKED: bool>(
 /// `gap_open + k * gap_extend`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:276-341
-/// ```c
-///     bestMatchSeqPos = 0;
-///     bestQueryPos = 0;
-///     bestScore = 0;
-///     newGapCost = gapOpen + gapExtend;
-///     ...
-///     for (queryPos = 0;  queryPos < queryLength;  queryPos++) {
-///         if (positionSpecific)
-///             matrixRow = matrix[queryPos];
-///         else
-///             matrixRow = matrix[query[queryPos]];
-///         newScore = 0;
-///         prevScoreNoGapMatchSeq = 0;
-///         prevScoreGapMatchSeq = -(gapOpen);
-///         for (matchSeqPos = 0;  matchSeqPos < matchSeqLength;  matchSeqPos++) {
-///             ...
-///             if (newScore > bestScore) {
-///                 bestScore = newScore;
-///                 bestQueryPos = queryPos;
-///                 bestMatchSeqPos = matchSeqPos;
-///             }
-///         }
-///     }
-///     free(scoreVector);
-///     if (bestScore < 0)
-///         bestScore = 0;
-///     *matchSeqEnd = bestMatchSeqPos;
-///     *queryEnd = bestQueryPos;
-///     *score = bestScore;
-/// ```
 // One call per scan, out of line: the row loop keeps its values in registers.
 #[inline(never)]
 pub(crate) fn smith_waterman_score_only<'r, F>(
@@ -600,40 +434,6 @@ where
 /// stops at the first cell where the best score reaches `score_in`, avoiding `forbidden`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:380-454
-/// ```c
-///     bestMatchSeqPos = 0;
-///     bestQueryPos = 0;
-///     bestScore = 0;
-///     newGapCost = gapOpen + gapExtend;
-///     ...
-///     for (queryPos = queryEnd;  queryPos >= 0;  queryPos--) {
-///         if (positionSpecific)
-///             matrixRow = matrix[queryPos];
-///         else
-///             matrixRow = matrix[query[queryPos]];
-///         newScore = 0;
-///         prevScoreNoGapMatchSeq = 0;
-///         prevScoreGapMatchSeq = -(gapOpen);
-///         for (matchSeqPos = matchSeqEnd;  matchSeqPos >= 0;  matchSeqPos--) {
-///             ...
-///             if (newScore > bestScore) {
-///                 bestScore = newScore;
-///                 bestQueryPos = queryPos;
-///                 bestMatchSeqPos = matchSeqPos;
-///             }
-///             if (bestScore >= score_in)
-///                 break;
-///         }
-///         if (bestScore >= score_in)
-///             break;
-///     }
-///     free(scoreVector);
-///     if (bestScore < 0)
-///         bestScore = 0;
-///     *matchSeqStart = bestMatchSeqPos;
-///     *queryStart = bestQueryPos;
-///     *score_out = bestScore;
-/// ```
 // One call per scan, out of line: the row loop keeps its values in registers.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -748,18 +548,11 @@ impl<W: Default> SwRedoScratch<W> {
 /// `s_EvalueFromScore`: the e-value of a Smith-Waterman score in the redo's significance test.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:943-947
-/// ```c
-/// static double
-/// s_EvalueFromScore(int score, double Lambda, double logK, double searchsp)
-/// {
-///     return searchsp * exp(-(Lambda * score) + logK);
-/// }
-/// ```
 pub(crate) fn evalue_from_score(score: i32, lambda: f64, log_k: f64, searchsp: f64) -> f64 {
     searchsp * (-(lambda * f64::from(score)) + log_k).glibc_exp()
 }
 
-/// The significance test of a round (redo_alignment.c:1456-1474, quoted at
+/// The significance test of a round (redo_alignment.c:1456-1474, cited at
 /// `smith_waterman_redo_window`).
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SwSignificance {
@@ -880,129 +673,10 @@ pub(crate) enum SwWindowRedo {
 /// cells 0 or less) also fails, at its traceback.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1438-1529
-/// ```c
-///             Blast_ForbiddenRangesClear(forbidden);
-///             do {
-///                 int matchEnd, queryEnd;    /* end points of the alignments
-///                                             * computed by the Smith-Waterman
-///                                             * algorithm. */
-///                 status =
-///                     Blast_SmithWatermanScoreOnly(&aSwScore, &matchEnd,
-///                                                  &queryEnd,
-///                                                  subject.data,
-///                                                  subject.length,
-///                                                  query.data,
-///                                                  query.length, matrix,
-///                                                  gap_open, gap_extend,
-///                                                  positionBased,
-///                                                  forbidden);
-///                 ...
-///                 if (do_link_hsps) {
-///                     alignment_is_significant = aSwScore >= params->cutoff_s;
-///                 } else {
-///                     double newSwEvalue;     /* evalue as computed by the
-///                                              * Smith-Waterman algorithm */
-///                     newSwEvalue =
-///                         s_EvalueFromScore(aSwScore, Lambda, logK, searchsp);
-///
-///                     alignment_is_significant = newSwEvalue < params->cutoff_e;
-///                     if (alignments[query_index] == NULL) {
-///                         /* this is the most significant alignment; if
-///                          * it will not be accepted, no alignments from
-///                          * this match will */
-///                         alignment_is_significant =
-///                             alignment_is_significant &&
-///                             BlastCompo_HeapWouldInsert(
-///                                 &significantMatches[query_index],
-///                                 newSwEvalue, aSwScore, matchingSeq->index);
-///                     }
-///                 }
-///                 if (alignment_is_significant) {
-///                     ...
-///                     status =
-///                         Blast_SmithWatermanFindStart(&updatedScore,
-///                                                      &matchStart,
-///                                                      &queryStart,
-///                                                      subject.data,
-///                                                      subject.length,
-///                                                      query.data,
-///                                                      matrix, gap_open,
-///                                                      gap_extend,
-///                                                      matchEnd,
-///                                                      queryEnd,
-///                                                      aSwScore,
-///                                                      positionBased,
-///                                                      forbidden);
-///                     ...
-///                     status =
-///                         callbacks->
-///                         new_xdrop_align(&newAlign, &queryEnd, &matchEnd,
-///                                         queryStart, matchStart, aSwScore,
-///                                         &query, &window->query_range,
-///                                         ccat_query_length,
-///                                         &subject, &window->subject_range,
-///                                         matchingSeq->length,
-///                                         gapping_params, matrix_adjust_rule);
-///                     if (status != 0) {
-///                         goto window_index_loop_cleanup;
-///                     }
-///                     newAlign->next = alignments[query_index];
-///                     alignments[query_index] = newAlign;
-///
-///                     if (window->hspcnt > 1) {
-///                         /* We may compute more alignments; make the range
-///                            of the current alignment forbidden */
-///                         status =
-///                             Blast_ForbiddenRangesPush(forbidden,
-///                                                       queryStart, queryEnd,
-///                                                       matchStart, matchEnd);
-///                     }
-///                     ...
-///                 }
-///                 /* end if the next local alignment is significant */
-///             } while (alignment_is_significant && window->hspcnt > 1);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:437-446
-/// ```c
-///             if (newScore > bestScore) {
-///                 bestScore = newScore;
-///                 bestQueryPos = queryPos;
-///                 bestMatchSeqPos = matchSeqPos;
-///             }
-///             if (bestScore >= score_in)
-///                 break;
-///         }
-///         if (bestScore >= score_in)
-///             break;
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:428-432
-/// ```c
-///     if (x_dropoff < gap_open_extend)
-///         x_dropoff = gap_open_extend;
-///
-///     if(N <= 0 || M <= 0)
-///         return 0;
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/gapinfo.c:61-62
-/// ```c
-///     if (size <= 0)
-///        return NULL;
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1856-1873
-/// ```c
-///     if (editScript != NULL) {
-///         ...
-///         obj = BlastCompo_AlignmentNew(newScore, matrix_adjust_rule,
-///                                       aqueryStart, aqueryEnd,
-///                                       query_range->context,
-///                                       amatchStart, amatchEnd,
-///                                       subject_range->context, editScript);
-///         ...
-///     }
-///     *pnewAlign = obj;
-///
-///     return obj != NULL ? 0 : -1;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1856-1876
 // Generic over the caller's rows, heap and traceback: one instance per redo (BLASTP's, RPS-BLAST's),
 // each on the Smith-Waterman path only.
 pub(crate) fn smith_waterman_redo_window<'r, F, H, T>(

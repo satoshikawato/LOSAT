@@ -5,19 +5,6 @@ use super::{
 use crate::utils::matrix::ncbistdaa;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:782-849
-// ```c
-// case 5:
-//     new_cell->query_offsets[0] = backbone_cell->payload.query_offsets[2];
-//     new_cell->query_offsets[1] = backbone_cell->payload.query_offsets[3];
-//     new_cell->query_offsets[2] = query_offset;
-// ...
-// default:
-//     cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-//     if (cell_index == 0 ) {
-//         new_cell->next = backbone_cell->payload.overflow_list.head;
-//         backbone_cell->payload.overflow_list.head = new_cell;
-//     }
-// ```
 #[test]
 fn compressed_word_hit_overflow_matches_ncbi_scan_order() {
     let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
@@ -34,10 +21,6 @@ fn compressed_word_hit_overflow_matches_ncbi_scan_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1182-1242
-// ```c
-// PV_SET(pv, i, pv_array_bts);
-// longest_chain = MAX(count, longest_chain);
-// ```
 #[test]
 fn compressed_finalize_sets_pv_and_longest_chain() {
     let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
@@ -65,12 +48,6 @@ fn compressed_finalize_sets_pv_and_longest_chain() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:859-929
-// ```c
-// s_CompressedLookupAddEncoded(lookup, subject_word, query_offset);
-// ...
-// if (skip == 0)
-//     s_CompressedLookupAddWordHit(lookup, index, query_offset);
-// ```
 #[test]
 fn compressed_encoded_and_unencoded_indices_match() {
     let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
@@ -96,11 +73,6 @@ fn compressed_encoded_and_unencoded_indices_match() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1071-1176
-// ```c
-// s_CompressedAddWordHits(&info, query->sequence, offset);
-// ...
-// s_CompressedAddWordHitsCore(info, score, 0);
-// ```
 #[test]
 fn compressed_neighbor_lookup_builds_representative_blosum62_word() {
     let query = [

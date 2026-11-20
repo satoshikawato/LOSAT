@@ -27,9 +27,6 @@ PROGRAMS = ("blastn", "blastp", "tblastx")
 IMPLEMENTATIONS = ("NCBI BLAST+", "LOSAT")
 PROGRAM_LABELS = {"blastn": "BLASTN", "blastp": "BLASTP", "tblastx": "TBLASTX"}
 # NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:191-194
-# CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
-# lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-# results = lcl_blast.Run();
 # These timing labels retain requested thread configurations; the data-only
 # renderer does not implement or alter search behavior.
 TIMING_MODES = (
@@ -100,9 +97,7 @@ TIMING_FIELDS = {
 }
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40,109-116
-# const char* kDfltArgTabularOutputFmt =
 #     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-#     "evalue bitscore";
 # SFormatSpec("length", "Alignment length", eAlignmentLength),
 # SFormatSpec("pident", "Percentage of identical matches", ePercentIdentical),
 
@@ -573,10 +568,6 @@ def summarize_current_timing(
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:48,55-61
-# static const char kProgram[] = "blastn";
-# static const char kDefaultTask[] = "megablast";
-# SetTask(kDefaultTask);
-# arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
 # Megablast is a distinct task within BLASTN. Facets retain the exact current
 # snapshot case identities; the horizontal layout and independent linear axes
 # follow LOSAT/tests/plot_execution_time.py, without reading its historical logs.

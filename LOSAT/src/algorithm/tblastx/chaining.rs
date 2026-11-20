@@ -3,23 +3,7 @@
 //! `UngappedHit` is the lightweight HSP the scan, the linking and the report steps pass around.
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-101,126-128,133,158
-// ```c
-// typedef struct BlastSeg {
-//    Int2 frame;  /**< Translation frame */
-//    Int4 offset; /**< Start of hsp */
-//    Int4 end;    /**< End of hsp */
-//    Int4 gapped_start;/**< Where the gapped extension started. */
-// } BlastSeg;
-// typedef struct BlastHSP {
-//    Int4 score;           /**< This HSP's raw score */
-//    Int4 num_ident;       /**< Number of identical base pairs in this HSP */
-//    Int4     context;     /**< Context number of query */
-//    Int4 hspcnt; /**< Number of HSPs saved */
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:246
-// ```c
-//    Int4 length;         /**< Length of sequence. */
-// ```
 // No NCBI counterpart: the field widths. NCBI holds an HSP's offsets, seed offsets, context,
 // identity count and its position in a list (`hspcnt`), and a sequence's length, in `Int4`, so
 // every value NCBI accepts there fits `u32` (non-negative values below 2^31). The record is
@@ -63,13 +47,6 @@ pub struct UngappedHit {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:Blast_HSPGetNumIdentitiesAndPositives
     pub num_ident: u32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
-    // ```c
-    // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
-    // {
-    //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //               ScoreCompareHSPs);
-    // ```
     /// Nonprinted position in the current NCBI-equivalent `BlastHSPList`
     /// before score/link qsort steps. Used only when the NCBI comparator
     /// returns equality, so no biological tie-break absent from NCBI is added.
@@ -84,45 +61,18 @@ pub struct UngappedHit {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c line 955
     pub start_of_chain: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-65
-    // ```c
-    // typedef struct BlastHSPLink {
-    //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
-    //                                                choice of HSP to link with */
-    // ```
     /// Stable wrapper id used to preserve `hsp_link.link[ordering_method]`
     /// across the final translated-query qsort/replay phase.
     pub link_id: u32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1022-1028
-    // ```c
-    // /* If the HSP has no "link" connect the "next", otherwise follow the "link"
-    //    chain down, connecting them with "next" and "prev". */
-    // ordering_method = H->ordering_method;
-    // if (H->hsp_link.link[ordering_method] == NULL)
-    // ```
     /// Stable id of the next HSP in the selected chain, if any.
     pub chain_next_link_id: Option<u32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-66
-    // ```c
-    // typedef struct BlastHSPLink {
-    //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
-    //                                                choice of HSP to link with */
-    //    Int2 num[eOrderingMethods]; /**< number of HSP in the ordering. */
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1044-1045
-    // ```c
-    // 			/* The first one has the number of links correct. */
-    // 			num_links = H->hsp_link.num[ordering_method];
-    // ```
     /// `hsp_link.num[ordering_method]` of a chain head when its chain is selected (the
     /// number of HSPs in the chain). Read only for chain heads.
     pub hsp_link_num: i16,
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:135-138
-    // ```c
-    //    Int4 num;             /**< How many HSP's are linked together for sum
-    //                               statistics evaluation? If unset (0), this HSP is
-    //                               not part of a linked set, i.e. value 0 is treated
-    //                               the same way as 1. */
-    // ```
     /// NCBI `BlastHSP::num`. The pairwise report prints it as `Expect(n)` and in the `N`
     /// column (the Seq-align score "sum_n").
     pub num: i32,
@@ -130,19 +80,8 @@ pub struct UngappedHit {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:170-173 (in `Blast_HSPInit`,
 // called by `BLAST_GetUngappedHSPList`, blast_gapalign.c:4760-4767)
-// ```c
-//    new_hsp->query.offset = query_start;
-//    new_hsp->subject.offset = subject_start;
-//    new_hsp->query.end = query_end;
-//    new_hsp->subject.end = subject_end;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 (in
 // `s_BlastAaExtendOneHit`)
-// ```c
-//     init_hit_width = q_right_off - q_left_off + 1;
-// ...
-//     *hsp_len = left_disp + right_disp + init_hit_width;
-// ```
 // No NCBI counterpart: where LOSAT keeps the `Int4` ends of an HSP whose length is 0 or negative.
 // The one-hit word finder of TBLASTX (`-window_size 0`) can save such an HSP (a word whose
 // running sum is reset after its best part), and NCBI's `end = offset + length` is then at or
@@ -188,11 +127,6 @@ impl UngappedHit {
 #[cfg(test)]
 mod tests {
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:98-100
-    // ```c
-    //    Int4 offset; /**< Start of hsp */
-    //    Int4 end;    /**< End of hsp */
-    //    Int4 gapped_start;/**< Where the gapped extension started. */
-    // ```
     // No NCBI counterpart: the layout of LOSAT's record. With the `Int4` values of NCBI in `u32`
     // fields (and the subject frame index in `u8`), one ungapped HSP of the linking list takes
     // 88 bytes on 64-bit targets instead of 152. On 32-bit targets (wasm32) `usize` was 4 bytes

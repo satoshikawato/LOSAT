@@ -3,18 +3,6 @@
 //! (`LOSAT_X_GREEDYROWFUSE`; `=0` runs `x_greedy_row_avx2`, the three passes).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-553,571-614
-//! ```c
-//!         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-//!             seq2_index = MAX(last_seq2_off[d - 1][k + 1],
-//!                              last_seq2_off[d - 1][k    ]) + 1;
-//!             seq2_index = MAX(seq2_index, last_seq2_off[d - 1][k - 1]);
-//!             seq1_index = seq2_index + k - diag_origin;
-//!             if (seq2_index < 0 || seq1_index + seq2_index < xdrop_score) {
-//! ...
-//!             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
-//! ...
-//!             last_seq2_off[d][k] = seq2_index;
-//! ```
 //!
 //! What changes. `x_greedy_row_impl` (the three passes) reads off, in its pass 2, the slide
 //! length of every diagonal from one eight-byte comparison, as a vector loop over the block, and
@@ -67,15 +55,6 @@ use super::{
 use crate::algorithm::blastn::constants::INVALID_OFFSET;
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-553,571-614
-/// ```c
-///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-///             seq2_index = MAX(last_seq2_off[d - 1][k + 1],
-///                              last_seq2_off[d - 1][k    ]) + 1;
-/// ...
-///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
-/// ...
-///             last_seq2_off[d][k] = seq2_index;
-/// ```
 /// One distance, as `x_greedy_row_impl` (same arguments, same result; module doc). Two passes
 /// per block of the band:
 ///
@@ -302,9 +281,6 @@ unsafe fn x_greedy_row_fused<const REVERSE: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
-/// ```c
-///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-/// ```
 /// `x_greedy_row_fused` for the C `reverse` argument, compiled for AVX2/BMI (`tzcnt` / `lzcnt`).
 ///
 /// SAFETY: as `x_greedy_row_avx2` (the CPU must support the features).
@@ -590,13 +566,6 @@ mod tests {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-553,571-614
-    /// ```c
-    ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-    /// ...
-    ///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
-    /// ...
-    ///             last_seq2_off[d][k] = seq2_index;
-    /// ```
     /// Single distances on random rows: the fused build leaves the return value, every cell of
     /// the row (stale cells included) and every field of the state that `x_greedy_row_avx2`
     /// (`LOSAT_X_GREEDYROWFUSE=0`) and the plain build leave. The generator must reach the
@@ -759,16 +728,6 @@ mod tests {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:509-537,682-751
-    /// ```c
-    ///     for (d = 1; d <= max_dist; d++) {
-    /// ...
-    ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-    /// ...
-    ///     if (edit_block == NULL)
-    ///         return best_dist;
-    /// ...
-    ///     s_GetNextNonAffineTback(last_seq2_off, d, diag, &new_seq2_index);
-    /// ```
     /// Sequences of whole alignments on one scratch per build, so that the cells earlier calls
     /// left matter: traceback calls and score-only calls with the fence hit on entry, on related
     /// sequences of up to about 3,000 bases with megablast's and other costs. The fused build

@@ -17,14 +17,7 @@ pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for 
 /// Scan range for off-diagonal hit detection
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:658: Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:63
-/// ```c
-/// #define BLAST_SCAN_RANGE_NUCL 0   /**< default scan range (blastn) */
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:165-168
-/// ```c
-/// SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
-/// SetOffDiagonalRange(BLAST_SCAN_RANGE_NUCL);
-/// ```
 pub const SCAN_RANGE_BLASTN: usize = 0;
 pub const SCAN_RANGE_MEGABLAST: usize = 0;
 

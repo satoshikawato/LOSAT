@@ -179,17 +179,6 @@ impl Drop for Batches {
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-297
-// ```c++
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-// ...
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-// ...
-//             	ITERATE(CSearchResultSet, result, *results) {
-//                	    formatter.PrintOneResultSet(**result, query_batch);
-//             	}
-// ...
-//         formatter.PrintEpilog(opt);
-// ```
 // The half of the test of this name in `LOSAT/tests/run_local_blastx.rs` that the api does not
 // reach: the observer must report the exact bytes of every HSP in every format (the CLI half
 // there compares the reports and the warnings with the CLI runs). The reference is the entry's
@@ -250,11 +239,6 @@ fn assert_observer_ranges_of(inputs: &Inputs, extra: &[&str], hits: bool, contex
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
-// ```c++
-//     if (args.Exist(kArgNumDescriptions) && args[kArgNumDescriptions]) {
-//        m_NumDescriptions = args[kArgNumDescriptions].AsInteger();
-//     }
-// ```
 // The half of the test of this name in `LOSAT/tests/run_local_blastx.rs` that the api does not
 // reach: the entry refuses formats that need different hit list sizes (the api splits them into
 // searches itself), and the formats searched by separate calls share one pool.
@@ -562,18 +546,6 @@ fn short_subject_between_warnings() -> PathBuf {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-// ```c++
-//     TSeqPos size_read = 0;
-//
-//     while (size_read < GetBatchSize()) {
-// ...
-//         catch (const exception&) {
-//             continue; //SB-2307. ignore well formed, not found accession
-//         }
-// ...
-//             size_read += sequence::GetLength(loc->GetInt().GetId(),
-//                                              q->GetScope());
-// ```
 /// The half of the test of this name in `LOSAT/tests/run_local_blastx.rs` that the api does not
 /// reach: the observer's ranges are exact for the records cut by `-query_loc` and `-subject_loc`
 /// (queries skipped or without letters in the range, subjects without letters, lower-case masks,

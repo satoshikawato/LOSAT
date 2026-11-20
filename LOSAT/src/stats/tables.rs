@@ -212,17 +212,6 @@ const BLASTN_5_4: &[ParamEntry] = &[
 ];
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3955-3963
-/// ```c
-/// static double s_GetUngappedBeta(Int4 reward, Int4 penalty)
-/// {
-///     double beta = 0;
-///     if ((reward == 1 && penalty == -1) ||
-///         (reward == 2 && penalty == -3))
-///         beta = -2;
-///
-///     return beta;
-/// }
-/// ```
 pub(crate) fn ungapped_beta(reward: i32, penalty: i32) -> f64 {
     if (reward, penalty) == (1, -1) || (reward, penalty) == (2, -3) {
         -2.0
@@ -236,70 +225,8 @@ pub(crate) fn ungapped_beta(reward: i32, penalty: i32) -> f64 {
 /// with the gap costs multiplied and Lambda and alpha divided by the divisor.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3237-3372
-/// ```c
-///     int divisor = BLAST_Gcd(reward, penalty);
-///
-///     *round_down = FALSE;
-///     ...
-///     if (divisor != 1)
-///     {
-///        reward /= divisor;
-///        penalty /= divisor;
-///     }
-///
-///     if (reward == 1 && penalty == -5) {
-///         if ((status=s_SplitArrayOf8(blastn_values_1_5, &kValues, &kValues_non_affine, &split)))
-///            return status;
-///
-///         *array_size = sizeof(blastn_values_1_5)/sizeof(array_of_8);
-///         *gap_open_max = 3;
-///         *gap_extend_max = 3;
-///     ...
-///     } else if (reward == 2 && penalty == -3) {
-///         ...
-///         *round_down = TRUE;
-///         *array_size = sizeof(blastn_values_2_3)/sizeof(array_of_8);
-///         *gap_open_max = 6;
-///         *gap_extend_max = 4;
-///     ...
-///     } else  { /* Unsupported reward-penalty */
-///         status = -1;
-///         if (error_return) {
-///             char buffer[256];
-///             snprintf(buffer, sizeof(buffer), "Substitution scores %d and %d are not supported",
-///                 reward, penalty);
-///             Blast_MessageWrite(error_return, eBlastSevError, kBlastMessageNoContext, buffer);
-///         }
-///     }
-///     if (split)
-///         (*array_size)--;
-///     ...
-///         status = s_AdjustGapParametersByGcd(*normal, *non_affine, *array_size, gap_open_max, gap_extend_max, divisor);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3159-3170 (s_SplitArrayOf8)
-/// ```c
-///     if (input[0][0] == 0 && input[0][1] == 0)
-///     {
-///             *normal = input+1;
-///             *non_affine = input;
-///             *split = TRUE;
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3192-3215 (s_AdjustGapParametersByGcd)
-/// ```c
-///     (*gap_existence_max) *= divisor;
-///     (*gap_extend_max) *= divisor;
-///     ...
-///                 normal[i][0] *= divisor;
-///                 normal[i][1] *= divisor;
-///                 normal[i][2] /= divisor;
-///                 normal[i][5] /= divisor;
-///     ...
-///        linear[0][0] *= divisor;
-///        linear[0][1] *= divisor;
-///        linear[0][2] /= divisor;
-///        linear[0][5] /= divisor;
-/// ```
 /// The command line accepts no reward of 0, so the divisor is at least 1.
 pub struct NuclValues {
     /// The affine gap costs of the table, with their values.
@@ -358,35 +285,6 @@ impl NuclValues {
     /// scores.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3875-3935
-    /// ```c
-    ///     if (gap_open == 0 && gap_extend == 0 && linear)
-    ///     {
-    ///         kbp->Lambda = linear[0][kLambdaIndex];
-    ///     ...
-    ///         for (index = 0; index < num_combinations; ++index) {
-    ///             if (normal[index][kGapOpenIndex] == gap_open &&
-    ///                 normal[index][kGapExtIndex] == gap_extend) {
-    ///     ...
-    ///         if (index == num_combinations) {
-    ///         /* If gap costs are larger than maximal provided in tables, copy
-    ///            the values from the ungapped Karlin block. */
-    ///             if (gap_open >= gap_open_max && gap_extend >= gap_extend_max) {
-    ///                 Blast_KarlinBlkCopy(kbp, kbp_ungap);
-    ///             } else if (error_return) {
-    ///     ...
-    ///                 out_sz = snprintf(buffer, (size_t)buffer_sz,"Gap existence and extension values %ld and %ld "
-    ///                         "are not supported for substitution scores %ld and %ld\n",
-    ///                         (long) gap_open, (long) gap_extend, (long) reward, (long) penalty);
-    ///     ...
-    ///                      out_sz = snprintf(buffer+len, (size_t)buffer_sz, "%ld and %ld are supported existence and extension values\n",
-    ///                         (long) normal[i][kGapOpenIndex],  (long) normal[i][kGapExtIndex]);
-    ///     ...
-    ///                 out_sz = snprintf(buffer+len, (size_t)buffer_sz, "%ld and %ld are supported existence and extension values\n",
-    ///                      (long) gap_open_max, (long) gap_extend_max);
-    ///     ...
-    ///                 out_sz = snprintf(buffer+len, (size_t)buffer_sz, "Any values more stringent than %ld and %ld are supported\n",
-    ///                      (long) gap_open_max, (long) gap_extend_max);
-    /// ```
     fn row(&self, spec: &NuclScoringSpec) -> Result<Option<ParamEntry>, String> {
         let row = if spec.gap_open == 0 && spec.gap_extend == 0 && self.linear.is_some() {
             self.linear
@@ -434,19 +332,6 @@ impl NuclValues {
     /// `ungapped` is the context's ungapped block, which gap costs beyond the table use.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3995-4026
-    /// ```c
-    ///     if (gapped_calculation && normal) {
-    ///         if (gap_open == 0 && gap_extend == 0 && linear)
-    ///         {
-    ///             *alpha = linear[0][kAlphaIndex];
-    ///             *beta = linear[0][kBetaIndex];
-    ///     ...
-    ///     if (!found)
-    ///     {
-    ///         *alpha = kbp->Lambda/kbp->H;
-    ///         *beta = s_GetUngappedBeta(reward, penalty);
-    ///     }
-    /// ```
     pub fn gapped(
         &self,
         spec: &NuclScoringSpec,
@@ -466,17 +351,6 @@ impl NuclValues {
 /// Lambda, K, H, alpha and beta of a protein table row (NCBI's columns 3-7).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3617-3623, 3078-3081
-/// ```c
-///                kbp->Lambda = values[index][3];
-///                kbp->K = values[index][4];
-///                kbp->logK = log(kbp->K);
-///                kbp->H = values[index][5];
-/// ...
-///          if (alpha)
-///             alpha_array[index] = values[index][6];
-///          if (beta)
-///             beta_array[index] = values[index][7];
-/// ```
 fn protein_row_params(row: &ProteinTableRow) -> KarlinParams {
     KarlinParams {
         lambda: row.0[3],
@@ -503,22 +377,7 @@ fn protein_row_params(row: &ProteinTableRow) -> KarlinParams {
 /// `BLAST_CalcEffLengths` starts with, 0 and 0.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3117-3126
-/// ```c
-///      else {
-///        for(i = 1; i < num_values; i++) {
-///     if ((gapOpen_arr[i] == gap_open) &&
-///         (gapExtend_arr[i] == gap_extend)) {
-///       (*alpha) = alpha_arr[i];
-///       (*beta) = beta_arr[i];
-///       break;
-///     }
-///        }
-///      }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:705
-/// ```c
-///    double alpha=0, beta=0; /*alpha and beta for new scoring system */
-/// ```
 pub fn lookup_protein_params(spec: &ProteinScoringSpec) -> KarlinParams {
     let table = scoring_matrix_table(spec.matrix);
     let row = gap_costs_row(table, spec.gap_open, spec.gap_extend).unwrap_or_else(|| {
@@ -538,14 +397,6 @@ pub fn lookup_protein_params(spec: &ProteinScoringSpec) -> KarlinParams {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:908-936
-// ```c
-// if ((status=Blast_KarlinBlkGappedLoadFromTables(NULL, options->gap_open,
-//       options->gap_extend, options->matrix, std_matrix_only)) != 0)
-// {
-//     ...
-//     return BLASTERR_OPTION_VALUE_INVALID;
-// }
-// ```
 pub fn protein_scoring_supported(spec: &ProteinScoringSpec) -> bool {
     gap_costs_row(
         scoring_matrix_table(spec.matrix),
@@ -561,18 +412,7 @@ pub fn protein_scoring_supported(spec: &ProteinScoringSpec) -> bool {
 /// NCBI BLAST uses ungapped params (kbp_std) for gap_trigger calculation.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:340-345
-/// ```c
-/// if (sbp->kbp_std) {
-///    kbp = sbp->kbp_std[context];
-///    gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3128-3130
-/// ```c
-///    else if (num_values > 0) {
-///      (*alpha) = alpha_arr[0];
-///      (*beta) = beta_arr[0];
-/// ```
 pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
     protein_row_params(&scoring_matrix_table(matrix).values[0])
 }
@@ -584,27 +424,11 @@ pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
 /// for length_adjustment calculation in BLAST_CalcEffLengths.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:814-819
-/// ```c
-/// BLAST_GetAlphaBeta(sbp->name, &alpha, &beta,
-///                    scoring_options->gapped_calculation,  // TRUE
-///                    gap_open, gap_extend, sbp->kbp_std[index]);
-/// ```
 ///
 /// For tblastx, scoring_options->gapped_calculation = TRUE (default),
 /// so BLAST_GetAlphaBeta returns gapped alpha/beta values.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3107-3116
-/// ```c
-///    if (gapped) {
-///      if ((0 == gap_open) && (0 == gap_extend)) {
-///        for(i = 1; i < num_values; i++) {
-///     if(pref_flags[i]==BLAST_MATRIX_BEST) {
-///       (*alpha) = alpha_arr[i];
-///       (*beta) = beta_arr[i];
-///       break;
-///     }
-///        }
-/// ```
 #[cfg(test)]
 pub fn lookup_protein_params_gapped(matrix: ScoringMatrix) -> KarlinParams {
     let (gap_open, gap_extend) = protein_gap_existence_extend_params(matrix.ncbi_name())

@@ -8,22 +8,6 @@
 use crate::ncbi_app::args::{flag, key, Constraint, Dep, Desc, Kind};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:901-919
-// ```c++
-// void CBlastDBCmdApp::Init()
-// {
-//     HideStdArgs(fHideConffile | fHideFullVersion | fHideXmlHelp | fHideDryRun);
-//
-//     unique_ptr<CArgDescriptions> arg_desc(new CArgDescriptions);
-//     ...
-//     arg_desc->AddDefaultKey(kArgDb, "dbname", "BLAST database name",
-//                             CArgDescriptions::eString, "nr");
-//
-//     arg_desc->AddDefaultKey(kArgDbType, "molecule_type",
-//                             "Molecule type stored in BLAST database",
-//                             CArgDescriptions::eString, "guess");
-//     arg_desc->SetConstraint(kArgDbType, &(*new CArgAllow_Strings,
-//                                         "nucl", "prot", "guess"));
-// ```
 /// The arguments of `CBlastDBCmdApp::Init` (blastdbcmd.cpp:901-1167) in the order it describes
 /// them; NCBI's reader adds the help flags before them and `-logfile` and `-conffile` after them
 /// (`ncbi_app::args`). The file keys are `eInputFile` (`-entry_batch`, `-ipg_batch`,
@@ -77,15 +61,6 @@ pub(super) const DESCS: &[Desc] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:955-961
-// ```c++
-//     arg_desc->AddFlag("info", "Print BLAST database information", true);
-//     // All other options to this program should be here
-//     const char* exclusions[]  = { "entry", "entry_batch", "outfmt", "strand",
-//         "target_only", "ctrl_a", "get_dups", "pig", "range",
-//         "mask_sequence", "list", "remove_redundant_dbs", "recursive",
-//         "list_outfmt", "metadata", "metadata_output_prefix", kArgTaxIdListFile.c_str(), kArgTaxIdList.c_str(),
-//         kArgNoTaxIdExpansion.c_str()};
-// ```
 // `pig` and `mask_sequence` name no argument, so they never apply.
 const INFO_EXCLUSIONS: &[&str] = &[
     "entry",
@@ -110,13 +85,6 @@ const INFO_EXCLUSIONS: &[&str] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:969-977
-// ```c++
-//     const char* exclusions_m[]  = { "entry", "entry_batch", "outfmt", "strand",
-//         "target_only", "ctrl_a", "get_dups", "pig", "range",
-//         "mask_sequence", "list", "remove_redundant_dbs", "recursive",
-//         "list_outfmt", "info", kArgTaxIdListFile.c_str(), kArgTaxIdList.c_str(),
-//         kArgNoTaxIdExpansion.c_str()};
-// ```
 const METADATA_EXCLUSIONS: &[&str] = &[
     "entry",
     "entry_batch",
@@ -139,13 +107,6 @@ const METADATA_EXCLUSIONS: &[&str] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:994-998
-// ```c++
-//     const char* tax_info_exclusions[]  = { "info", "entry", "entry_batch", "strand",
-//         "target_only", "ctrl_a", "get_dups", "pig", "range",
-//         "mask_sequence", "list", "remove_redundant_dbs", "recursive",
-//         "list_outfmt", kArgTaxIdListFile.c_str(), kArgTaxIdList.c_str(),
-//         kArgNoTaxIdExpansion.c_str() };
-// ```
 const TAX_INFO_EXCLUSIONS: &[&str] = &[
     "info",
     "entry",
@@ -167,11 +128,6 @@ const TAX_INFO_EXCLUSIONS: &[&str] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1111-1113
-// ```c++
-//     const char* exclusions_discovery[]  = { "entry", "entry_batch", "outfmt",
-//         "strand", "target_only", "ctrl_a", "get_dups", "pig", "range", kArgDb.c_str(),
-//         "info", "mask_sequence", "line_length" };
-// ```
 const DISCOVERY_EXCLUSIONS: &[&str] = &[
     "entry",
     "entry_batch",

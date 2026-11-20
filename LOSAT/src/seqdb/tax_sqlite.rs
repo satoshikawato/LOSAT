@@ -306,38 +306,6 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:77-106
-    // ```c++
-    // void CTaxonomy4BlastSQLite::x_SanityCheck()
-    // {
-    //     const map<string, string> kRequiredElements {
-    //         { "table", "TaxidInfo" },
-    //         { "index", "TaxidInfoCompositeIdx_parent" }
-    //     };
-    //     const string kSqlStmt =
-    //         "SELECT COUNT(*) FROM sqlite_master WHERE type=? and name=?;";
-    //     for (auto& [type, name] : kRequiredElements) {
-    //         unique_ptr<CSQLITE_Statement> s(new CSQLITE_Statement(&*m_DbConn, kSqlStmt));
-    //         s->Bind(1, type);
-    //         s->Bind(2, name);
-    //         s->Execute();
-    //         if (s->Step()) {
-    //             if (s->GetInt(0) != 1) {
-    //                 CNcbiOstrstream oss;
-    //                 oss << "Database '" << m_DbName << "' does not have " << type;
-    //                 oss << " " << name << ". Please run the following command or ";
-    //                 oss << "contact your system administrator to install it:" << endl;
-    //                 oss << "update_blastdb.pl --decompress taxdb";
-    //                 NCBI_THROW(CSeqDBException, eArgErr, CNcbiOstrstreamToString(oss));
-    //             }
-    //         } else {
-    //             CNcbiOstrstream oss;
-    //             oss << "Failed to check for " << type << " " << name << " in '";
-    //             oss << m_DbName << "'";
-    //             NCBI_THROW(CSeqDBException, eArgErr, CNcbiOstrstreamToString(oss));
-    //         }
-    //     }
-    // }
-    // ```
     // The `map` iterates in key order, so the index is checked before the table.
     // `SELECT COUNT(*)` always returns a row, so the "Failed to check" branch cannot
     // happen. `db_name` is the resolved path NCBI puts in the message. The header
@@ -728,17 +696,6 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:40-48
-    // ```c++
-    // const char* kSQLQuery = R"(
-    // WITH RECURSIVE descendants_from(taxid, parent) AS
-    //     (SELECT ?1, NULL
-    //      UNION ALL
-    //      SELECT T.taxid, T.parent
-    //        FROM descendants_from D, TaxidInfo T
-    //        WHERE D.taxid = T.parent)
-    // SELECT taxid from descendants_from;
-    // )";
-    // ```
     // The recursive step `T.parent = D.taxid` is answered by the index
     // `TaxidInfoCompositeIdx_parent (parent, taxid)`: all entries whose first
     // column equals `x` are adjacent, ordered by taxid. The scan seeks the first
@@ -790,27 +747,6 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:108-126
-    // ```c++
-    // void CTaxonomy4BlastSQLite::GetLeafNodeTaxids(const int taxid, vector<int>& descendants)
-    // {
-    //     descendants.clear();
-    //     if (taxid <= 0) return;
-    //
-    //     if (!m_Statement) {
-    //         m_Statement.reset(new CSQLITE_Statement(&*m_DbConn, kSQLQuery));
-    //     }
-    //     m_Statement->Reset();
-    //     m_Statement->ClearBindings();
-    //     m_Statement->Bind(1, taxid);
-    //     m_Statement->Execute();
-    //
-    //     while (m_Statement->Step()) {
-    //         auto desc_taxid = m_Statement->GetInt(0);
-    //         if (desc_taxid != taxid)
-    //             descendants.push_back(desc_taxid);
-    //     }
-    // }
-    // ```
     /// All proper descendants of `taxid` (children, their children, ...) in the order
     /// SQLite's recursive CTE emits them, which is breadth first: SQLite keeps the
     /// rows of the recursive table in a queue, outputs the row at the head and

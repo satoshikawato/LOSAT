@@ -2,13 +2,6 @@
 //! the former switch `LOSAT_X_TBNLINKWIN` graduated on 2026-10-26) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1713-1723
-//! ```c
-//!        for (index1 = hsp_index_left; index1 < hsp_index_right; ++index1) {
-//!            BlastLinkedHSPSet* lhsp = offset_hsp_array[index1];
-//!            ...
-//!            if (s_LinkedHSPSetsAdmissible(head_hsp, lhsp,
-//!                                          link_hsp_params, program)) {
-//! ```
 //! The search tests the candidates of NCBI's window less those that cannot be admissible, in
 //! NCBI's order (the unit test `x_chosen_candidates_give_the_links_of_the_whole_window` compares
 //! the links with NCBI's whole window), so its report is that of NCBI's loop (the frozen NCBI

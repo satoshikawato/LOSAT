@@ -518,9 +518,6 @@ fn pairwise_hit(e_value: f64) -> PairwiseHit {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1186
-// ```c++
-//     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
-// ```
 // The sorts compare the Seq-align's E-values: below 1e-180 both are 0.0, so `0.0 < 0.0` is false
 // and the order stays (NCBI 2.17.0 `blastp -comp_based_stats 0 -sorthits 4` on a query and two
 // subjects, the query itself and the query between 800 letters on each side, keeps the second

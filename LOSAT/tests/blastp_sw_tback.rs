@@ -16,31 +16,10 @@
 //! (frozen on ws); these tests pin LOSAT's decisions and their independence of `-num_threads`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
-//! ```c
-//!     for (i = 0; i < actual_num_threads; ++i) {
-//!         if (status_code_tld[i] != 0) {
-//!             status_code = status_code_tld[i];
-//!         }
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
-//! ```c++
-//!     if (status) {
-//!         NCBI_THROW(CBlastException, eCoreBlastError, "Traceback failed");
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3796-3802 (the arrays of
 //! every query's heap are freed, then the first query's heap is popped:
 //! `BlastCompo_HeapPop`, compo_heap.c:444-457, reads `heapArray[1]` when its count is above 0)
-//! ```c
-//!             if (redoneMatches_tld[i] != NULL) {
-//!                 int qi;
-//!                 for (qi = 0; qi < numQueries; ++qi) {
-//!                     sfree(redoneMatches_tld[i][qi].array);
-//!                     sfree(redoneMatches_tld[i][qi].heapArray);
-//!                 }
-//!                 s_ClearHeap(redoneMatches_tld[i]);
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

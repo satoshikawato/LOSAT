@@ -4,7 +4,6 @@ let cryptoModule = null;
 const crypto = () => cryptoModule ??= require("node:crypto");
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status); return status;
 // WASI ABI boundary: command uses _start; reactor uses _initialize once.
 // Inspect actual imports/exports and binary memory limits, never the filename.
 // Module validation and ownership are Wasm-host concerns. Retain the validated
@@ -63,13 +62,11 @@ function prepareArtifact(bytes, expected, module = new WebAssembly.Module(bytes)
   return { module, identity: { kind, sha256: sha256 ?? crypto().createHash("sha256").update(bytes).digest("hex"), imports, exports, memory: memories[0] } };
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status); ... return status;
 // Preserve the metadata-only API and CLI JSON; validation errors still propagate.
 function inspectArtifact(bytes, expected) {
   return prepareArtifact(bytes, expected).identity;
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-// CATCH_ALL(status); return status;
 // Host compatibility only. A Wasm i32 reaches JavaScript as a signed number, so a
 // pointer or a length of 2 GiB or more arrives negative. Node v24.21.0 and v26.8.2,
 // src/node_wasi.cc:300-301,393-394:
@@ -119,7 +116,6 @@ function blockingStdioWrite(fdWrite) {
   };
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
 // Host memory only. The module declares the largest shared memory it can use (65,535
 // pages, LOSAT/.cargo/config.toml), and a provided memory may have a smaller maximum
 // (WebAssembly import matching). An engine reserves a shared memory's maximum as address

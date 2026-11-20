@@ -24,7 +24,6 @@ def digest(path):
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
-# (*thread)->Run(); (*thread)->Join(&result);
 # Build identity only: the shared memory's maximum is a link argument in the target
 # rustflags (.cargo/config.toml). A build that lost it would silently declare Rust's 1 GiB.
 def declared_maximum_pages(rustflags):
@@ -34,7 +33,6 @@ def declared_maximum_pages(rustflags):
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
-# (*thread)->Run(); (*thread)->Join(&result);
 # Host compatibility only: the threaded modules are written with the shared-memory guard
 # (wasi_shared_memory.js), so that every host, browsers included, runs guarded bytes (release
 # v0.2.0 DECISIONS 52). The guard exits 1, and the build fails, when it declines an encoding,
@@ -49,7 +47,6 @@ def write_artifact(node, kind, built, destination):
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-# TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
 # Artifact identity belongs to the host ABI, not to any NCBI implementation.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -59,7 +56,6 @@ def main():
     parser.add_argument("--reverse-order", action="store_true")
     # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     # #ifdef NCBI_NO_THREADS
-    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
     # Serial artifacts are an explicit compatibility build, not the default.
     parser.add_argument("--include-serial", action="store_true",
                         help="also build serial command/reactor compatibility artifacts")
@@ -67,7 +63,6 @@ def main():
     out, target = args.output_dir.resolve(), args.target_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
     # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
-    # CATCH_ALL(status); return status;
     # Do not silently mix old compatibility outputs into a threaded bundle.
     if not args.include_serial and any((out / name).exists() for name in
                                       ["losat-serial-command.wasm", "losat-serial-reactor.wasm",
@@ -80,7 +75,6 @@ def main():
     node = subprocess.check_output([args.node, "-p", "JSON.stringify(process.versions)"], text=True)
     recorded, identities = {}, {}
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
-    # (*thread)->Run(); (*thread)->Join(&result);
     kinds = [kind for kind in SPECS if args.include_serial or kind.startswith("threaded-")]
     for kind in reversed(kinds) if args.reverse_order else kinds:
         triple, options, features = SPECS[kind]
@@ -118,7 +112,6 @@ def main():
         print(f"{kind}: {identity['sha256']}", flush=True)
     runtime_files = {}
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
-    # (*thread)->Run(); (*thread)->Join(&result);
     runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_thread_worker.js", "wasi_artifact.js", "wasi_shared_memory.js", "wasi_files.js"]
     if args.include_serial:
         runtime_names.append("run_losat_wasi.js")

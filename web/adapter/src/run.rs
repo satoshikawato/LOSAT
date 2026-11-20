@@ -698,18 +698,6 @@ impl FormatObserver for RangeRecorder {
 /// run before any hit.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155
-/// ```c++
-///         try { q.Reset(m_Source->GetNextSequence(scope)); }
-///         catch (const CObjReaderParseException& e) {
-///             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-///                 break;
-///             }
-///             throw;
-///         }
-///         catch (const exception&) {
-///             continue; //SB-2307. ignore well formed, not found accession
-///         }
-/// ```
 fn searched_queries(query_loc: Option<&str>, records: &[FastaRecord]) -> Option<Vec<usize>> {
     use losat::web_adapter::{parse_optional_range, record_interval, RangeRole, RecordInterval};
     let range = parse_optional_range(query_loc, RangeRole::Query).ok()??;

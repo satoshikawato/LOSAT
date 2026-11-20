@@ -14,13 +14,6 @@
 //! stored O). There is no rule (class `always`): every `-db` run takes this path.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385
-//! ```c
-//!         if( program_number == eBlastTypeTblastn ) {
-//!             seq_info->seq_arg.encoding = eBlastEncodingNcbi4na;
-//!         } else {
-//!             seq_info->seq_arg.encoding = eBlastEncodingProtein;
-//!         }
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

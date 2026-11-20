@@ -1107,7 +1107,7 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
     )
 
 
-# NCBI references:
+# NCBI references (598d8ae6):
 # - c++/src/algo/blast/format/blast_format.cpp:770-832
 #   dispatches the selected output format.
 # - c++/src/objtools/align_format/tabular.cpp:1098-1108
@@ -1191,7 +1191,7 @@ def run_capture(
     )
 
 
-# NCBI references:
+# NCBI references (598d8ae6):
 # - c++/src/algo/blast/format/blast_format.cpp:770-832
 #   formats the search result produced from the supplied query and subject.
 # - c++/src/objtools/align_format/tabular.cpp:1098-1108
@@ -1725,16 +1725,6 @@ def _input_arguments(
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:794-808
-# ```c++
-# if (m_FormatType == CFormattingArgs::eTabularWithComments) {
-#     if (m_IsDbScan)
-#         dbname = string("User specified sequence set (Input: ")
-#                  + m_SubjectTag + string(")");
-#     tabinfo.PrintHeader(strProgVersion, *(bhandle.GetBioseqCore()),
-#                         dbname, results.GetRID(), itr_num, aln_set,
-#                         subject_bioseq);
-# }
-# ```
 # The input argument is therefore certification provenance for commented tabular
 # output. Only its filesystem layer is redirected to the immutable PR 5 spelling.
 def _adapt_fixture_arguments(
@@ -1865,7 +1855,7 @@ def required_fixture_relatives(steps: Sequence[SearchStep]) -> list[PurePosixPat
     return sorted(required, key=PurePosixPath.as_posix)
 
 
-# NCBI references:
+# NCBI references (598d8ae6):
 # - c++/src/algo/blast/format/blast_format.cpp:770-832
 # - c++/src/objtools/align_format/tabular.cpp:1098-1108
 # The exact query/subject bytes feed the certified raw formatter bytes. Copy the
@@ -1947,12 +1937,6 @@ def fixture_staging_identity(records: Sequence[StagedFixture]) -> dict[str, obje
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-832
-# ```c++
-# ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-#     tabinfo.SetFields(**itr, *m_Scope, &m_ScoringMatrix);
-#     tabinfo.Print();
-# }
-# ```
 # Existing program authorities own command construction and output classification.
 # This platform layer records and invokes those commands without sorting or rewriting
 # LOSAT output; the Gate A manifest's raw SHA-256 is the cross-platform gate.
@@ -2076,7 +2060,6 @@ def build_steps(
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
-#   x_PrintField(*iter); m_Ostream << "\n";
 # Gate A compares these raw bytes by SHA-256 without normalization. The known
 # frozen mismatches are read from the candidate commit's Git blob, like the
 # other control files; a frozen manifest is never rewritten (a new output
@@ -2200,7 +2183,6 @@ def allowed_known_mismatch_lines(
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
-#   x_PrintField(*iter); m_Ostream << "\n";
 # One rule for a Gate A output hash in execution, resume and aggregation: the
 # Gate A manifest hash, or, for a case in frozen_mismatch_allowlist.json, only its
 # recorded actual output. A listed case that matches its frozen hash again is
@@ -2349,7 +2331,7 @@ def _authority_executable(
     return matches[0]
 
 
-# NCBI references:
+# NCBI references (598d8ae6):
 # - c++/src/algo/blast/format/blast_format.cpp:770-832
 #   selects the requested tabular formatter before the search output is written.
 # - c++/src/objtools/align_format/tabular.cpp:1098-1108
@@ -2508,7 +2490,7 @@ def verify_native_invocation_identity(
         ) from error
 
 
-# NCBI references:
+# NCBI references (598d8ae6):
 # - c++/src/objtools/align_format/tabular.cpp:59-91
 #   expands the selected tabular fields in their requested order.
 # - c++/src/objtools/align_format/tabular.cpp:1098-1108
@@ -2570,7 +2552,7 @@ def line_endings_only(left: Path, right: Path) -> bool:
     ) == canonical_newlines(right_bytes)
 
 
-# NCBI references:
+# NCBI references (598d8ae6):
 # - c++/src/algo/blast/format/blast_format.cpp:828-832
 #   emits retained alignments before this post-acceptance comparison exists.
 # - c++/src/objtools/align_format/tabular.cpp:1100-1108

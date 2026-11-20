@@ -39,8 +39,6 @@ static std::pair<std::string, std::string> ReadFasta(const char* path) {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:274-280:
-//   query = input->GetNextSeqBatch(*scope);
-//   query_factory.Reset(new CObjMgr_QueryFactory(*query));
 static CRef<CSeq_loc> AddSequence(CScope& scope, const char* path, bool protein) {
     auto fasta = ReadFasta(path);
     CRef<CBioseq> bio(new CBioseq);
@@ -77,16 +75,9 @@ int main(int argc, char** argv) {
     if (fmt != 0 && fmt != 6 && fmt != 7) return 2;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-613:
-    //   const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
-    //   CSeqportUtil::Convert(gc_ncbieaa, &gc_ncbistdaa, CSeq_data::e_Ncbistdaa);
     auto gc = FindGeneticCode(code);
     if (!gc.get()) throw std::runtime_error("NCBI rejected genetic code");
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:629-646:
-    //   GenCodeSingletonInit();
-    //   if (GenCodeSingletonFind(genetic_code) == NULL) {
-    //       TAutoUint1ArrayPtr gc = FindGeneticCode(genetic_code);
-    //       GenCodeSingletonAdd(genetic_code, gc.get());
-    //   }
     CAutomaticGenCodeSingleton genetic_codes(code);
 
     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
@@ -109,18 +100,14 @@ int main(int argc, char** argv) {
     options->SetSegFilteringHicut(2.5);
     options->SetMaskAtHash(false);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1048-1056:
-    //   opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
     options->SetDbGeneticCode(code);
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193,287-291:
     //   InitializeSubject(db_args, m_OptsHndl, ..., db_adapter, scope);
-    //   CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
     CSearchDatabase search_db(argv[3], CSearchDatabase::eBlastDbIsNucleotide);
     CRef<CLocalDbAdapter> db(new CLocalDbAdapter(search_db));
 
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:242-265,275-305,342:
     //   CBlastFormat formatter(opt, *db_adapter, ... opt.GetDbGeneticCode() ...);
-    //   CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-    //   results = lcl_blast.Run(); formatter.PrintOneResultSet(**result, query);
     CLocalBlast search(qf, options, db);
     CRef<CSearchResultSet> results = search.Run();
     CFormattingArgs::EOutputFormat output = fmt == 0 ? CFormattingArgs::ePairwise :

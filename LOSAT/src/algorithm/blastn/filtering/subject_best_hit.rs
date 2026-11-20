@@ -10,7 +10,6 @@ use super::super::hsp::BlastnHsp;
 
 /// Default range difference for subject best hit filtering
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:1211-1212
-/// #define BLAST_SUBJECT_BESTHIT_DEFAULT_RANGE_DIFF 3
 const MAX_RANGE_DIFF: i64 = 3;
 
 /// The fields of an HSP that `Blast_HSPListSubjectBestHit` reads: its context, the frame of
@@ -29,24 +28,11 @@ pub struct BestHitKey {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2537-2606 Blast_HSPListSubjectBestHit
 ///
-/// ```c
-/// // NCBI algorithm:
-/// // 1. Sort HSPs by score (already done)
-/// // 2. For each HSP, remove subsequent HSPs with:
-/// //    - Same context (strand)
-/// //    - Query range within ±range_diff of current HSP
-/// // 3. For BLASTN: Also filter cross-strand HSPs with flipped coordinates
-/// ```
-///
 /// Arguments:
 /// - `hits`: Vector of HSPs, already sorted by score descending
 /// - `query_len`: Length of the query sequence (for cross-strand coordinate flipping)
 pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2563-2566
-    // ```c
-    // o = hsp_array[i]->query.offset - range_diff;
-    // e = hsp_array[i]->query.end + range_diff;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2563-2567
     // Subject-best-hit filtering uses internal query.offset/query.end, not
     // output coordinates.
     subject_best_hit_by(hits, |h| BestHitKey {
@@ -68,29 +54,10 @@ pub fn subject_best_hit_by<T>(hits: &mut Vec<T>, key: impl Fn(&T) -> BestHitKey)
     let keys: Vec<BestHitKey> = hits.iter().map(&key).collect();
     // Mark HSPs for removal
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2560-2566
-    // ```c
-    // // The hsp list is sorted by score
-    // for(i=0; i < hsp_list->hspcnt -1; i++) {
-    //     ...
-    // }
-    // ```
     let mut to_remove = vec![false; hits.len()];
 
     // Pass 1: Same-strand filtering
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2561-2577
-    // ```c
-    // for(i=0; i < hsp_list->hspcnt -1; i++) {
-    //     o = hsp_array[i]->query.offset - range_diff;
-    //     e = hsp_array[i]->query.end + range_diff;
-    //     while (i+j < hsp_list->hspcnt) {
-    //         if (hsp_array[i+j] && hsp_array[i]->context == hsp_array[i+j]->context &&
-    //             ((hsp_array[i+j]->query.offset >= o) && (hsp_array[i+j]->query.end <= e))) {
-    //             hsp_array[i+j] = Blast_HSPFree(hsp_array[i+j]);
-    //         }
-    //         j++;
-    //     }
-    // }
-    // ```
     for i in 0..hits.len() {
         if to_remove[i] {
             continue;
@@ -121,24 +88,6 @@ pub fn subject_best_hit_by<T>(hits: &mut Vec<T>, key: impl Fn(&T) -> BestHitKey)
 
     // Pass 2: Cross-strand filtering (BLASTN-specific)
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2582-2604
-    // ```c
-    // if(isBlastn) {
-    //     for(i=0; i < hsp_list->hspcnt -1; i++) {
-    //         curr_context = hsp_array[i]->context;
-    //         qlen = query_info->contexts[curr_context].query_length;
-    //         target_context = (hsp_array[i]->query.frame > 0) ? curr_context +1 : curr_context -1;
-    //         e = qlen - (hsp_array[i]->query.offset - range_diff);
-    //         o = qlen - (hsp_array[i]->query.end + range_diff);
-    //         while (i+j < hsp_list->hspcnt) {
-    //             if(hsp_array[i+j] && (hsp_array[i+j]->context == target_context) &&
-    //                ((hsp_array[i+j]->query.offset >= o) && (hsp_array[i+j]->query.end <= e))) {
-    //                 hsp_array[i+j] = Blast_HSPFree(hsp_array[i+j]);
-    //             }
-    //             j++;
-    //         }
-    //     }
-    // }
-    // ```
     for i in 0..hits.len() {
         if to_remove[i] {
             continue;
@@ -203,15 +152,6 @@ mod tests {
         query_frame: i32,
     ) -> BlastnHsp {
         // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
-        // ```c
-        // typedef struct BlastHSP {
-        //    Int4 score;
-        //    double evalue;
-        //    BlastSeg query;
-        //    BlastSeg subject;
-        //    Int4 context;
-        // } BlastHSP;
-        // ```
         BlastnHsp {
             identity: 100.0,
             length: q_end - q_start + 1,
@@ -225,12 +165,6 @@ mod tests {
             bit_score: score as f64,
             num_ident: q_end - q_start + 1,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1132
-            // ```c
-            // if (hsp->query.frame != hsp->subject.frame) {
-            //    *q_end = query_length - hsp->query.offset;
-            //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
-            // }
-            // ```
             query_frame,
             query_length: 1000,
             q_idx: 0,

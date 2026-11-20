@@ -18,7 +18,6 @@ use super::super::alignment::ContextQuery;
 use super::super::hsp::{adjust_blastn_offsets, BlastnHsp};
 use crate::utils::glibc_fma_libm::GlibcLibm;
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
-// BlastHSP** hsp_array;
 use super::super::tracing as blastn_trace;
 use crate::common::GapEditOp;
 use rustc_hash::FxHashMap;
@@ -26,31 +25,11 @@ use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2484-2487
-// ```c
-// hsp_array[i]->context == hsp_array[i+j]->context &&
-// hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
-// hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
-// hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame
-// ```
 fn blastn_hsp_context(hsp: &BlastnHsp) -> u32 {
     hsp.q_idx * 2 + if hsp.query_frame < 0 { 1 } else { 0 }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2285-2318
-// ```c
-// if (h1->context < h2->context) return -1;
-// if (h1->context > h2->context) return 1;
-// if (h1->query.offset < h2->query.offset) return -1;
-// if (h1->query.offset > h2->query.offset) return 1;
-// if (h1->subject.offset < h2->subject.offset) return -1;
-// if (h1->subject.offset > h2->subject.offset) return 1;
-// if (h1->score < h2->score) return 1;
-// if (h1->score > h2->score) return -1;
-// if (h1->query.end < h2->query.end) return 1;
-// if (h1->query.end > h2->query.end) return -1;
-// if (h1->subject.end < h2->subject.end) return 1;
-// if (h1->subject.end > h2->subject.end) return -1;
-// ```
 fn compare_query_offset_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     blastn_hsp_context(a)
         .cmp(&blastn_hsp_context(b))
@@ -62,20 +41,6 @@ fn compare_query_offset_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2350-2384
-// ```c
-// if (h1->context < h2->context) return -1;
-// if (h1->context > h2->context) return 1;
-// if (h1->query.end < h2->query.end) return -1;
-// if (h1->query.end > h2->query.end) return 1;
-// if (h1->subject.end < h2->subject.end) return -1;
-// if (h1->subject.end > h2->subject.end) return 1;
-// if (h1->score < h2->score) return 1;
-// if (h1->score > h2->score) return -1;
-// if (h1->query.offset < h2->query.offset) return 1;
-// if (h1->query.offset > h2->query.offset) return -1;
-// if (h1->subject.offset < h2->subject.offset) return 1;
-// if (h1->subject.offset > h2->subject.offset) return -1;
-// ```
 fn compare_query_end_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     blastn_hsp_context(a)
         .cmp(&blastn_hsp_context(b))
@@ -99,40 +64,7 @@ fn compare_query_end_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -> O
 /// - If cut_begin=true: Keep the END portion, update offsets
 /// - If cut_begin=false: Keep the START portion, update ends
 ///
-/// ```c
-/// // NCBI s_CutOffGapEditScript (blast_hits.c:2392-2452)
-/// static void
-/// s_CutOffGapEditScript(BlastHSP* hsp, Int4 q_cut, Int4 s_cut, Boolean cut_begin)
-/// {
-///    int index, opid, qid, sid;
-///    Boolean found = FALSE;
-///    GapEditScript *esp = hsp->gap_info;
-///    qid = 0;
-///    sid = 0;
-///    opid = 0;
-///    q_cut -= hsp->query.offset;
-///    s_cut -= hsp->subject.offset;
-///    for (index=0; index < esp->size; index++) {
-///        for(opid=0; opid < esp->num[index];){
-///           if (esp->op_type[index] == eGapAlignSub) {
-///              qid++;
-///              sid++;
-///              opid++;
-///           } else if (esp->op_type[index] == eGapAlignDel) {
-///              sid+=esp->num[index];
-///              opid+=esp->num[index];
-///           } else if (esp->op_type[index] == eGapAlignIns) {
-///              qid+=esp->num[index];
-///              opid+=esp->num[index];
-///           }
-///           if (qid >= q_cut && sid >= s_cut) found = TRUE;
-///           if (found) break;
-///        }
-///        if (found) break;
-///    }
-///    // ... (trimming logic follows)
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2391-2416
 ///
 /// # Arguments
 /// * `hit` - HSP to modify in place
@@ -150,12 +82,6 @@ pub fn cut_off_gap_edit_script(
     cut_begin: bool,
 ) -> bool {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2392-2396
-    // ```c
-    // s_CutOffGapEditScript(BlastHSP* hsp, Int4 q_cut, Int4 s_cut, Boolean cut_begin)
-    // {
-    //    ...
-    //    GapEditScript *esp = hsp->gap_info;
-    // ```
     // NCBI mutates the HSP's existing edit script in place. Move the Vec out
     // while trimming so Rust does not clone the whole script in this hot path.
     let mut gap_info = match hit.gap_info.take() {
@@ -166,12 +92,7 @@ pub fn cut_off_gap_edit_script(
         }
     };
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2398-2401
-    // ```c
-    // GapEditScript *esp = hsp->gap_info;
-    // q_cut -= hsp->query.offset;
-    // s_cut -= hsp->subject.offset;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2396-2401
     // Endpoint trimming operates on canonical internal offsets already stored
     // in the HSP. Do not reconstruct them from output coordinates.
     let mut q_offset_0 = hit.internal_q_offset_0;
@@ -252,21 +173,6 @@ pub fn cut_off_gap_edit_script(
 
     if cut_begin {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2426-2439
-        // ```c
-        // if (cut_begin) {
-        //     int new_index = 0;
-        //     if (opid < esp->num[index]) {
-        //        esp->op_type[0] = esp->op_type[index];
-        //        esp->num[0] = esp->num[index] - opid;
-        //        new_index++;
-        //     }
-        //     ++index;
-        //     for (; index < esp->size; index++, new_index++) {
-        //        esp->op_type[new_index] = esp->op_type[index];
-        //        esp->num[new_index] = esp->num[index];
-        //     }
-        //     esp->size = new_index;
-        // ```
         // Keep the tail of the same edit script buffer.
         let drain_end = match gap_info[found_index] {
             GapEditOp::Sub(n) if found_opid < n as usize => {
@@ -285,17 +191,6 @@ pub fn cut_off_gap_edit_script(
         s_offset_0 = s_offset_0.saturating_add(sid);
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2442-2449
-        // ```c
-        // } else {
-        //     if (opid < esp->num[index]) {
-        //        ASSERT(esp->op_type[index] == eGapAlignSub);
-        //        esp->num[index] = opid;
-        //     }
-        //     esp->size = index+1;
-        //     hsp->query.end = hsp->query.offset + qid;
-        //     hsp->subject.end = hsp->subject.offset + sid;
-        // }
-        // ```
         // Keep the prefix and truncate the same edit script buffer.
         if let GapEditOp::Sub(n) = gap_info[found_index] {
             if found_opid < n as usize {
@@ -306,7 +201,7 @@ pub fn cut_off_gap_edit_script(
 
         // Update HSP coordinates
         // NCBI: hsp->query.end = hsp->query.offset + qid;
-        // hsp->subject.end = hsp->subject.offset + sid;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2449-2449
         q_end_0 = q_offset_0 + qid as i32;
         s_end_0 = s_offset_0.saturating_add(sid);
     }
@@ -319,14 +214,7 @@ pub fn cut_off_gap_edit_script(
         hit.query_length,
         hit.query_frame,
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2436-2444
-    // ```c
-    // hsp->query.offset += qid;
-    // hsp->subject.offset += sid;
-    // ...
-    // hsp->query.end = hsp->query.offset + qid;
-    // hsp->subject.end = hsp->subject.offset + sid;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2436-2449
     hit.internal_q_offset_0 = q_offset_0;
     hit.internal_q_end_0 = q_end_0;
     hit.internal_s_offset_0 = s_offset_0;
@@ -366,27 +254,6 @@ pub fn cut_off_gap_edit_script(
 /// * `purge` - If true, delete HSPs entirely (current behavior).
 ///   If false, trim overlapping HSPs using gap_info and move to end.
 ///
-/// ```c
-/// // NCBI s_QueryOffsetCompareHSPs (blast_hits.c:2268-2320)
-/// // Sort by: context, query.offset, subject.offset, score DESC
-/// if (h1->context < h2->context) return -1;
-/// if (h1->context > h2->context) return 1;
-/// if (h1->query.offset < h2->query.offset) return -1;
-/// if (h1->query.offset > h2->query.offset) return 1;
-/// if (h1->subject.offset < h2->subject.offset) return -1;
-/// if (h1->subject.offset > h2->subject.offset) return 1;
-/// if (h1->score < h2->score) return 1;  // DESC
-/// if (h1->score > h2->score) return -1;
-/// ```
-///
-/// ```c
-/// // NCBI purge condition (blast_hits.c:2482-2487)
-/// hsp_array[i]->context == hsp_array[i+j]->context &&
-/// hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
-/// hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
-/// hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame
-/// ```
-///
 /// For blastn:
 /// - context = query index + strand (q_idx * 2 + {0,1})
 /// - subject.frame is always +1 (blastn subject only), so strand is encoded by context.
@@ -406,14 +273,6 @@ pub fn purge_hsps_with_common_endpoints_ex(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:637-668
-    // ```c
-    // Int4 extra_start =
-    //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
-    // ...
-    // if(program_number == eBlastTypeBlastn) {
-    //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-    // }
-    // ```
     // Traceback calls this on one BlastHSPList, i.e. one subject, in the hot path.
     // Avoid rebuilding the same per-subject grouping when the input already matches
     // NCBI's per-subject HSP list shape.
@@ -422,15 +281,6 @@ pub fn purge_hsps_with_common_endpoints_ex(
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
-    //    BlastHSP** hsp_array;
-    //    Int4 hspcnt;
-    //    ...
-    // } BlastHSPList;
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2535
     // Blast_HSPListPurgeHSPsWithCommonEndpoints operates on BlastHSPList which is per-subject.
     // We must group hits by subject oid (s_idx) and process each group separately.
@@ -471,7 +321,6 @@ pub fn purge_hsps_with_common_endpoints(hits: Vec<BlastnHsp>) -> Vec<BlastnHsp> 
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
-// BlastHSP** hsp_array;
 // A nonzero slot+1 is the Rust equivalent of a nullable HSP pointer.
 type HspHandle = Option<NonZeroUsize>;
 
@@ -535,13 +384,6 @@ const _: () = assert!(
 );
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2457,2478
-// ```c
-// Blast_HSPListPurgeHSPsWithCommonEndpoints(EBlastProgramType program,
-//                                           BlastHSPList* hsp_list,
-//                                           Boolean purge)
-// ...
-//    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-// ```
 /// Purge HSPs with common endpoints for a single subject.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2535
@@ -560,8 +402,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
 
     let initial_count = len;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2471-2478
-    // hsp_array = hsp_list->hsp_array;
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
     // Keep HSP payloads in fixed slots while sorting/shifting nullable handles.
     // This arena never grows or reorders; only final materialization moves live HSPs.
     let mut hsp_storage: Vec<Option<BlastnHsp>> = hits.into_iter().map(Some).collect();
@@ -574,12 +414,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     let mut end_trimmed = 0usize;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2471-2478
-    // ```c
-    // hsp_array = hsp_list->hsp_array;
-    // hsp_count = hsp_list->hspcnt;
-    //
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-    // ```
     qsort_hsp_array_prefix_by(
         &hsp_storage,
         &mut hsp_array,
@@ -588,39 +422,11 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     );
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2480-2500
-    // if (!purge && (hsp->query.end > hsp_array[i]->query.end)) {
     //     s_CutOffGapEditScript(hsp, hsp_array[i]->query.end, hsp_array[i]->subject.end, TRUE);
-    // } else {
-    //     hsp = Blast_HSPFree(hsp);
-    // }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2478-2500
-    // ```c
-    // while (i+j < hsp_count &&
-    //        hsp_array[i]->context == hsp_array[i+j]->context &&
-    //        hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
-    //        hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
-    //        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
-    //    hsp_count--;
-    //    hsp = hsp_array[i+j];
-    //    ...
-    //    for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-    //    hsp_array[hsp_count] = hsp;
-    // }
-    // ```
     // The C code keeps the sorted active prefix and moves trimmed/null HSPs to
     // the tail by decrementing hsp_count before shifting hsp_array left.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2478-2502
-    // ```c
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-    // ...
-    //         hsp_count--;
-    //         hsp = hsp_array[i+j];
-    // ...
-    //         for (k=i+j; k<hsp_count; k++) {
-    //             hsp_array[k] = hsp_array[k+1];
-    //         }
-    //         hsp_array[hsp_count] = hsp;
-    // ```
     // No NCBI counterpart: LOSAT makes the same keep/trim/delete decisions on the same pairs as the C
     // loop above. It writes the survivors in order and the removed entries to the tail slots the C
     // shifts would leave them in, so the array is the same; it only avoids the repeated left shifts.
@@ -679,7 +485,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
                             keeper_s_end,
                         );
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2494,2520
-                        // hsp = Blast_HSPFree(hsp);
                         // Release owned script storage now, before shifting handles.
                         drop(
                             hsp_storage[handle.get() - 1]
@@ -699,10 +504,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
         }
         hsp_count = w + 1;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
-        // ```c
-        // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-        // hsp_array[hsp_count] = hsp;
-        // ```
         // The removed handles go to the tail slots, the first removal to the last slot.
         for (k, tail) in tails.into_iter().enumerate() {
             hsp_array[n0 - 1 - k] = tail;
@@ -712,9 +513,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     // Pass 2: Remove HSPs with common END positions
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2504-2526
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2504
-    // ```c
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
-    // ```
     qsort_hsp_array_prefix_by(
         &hsp_storage,
         &mut hsp_array,
@@ -722,39 +520,11 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
         compare_query_end_hsps_for_common_endpoint,
     );
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2516-2520
-    // if (!purge && (hsp->query.offset < hsp_array[i]->query.offset)) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2499-2528
     //     s_CutOffGapEditScript(hsp, hsp_array[i]->query.offset, hsp_array[i]->subject.offset, FALSE);
-    // } else {
-    //     hsp = Blast_HSPFree(hsp);
-    // }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2512-2528
-    // ```c
-    // while (i+j < hsp_count &&
-    //        hsp_array[i]->context == hsp_array[i+j]->context &&
-    //        hsp_array[i]->query.end == hsp_array[i+j]->query.end &&
-    //        hsp_array[i]->subject.end == hsp_array[i+j]->subject.end &&
-    //        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
-    //    hsp_count--;
-    //    hsp = hsp_array[i+j];
-    //    ...
-    //    for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-    //    hsp_array[hsp_count] = hsp;
-    // }
-    // ```
     // Repeat the same active-prefix mutation NCBI uses for common endpoints.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2504-2528
-    // ```c
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
-    // ...
-    //         hsp_count--;
-    //         hsp = hsp_array[i+j];
-    // ...
-    //         for (k=i+j; k<hsp_count; k++) {
-    //             hsp_array[k] = hsp_array[k+1];
-    //         }
-    //         hsp_array[hsp_count] = hsp;
-    // ```
     // No NCBI counterpart: LOSAT makes the same keep/trim/delete decisions on the same pairs as the C
     // loop above. It writes the survivors in order and the removed entries to the tail slots the C
     // shifts would leave them in, so the array is the same; it only avoids the repeated left shifts.
@@ -817,7 +587,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
                             keeper_s_offset,
                         );
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2494,2520
-                        // hsp = Blast_HSPFree(hsp);
                         // Release owned script storage now, before shifting handles.
                         drop(
                             hsp_storage[handle.get() - 1]
@@ -837,10 +606,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
         }
         hsp_count = w + 1;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
-        // ```c
-        // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-        // hsp_array[hsp_count] = hsp;
-        // ```
         // The removed handles go to the tail slots, the first removal to the last slot.
         for (k, tail) in tails.into_iter().enumerate() {
             hsp_array[n0 - 1 - k] = tail;
@@ -848,19 +613,11 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2530-2535
-    // ```c
-    // if (purge) {
-    //    Blast_HSPListPurgeNullHSPs(hsp_list);
-    // }
-    //
-    // return hsp_count;
-    // ```
     // In purge=false mode NCBI leaves trimmed HSPs in the tail for
     // blast_traceback.c:647-665 to re-evaluate, while NULL tail entries are
     // skipped. Store the same live order and return the active-prefix boundary.
     let extra_start = hsp_count;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2530-2535
-    // Blast_HSPListPurgeNullHSPs(hsp_list); return hsp_count;
     // No NCBI counterpart (memory placement only): the live handle order is applied to the storage
     // in place, so the list is never copied into a second array (`x_in_handle_order`).
     let hits = x_in_handle_order(hsp_storage, &hsp_array);
@@ -885,11 +642,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2387
-// ```c
-// if (!h1 && !h2) return 0;
-// else if (!h1) return 1;
-// else if (!h2) return -1;
-// ```
 // NCBI's qsort callbacks sort NULL HSP pointers after real HSPs. The active
 // prefix normally contains only real HSPs, but preserve the NULL ordering when
 // mirroring Blast_HSPListPurgeHSPsWithCommonEndpoints exactly.
@@ -901,8 +653,6 @@ fn qsort_hsp_array_prefix_by(
 ) {
     let prefix_len = hsp_count.min(hsp_array.len());
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2478,2504,2268-2387
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-    // if (!h1 && !h2) return 0; else if (!h1) return 1; else if (!h2) return -1;
     // Retain the existing Rust stable tie order, without adding an index tie-break.
     hsp_array[..prefix_len].sort_by(|&lhs, &rhs| {
         match (
@@ -918,13 +668,6 @@ fn qsort_hsp_array_prefix_by(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2482-2487
-// ```c
-// hsp_array[i] && hsp_array[i+j] &&
-// hsp_array[i]->context == hsp_array[i+j]->context &&
-// hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
-// hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
-// hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame
-// ```
 fn same_common_start(
     hsp_storage: &[Option<BlastnHsp>],
     hsp_array: &[HspHandle],
@@ -947,13 +690,6 @@ fn same_common_start(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2508-2513
-// ```c
-// hsp_array[i] && hsp_array[i+j] &&
-// hsp_array[i]->context == hsp_array[i+j]->context &&
-// hsp_array[i]->query.end == hsp_array[i+j]->query.end &&
-// hsp_array[i]->subject.end == hsp_array[i+j]->subject.end &&
-// hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame
-// ```
 fn same_common_end(
     hsp_storage: &[Option<BlastnHsp>],
     hsp_array: &[HspHandle],
@@ -976,35 +712,7 @@ fn same_common_end(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2480-2499
-// ```c
-// while (i+j < hsp_count &&
-//        hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
-//        hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
-//        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
-//    hsp_count--;
-//    hsp = hsp_array[i+j];
-//    if (!purge && (hsp->query.end > hsp_array[i]->query.end)) {
-//        s_CutOffGapEditScript(hsp, hsp_array[i]->query.end,
-//                                  hsp_array[i]->subject.end, TRUE);
-//    } else {
-//        hsp = Blast_HSPFree(hsp);
-//    }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2512-2525
-// ```c
-// while (i+j < hsp_count &&
-//        hsp_array[i]->query.end == hsp_array[i+j]->query.end &&
-//        hsp_array[i]->subject.end == hsp_array[i+j]->subject.end &&
-//        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
-//    hsp_count--;
-//    hsp = hsp_array[i+j];
-//    if (!purge && (hsp->query.offset < hsp_array[i]->query.offset)) {
-//        s_CutOffGapEditScript(hsp, hsp_array[i]->query.offset,
-//                                  hsp_array[i]->subject.offset, FALSE);
-//    } else {
-//        hsp = Blast_HSPFree(hsp);
-//    }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2508-2525
 fn trace_common_endpoint_purge_decision(
     pass: &str,
     action: &str,
@@ -1138,23 +846,7 @@ fn stats_from_edit_ops(
 /// Update identity/length stats and apply Blast_HSPTestIdentityAndLength filtering.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:656-663
-/// ```c
-/// delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
-/// if (!delete_hsp)
-///     delete_hsp = Blast_HSPTestIdentityAndLength(program_number, hsp,
-///                                                 query_nomask, subject,
-///                                                 score_options, hit_options);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-818
-/// ```c
-/// for (index=0; index<esp->size; index++) {
-///     align_length += esp->num[index];
-///     if (esp->op_type[index] == eGapAlignSub) {
-///         if (*q == *s) num_ident++;
-///         ...
-///     }
-/// }
-/// ```
 pub fn blast_hsp_test_identity_and_length(
     hit: &mut BlastnHsp,
     query_nomask: ContextQuery<'_>,
@@ -1162,18 +854,7 @@ pub fn blast_hsp_test_identity_and_length(
     percent_identity: f64,
 ) -> bool {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:758-765
-    // ```c
-    // q_off = hsp->query.offset;
-    // s_off = hsp->subject.offset;
-    // q = (Uint1*) &query[q_off];
-    // s = (Uint1*) &subject[s_off];
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:678-692
-    // ```c
-    // Since the list is sorted by score already, any HSP
-    // contained by a previous HSP is guaranteed to have a
-    // lower score, and may be purged.
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:675-676,678-692
     // BLASTN re-evaluation and identity counting operate on canonical internal
     // offsets; output coordinates are adjusted only after pruning. NCBI's `query` is the
     // context's start in the concatenated query (`query_nomask`), read at the HSP's `Int4`
@@ -1208,16 +889,6 @@ pub fn blast_hsp_test_identity_and_length(
     hit.mismatch = mismatches;
     hit.gapopen = gap_opens;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
-    // ```c
-    // s_Blast_HSPGetNumIdentitiesAndPositives(..., Int4* num_ident_ptr, ...,
-    //                                         Int4* num_pos_ptr)
-    // {
-    //    ...
-    //    *num_ident_ptr = num_ident;
-    //    ...
-    //    *num_pos_ptr = num_pos + num_ident;
-    // }
-    // ```
     hit.num_ident = matches;
     hit.num_positives = matches;
     hit.identity = if align_length > 0 {
@@ -1237,13 +908,6 @@ pub struct ReevalParams {
     pub k: f64,
     pub eff_searchsp: i64,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1864-1870
-    // ```c
-    // score = hsp->score;
-    // if (hsp_list && hsp_list->hspcnt != 0
-    //         && gapped_calculation && sbp->round_down) {
-    //     score &= ~1;
-    // }
-    // ```
     pub round_down_evalue_score: bool,
 }
 
@@ -1262,16 +926,12 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     reeval_params: Option<&ReevalParams>,
 ) -> bool {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:539-540
-    // esp = hsp->gap_info;
-    // if (!esp) return TRUE;
     let gap_ops = match hit.gap_info.as_mut() {
         Some(info) if !info.is_empty() => info,
         _ => return true, // No gap_info = delete HSP
     };
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:528-535
-    // query = q + hsp->query.offset;
-    // subject = s + hsp->subject.offset;
     // `q` is the context's start in the concatenated query and `qlen` the context's length
     // (`ContextQuery`): the positions below are in the concatenated query, from the HSP's `Int4`
     // offset, which lies outside the context for an HSP outside it.
@@ -1291,12 +951,6 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     };
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:507-514
-    // ```c
-    // const Uint1* query,* subject;
-    // Int4** matrix;
-    // ...
-    // matrix = sbp->matrix->data;
-    // ```
     let matrix = score_matrix;
 
     let mut score: i32 = 0;
@@ -1342,36 +996,6 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     let mut best_end_esp_num: i32 = -1;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:562-608
-    // ```c
-    // if (sum < 0) {
-    //     if (op_index < esp->num[index]) {
-    //         esp->num[index] -= op_index;
-    //         current_start_esp_index = index;
-    //         op_index = 0;
-    //     } else {
-    //         current_start_esp_index = index + 1;
-    //     }
-    //     sum = 0;
-    //     current_q_start = query;
-    //     current_s_start = subject;
-    //     if (score < cutoff_score) {
-    //         best_q_start = query;
-    //         best_s_start = subject;
-    //         score = 0;
-    //         best_start_esp_index = current_start_esp_index;
-    //         best_end_esp_index = current_start_esp_index;
-    //     }
-    // } else if (sum > score) {
-    //     score = sum;
-    //     best_q_start = current_q_start;
-    //     best_s_start = current_s_start;
-    //     best_q_end = query;
-    //     best_s_end = subject;
-    //     best_start_esp_index = current_start_esp_index;
-    //     best_end_esp_index = index;
-    //     best_end_esp_num = op_index;
-    // }
-    // ```
     macro_rules! update_after_op {
         ($index:ident, $op_index:ident) => {{
             if sum < 0 {
@@ -1409,27 +1033,12 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:541-610
-    // ```c
-    // if (op_index < esp->num[index]) {
-    //     esp->num[index] -= op_index;
-    //     current_start_esp_index = index;
-    //     op_index = 0;
-    // } else {
-    //     current_start_esp_index = index + 1;
-    // }
-    // ```
     for index in 0..gap_ops.len() {
         let mut op_index = 0usize;
         while op_index < gap_ops[index].num() as usize {
             match gap_ops[index] {
                 GapEditOp::Sub(_) => {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:547-551
-                    // ```c
-                    // sum += factor*matrix[*query & kResidueMask][*subject];
-                    // query++;
-                    // subject++;
-                    // op_index++;
-                    // ```
                     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
                     {
                         use std::arch::wasm32::*;
@@ -1577,26 +1186,13 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:640-646
-    // ```c
-    // return s_UpdateReevaluatedHSP(hsp, TRUE, cutoff_score,
-    //                               score, q, s, best_q_start,
-    //                               best_q_end, best_s_start, best_s_end,
-    //                               best_start_esp_index, best_end_esp_index,
-    //                               best_end_esp_num);
-    // ```
     if score < cutoff_score {
         return true;
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:414-470 s_UpdateReevaluatedHSP
     hit.raw_score = score;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:452-455
-    // ```c
-    // hsp->query.offset = (Int4)(best_q_start - query_start);
-    // hsp->query.end = (Int4)(hsp->query.offset + best_q_end - best_q_start);
-    // hsp->subject.offset = (Int4)(best_s_start - subject_start);
-    // hsp->subject.end = (Int4)(hsp->subject.offset + best_s_end - best_s_start);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:452-458
     // Back to NCBI's `Int4` offsets in the context.
     let best_q_start = (best_q_start as isize - query.start as isize) as i32;
     let best_q_end = (best_q_end as isize - query.start as isize) as i32;
@@ -1617,16 +1213,6 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     hit.s_start = s_start;
     hit.s_end = s_end;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:460-470
-    // ```c
-    // if (best_end_esp_index != last_num || best_start_esp_index > 0) {
-    //     GapEditScript* esp_temp = GapEditScriptNew(...);
-    //     GapEditScriptPartialCopy(esp_temp, 0, hsp->gap_info, ...);
-    //     hsp->gap_info = GapEditScriptDelete(hsp->gap_info);
-    //     hsp->gap_info = esp_temp;
-    // }
-    // last_num = hsp->gap_info->size - 1;
-    // hsp->gap_info->num[last_num] = best_end_esp_num;
-    // ```
     let mut new_gap_info: Option<Vec<GapEditOp>> = None;
     if best_end_esp_index != gap_ops.len().saturating_sub(1) || best_start_esp_index > 0 {
         let mut subset = gap_ops[best_start_esp_index..=best_end_esp_index].to_vec();
@@ -1666,23 +1252,12 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
 
         // E-value calculation
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1864-1870
-        // ```c
-        // /* Round score down to even number for E-value calculations only. */
-        // score = hsp->score;
-        // if (hsp_list && hsp_list->hspcnt != 0
-        //         && gapped_calculation && sbp->round_down) {
-        //     score &= ~1;
-        // }
-        // ```
         let evalue_score = if params.round_down_evalue_score {
             score & !1
         } else {
             score
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4157-4171
-        // ```c
-        // return (double) searchsp * exp((double)(-Lambda * S) + kbp->logK);
-        // ```
         // E = K * searchsp * exp(-lambda * score)
         if params.eff_searchsp > 0 {
             hit.e_value = params.k
@@ -1698,14 +1273,7 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
 mod tests {
     use super::*;
 
-    // NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:45-53
-    // ```c
-    // typedef enum {
-    //    eGapAlignDel = 0, /**< Deletion: a gap in query */
-    //    eGapAlignSub = 3, /**< Substitution */
-    //    eGapAlignIns = 6, /**< Insertion: a gap in subject */
-    // } EGapAlignOpType;
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:45-54
     fn edit_script_consumption(edit_ops: &[GapEditOp]) -> (usize, usize) {
         edit_ops.iter().fold(
             (0usize, 0usize),
@@ -1721,16 +1289,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
-    // ```c
-    // typedef struct BlastHSP {
-    //    Int4 score;
-    //    Int4 num_ident;
-    //    BlastSeg query;
-    //    BlastSeg subject;
-    //    Int4 context;
-    //    GapEditScript* gap_info;
-    // } BlastHSP;
-    // ```
     fn opaque_equal_endpoint_hsps() -> (BlastnHsp, BlastnHsp) {
         let g_ops = vec![
             GapEditOp::Sub(10),
@@ -1784,9 +1342,6 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2480-2535
     // if (!purge && hsp->query.end > hsp_array[i]->query.end)
     //     s_CutOffGapEditScript(hsp, ..., TRUE);
-    // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-    // hsp_array[hsp_count] = hsp;
-    // ... repeat for common ends with cut_begin=FALSE; return hsp_count;
     // Repeated removals in both passes must keep the active order and the
     // reverse removal order of live trimmed tail entries around NULL slots.
     #[test]
@@ -1844,8 +1399,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2478,2504,2268-2387
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-    // if (!h1 && !h2) return 0; else if (!h1) return 1; else if (!h2) return -1;
     #[test]
     fn handle_sort_keeps_payload_addresses_equal_order_and_tail() {
         let (a, b) = opaque_equal_endpoint_hsps();
@@ -1979,7 +1532,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2490-2499,2516-2525
     // s_CutOffGapEditScript(hsp, ..., TRUE); ... s_CutOffGapEditScript(hsp, ..., FALSE);
-    // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
     // Also complements unit_tests/api/blasthits_unit_test.cpp:1163-1204.
     #[test]
     fn final_active_slot_can_be_trimmed_or_deleted_in_either_pass() {
@@ -2037,18 +1589,6 @@ mod tests {
     // without depending on the host libc's ordering of comparator-equal items.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2478-2500
-    // ```c
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-    // while (i+j < hsp_count &&
-    //        hsp_array[i]->context == hsp_array[i+j]->context &&
-    //        hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
-    //        hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset) {
-    //    hsp_count--;
-    //    hsp = hsp_array[i+j];
-    //    hsp = Blast_HSPFree(hsp);
-    //    for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-    // }
-    // ```
     fn purge_after_injected_common_start_sort(post_sort_order: Vec<BlastnHsp>) -> Vec<BlastnHsp> {
         let mut hsp_storage: Vec<_> = post_sort_order.into_iter().map(Some).collect();
         let mut hsp_array: Vec<HspHandle> = (0..hsp_storage.len())
@@ -2119,12 +1659,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2285-2387
-    // ```c
-    // if (h1->score < h2->score) return 1;
-    // if (h1->score > h2->score) return -1;
-    // ... compare the remaining endpoint ...
-    // return 0;
-    // ```
     #[test]
     fn common_endpoint_comparator_ignores_edit_script() {
         let (g_path, s_path) = opaque_equal_endpoint_hsps();
@@ -2208,31 +1742,10 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2285-2318
-    // ```c
-    // if (h1->query.offset < h2->query.offset) return -1;
-    // if (h1->query.offset > h2->query.offset) return 1;
-    // if (h1->subject.offset < h2->subject.offset) return -1;
-    // if (h1->subject.offset > h2->subject.offset) return 1;
-    // if (h1->score < h2->score) return 1;
-    // if (h1->score > h2->score) return -1;
-    // if (h1->query.end < h2->query.end) return 1;
-    // if (h1->query.end > h2->query.end) return -1;
-    // if (h1->subject.end < h2->subject.end) return 1;
-    // if (h1->subject.end > h2->subject.end) return -1;
-    // ```
     #[test]
     fn test_purge_common_start_keeps_longer_end_on_score_tie() {
         fn make_hit(q_end: usize, s_end: usize) -> BlastnHsp {
             // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
-            // ```c
-            // typedef struct BlastHSP {
-            //    Int4 score;
-            //    double evalue;
-            //    BlastSeg query;
-            //    BlastSeg subject;
-            //    Int4 context;
-            // } BlastHSP;
-            // ```
             BlastnHsp {
                 identity: 100.0,
                 length: q_end,

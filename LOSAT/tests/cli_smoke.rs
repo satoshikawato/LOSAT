@@ -79,10 +79,6 @@ fn run_losat(args: &[&str]) -> Output {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:48-53
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:47-52
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
-// ```c
-// m_ClientId = string(kProgram) + " " + CBlastVersion().Print();
-// m_ClientId = kProgram + " " + CBlastVersion().Print();
-// ```
 #[test]
 fn cli_help_and_version_are_available_without_inputs() {
     for args in [
@@ -158,14 +154,6 @@ fn startup_trace_needs_the_diagnostics_feature() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
-// ```c
-//     NON_CONST_ITERATE(TBlastCmdLineArgs, arg, m_Args) {
-//         (*arg)->ExtractAlgorithmOptions(args, opts);
-//     }
-//
-//     m_IsUngapped = !opts.GetGappedMode();
-//     try { retval->Validate(); }
-// ```
 // NCBI's handlers read the subjects and open the query before the options are checked, so a
 // missing file is reported first; LOSAT's rejection of an option that NCBI runs comes where
 // NCBI checks the options. The option here is `-use_sw_tback` without composition-based
@@ -215,12 +203,6 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
-// ```c
-// CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
-// CRef<CBlastInput> input(new CBlastInput(fasta));
-// CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-// sequences = input->GetAllSeqs(*scope);
-// ```
 #[test]
 fn missing_input_file_reports_ncbi_error() {
     let missing_query = temp_path("missing_query", "fa");
@@ -249,23 +231,7 @@ fn missing_input_file_reports_ncbi_error() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:751-758
-// ```c++
-//     if (bad >= good / 3  &&
-//         (len_to_check > 3  ||  good == 0  ||  bad > good))
-//     {
-//         FASTA_ERROR( LineNumber(),
-//             "CFastaReader: Near line " << LineNumber()
-//             << ", there's a line that doesn't look like plausible data, "
-//             "but it's not marked as defline or comment.",
-//             CObjReaderParseException::eFormat);
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
-// ```c++
-//     catch (const CObjReaderParseException& e) {                             \
-//         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
 // A comment line before the first defline is skipped; a first data line that does not
 // look like sequence data stops BLASTN with NCBI's reader error.
 #[test]
@@ -619,16 +585,6 @@ fn makeblastdb_reads_compressed_inputs_as_makeblastdb_does() {
         );
 
         // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1513-1526
-        // ```c++
-        //             if ((errcode == Z_STREAM_END)  &&  m_IsGZ) {
-        //                 // Skip .gz file footer (8 bytes)
-        //                 if (STREAM->avail_in < 8) {
-        //                     m_SkipInput = 8 - STREAM->avail_in;
-        //                     STREAM->avail_in = 0;
-        //                 } else {
-        //                     STREAM->avail_in -= 8;
-        //                 }
-        // ```
         // makeblastdb skips a gzip member's trailer without checking it: a wrong CRC-32, or a
         // trailer cut short, builds the database of the intact file (makeblastdb 2.17.0,
         // 2026-11-08: exit 0, "added 1 sequences", no message).
@@ -664,20 +620,6 @@ fn makeblastdb_reads_compressed_inputs_as_makeblastdb_does() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-152
-// ```c++
-//     while (size_read < GetBatchSize()) {
-//
-//         if (End())
-//             break;
-//
-//         CRef<CBlastSearchQuery> q;
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-// ```
 // NCBI reads the queries one batch at a time: a reader error in a later batch comes after
 // the reports of the batches before, without the epilog (oracle BI b_q_b2_bad_7), and in
 // the first batch before any report.
@@ -723,12 +665,6 @@ fn a_reader_error_in_a_later_query_batch_follows_the_earlier_reports() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-// ```c++
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-// ```
 // BLASTP's pairwise formats, outfmt 0 and the query-anchored 1 to 4, write through one formatter
 // stream, which throws on a failed write: NCBI BLAST+ 2.17.0 (`blastp -query of1/qa.fa -subject
 // of1/sp.fa -num_threads 1`, line RG T3a review 2 D4) exits with status 6 and that message for each
@@ -766,13 +702,7 @@ fn a_failed_write_of_a_blastp_pairwise_format_exits_as_ncbi() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
-// ```c
-// #if _BLAST_DEBUG
-// arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-//                  true);
-// #endif /* _BLAST_DEBUG */
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
 #[test]
 fn normal_tblastx_run_keeps_stderr_clean_without_debug_env() {
     let query = temp_path("tblastx_query", "fa");
@@ -813,14 +743,6 @@ fn normal_tblastx_run_keeps_stderr_clean_without_debug_env() {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977
-// ```c++
-//             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
-//                 delete[] v;
-//                 // Print VERSION
-//                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
-//                 diag_context.DiscardMessages();
-//                 return 0;
-// ```
 // NCBI reads `-version` before any other argument: anywhere before `--`, in the value place
 // of another option, and next to arguments that are invalid.
 #[test]
@@ -867,10 +789,6 @@ fn ncbi_version_is_two_lines_for_every_program() {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
-// ```c++
-// static const char* s_AutoHelp     = "h";
-// static const char* s_AutoHelpFull = "help";
-// ```
 #[test]
 fn short_help_h_succeeds_for_every_program() {
     for name in [
@@ -894,11 +812,6 @@ fn short_help_h_succeeds_for_every_program() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
-// ```c++
-//     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
-//                   "Application to create BLAST databases, version "
-//                   + CBlastVersion().Print());
-// ```
 // `losat makeblastdb` writes the database; its old name `makedb` is an unknown command.
 #[test]
 fn makeblastdb_writes_a_database_and_makedb_is_unknown() {
@@ -955,15 +868,6 @@ fn makeblastdb_writes_a_database_and_makedb_is_unknown() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1203-1209
-// ```c++
-//     bool parse_seqids = x_ShouldParseSeqIds();
-//     bool hash_index = args["hash_index"];
-//     bool use_gi_mask = args["gi_mask"];
-//
-//     CWriteDB::TIndexType indexing = CWriteDB::eNoIndex;
-//     indexing |= (hash_index ? CWriteDB::eAddHash : 0);
-//     indexing |= (parse_seqids ? CWriteDB::eFullIndex : 0);
-// ```
 // `-parse_seqids`, `-hash_index` and `-taxid_map` on the command line: the id files of version 5
 // (`.pos`, `.pog`, the hash index) and of version 4 (`.psi`/`.psd`), the argument rules (exit
 // status 2 from LOSAT's parser), a version 5 input makeblastdb aborts on (exit status 1), and
@@ -1223,13 +1127,6 @@ const MT_PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKA
 const MT_NUCLEOTIDE: &str = "ATGAAAACCGCCTATATTGCCAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCCCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCCGAAAAAGCCGTGCAGGTGAAAGTGAAAGCCCTGCCGGATGCCCAGTTTGAAGTGGTG";
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3176-3181
-// ```c++
-//     	arg_desc.SetConstraint(kArgMTMode,
-//                                new CArgAllowValuesBetween(0, 2, true));
-//     	arg_desc.SetDependency(kArgMTMode,
-//                                CArgDescriptions::eRequires,
-//                                kArgNumThreads);
-// ```
 // `-mt_mode` has no effect on LOSAT's output (CLI DECISIONS 5).
 #[test]
 fn mt_mode_does_not_change_the_output() {
@@ -1302,15 +1199,6 @@ fn mt_mode_does_not_change_the_output() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3381-3397
-// ```c++
-//     if( args.Exist( kArgUseIndex ) &&
-//         !(args.Exist( kArgSubject ) && args[kArgSubject])) {
-// ...
-//         if( args.Exist( kTask ) && args[kTask] &&
-//                 args[kTask].AsString() != "megablast" ) {
-//             use_index = false;
-//         }
-// ```
 // NCBI BLAST+ 2.17.0 (the official Linux x64 build, 2026-11-11, line LIB P-S3): `-use_index
 // true` changes nothing with `-subject` or another task; a megablast search of a database
 // without an index writes this warning and the output of the search without `-use_index`;
@@ -1449,13 +1337,6 @@ fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:87-88,106-107
-// ```c++
-//     arg.Reset(new CFilteringArgs( !kQueryIsProtein ));
-//     m_Args.push_back(arg);
-// ...
-//     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
-//     arg.Reset(m_QueryOptsArgs);
-// ```
 // NCBI BLAST+ 2.17.0 (line LIB P-S3): BLASTX's error of `-seg` comes from the filtering handler,
 // before the query options handler (`-query_loc`) and the formatting handler (its warning of an
 // ignored `-num_descriptions`).
@@ -1490,13 +1371,6 @@ fn blastx_seg_error_comes_from_the_filtering_handler() {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
-// ```c++
-// inline CArg_Double::CArg_Double(const string& name, const string& value)
-//     : CArg_String(name, value)
-// {
-//     try {
-//         m_Double = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
-// ```
 // NCBI BLAST+ 2.17.0 (swebok-improve-20261105/sw8/nfix/probe/cli): a real argument takes
 // glibc's hexadecimal numbers and NCBI's mantissa with a final `e` (`blastn -evalue`, BLAST XML's
 // `Parameters_expect`); `-threshold`'s constraint reads its value without the final `e` (an
@@ -1621,16 +1495,6 @@ fn real_arguments_and_pssm_spaces_read_as_ncbis() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1147-1154
-// ```c
-//         sparamsp = SegParametersNewAa();
-//         sparamsp->overlaps = TRUE;
-//         if (seg_options->window > 0)
-//             sparamsp->window = seg_options->window;
-//         if (seg_options->locut > 0.0)
-//             sparamsp->locut = seg_options->locut;
-//         if (seg_options->hicut > 0.0)
-//             sparamsp->hicut = seg_options->hicut;
-// ```
 // NCBI BLAST+ 2.17.0 (swebok-improve-20261105/sw8/nfix/probe/seg2): a `-seg` locut or hicut
 // that is NaN keeps SEG's default (`-nan > 0.0` is false), an infinite locut makes every window
 // low in complexity (no hit), and the filter string prints the values as glibc's `%1.1f`.

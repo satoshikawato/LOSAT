@@ -103,19 +103,7 @@ fn run(inputs: &Inputs, formats: &[&str], extra: &[&str], observe: bool) -> Run 
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
 #[test]
 fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new(8);
@@ -147,11 +135,6 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-// ```c
-// if (args[kArgOutputFormat]) {
-//     string fmt_choice =
-//         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-// ```
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new(1);
@@ -378,12 +361,6 @@ fn run_local_outputs(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
-// ```c
-//     // Validate that at least one query context is valid
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
 // A batch of queries without residues only stops NCBI after the prolog, with one message
 // per query (oracle `blastp.rec_empty_all.q.*`). This half checks the entry's own error (NCBI's
 // error with exit code 3 and its message), the prolog it wrote and that no other report has a
@@ -418,9 +395,6 @@ fn a_batch_of_queries_without_residues_stops() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
-// ```c++
-// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-// ```
 // The rendered rows of blastp's final hits made a window of queries at a time
 // (`src/algorithm/blastp/blast_engine/query_rows.rs`): outfmt 0, BLAST XML and the tabular fields
 // that show the alignment write the bytes of the rows made for every query up front.

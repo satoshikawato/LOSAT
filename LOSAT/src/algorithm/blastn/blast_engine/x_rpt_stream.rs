@@ -4,22 +4,6 @@
 //! keeps the final lists of every batch and writes all reports after the loop.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-318
-//! ```c++
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!     ...
-//!                 results = lcl_blast.Run();
-//!                 if (!batch_size)
-//!                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
-//!     ...
-//!                 ITERATE(CSearchResultSet, result, *results) {
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//!                 }
-//!     ...
-//!         }
-//!         BLAST_PROF_START( APP.POST );
-//!         formatter.PrintEpilog(opt);
-//! ```
 //!
 //! With the switch on, the loop writes a batch's reports right after it has searched the batch (in
 //! batch order), finished its lists (`-db`: `finish_query_hit_list`, the titles, the HSPs of score
@@ -471,14 +455,6 @@ fn check(
         return Err(off);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-    // ```c++
-    //     TSeqPos size_read = 0;
-    //
-    //     while (size_read < GetBatchSize()) {
-    //
-    //         if (End())
-    //             break;
-    // ```
     // The first batch takes every record (`next_ranged_batch` with the first batch's size, as
     // the loop reads it): no refusal can come after it (a refusal of that batch finds nothing
     // written; what ends the reading after the records comes in that batch or in a batch of its
@@ -545,11 +521,6 @@ fn check(
         return Err(Off::SearchSpace);
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
-    // ```c++
-    //                 ITERATE(CSearchResultSet, result, *results) {
-    //                     formatter.PrintOneResultSet(**result, query_batch);
-    //                 }
-    // ```
     // The stored data and the report ids of the reported subjects (a database's definition
     // lines, ambiguity data and taxonomy, a subject set's ids) are checked by the report call of
     // the batch that reports them, as NCBI's formatter reads them for each batch's result sets

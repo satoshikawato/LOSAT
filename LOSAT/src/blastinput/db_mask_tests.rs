@@ -570,7 +570,7 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     assert_eq!(bounded(&[(1001, 1002)], (1012, 1015), 1012), (None, 1));
 }
 
-// blast_app_util.cpp:644-651 and local_db_adapter.cpp:54-58 (quoted at `strategy_params`): after
+// blast_app_util.cpp:644-651 and local_db_adapter.cpp:54-58 (cited at `strategy_params`): after
 // the formatter's warning the search strategy still writes a name as its key (probe of
 // `-export_search_strategy` with `-db_soft_mask dust`; frozen as the strategy case
 // blastn.db.dbmask.name), not the empty name or the id -1.

@@ -22,14 +22,6 @@ EXCEPTION_CASE = "Sakai.MG1655.megablast"
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-# ```c
-# ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-#     if (iter != m_FieldsToShow.begin())
-#         m_Ostream << m_FieldDelimiter;
-#     x_PrintField(*iter);
-# }
-# m_Ostream << "\n";
-# ```
 def tabular_row(
     qstart: int,
     *,

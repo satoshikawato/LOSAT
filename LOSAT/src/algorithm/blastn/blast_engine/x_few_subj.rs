@@ -5,24 +5,7 @@
 //! LOSAT_X_PAIRPARDISCARR).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
-//! ```c
-//!     /* iterate over all subject sequences */
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//!        Int4 stat_length;
-//!        if (seq_arg.oid == BLAST_SEQSRC_ERROR) {
-//!            status = BLASTERR_SEQSRC;
-//!            break;
-//!        }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-484
-//! ```c
-//!     while (TRUE) {
-//!         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-//!                                        dbseq_chunk_overlap);
-//!         if (status == SUBJECT_SPLIT_DONE) break;
-//!         if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-//! ```
 //!
 //! Without the switch, a search of two subjects or more at two threads or more searches each
 //! subject as one task of the pool (`use_parallel`, `search_subjects`), and a subject of two

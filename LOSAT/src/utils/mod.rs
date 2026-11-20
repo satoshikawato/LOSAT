@@ -1,11 +1,11 @@
 pub mod dust;
 pub mod entry_names;
-// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp (`CFormatGuess`, quoted in the module).
+// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp (`CFormatGuess`, cited in the module).
 pub(crate) mod format_guess;
 pub mod genetic_code;
 pub mod glibc_fma_libm;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:252-262 (`CRpsMmappedFile`,
-// quoted in the module).
+// cited in the module).
 pub(crate) mod mapped_file;
 pub mod matrix;
 pub(crate) mod process_id;
@@ -13,7 +13,7 @@ pub(crate) mod process_id;
 pub(crate) mod same_file;
 pub mod seg;
 mod seg_lnfact;
-// libstdc++ (GCC 13): bits/stl_algo.h:1939-1951 (`std::sort`, quoted in the module): the order
+// libstdc++ (GCC 13): bits/stl_algo.h:1939-1951 (`std::sort`, cited in the module): the order
 // in which rpsbproc's sorts leave equal elements (RpsbProc/src/common/cdalignproc_base.cpp:200,
 // ptrmap.hpp:171 of the 2025-05-13 package).
 pub(crate) mod std_sort;
@@ -22,7 +22,6 @@ pub(crate) mod std_sort;
 #[cfg(test)]
 pub(crate) mod test_dir;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
-// (*thread)->Run(); (*thread)->Join(&result);
 pub mod threading;
 pub mod winmask;
 pub(crate) mod x87;

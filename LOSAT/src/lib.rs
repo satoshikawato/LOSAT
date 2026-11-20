@@ -24,41 +24,9 @@
 // `pub(crate) use` lines below, which therefore have to follow the definitions.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:81-83
-// ```c
-// NCBI_XBLAST_EXPORT const int   kBlastMajorVersion = 2;
-// NCBI_XBLAST_EXPORT const int   kBlastMinorVersion = 17;
-// NCBI_XBLAST_EXPORT const int   kBlastPatchVersion = 0;
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:53-62
-// ```cpp
-// class CBlastVersion : public CVersionInfo {
-// public:
-//     CBlastVersion()
-//         : CVersionInfo(kBlastMajorVersion,
-//                        kBlastMinorVersion,
-//                        kBlastPatchVersion) {}
-//     virtual string Print(void) const {
-//         return CVersionInfo::Print() + "+";
-//     }
-// };
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:60-64 (report headers)
-// ```c++
-// string CBlastFormatUtil::BlastGetVersion(const string program)
-// {
-//     string program_uc = program;
-//     return NStr::ToUpper(program_uc) + " " + blast::CBlastVersion().Print();
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/version.cpp:732-739 (`-version`)
-// ```cpp
-// if (flags & fVersionInfo) {
-//     os << appname << ": " << m_VersionInfo->Print() << endl;
-// }
-// ...
-//     os << " Package: " << GetPackageName() << ' '
-//        << GetPackageVersion().Print() << ", build "
-// ```
 //
 // `ncbi_blast_release!()`: NCBI's package version (`GetPackageVersion().Print()`, "2.17.0"),
 // which LOSAT's `-version` names after `output compatible with blast` (LOSAT's own `Package:`

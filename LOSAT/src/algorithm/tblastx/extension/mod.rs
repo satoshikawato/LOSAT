@@ -40,24 +40,9 @@ use crate::utils::matrix::blosum62_score;
 /// NCBI aa_ungapped uses the blast core 28x28 score matrix directly; NULLB is
 /// not special-cased in the extension loops.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:847-849
-/// ```c
-/// for (i = 0; i < n; i++) {
-///     score += matrix[q[i]][s[i]];
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-849
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1579
-/// ```c
-/// for (i = 0; i < sbp->alphabet_size; i++) {
-///     for (j = 0; j < sbp->alphabet_size; j++) {
-///         matrix[i][j] = BLAST_SCORE_MIN;
-///     }
-/// }
-/// ...
-/// if (i == AMINOACID_TO_NCBISTDAA['-'] || j == AMINOACID_TO_NCBISTDAA['-']) {
-///     continue;
-/// }
-/// ```
 #[inline(always)]
 pub fn get_score(a: u8, b: u8) -> i32 {
     blosum62_score(a, b)

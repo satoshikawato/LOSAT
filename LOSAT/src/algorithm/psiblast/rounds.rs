@@ -7,51 +7,6 @@
 //! query (`blastp::blast_engine::psi_round`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-321
-//! ```c++
-//!             while (itr) {
-//!
-//!                 SavePssmToFile(pssm, &itr);
-//!
-//!                 CRef<CSearchResultSet> results;
-//!                 ...
-//!                    results = psiblast->Run();
-//!                    ...
-//! 	                      formatter.PrintOneResultSet(**result, query,
-//! 	                                                itr.GetIterationNumber(),
-//! 	                                                itr.GetPreviouslyFoundSeqIds());
-//!                 ...
-//!                 CSearchResults& results_1st_query = (*results)[0];
-//!                 if ( !results_1st_query.HasAlignments() ) {
-//!                     break;
-//!                 }
-//!
-//!                 if (run_token & 2)
-//!                 {
-//!                         CConstRef<CSeq_align_set> aln(results_1st_query.GetSeqAlign());
-//!                         CPsiBlastIterationState::TSeqIds ids;
-//!                         CPsiBlastIterationState::GetSeqIds(aln, psi_opts, ids);
-//!
-//!                         itr.Advance(ids);
-//!
-//!                         if (itr || m_CmdLineArgs->GetSaveLastPssm()) {
-//!                         CConstRef<CBioseq> seq =
-//!                          s_GetQueryBioseq(query, scope, pssm);
-//!                         pssm =
-//!                          ComputePssmForNextIteration(*seq, aln, psi_opts, scope,
-//!                                      results_1st_query.GetAncillaryData());
-//!                         psiblast->SetPssm(pssm);
-//!                         }
-//!                 }
-//!                 else
-//!                   break;
-//!             }
-//!             if (itr.HasConverged())
-//!               converged = true;
-//!
-//!        if (m_CmdLineArgs->GetSaveLastPssm()) {
-//!            SavePssmToFile(pssm, &itr);
-//!        }
-//! ```
 
 use std::collections::BTreeSet;
 use std::io::Write as _;
@@ -186,21 +141,6 @@ impl SetKey {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2938
-// ```c++
-// CSeq_id_Info* CSeq_id_Giim_Tree::x_FindInfo(const CGiimport_id& gid) const
-// {
-//     TIdMap::const_iterator id_it = m_IdMap.find(gid.GetId());
-//     if (id_it == m_IdMap.end())
-//         return 0;
-//     ITERATE (TGiimList, dbr_it, id_it->second) {
-//         CConstRef<CSeq_id> id = (*dbr_it)->GetSeqId();
-//         const CGiimport_id& gid2 = id->GetGiim();
-//         // Both Db and Release must be equal
-//         if ( !gid.Equals(gid2) ) {
-//             return *dbr_it;
-//         }
-//     }
-// ```
 // A giim id is never one handle with an equal id (`FindOrCreate` makes a new one each time), so
 // NCBI's inclusion sets never find it again, every included HSP of it counts as a row, and its
 // scope never finds its Bioseq (review 1 of line DBID pssmrows, H1): LOSAT refuses a giim key
@@ -251,76 +191,7 @@ impl<'a> HandleIndex<'a> {
 pub(crate) type InclusionSet = BTreeSet<SetKey>;
 
 /// `CPsiBlastIterationState`.
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_iteration.cpp:49-130
-// ```c++
-// CPsiBlastIterationState::CPsiBlastIterationState(unsigned int num_iterations)
-//     : m_TotalNumIterationsToDo(num_iterations), m_IterationsDone(0)
-// {}
-// ...
-// bool
-// CPsiBlastIterationState::HasMoreIterations() const
-// {
-//     if (m_TotalNumIterationsToDo == 0 ||
-//         m_IterationsDone < m_TotalNumIterationsToDo) {
-//         return true;
-//     }
-//     return false;
-// }
-//
-// bool
-// CPsiBlastIterationState::HasConverged()
-// {
-//     // For an object that hasn't been 'advanced' or one that only has performed
-//     // one iteration (i.e.: called Advance() once), it doesn't make sense to
-//     // have converged
-//     if (m_IterationsDone <= 1) {
-//         return false;
-//     }
-//     // if the most current list of ids is empty, that means that no new
-//     // sequences were found and therefore we have converged.
-//     if ( !m_PreviousData.empty() && m_CurrentData.empty() ) {
-//         return true;
-//     }
-//
-//     // Element by element comparison: has every element in the current Seq-id
-//     // list been found in the previous iterations?
-//     bool retval = true;
-//     ITERATE(TSeqIds, current_id, m_CurrentData) {
-//         if (m_PreviousData.find(*current_id) == m_PreviousData.end()) {
-//             retval = false;
-//             break;
-//         }
-//     }
-//     return retval;
-// }
-//
-// CPsiBlastIterationState::operator bool()
-// {
-//     return (HasMoreIterations() && !HasConverged());
-// }
-// ...
-// CPsiBlastIterationState::TSeqIds
-// CPsiBlastIterationState::GetPreviouslyFoundSeqIds() const
-// {
-//     return m_CurrentData;
-// }
-//
-// void
-// CPsiBlastIterationState::Advance(const TSeqIds& list)
-// {
-//     x_ThrowExceptionOnLogicError();
-//
-//     m_PreviousData = m_CurrentData;
-//     m_CurrentData = list;
-//     m_IterationsDone++;
-// }
-//
-// unsigned int
-// CPsiBlastIterationState::GetIterationNumber() const
-// {
-//     return m_IterationsDone+1;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_iteration.cpp:49-131
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct IterationState {
     total: u32,
@@ -421,7 +292,7 @@ pub(crate) struct RoundOutcome {
 
 /// The PSSM files of a run (`SavePssmToFile`), written between the rounds: each option's
 /// `CAutoOutputFileReset` (one run-level `F.N` counter each), the ASN.1 file then the ASCII one.
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-407 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-407 (cited at
 // `pssm::PssmFiles`)
 pub(crate) struct RoundFiles {
     asn: Option<OutputFileReset>,
@@ -481,7 +352,7 @@ mod tests {
         keys.iter().map(|&key| SetKey::Index(key)).collect()
     }
 
-    // psiblast_iteration.cpp:68-96 (quoted at `IterationState`): no convergence before two
+    // psiblast_iteration.cpp:68-96 (cited at `IterationState`): no convergence before two
     // rounds, an empty set after a non-empty one, and every current id among the previous ones
     // (two empty sets too).
     #[test]
@@ -555,7 +426,7 @@ mod tests {
     // Line DBID pssmrows (weakbatch DECISIONS 43 (4)): the keys of a database's subjects are their
     // Seq-align ids as `ParsedSubject` reads them; psiblast's PSSM puts following hits whose ids
     // `Match` in one row and counts its rows by their handles (psi_pssm_input.cpp
-    // x_CountAndSelectQualifyingAlignments and x_ExtractAlignmentData, quoted at
+    // x_CountAndSelectQualifyingAlignments and x_ExtractAlignmentData, cited at
     // `pssm::input_msa`).
     #[test]
     fn a_pssm_row_joins_following_hits_whose_seq_align_ids_match() {
@@ -577,7 +448,7 @@ mod tests {
         SetKey::check_handles(&[key(8), key(7), key(4)]).unwrap();
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-320 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-320 (cited at
     // `pssm::input_msa`): following Seq-aligns whose ids `Match` share a row.
     #[test]
     fn keys_match_as_their_seq_align_ids() {
@@ -591,7 +462,7 @@ mod tests {
         assert!(!id("gnl|BL_ORD_ID|5").matches(&SetKey::Index(6)));
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1064-1095 (quoted at
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1064-1095 (cited at
     // `seqid::defline_set::handle_superset_key`): a handle compares a text id's accession
     // without case.
     #[test]
@@ -625,7 +496,7 @@ mod tests {
         );
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2938 (quoted at
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2938 (cited at
     // `HandleIndex`): a giim id is never one handle with an equal one.
     #[test]
     fn a_giim_key_is_refused() {

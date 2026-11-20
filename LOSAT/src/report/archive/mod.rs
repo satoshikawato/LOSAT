@@ -1,22 +1,6 @@
 //! The BLAST archive (outfmt 11, `Blast4-archive`), shared by the programs.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1051-1064
-//! ```c++
-//! void CBlastFormat::PrintArchive(CRef<objects::CBlast4_archive> archive, CNcbiOstream& out)
-//! {
-//!     if (archive.Empty()) {
-//!         return;
-//!     }
-//!     string outfmt = CNcbiEnvironment().Get("ARCHIVE_FORMAT");
-//!     if (outfmt.empty()) {
-//!         out << MSerial_AsnText << *archive;
-//!     } else if (!NStr::CompareNocase(outfmt, "xml")) {
-//!         out << MSerial_Xml << *archive;
-//!     } else if (NStr::StartsWith(outfmt, "bin", NStr::eNocase)) {
-//!         out << MSerial_AsnBinary << *archive;
-//!     }
-//! }
-//! ```
 //! One `Blast4-archive` per query batch is written after the batch's search, one error
 //! archive when the application stops with a diagnostic (`PrintErrorArchive`). Each archive
 //! is written straight to the sink, element by element (`writer`), from data the program
@@ -146,17 +130,6 @@ impl ArchiveEncoding {
 /// Whether NCBI's `PrintErrorArchive` writes the error archive for this `-outfmt` text.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-929
-/// ```c++
-/// void PrintErrorArchive(const CArgs & a, const list<CRef<CBlast4_error> > & msg)
-/// {
-///     try {
-///         if(NStr::StringToInt(NStr::TruncateSpaces(a[align_format::kArgOutputFormat].AsString())) == CFormattingArgs::eArchiveFormat) {
-///             ...
-///             CBlastFormat::PrintArchive(archive, a[kArgOutput].AsOutputFile());
-///         }
-///     } catch (...) {}
-/// }
-/// ```
 /// The conversion throws (and nothing is written) for text after the number, such as
 /// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
 /// error archive does not. `TruncateSpaces` (`eTrunc_Both`) and `StringToInt` (flags 0) are
@@ -194,31 +167,7 @@ impl ArchiveRequest {
     /// for `-subject`).
     pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&str>) -> Self {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:289-295,305-309
-        // ```c++
-        //         else
-        //         {
-        //             if(num_iters != 0)
-        //             	retval.Reset(new blast::CExportStrategy(queries, opts_hndl, search_db, client_id, num_iters));
-        //             else
-        //             	retval.Reset(new blast::CExportStrategy(queries, opts_hndl, search_db, client_id));
-        //         }
-        //     ...
-        //         else
-        //         {
-        //             retval.Reset(new blast::CExportStrategy(queries, opts_hndl,
-        //             								 db_args->GetSubjects(), client_id));
-        //         }
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-751
-        // ```c++
-        // void CExportStrategy::x_AddPsiNumOfIterationsToFormatOptions(unsigned int num_iters)
-        // {
-        // 	CRef<CBlast4_parameter> p(new CBlast4_parameter);
-        // 	p->SetName(CBlast4Field::GetName(eBlastOpt_Web_StepNumber));
-        //
-        // 	CRef<CBlast4_value> v(new CBlast4_value);
-        // 	v->SetInteger(num_iters);
-        // ```
         // psiblast's `-num_iterations` (1 by default) with `-db` (`p9.ps.q.db.itdef.f6`), none
         // for 0 or with `-subject` (`p9.ps.q.db.it0.f6`, `p9.ps.q.sub.it2.f6`).
         let step_number = inputs
@@ -247,15 +196,6 @@ impl ArchiveRequest {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173 (quoted
 // at `OptionsHandle::set_database_filter`) and c++/src/algo/blast/api/effsearchspace_calc.cpp:111-121
-// ```c++
-//     BlastEffectiveLengthsParametersNew(opts_memento->m_EffLenOpts,
-//                                        db_num_bases, db_num_seqs,
-//                                        &eff_len_params);
-//
-//     Int2 status =
-//         BLAST_CalcEffLengths(m_Program, opts_memento->m_ScoringOpts,
-//                              eff_len_params, sbp, m_QueryInfo, NULL);
-// ```
 // The request's `EffectiveSearchSpace` is `BLAST_CalcEffLengths` with the statistics' length and
 // count before the setup's fallback to OID 0 (`BLAST_GapAlignSetUp`, blast_setup.c:929-937): the
 // search's own value where the length is positive; nothing (0) for a length of 0 (blast_setup.c:
@@ -302,14 +242,6 @@ impl RequestLength {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:280-282,304-306
-// ```c++
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//
-//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-//     ...
-//             if (isArchiveFormat) {
-//                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-// ```
 /// What NCBI's options handle (`m_OptsHndl`) holds for the requests of a run beyond the options
 /// of the command line: the database list's parameter and how the database's statistics make the
 /// `EffectiveSearchSpace` option of a searched batch (`RequestLength`), and the parameters that
@@ -372,18 +304,6 @@ pub struct HandleCarry(options::ParamList);
 
 impl OptionsHandle {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
-    // ```c++
-    //     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);
-    //     if (total_length <= 0)
-    //         total_length = BlastSeqSrcGetTotLen(seqsrc);
-    //     Int4 num_seqs = BlastSeqSrcGetNumSeqsStats(seqsrc);
-    //     if (num_seqs <= 0)
-    //         num_seqs = BlastSeqSrcGetNumSeqs(seqsrc);
-    //
-    //     CEffectiveSearchSpaceCalculator calc(full_query_fact, *options,
-    //                                          num_seqs, total_length,
-    //                                          full_data->m_ScoreBlk->GetPointer());
-    // ```
     /// What the database's list and statistics make of the requests: its `program-options`
     /// parameter (`DbFilterArgs::archive_parameter`), and how the `EffectiveSearchSpace` option
     /// of a searched batch is made (`RequestLength`, `common::database::note_archive_database_filter`):
@@ -406,14 +326,7 @@ impl OptionsHandle {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-503
-    // ```c++
-    //     // Set the filtering algorithms
-    //     string algo_key = db->GetFilteringAlgorithmKey();
-    //     if (algo_key != kEmptyStr)
-    //     {
-    //     	int mask_type = (int) db->GetMaskType();
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-504
     /// The database masking's program options of the archive (`ResolvedMask::archive_params`)
     /// and of the search strategy (`DbMaskOption::strategy_params`), which follow the list's: set
     /// once per run, where the formatter resolves the masking; a second setting is LOSAT's
@@ -434,21 +347,6 @@ impl OptionsHandle {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:257-269
-    // ```c++
-    //     void x_AttachValue(CRef<objects::CBlast4_parameter> p)
-    //     {
-    //         typedef objects::CBlast4_parameter TParam;
-    //
-    //         NON_CONST_ITERATE(list< CRef<TParam> >, iter, m_ReqOpts->Set()) {
-    //             if ((**iter).GetName() == p->GetName()) {
-    //                 (*iter) = p;
-    //                 return;
-    //             }
-    //         }
-    //
-    //         m_ReqOpts->Set().push_back(p);
-    //     }
-    // ```
     /// The parameters that the run sets in the handle after the command line's options and
     /// besides the batches' `EffectiveSearchSpace`: `before_batches` once, before the first batch
     /// (rpsblast's `CompositionBasedStats` 0 for a database without frequency ratios), and
@@ -521,13 +419,6 @@ impl OptionsHandle {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181
-    // ```c++
-    //     vector<Int8> eff_searchsp;
-    //     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
-    //         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
-    //     }
-    //     options->SetEffectiveSearchSpace(eff_searchsp);
-    // ```
     /// Moves `carry` past a batch: what the batch's set-up sets in the handle (`set_search_sets`'s
     /// `each_batch`), then the batch's `EffectiveSearchSpace` option when the batch was searched
     /// (`SplitQuery_SetEffectiveSearchSpace` writes it into the handle): `searched` is the batch's
@@ -761,21 +652,6 @@ impl ArchiveHandle {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
-// ```c++
-// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
-// {
-// 	if(m_handler != NULL) {
-// 		m_handler->Post(mess);
-// 	}
-// 	if(m_save) {
-// 		CRef<CBlast4_error> d(new CBlast4_error);
-// 		string m;
-// 		mess.Write(m);
-// 		d->SetMessage(NStr::Sanitize(m));
-// 		d->SetCode((int)mess.m_Severity);
-// 		...
-// 			m_messages.push_back(d);
-// ```
 /// Posts error 803.7 of each byte that NCBI's stream replaced in an archive of the run of the
 /// application `application` (`encoder::ReplacedChar`, with its prefix: `SetDiagPostPrefix(
 /// "blastn")`, `ArchiveRequest::application`) on `diagnostics`, without saving them as messages of the run's archive `archive`:
@@ -860,22 +736,9 @@ pub(crate) fn seq_id_written_as_is(
 pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
     let native = error.downcast_ref::<crate::cli::NativeError>()?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
-    // ```c++
-    //     catch (const CException& e) {                                           \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     // `Error: NCBI C++ Exception:` is that report of an exception of NCBI's C++ Toolkit
     // (BLASTN's `-window_masker_db` file that cannot be opened).
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-220
-    // ```c++
-    //     catch (const blast::CBlastException& e) {                               \
-    //         const string& msg = e.GetMsg();                                     \
-    //         if (e.GetErrCode() == CBlastException::eInvalidOptions) {           \
-    //             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
-    //             exit_code = BLAST_INPUT_ERROR;                                  \
-    // ```
     // `BLAST options error:` is that report of an options error that the search raises inside
     // `Run`: BLASTN's database mask that the database lacks (`DbMaskOption::validate_at_open`,
     // review 1 F1 of M4a-2a) and PSIBLAST's PSSM options (`IPssmInputData`; LOSAT's PSIBLAST
@@ -890,12 +753,6 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         "BLAST query/options error:",
     ];
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
-    // ```c++
-    //     catch (const std::exception& e) {                                       \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     // `CATCH_ALL`'s two reports of an exception, a `CException`'s and a `std::exception`'s
     // (`NativeError::exception`, `NativeError::std_exception`: exit status 255, `Error: `): the
     // latter is `Error: vector::reserve` of the `-in_pssm` reader's Dense-seg hook (NCBI BLAST+
@@ -912,7 +769,7 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     if !known {
         return None;
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172 (quoted in
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172 (cited in
     // `report::diag_log`: `mess.Write(m)` of each post)
     // In a failed stream every post writes its header only (`ncbi_exception::post_line`) and saves
     // that text: `CATCH_ALL`'s posts, which have no header, save empty messages, one per line
@@ -949,13 +806,6 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:351-355
-// ```c++
-//     } CATCH_ALL(status)
-//     if(!m_Bah.GetMessages().empty()) {
-//     	const CArgs & a = GetArgs();
-//     	PrintErrorArchive(a, m_Bah.GetMessages());
-//     }
-// ```
 /// The error lines of a run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`:
 /// the failed write of the object manager's message after its diagnostic stream failed, a PSSM
 /// file that ends after its header): none, and NCBI writes the error archive of the messages saved
@@ -966,14 +816,6 @@ pub fn silent_end_lines(handle: &ArchiveHandle, error: &anyhow::Error) -> Option
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
-// ```c++
-//     } CATCH_ALL(status)
-//
-//     if(!m_Bah.GetMessages().empty()) {
-//     	const CArgs & a = GetArgs();
-//     	PrintErrorArchive(a, m_Bah.GetMessages());
-//     }
-// ```
 /// Writes the error archive of a command line run that stopped with `error` (`error_lines` of it:
 /// `lines`) into `sink`, after the error's text. NCBI's `CATCH_ALL` writes the text to standard
 /// error before `PrintErrorArchive` writes the archive (`cli::post_native_error`), so in one

@@ -23,25 +23,7 @@ use std::io::Read;
 use std::path::Path;
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1722-1734
-// ```c++
-//     // Bind values to internal variables
-//     struct tm *t;
-//
-// #ifdef HAVE_LOCALTIME_R
-//     struct tm temp;
-//     if (GetTimeZone() == eLocal) {
-//         localtime_r(&timer, &temp);
-//     } else {
-//         gmtime_r(&timer, &temp);
-//     }
-//     t = &temp;
-// #else
-//     t = ( GetTimeZone() == eLocal ) ? localtime(&timer) : gmtime(&timer);
-// ```
 // NCBI reference (598d8ae6): c++/src/build-system/cmake/CMakeChecks.basic-checks.cmake:116
-// ```cmake
-// check_function_exists(localtime_r HAVE_LOCALTIME_R)
-// ```
 // The reference platform is Unix (glibc). A WASI module has no time zone call (WASI
 // preview 1); it sees the environment and the directories its host gives it, and reading
 // `TZ`, `TZDIR` and `/etc/localtime` there as glibc reads them on the host gives the time

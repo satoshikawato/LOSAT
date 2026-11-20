@@ -11,20 +11,6 @@
 //! (`QueryContext::dna_masks`, after the core's protein-to-DNA conversion).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-744
-//! ```c++
-//!     } else if (m_FormatType == CFormattingArgs::eXml) {
-//!         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
-//!         res->TrimSeqAlign(m_HitlistSize);
-//!         m_AccumulatedResults.push_back(res);
-//!         ...
-//!         	CCmdLineBlastXMLReportData report_data(m_AccumulatedQueries,
-//!                                                    m_AccumulatedResults,
-//!                                                    *m_Options, m_DbName, m_DbIsAA,
-//!                                                    m_QueryGenCode, m_DbGenCode,
-//!                                                    m_IsRemoteSearch);
-//!         	BlastXML_FormatReport(xml_output, &report_data, &m_Outfile,
-//!                                   m_BlastXMLIncremental.GetPointer());
-//! ```
 //! (`PrintOneResultSet` is called once per query's result set; the accumulated lists hold that
 //! one query.)
 //!
@@ -204,16 +190,6 @@ fn gapped_karlin(options: &ResolvedOptions) -> crate::stats::tables::KarlinParam
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
-// ```c++
-//     // find the first valid context corresponding to this query
-//     for (i = 0; i < context_per_query; i++) {
-//         BlastContextInfo *ctx = query_info->contexts +
-//                                 query_number * context_per_query + i;
-//         if (ctx->is_valid) {
-//             m_SearchSpace = ctx->eff_searchsp;
-//             m_LengthAdjustment = ctx->length_adjustment;
-//             break;
-// ```
 /// Hands the observer the statistics of every query of `batches`, the values of the XML reports,
 /// each query numbered among the run's queries (`queries_before` queries before `batches`).
 pub(super) fn observe_query_stats(
@@ -393,15 +369,6 @@ impl HeldOutput {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:493-500
-    // ```c++
-    //         if (new_hit) {
-    //             new_hit->SetNum(index);
-    //             ++index;
-    //             if( !incremental_output ) hits.push_back(new_hit);
-    // 	    else
-    // 	    {
-    // 		CNcbiOstrstream  one_hit_os;
-    // ```
     /// The run's standard error `inner` through this output (`HeldStderr`): while the output is
     /// held, what the run writes there is kept with the place in the output where NCBI, which
     /// writes its document as it goes, writes it (the taxonomy texts of a `Hit`'s read between
@@ -948,26 +915,6 @@ pub(super) struct QueryScan {
 /// scan, at the position it had, so the search's reading starts where it would have started. It
 /// reads that open file itself, never a second handle on it, which the WASI targets cannot make.
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
-// ```c++
-// 	char c;
-// 	CNcbiStreampos orig_p = in.tellg();
-// 	// Piped input
-// 	if(orig_p < 0)
-// 		return false;
-//
-// 	IOS_BASE::iostate orig_state = in.rdstate();
-// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-//
-// 	if(! (in >> c))
-// 		return true;
-//
-// 	in.seekg(orig_p);
-// 	in.flags(orig_flags);
-// 	in.clear();
-// 	in.setstate(orig_state);
-//
-// 	return false;
-// ```
 // NCBI reads ahead of the search on the argument's one stream (`m_Ios`, c++/src/corelib/ncbiargs.cpp:727-735) and
 // seeks it back to `orig_p`. This read has no NCBI counterpart (NCBI reads the query file once; this
 // read is LOSAT's, for its refusals before the first byte), and it reads the same way: on the one
@@ -1189,16 +1136,6 @@ pub(super) fn xml2_kind(outfmt: u8) -> Option<Xml2Kind> {
 /// are the side files of outfmt 13 and 14.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:544-554
-/// ```c++
-///     // Composition-based statistics
-///     if (data->GetCompositionBasedStats() > 0) {
-///         params.SetCbs(data->GetCompositionBasedStats());
-///     }
-///     // Query genetic code
-///     if (data->GetQueryGeneticCode() > 0) {
-///         params.SetQuery_gencode(data->GetQueryGeneticCode());
-///     }
-/// ```
 pub(super) fn xml2_writer(
     kind: Xml2Kind,
     options: &ResolvedOptions,
@@ -1227,7 +1164,7 @@ pub(super) fn xml2_writer(
     Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121 (cited at
 // `blast_xml2::reports_held`)
 /// Where BLASTX's run of the formats `formats` (the command line's one, or the library's) stops
 /// for a matrix name that NCBI's BLAST XML report data does not know
@@ -1280,15 +1217,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
 ) -> Result<()> {
     let gapped_karlin = gapped_karlin(options);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
-    // ```c++
-    //     else {
-    //         string prog_name = Blast_ProgramNameFromType(
-    //                                            m_Options.GetProgramType());
-    //         if (prog_name != "blastn" && prog_name != "megablast") {
-    //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-    //                         "unsupported score matrix");
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389 (cited at
     // `blast_xml::matrix::XmlMatrixFailure`)
     // The formatting table is found by the name as typed (`strcmp`): a lower-case name stops the
     // report data of the run's first query, or of its second where the report is held
@@ -1492,15 +1421,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 .filter(|hsp| has_seqalign(hsp, options.gapped))
                             {
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
-                                // ```c++
-                                //         const bool kTranslated = kAlign.GetSegs().IsStd();
-                                //         if (kTranslated) {
-                                //             CRef<CSeq_align> densegAln = kAlign.CreateDensegFromStdseg();
-                                // ```
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243
-                                // ```c++
-                                //         	q_start = kAlign.GetSeqStart(0) + 1;
-                                // ```
                                 // An HSP of length 0 (`empty_rows`): the Dense-seg of `-subject`'s
                                 // mapped Std-seg throws, else the empty query row's start (`-db`,
                                 // and the rows that `-subject`'s mapper leaves,
@@ -1556,18 +1477,6 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 Ok(())
             });
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:745-760
-            // ```c++
-            // 	query_label = string("Q(")+NStr::NumericToString(index) +
-            // 	    string("/")+ NStr::NumericToString(data->GetNumQueries() );
-            // 	try{
-            //         s_BlastXMLAddIteration(bxmlout, data->GetAlignment(index), *seqloc,
-            //         ...
-            // 	}
-            // 	catch(CException &e){
-            // 	    ERR_POST(Error << "Failed s_BlastXMLAddIteration " << query_label << e.what() );
-            // 	    return;
-            // 	}
-            // ```
             // A query whose HSP throws (`CaughtException`): BLAST XML leaves its `Iteration`
             // open after the `Hit`s before (each written as it is made), the XML2 and JSON
             // documents leave its report out (`Xml2Document::report`; for `-subject`, whose

@@ -3,25 +3,8 @@
 set -uo pipefail
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# ```c
-# const string kArgQuery("query");
-# const string kArgOutput("out");
-# const string kArgSubject("subject");
-# const string kArgNumThreads("num_threads");
-# const string kArgEvalue("evalue");
-# const string kArgMaxTargetSequences("max_target_seqs");
-# ```
 #
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-# ```c
-# const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-# int num_threads = args[kArgNumThreads].AsInteger();
-# if (num_threads > kMaxValue) {
-#     m_NumThreads = kMaxValue;
-# } else {
-#     m_NumThreads = num_threads;
-# }
-# ```
 
 LOSAT_BIN="${LOSAT_BIN:-../target/debug/losat}"
 case "$(uname -s 2>/dev/null || true)" in
@@ -41,9 +24,6 @@ FASTA_DIR="./fasta"
 source ./blastp_parity_options.sh
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# ```c
-# const string kArgOutput("out");
-# ```
 #
 # Comparison-harness note: keep LOSAT outputs in a temporary directory so
 # tracked `losat_out/` artifacts cannot mask current-source divergence.

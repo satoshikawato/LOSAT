@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Comparison fixtures only. Run with NEW output directory and clean NCBI archive.
 NCBI source: c++/src/algo/blast/unit_tests/api/bl2seq_unit_test.cpp:1638-1654:
- CBl2Seq blaster(*query, *subj, eBlastx); TSeqAlignVector sav(blaster.Run());
 NCBI source: c++/src/algo/blast/unit_tests/api/blastfilter_unit_test.cpp:949-1035: masks.push_back(TSeqRange(0,75));
 NCBI source: c++/src/objects/seqfeat/gc.prt: ncbieaa / Base1 / Base2 / Base3.
 Synthetic inputs are deterministic probes, never hand-authored search expectations.

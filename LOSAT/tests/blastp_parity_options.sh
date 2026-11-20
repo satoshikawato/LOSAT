@@ -1,32 +1,12 @@
 #!/bin/bash
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# ```c
-# const string kTask("task");
-# const string kArgMatrixName("matrix");
-# const string kArgEvalue("evalue");
-# const string kArgMaxTargetSequences("max_target_seqs");
-# const string kArgGapOpen("gapopen");
-# const string kArgGapExtend("gapextend");
-# ```
 #
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:101-211
-# ```c
-# const string kArgWindowSize("window_size");
-# const string kArgWordSize("word_size");
-# const string kArgCompBasedStats("comp_based_stats");
-# const string kArgSegFiltering("seg");
-# ```
 #
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:570-622
-# ```c
-# const string kArgWordThreshold("threshold");
-# ```
 #
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:190-210
-# ```c
-# const string kArgMaxHSPsPerSubject("max_hsps");
-# ```
 BLASTP_PARITY_COMMON_OPTIONS=(
     -task blastp
     -matrix BLOSUM62
@@ -41,10 +21,6 @@ BLASTP_PARITY_COMMON_OPTIONS=(
 )
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# ```c
-# const string kArgEvalue("evalue");
-# const string kArgMaxTargetSequences("max_target_seqs");
-# ```
 BLASTP_PARITY_STRICT_OPTIONS=(
     "${BLASTP_PARITY_COMMON_OPTIONS[@]}"
     -evalue 1e-5
@@ -52,10 +28,6 @@ BLASTP_PARITY_STRICT_OPTIONS=(
 )
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# ```c
-# const string kArgEvalue("evalue");
-# const string kArgMaxTargetSequences("max_target_seqs");
-# ```
 BLASTP_PARITY_DEFAULT_OPTIONS=(
     "${BLASTP_PARITY_COMMON_OPTIONS[@]}"
     -evalue 10

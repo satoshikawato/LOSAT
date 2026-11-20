@@ -23,14 +23,12 @@ ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / 'LOSAT/tests'
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
-# x_PrintField(*iter); m_Ostream << "\n";
 # Preserve frozen fixture bytes/paths, formatting and order; no normalization.
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ['native', 'threaded', 'oracle-dir', 'output-dir']:
         p.add_argument('--' + name, type=Path, required=True)
     # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
     p.add_argument('--serial', type=Path, help='opt in to serial compatibility checks')
     p.add_argument('--node', default='node')
     p.add_argument('--jobs',type=int,default=1,choices=[1,2,3])
@@ -48,7 +46,6 @@ def main():
     environment.update(LC_ALL='C', NODE_NO_WARNINGS='1')
     records = []; record_lock=threading.Lock(); pending=[]
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
-    # (*thread)->Run(); (*thread)->Join(&result);
     metadata = dict(head=head, scope=__doc__, per_search_timeout_seconds=args.timeout_seconds, artifacts={name: {'path': str(value.resolve()), 'sha256': digest(value)} for name, value in [('native', args.native), ('serial', args.serial), ('threaded', args.threaded)] if value}, authority_sha256=native_authority.file_sha256)
     prefixes = [('native', [str(args.native.resolve())]),
                 ('threaded', [args.node, str(TESTS/'run_losat_wasi_threads.js'), str(args.threaded.resolve())])]
@@ -79,7 +76,6 @@ def main():
             count_index = command.index('-num_threads') + 1
             original_n = int(command[count_index])
             # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
-            # x_PrintField(*iter); m_Ostream << "\n";
             for kind, prefix in prefixes:
                 if kind == 'serial' and original_n != 1: continue  # explicitly non-applicable frozen native-thread4 rows
                 current = [*prefix, *command[1:]]
@@ -93,7 +89,6 @@ def main():
         else:
             pending.append((step.program, step.case_id, f'repeatability/{step.program}/{step.case_id}/{step.run_index}', list(step.command), step.expected_losat_sha256, {**environment, **dict(step.environment)}))
     # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
-    # x_PrintField(*iter); m_Ostream << "\n";
     # Independent oracle processes may overlap; each output is compared without reordering.
     # This is correctness execution, never a performance sample.
     metadata['concurrent_test_processes']=args.jobs

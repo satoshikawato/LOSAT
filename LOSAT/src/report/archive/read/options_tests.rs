@@ -309,11 +309,11 @@ fn cutoff_score_fails_in_ncbis_getter() {
         let error = request.import().unwrap_err();
         assert_eq!(
             error.what(),
-            format!(
+            crate::wording::losat_text(&format!(
                 "NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/blast/Blast4_value_.cpp\", \
                  line 252: Error: (CInvalidChoiceSelection::eFail) CBlast4_value::GetInteger(): \
                  Invalid choice selection: NCBI-Blast4::Blast4-value.cutoff\n"
-            )
+            ))
         );
     }
     // Of another type, the name is not the field's.

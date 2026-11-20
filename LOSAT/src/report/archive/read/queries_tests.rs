@@ -57,7 +57,7 @@ fn every_probed_query_set_is_written_as_ncbi_wrote_it() {
             ("same", None, Some(exception)) => match got {
                 Err(RenderError::Exception(e)) => assert_eq!(
                     e.what_in(PROBE_BUILD_ROOT),
-                    String::from_utf8(exception).unwrap(),
+                    crate::wording::losat_text(&String::from_utf8(exception).unwrap()),
                     "{case}"
                 ),
                 other => panic!("{case}: {other:?}"),

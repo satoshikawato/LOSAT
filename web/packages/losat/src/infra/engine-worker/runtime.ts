@@ -13,10 +13,13 @@
 // search only, and the files that a run makes besides its outputs (stream 8: the file of
 // -logfile) come back with its result, or with its error when it fails (line RG E1w-3b); they
 // never go to the Data worker. Where the run's messages go (stream 10: the diagnostics, the file of
-// -logfile, or nowhere) comes back with its result too (line WQA's sweep, D7, 2026-11-20).
+// -logfile, or nowhere) comes back with its result too (line WQA's sweep, D7, 2026-11-20). The
+// warnings of a run (stream 3) go to the Data worker; a run that the engine failed ends its output
+// with `fail`, so that the Data worker keeps those of a failed run (line WQA's sweep, D3,
+// 2026-11-19).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
 import { readStoredZip, type MessagePlace, type RunFile } from '../../domain/run-files.js';
-import { InputMismatchError, withRunFiles, type EnginePhase } from '../../ports/engine.js';
+import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase } from '../../ports/engine.js';
 import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
@@ -247,8 +250,12 @@ export class EngineRuntime {
         });
       } catch (error) {
         // A run that the engine failed gives the files that it made (TBLASTX's file of -logfile holds
-        // its error); a stop does not (the chunks before a trap are discarded, ABI v2 §4).
-        throw abi.stoppedBy === undefined ? failedWithFiles(error, archive) : error;
+        // its error), and ends its output with `fail`, so that the Data worker keeps what it wrote to
+        // the CLI's standard error before its error (stream 3; line WQA's sweep, D3, 2026-11-19); a
+        // stop does neither (the chunks before a trap are discarded, ABI v2 §4).
+        if (abi.stoppedBy !== undefined) throw error;
+        writer.fail();
+        throw failedWithFiles(error, archive);
       }
       const runFiles = readRunFiles(archive);
       if (messages === undefined) throw new Error(`the engine did not say where the messages of the run go (stream ${MESSAGES_STREAM})`);
@@ -502,19 +509,21 @@ function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {
 }
 
 /**
- * The error of a run that the engine failed, with the files that the run made (`withRunFiles`). An
- * archive that cannot be read is told after the run's error, which stays the run's.
+ * The error of a run that the engine failed after it ended the run's output with `fail`
+ * (`withRunOutputFailed`), with the files that the run made (`withRunFiles`). An archive that cannot
+ * be read is told after the run's error, which stays the run's.
  */
 function failedWithFiles(error: unknown, chunks: readonly Uint8Array[]): unknown {
+  if (!(error instanceof Error)) return error;
+  const failed = withRunOutputFailed(error);
   let runFiles: RunFile[];
   try {
     runFiles = readRunFiles(chunks);
   } catch (unreadable) {
-    if (!(error instanceof Error)) return error;
-    error.message = `${error.message} (${messageOf(unreadable)})`;
-    return error;
+    failed.message = `${failed.message} (${messageOf(unreadable)})`;
+    return failed;
   }
-  return runFiles.length === 0 || !(error instanceof Error) ? error : withRunFiles(error, runFiles);
+  return runFiles.length === 0 ? failed : withRunFiles(failed, runFiles);
 }
 
 /** Bytes at each end of a counts file that its key includes (`edgeDigest`). */

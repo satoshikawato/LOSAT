@@ -19,6 +19,14 @@ const SEARCHES: [(&str, &str, &str); 5] = [
 /// NCBI's report of a registry file with the line `[x`, which ends the program (exit status 2).
 const SECTION_REPORT: &str = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
 
+/// Two of [`SECTION_REPORT`] (NCBI's text), in LOSAT's words (`losat::web_adapter::losat_text`, AGENTS.md rule 8),
+/// without the last line feed.
+fn section_reports() -> String {
+    losat::web_adapter::losat_text(&SECTION_REPORT.repeat(2))
+        .trim_end()
+        .to_string()
+}
+
 fn input(name: &str) -> Vec<u8> {
     let root = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -274,21 +282,26 @@ fn the_conffile_is_a_registered_registry_file() {
         }
         let mut words = plain_words.clone();
         words.extend(["-conffile", "e1w3a_bad.ini"]);
-        let report = SECTION_REPORT.repeat(2).trim_end().to_string();
+        let report = section_reports();
         assert_eq!(validate(&words).unwrap_err(), report, "{program}");
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), report, "{program}");
         assert_eq!(run_files(&streams), None, "{program}");
+        // The report is the error: nothing came before it on the standard error (stream 3).
+        assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "", "{program}");
         // With `-logfile`: the programs whose application holds its diagnostic handler as a member
         // replay the collected messages to the standard error, the others into the file
         // (`ncbi_environment::replays_to_stderr`).
         words.extend(["-logfile", "run.log"]);
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), report, "{program}");
-        let file = match program {
+        assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "", "{program}");
+        // NCBI's text in LOSAT's words (`losat::web_adapter::losat_text`, AGENTS.md rule 8).
+        let file = losat::web_adapter::losat_text(&match program {
             "tblastx" => SECTION_REPORT.repeat(2),
             _ => SECTION_REPORT.to_string(),
-        };
+        })
+        .into_owned();
         assert_eq!(
             run_files(&streams),
             Some(vec![("run.log".to_string(), file)]),
@@ -377,33 +390,40 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
 
 // NCBI BLAST+ 2.17.0 (probes `log_warn`, `log_engine_err` of line RG `E/SURVEY_E1.md`): TBLASTX
 // writes the messages of its run, and the error that ends it, to the `-logfile` file. In LOSAT Web
-// the file of a run that failed comes on stream 8 too. The command line's file of the failed run
-// (ws, the gate's build of this branch, NCBI's text): `BLAST query/options error: expect value ...`.
+// the file of a run that failed comes on stream 8 too. The file holds what the CLI's file holds for
+// the argv: in a run of two searches what the other search adds goes to stream 3, as without
+// `-logfile` (`the_error_of_an_output_that_fails_alone_is_where_its_signal_says`; line WQA's sweep,
+// D3 review r2, 2026-11-19: the file had the other search's warning and error). The command line's
+// file of the failed run (ws, the gate's build of this branch, NCBI's text): `BLAST query/options
+// error: expect value ...`.
 #[test]
 fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
     let failed = argv("tblastx", &["-evalue", "0", "-logfile", "run.log"]);
     let (result, streams) = run_of(&failed);
     assert!(result.is_err());
+    // The file has the error, and the standard error (stream 3) nothing.
+    assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "");
     assert_eq!(
         run_files(&streams),
         Some(vec![(
             "run.log".to_string(),
-            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n".to_string()
+            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n".to_string()
         )])
     );
 }
 
 // Line WQA's sweep, D7 (2026-11-20): each output that a run could not write is signalled with the
 // place where its error is (stream 9), which is where the sink wrote it (`CallerSink::error`), for
-// each `-logfile`. The tabular formats' hit list size of 0 fails them alone with NCBI's message,
-// which goes where the run's messages go: the CLI's `tblastx -outfmt 6 -num_alignments 0` writes
-// it to the file of `-logfile run.log`, nowhere for `""` and `/dev/null`, and to the standard error
-// for `-` (LOSAT's command line and NCBI BLAST+ 2.17.0); BLASTN's go to the standard error. A
-// subject title that NCBI cannot decode fails them alone with LOSAT's own refusal, which the CLI's
-// `tblastx -outfmt 6` writes to the standard error whatever `-logfile` is (`cli::main_entry`, its
-// file empty). LOSAT Web writes the run of outfmt 0 and the run of the tabular formats as one run
-// (the argv's `-outfmt 0` here): its run's messages hold both searches' messages, where the CLI's
-// run of the argv alone writes none of the tabular search's.
+// each `-logfile`. The tabular formats' hit list size of 0 fails them alone with NCBI's message.
+// The run of the argv's `-outfmt 0` (here) writes the run's messages where the CLI's run of the
+// argv writes them: in TBLASTX the file of `-logfile run.log`, which then holds what the CLI's file
+// holds, nothing (the CLI's `tblastx -num_alignments 0 -logfile run.log`); what the tabular formats
+// add, their error among it, goes to stream 3, as without `-logfile` (line WQA's sweep, D3 review
+// r2, 2026-11-19), and nowhere for `""` and `/dev/null`, where the CLI's `tblastx -outfmt 6
+// -num_alignments 0` writes it nowhere (LOSAT's command line and NCBI BLAST+ 2.17.0; D3 review r3);
+// BLASTN's go to the standard error. A subject title that NCBI cannot decode fails them alone with
+// LOSAT's own refusal, which the CLI's `tblastx -outfmt 6` writes to the standard error whatever
+// `-logfile` is (`cli::main_entry`, its file empty).
 #[test]
 fn the_error_of_an_output_that_fails_alone_is_where_its_signal_says() {
     const CODING: &str = "ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
@@ -419,6 +439,8 @@ fn the_error_of_an_output_that_fails_alone_is_where_its_signal_says() {
     for program in ["tblastx", "blastn"] {
         let (result, plain) = run_of(&argv(program, &["-num_alignments", "0"]));
         result.unwrap();
+        let stderr = stream_text(&plain, STREAM_DIAGNOSTICS);
+        assert!(stderr.contains(saved), "{program}: {stderr}");
         for logfile in [
             None,
             Some("-"),
@@ -438,21 +460,42 @@ fn the_error_of_an_output_that_fails_alone_is_where_its_signal_says() {
                 logfile == Some("run.log"),
                 "{label}"
             );
+            let messages = match (program, logfile) {
+                ("tblastx", Some("run.log")) => STREAM_RUN_FILES,
+                ("tblastx", Some("" | "/dev/null")) => PLACE_NOWHERE,
+                _ => STREAM_DIAGNOSTICS,
+            };
+            assert_eq!(messages_place(&streams), Some(messages), "{label}");
+            // The error is where what the tabular formats add goes: stream 3, as without -logfile,
+            // also where the run's messages go to the file, which holds the CLI's file of the argv
+            // (empty), and nowhere where they go nowhere (line WQA's sweep, D3 review r2 and r3).
             let place = place_of(&streams, saved);
             assert_eq!(signals(&streams), [(6, place), (7, place)], "{label}");
+            let nowhere = messages == PLACE_NOWHERE;
             assert_eq!(
                 place,
-                match (program, logfile) {
-                    ("tblastx", Some("run.log")) => STREAM_RUN_FILES,
-                    ("tblastx", Some("" | "/dev/null")) => PLACE_NOWHERE,
-                    _ => STREAM_DIAGNOSTICS,
+                if nowhere {
+                    PLACE_NOWHERE
+                } else {
+                    STREAM_DIAGNOSTICS
                 },
                 "{label}"
             );
-            // The run's messages go there too (stream 10), and stream 3 holds none of them elsewhere.
-            assert_eq!(messages_place(&streams), Some(place), "{label}");
-            if place != STREAM_DIAGNOSTICS {
-                assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "", "{label}");
+            assert_eq!(
+                stream_text(&streams, STREAM_DIAGNOSTICS),
+                if nowhere {
+                    String::new()
+                } else {
+                    stderr.clone()
+                },
+                "{label}"
+            );
+            if logfile == Some("run.log") {
+                assert_eq!(
+                    run_files(&streams),
+                    Some(vec![("run.log".to_string(), String::new())]),
+                    "{label}"
+                );
             }
             // LOSAT's own refusal.
             let words = [program, "-query", "q", "-subject", "s"];
@@ -510,7 +553,7 @@ fn a_dry_run_does_not_read_the_outfmt() {
 #[test]
 fn a_leading_dot_slash_names_the_same_registry_file() {
     let _registered = Registered::new("./e1w3a_dot.ini", b"[x\n");
-    let report = SECTION_REPORT.repeat(2).trim_end().to_string();
+    let report = section_reports();
     for name in ["e1w3a_dot.ini", "./e1w3a_dot.ini", "././e1w3a_dot.ini"] {
         let words = argv("blastp", &["-conffile", name]);
         assert_eq!(validate(&words).unwrap_err(), report, "{name}");

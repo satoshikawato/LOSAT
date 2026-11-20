@@ -266,7 +266,7 @@ fn the_crafted_files_of_the_survey_end_as_ncbis() {
             } else {
                 format!("Error: {}\n", error.what_in(PROBE_BUILD_ROOT))
             };
-            assert_eq!(report, ncbi, "{case}");
+            assert_eq!(report, crate::wording::losat_text(&ncbi), "{case}");
             checked += 1;
             continue;
         }

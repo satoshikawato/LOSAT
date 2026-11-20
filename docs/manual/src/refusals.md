@@ -258,7 +258,6 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | A hit list size of 2^31 - 50 or more | Refused, as in `blastp`. |
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) or more | Refused. NCBI's `tblastn` crashes on some inputs with it. |
-| `-max_intron_length` other than 0 with sum statistics (the default, and `-sum_stats true` with `-in_pssm`) | Refused. Without sum statistics NCBI does not use the option, and neither does LOSAT. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback | Refused. NCBI crashes. |
 | `-in_pssm` | See the next section. |
 
@@ -371,6 +370,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - With `-subject`, a Seq-id twice in the query's entry where NCBI's exception may write a Seq-id as a subject record spelled it. That is a GenBank, EMBL or DDBJ accession alone, a name, a patent number or country with a letter, or more than 64 letters in a local or general id or in an accession.
 - With `-out_pssm`, a PSSM of frequency ratios only without `rpsdbparams`. NCBI cannot write its matrix name.
 - With `-out_ascii_pssm`, a PSSM whose information content comes without the other columns of NCBI's long ASCII form.
+- With `-out_ascii_pssm`, a PSSM query with a residue that its coding does not have. NCBI prints its letter from memory it never set.
 - A real number in a PSSM whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`) is read with the exact exponent, the smallest normal double; see [Differences](differences.md). The PSSM's ASN.1 text is read as NCBI reads it.
 
 </details>

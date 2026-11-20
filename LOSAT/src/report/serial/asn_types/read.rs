@@ -26,9 +26,11 @@
 use super::{resolved, EnumValue, Kind, Member, Storage, StringKind, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_text_reader::{
-    real_of_parts, AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, SliceSource,
+    real_of_parts, AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, SliceSource, BAD_NUMBER,
+    NUMBER_OVERFLOW,
 };
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
+use crate::report::serial::object_frame::{frame_info, text_frame_site, FrameKind};
 
 /// A message that NCBI's reader posts while it reads, in the order posted.
 #[derive(Clone, Debug, PartialEq)]
@@ -87,18 +89,6 @@ impl From<AsnTextError> for ReadError {
     }
 }
 
-/// A frame of NCBI's object stack (`CObjectStackFrame::EFrameType`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FrameKind {
-    Named,
-    Class,
-    ClassMember,
-    Choice,
-    ChoiceVariant,
-    Array,
-    ArrayElement,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Frame {
     kind: FrameKind,
@@ -132,156 +122,18 @@ impl Frame {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:366-381
-// ```c++
-// const char* CObjectStackFrame::GetFrameTypeName(void) const
-// {
-//     const char* s;
-//     switch (GetFrameType())
-//     {
-//     default:                  s = "UNKNOWN";             break;
-//     case eFrameOther:         s = "eFrameOther";         break;
-//     case eFrameNamed:         s = "eFrameNamed";         break;
-//     case eFrameArray:         s = "eFrameArray";         break;
-//     case eFrameArrayElement:  s = "eFrameArrayElement";  break;
-//     case eFrameClass:         s = "eFrameClass";         break;
-//     case eFrameClassMember:   s = "eFrameClassMember";   break;
-//     case eFrameChoice:        s = "eFrameChoice";        break;
-//     case eFrameChoiceVariant: s = "eFrameChoiceVariant"; break;
-//     }
-//     return s;
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:399-410
-// ```c++
-// string CObjectStackFrame::GetFrameInfo(void) const
-// {
-//     string info(" Frame type= ");
-//     info += GetFrameTypeName();
-//     if (m_TypeInfo) {
-//         info += ", Object type= " + m_TypeInfo->GetName();
-//     }
-//     if (m_MemberId) {
-//         info += ", Member name= " + m_MemberId->GetName();
-//     }
-//     return info;
-// }
-// ```
 impl Frame {
+    /// `GetFrameInfo()` (`object_frame::frame_info`).
     fn info(&self) -> String {
-        let kind = match self.kind {
-            FrameKind::Named => "eFrameNamed",
-            FrameKind::Class => "eFrameClass",
-            FrameKind::ClassMember => "eFrameClassMember",
-            FrameKind::Choice => "eFrameChoice",
-            FrameKind::ChoiceVariant => "eFrameChoiceVariant",
-            FrameKind::Array => "eFrameArray",
-            FrameKind::ArrayElement => "eFrameArrayElement",
-        };
-        let mut info = format!(" Frame type= {kind}");
-        if let Some(name) = self.type_name {
-            info.push_str(", Object type= ");
-            info.push_str(name);
-        }
-        if let Some(member) = self.member {
-            info.push_str(", Member name= ");
-            info.push_str(member);
-        }
-        info
+        frame_info(self.kind, self.type_name, self.member)
     }
 
-    /// The source file, line and function of the `END_OBJECT_FRAME` that leaves this frame: the
-    /// place of the line that `NCBI_RETHROW_SAME` adds to an exception passing through it.
-    // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:201-214
-    // ```c++
-    // #define END_OBJECT_FRAME_OF(Stream) \
-    //     } catch (CSerialException& s_expt) { \
-    //         std::string msg((Stream).TopFrame().GetFrameName()); \
-    //         (Stream).PopFrame(); \
-    //         s_expt.AddFrameInfo(msg); \
-    //         throw; \
-    //     } catch ( CEofException& e_expt ) { \
-    //         (Stream).HandleEOF(e_expt); \
-    //     } catch (CException& expt) { \
-    //         std::string msg((Stream).TopFrame().GetFrameInfo()); \
-    //         (Stream).PopFrame(); \
-    //         NCBI_RETHROW_SAME(expt,msg); \
-    //     } \
-    //     (Stream).PopFrame()
-    // ```
-    // The lines are those of `END_OBJECT_FRAME()` in the functions that push the frames:
-    // `CObjectIStream::Read` (objistr.cpp:959-969), `CObjectIStreamAsn::ReadClassSequential`
-    // (objistrasn.cpp:1380-1397, the member frame ends in `ReadClassSequentialContentsEnd` at
-    // 1393), `CObjectIStream::ReadChoiceSimple` (objistr.cpp:1482-1501),
-    // `CObjectIStreamAsn::ReadContainer` (objistrasn.cpp:1245-1274), and the skip functions
-    // `SkipClassSequential` (objistrasn.cpp:1417-1433), `SkipChoiceSimple` (objistr.cpp:1503-1522)
-    // and `SkipContainer` (objistrasn.cpp:1276-1292).
+    /// The source file, line and function of the `END_OBJECT_FRAME` that leaves this frame
+    /// (`object_frame::text_frame_site`).
     fn site(&self) -> (&'static str, u32, &'static str) {
-        const ASN: &str = "src/serial/objistrasn.cpp";
-        const ISTR: &str = "src/serial/objistr.cpp";
-        match (self.kind, self.skip) {
-            (FrameKind::Named, _) => (ISTR, 968, "ncbi::CObjectIStream::Read"),
-            (FrameKind::Class, false) => {
-                (ASN, 1396, "ncbi::CObjectIStreamAsn::ReadClassSequential")
-            }
-            (FrameKind::ClassMember, false) => {
-                (ASN, 1393, "ncbi::CObjectIStreamAsn::ReadClassSequential")
-            }
-            (FrameKind::Choice, false) => (ISTR, 1500, "ncbi::CObjectIStream::ReadChoiceSimple"),
-            (FrameKind::ChoiceVariant, false) => {
-                (ISTR, 1498, "ncbi::CObjectIStream::ReadChoiceSimple")
-            }
-            (FrameKind::Array, false) => (ASN, 1273, "ncbi::CObjectIStreamAsn::ReadContainer"),
-            (FrameKind::ArrayElement, false) => {
-                (ASN, 1270, "ncbi::CObjectIStreamAsn::ReadContainer")
-            }
-            (FrameKind::Class, true) => (ASN, 1432, "ncbi::CObjectIStreamAsn::SkipClassSequential"),
-            (FrameKind::ClassMember, true) => {
-                (ASN, 1429, "ncbi::CObjectIStreamAsn::SkipClassSequential")
-            }
-            (FrameKind::Choice, true) => (ISTR, 1521, "ncbi::CObjectIStream::SkipChoiceSimple"),
-            (FrameKind::ChoiceVariant, true) => {
-                (ISTR, 1519, "ncbi::CObjectIStream::SkipChoiceSimple")
-            }
-            (FrameKind::Array, true) => (ASN, 1291, "ncbi::CObjectIStreamAsn::SkipContainer"),
-            (FrameKind::ArrayElement, true) => {
-                (ASN, 1288, "ncbi::CObjectIStreamAsn::SkipContainer")
-            }
-        }
+        text_frame_site(self.kind, self.skip)
     }
 }
-
-// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:570-584
-// ```c++
-// void CIStreamBuffer::BadNumber(void)
-//     THROWS1((CUtilException))
-// {
-//     m_Error = "bad number";
-//     NCBI_THROW_FMT(CUtilException, eWrongData,
-//                    "bad number in line " << GetLine());
-// }
-//
-//
-// void CIStreamBuffer::NumberOverflow(void)
-//     THROWS1((CUtilException))
-// {
-//     m_Error = "number overflow";
-//     NCBI_THROW_FMT(CUtilException, eWrongData,
-//                    "number overflow in line " << GetLine());
-// }
-// ```
-const BAD_NUMBER: ThrowSite = ThrowSite {
-    file: "src/util/strbuffer.cpp",
-    line: 574,
-    kind: "CUtilException::eWrongData",
-    function: Some("ncbi::CIStreamBuffer::BadNumber"),
-};
-const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
-    file: "src/util/strbuffer.cpp",
-    line: 583,
-    kind: "CUtilException::eWrongData",
-    function: Some("ncbi::CIStreamBuffer::NumberOverflow"),
-};
 
 /// Reads the ASN.1 text document at the start of `text` as the root type `root` (an object of
 /// `CObjectIStream::Read`: its file header, then the value; what follows it is not read), with
@@ -1252,119 +1104,22 @@ impl<S: AsnSource> TypedReader<'_, S> {
             .ok_or_else(|| ReadError::Serial("illegal REAL base (must be 2 or 10)".into()))
     }
 
-    /// `ReadStringValue` with the fix of `kind` / `SkipString`: the string's lines joined, `""` as
-    /// one quote, and for a VisibleString each byte outside 0x20..0x7E read as `#` with NCBI's
-    /// message, which quotes the piece of the string being appended (`AppendStringData`: up to the
-    /// end of the line, the quote, or 128 bytes; none when skipping).
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:877-912 (`AppendStringData`)
-    // ```c++
-    //     const char* data = m_Input.GetCurrentPos();
-    //     if ( fix_method != eFNP_Allow ) {
-    //         size_t done = 0, valid = 0;
-    //         for ( size_t i = 0; i < count; ++i ) {
-    //             char c = data[i];
-    //             if ( !GoodVisibleChar(c) ) {
-    //                 ...
-    //                 if (valid == 0) {
-    //                     if ( i > done ) {
-    //                         s.append(data + done, i - done);
-    //                     }
-    //                     c = ReplaceVisibleChar(c, fix_method, this, CTempString(data,count), x_FixCharsSubst());
-    //                     if (c != 0) {
-    //                         s += c;
-    //                     }
-    //                     done = i + 1;
-    //                 }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986 (`ReadStringValue`, quoted
-    // at `Reader::string`: a piece is appended at an end of line, at the quote, and every 128
-    // bytes; after `""` the next piece starts with the second quote)
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1093-1155
-    // ```c++
-    // void CObjectIStreamAsn::SkipString(EStringType type)
-    // {
-    //     ...
-    //             default:
-    //                 if (type == eStringTypeVisible) {
-    //                     if ( !GoodVisibleChar(c) ) {
-    //                         ...
-    //                         if (valid == 0) {
-    //                             c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, kEmptyStr, x_FixCharsSubst());
-    //                         }
-    // ```
-    // (`SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING` is 0, objistr.hpp:1163: `valid` stays 0;
-    // the fix is `eFNP_ReplaceAndWarn`, the default of `SERIAL_WRONG_CHARS_READ`, objistr.cpp:302.)
+    /// `ReadStringValue` with the fix of `kind` / `SkipString` (`Reader::visible_string`): for a
+    /// VisibleString each byte outside 0x20..0x7E read as `#`, with NCBI's message.
     fn string(&mut self, kind: StringKind, skip: bool) -> R<Vec<u8>> {
-        let visible = kind != StringKind::Utf8;
-        self.r.expect(b'"')?;
-        let start_line = self.r.line;
-        let unclosed = |line: usize| {
-            ReadError::Serial(format!(
-                "unclosed string starts at line {start_line} ({line})"
-            ))
-        };
         let mut out = Vec::new();
-        let mut i = 0usize;
-        loop {
-            let Some(c) = self.r.src.byte_at(self.r.pos + i) else {
-                return Err(unclosed(self.r.line));
-            };
-            match c {
-                b'\r' | b'\n' => {
-                    self.append(&mut out, i, visible, skip);
-                    self.r.pos += i + 1;
-                    i = 0;
-                    self.r.skip_end_of_line(c);
-                }
-                b'"' => {
-                    self.append(&mut out, i, visible, skip);
-                    self.r.pos += i + 1;
-                    if self.r.peek_at(0) != b'"' {
-                        return Ok(out);
-                    }
-                    // `""`: the second quote starts the next piece (`SkipString` takes both).
-                    if skip {
-                        self.r.pos += 1;
-                        i = 0;
-                    } else {
-                        i = 1;
-                    }
-                }
-                _ => {
-                    if skip && visible && !(b' '..=b'~').contains(&c) {
-                        self.post_bad_char(c, &[]);
-                    }
-                    i += 1;
-                    if i == 128 {
-                        self.append(&mut out, i, visible, skip);
-                        self.r.pos += i;
-                        i = 0;
-                    }
-                }
-            }
+        let mut replaced = Vec::new();
+        let result = self.r.visible_string(
+            &mut out,
+            kind != StringKind::Utf8,
+            skip,
+            &mut |line, byte, piece| replaced.push((line, byte, piece.to_vec())),
+        );
+        for (line, byte, piece) in replaced {
+            self.post_bad_char(line, byte, &piece);
         }
-    }
-
-    /// `AppendStringData` of the `count` bytes at the reader's position (not taken).
-    fn append(&mut self, out: &mut Vec<u8>, count: usize, visible: bool, skip: bool) {
-        if skip {
-            return;
-        }
-        let data = self.r.bytes(self.r.pos..self.r.pos + count).to_vec();
-        if !visible {
-            out.extend_from_slice(&data);
-            return;
-        }
-        let mut done = 0;
-        for (i, &c) in data.iter().enumerate() {
-            if !(b' '..=b'~').contains(&c) {
-                out.extend_from_slice(&data[done..i]);
-                self.post_bad_char(c, &data);
-                out.push(b'#');
-                done = i + 1;
-            }
-        }
-        out.extend_from_slice(&data[done..]);
+        result?;
+        Ok(out)
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (quoted at
@@ -1378,11 +1133,11 @@ impl<S: AsnSource> TypedReader<'_, S> {
     // ```
     // (`CObjectIStreamAsn` keeps `GetPosition` of its base; `CIStreamBuffer::GetLine` is the line
     // of the reader.)
-    fn post_bad_char(&mut self, byte: u8, string: &[u8]) {
+    fn post_bad_char(&mut self, line: usize, byte: u8, string: &[u8]) {
         self.posts.push(Post::BadChar(ReplacedChar {
             trace: self.stack_trace(),
             byte,
-            position: StreamPosition::Line(self.r.line as u64),
+            position: StreamPosition::Line(line as u64),
             string: string.into(),
         }));
     }

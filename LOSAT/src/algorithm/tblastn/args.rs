@@ -894,26 +894,6 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
                 || args.matrix_name.eq_ignore_ascii_case("identity"),
         )?;
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:774-815 (uneven gap
-    // linking of the HSPs, `longest_intron`)
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:781-787
-    // ```c
-    //    if (params->do_sum_stats) {
-    //       BlastLinkHSPParametersNew(program_number, gapped_calculation,
-    //                                 &params->link_hsp_params);
-    //
-    //       if((Blast_QueryIsTranslated(program_number) ||
-    // 	  Blast_SubjectIsTranslated(program_number)) &&
-    // 	 program_number != eBlastTypeTblastx) {
-    // ```
-    // The largest intron is read by the linking of the HSPs only: without sum statistics (the
-    // default of `-in_pssm`, or `-sum_stats false`) NCBI ignores it (DECISIONS 35 Q3 of line PS).
-    if args.max_intron_length != 0 && args.sum_stats {
-        anyhow::bail!(
-            "-max_intron_length {} (uneven gap linking) is not supported by LOSAT's TBLASTN",
-            args.max_intron_length
-        );
-    }
     let (compo_adjust_mode, _) = composition(args);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
     // ```c
@@ -1194,7 +1174,7 @@ mod tests {
         assert_eq!(counts(&["-outfmt", "6", "-num_alignments", "2"]), (2, 2, 2));
         assert_eq!(
             error(&["-num_descriptions", "0", "-num_alignments", "0"]),
-            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
     }
 
@@ -1286,7 +1266,6 @@ mod tests {
         );
         for extra in [
             &["-ungapped", "-comp_based_stats", "F"][..],
-            &["-max_intron_length", "100", "-sum_stats", "true"],
             &["-max_target_seqs", "1073741799"],
             &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
         ] {
@@ -1574,7 +1553,7 @@ mod tests {
         for size in ["5", "6", "7", "8"] {
             assert_eq!(
                 error(&["-word_size", size]),
-                "BLAST query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the BLAST+ user manual.\n",
+                "BLAST query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the LOSAT user manual.\n",
                 "{size}"
             );
         }
@@ -1601,23 +1580,30 @@ mod tests {
         }
     }
 
-    // NCBI blast_parameters.c:781-787: the largest intron is read by the linking only (DECISIONS
-    // 35 Q3 of line PS: accepted without `-sum_stats true`, refused with it as before).
+    // NCBI blast_parameters.c:781-815: the largest intron is read by the linking of the HSPs
+    // only (`core::link_hsps::translated_longest_intron`), so every value NCBI's command line
+    // takes is searched, with sum statistics and without them (the default of `-in_pssm`,
+    // `-sum_stats false`), and a negative one is the command line's error.
     #[test]
-    fn the_largest_intron_is_refused_with_sum_statistics_only() {
+    fn the_largest_intron_is_accepted_with_and_without_sum_statistics() {
         let settings = |args: TblastnArgs| check_search_limits(&args.resolve().unwrap());
-        assert!(settings(parse_pssm(&["-max_intron_length", "100"]).unwrap()).is_ok());
-        assert!(
-            settings(parse(&["-max_intron_length", "100", "-sum_stats", "false"]).unwrap()).is_ok()
-        );
-        for args in [
-            parse_pssm(&["-max_intron_length", "100", "-sum_stats", "true"]).unwrap(),
-            parse(&["-max_intron_length", "100"]).unwrap(),
-        ] {
-            assert!(settings(args)
-                .unwrap_err()
-                .to_string()
-                .contains("-max_intron_length 100 (uneven gap linking) is not supported"));
+        for value in ["0", "1", "4", "5", "100", "2147483647"] {
+            for args in [
+                parse(&["-max_intron_length", value]).unwrap(),
+                parse(&["-max_intron_length", value, "-sum_stats", "false"]).unwrap(),
+                parse_pssm(&["-max_intron_length", value]).unwrap(),
+                parse_pssm(&["-max_intron_length", value, "-sum_stats", "true"]).unwrap(),
+            ] {
+                assert!(settings(args).is_ok(), "{value}");
+            }
+        }
+        let resolved = parse(&["-max_intron_length", "2147483647"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!(resolved.max_intron_length, i32::MAX);
+        for value in ["-1", "2147483648", "1.5", "abc"] {
+            assert!(parse(&["-max_intron_length", value]).is_err(), "{value}");
         }
     }
 

@@ -39,9 +39,12 @@ fn engine() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
 }
 
+/// NCBI's frozen file `name`, in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md
+/// rule 8).
 fn frozen(name: &str) -> Vec<u8> {
     let path = engine().join("tests/fixtures/xml_dbname").join(name);
-    fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+    let bytes = fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    losat::wording::losat_output_bytes(&bytes).into_owned()
 }
 
 /// The frozen files of `case` that a run of outfmt 13 or 14 leaves beside its master file: the master

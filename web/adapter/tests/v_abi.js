@@ -693,6 +693,86 @@ function checkFiles(reactor) {
   assert.equal(reactor.call("losat_web2_file_release", begun.status).status, 0);
 }
 
+// -logfile names (abi_v2.md §4 *start*; line WQA's sweep, D11, 2026-11-20): a name is read as the CLI on Linux reads it
+// in a working directory where the name's directories exist. BLASTN and TBLASTX with -max_target_seqs 1 (TBLASTX
+// writes the warning where -logfile sends the diagnostics) on the outfmt11 inputs, without and with a `.ncbirc` that
+// NCBI cannot read (the one byte 0xEF: the usage report's error, which the CLI writes to its standard error at once and
+// to a -logfile file when it opens it), each against the CLI run in a new directory that has the name's directories, one
+// run per format with -out: outfmt 0, 6 and 7; stream 3 is the CLI's standard error of outfmt 6; stream 8 holds the file
+// that the name makes, under the name, or, for the names of the standard output, what the CLI writes there (its whole
+// standard output, the reports being in -out); stream 10 says where the warning went. `<dir>` is the run's directory.
+const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>/abs/run.log", "/dev/stdout", "/dev/fd/1",
+  "-", "/dev/stderr", "/dev/fd/2", "/proc/self/fd/2", "//dev/stderr", ".", "..", "logs/", "logs/.", "", "/dev/null", "//dev/null"];
+
+async function checkLogfileNames(reactor, native, scratch, engine, waitForWorkers) {
+  const inputs = path.join(ROOT, "LOSAT/tests/fasta/outfmt11");
+  const query = path.join(inputs, "arch_tbx_q.fna"), subject = path.join(inputs, "arch_tbx_s.fna");
+  const standardOutput = new Set(["/dev/stdout", "/dev/fd/1"]);
+  const device = (name) => name === "-" || name === "" || /^\/+(dev|proc)\//.test(name);
+  let rows = 0;
+  for (const program of ["blastn", "tblastx"]) {
+    const handles = [0, 1].map((role) => {
+      const registered = reactor.call("losat_web2_register", program, role, fs.readFileSync(role === 0 ? query : subject));
+      assert.ok(registered.status > 0, registered.error);
+      return registered.status;
+    });
+    for (const ncbirc of [false, true]) {
+      let registry;
+      if (ncbirc) {
+        const begun = reactor.call("losat_web2_file_begin", 2, ".ncbirc", 1);
+        assert.ok(begun.status > 0, begun.error);
+        assert.equal(reactor.call("losat_web2_file_chunk", begun.status, Buffer.from([0xef])).status, 0);
+        assert.equal(reactor.call("losat_web2_file_end", begun.status).status, 0);
+        registry = begun.status;
+      }
+      for (const template of LOG_NAMES) {
+        const directory = fs.mkdtempSync(path.join(scratch, "logfile."));
+        const name = template.replace("<dir>", directory);
+        const label = `${engine} ${program}${ncbirc ? " .ncbirc 0xEF" : ""} -logfile ${JSON.stringify(name)}`;
+        const slash = name.lastIndexOf("/");
+        if (slash > 0 && !device(name)) fs.mkdirSync(path.resolve(directory, name.slice(0, slash)), { recursive: true });
+        if (ncbirc) fs.writeFileSync(path.join(directory, ".ncbirc"), Buffer.from([0xef]));
+        const words = [program, "-query", query, "-subject", subject, "-max_target_seqs", "1"];
+        const outputs = new Map();
+        let cli;
+        for (const format of FORMATS[program]) {
+          const out = path.join(directory, `native.${format}.out`);
+          const result = require("node:child_process").spawnSync(native, [...words, "-outfmt", String(format), "-num_threads", "1", "-out", out, "-logfile", name],
+                                                                 { cwd: directory, env: { PATH: process.env.PATH, HOME: directory } });
+          assert.equal(result.status, 0, `${label}: native outfmt ${format}: ${result.stderr}`);
+          outputs.set(format, fs.readFileSync(out));
+          fs.rmSync(out);
+          const target = path.resolve(directory, name);
+          const made = !device(name) && fs.existsSync(target) && fs.statSync(target).isFile() ? fs.readFileSync(target) : undefined;
+          // The next format's run appends to the file: each run starts without it.
+          if (made !== undefined) fs.rmSync(target);
+          if (format === 6) cli = { stderr: result.stderr, stdout: result.stdout, made };
+        }
+        const files = standardOutput.has(name) ? [[name, cli.stdout]] : cli.made === undefined ? [] : [[name, cli.made]];
+        if (!standardOutput.has(name)) assert.equal(cli.stdout.length, 0, `${label}: the CLI's standard output with -out`);
+        const run = reactor.call("losat_web2_run", [...words, "-logfile", name, "-num_threads", "1"].join("\0"), ...handles);
+        if (waitForWorkers) await waitForWorkers();
+        assert.equal(run.status, 0, `${label}: ${run.error}`);
+        for (const format of FORMATS[program]) {
+          assert.equal(sha256(run.streams.get(format) || Buffer.alloc(0)), sha256(outputs.get(format)), `${label}: outfmt ${format}`);
+        }
+        assert.equal((run.streams.get(3) || Buffer.alloc(0)).toString(), cli.stderr.toString(), `${label}: stream 3 is the CLI's standard error`);
+        const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)).map(([entry, bytes]) => [entry, bytes.toString()]) : [];
+        assert.deepEqual(sent, files.map(([entry, bytes]) => [entry, bytes.toString()]), `${label}: the files of the run (stream 8)`);
+        const warning = `Warning: [${program}] Examining 5 or more matches is recommended\n`;
+        const place = run.streams.get(10).readUInt32LE(0);
+        const where = cli.stderr.toString().includes(warning) ? 3 : files.some(([, bytes]) => bytes.toString().includes(warning)) ? 8 : 0xffffffff;
+        assert.equal(place, where, `${label}: where the run's messages go (stream 10)`);
+        fs.rmSync(directory, { recursive: true, force: true });
+        rows++;
+      }
+      if (registry !== undefined) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
+    }
+    for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
+  }
+  return rows;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-"));
@@ -708,6 +788,8 @@ async function main() {
     assert.equal(reactor.exports.losat_web2_abi_version(), 4);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
+    const logRows = await checkLogfileNames(reactor, options.native, scratch, engine.name, waitForWorkers);
+    console.log(`ok ${engine.name} -logfile names: ${logRows} runs as the CLI's`);
     const subjects = new Map(); // "program subject" -> handle, kept across runs
     const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
     let countsRegistered = 0, countsKept = 0;

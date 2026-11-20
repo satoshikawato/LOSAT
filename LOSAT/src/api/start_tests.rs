@@ -918,3 +918,77 @@ fn a_callers_sink_writes_an_output_s_error_where_the_command_line_does() {
         }
     }
 }
+
+// Line WQA's sweep, D11 (2026-11-20): a caller's `-logfile` name is read as the command line on
+// Linux reads it where the name's directories exist (`RunFiles::log_target`). NCBI BLAST+ 2.17.0
+// and LOSAT's command line, with a `.ncbirc` of the one byte 0xEF, which NCBI cannot read (the
+// usage report's `Error: (110.4) Error reading the registry after line 1: `, written to the
+// standard error at once), and the run's warning (`-max_target_seqs 1`; TBLASTX writes it where
+// the diagnostics go): `-logfile -` writes the error once to the standard error; `/dev/stderr` is a
+// file there, which gets the error too, so the standard error has it twice; `logs/run.log` and
+// `/dev/stdout` are files, which get it (the command line writes the second into its standard
+// output); `logs/` names a directory, which NCBI cannot open: as `-`. The run's warning goes to the
+// file in TBLASTX, else to the standard error.
+#[test]
+fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
+    use crate::blastinput::ncbi_environment::{ApplicationStart, TextPlace};
+    use crate::report::run_files::RunFiles;
+    use std::io::Write as _;
+    let files = Files(vec![("./.ncbirc", b"\xef")]);
+    let error = "Error: (110.4) Error reading the registry after line 1: \n";
+    let warning = "Warning: w\n";
+    for program in ["blastn", "tblastx"] {
+        let follows = program == "tblastx";
+        for (logfile, twice, file) in [
+            ("-", false, false),
+            ("/dev/stderr", true, false),
+            ("/proc/self/fd/2", true, false),
+            ("logs/run.log", false, true),
+            ("/tmp/run.log", false, true),
+            ("/dev/stdout", false, true),
+            ("logs/", false, false),
+        ] {
+            let words = ["-logfile", logfile];
+            let kept = std::sync::Arc::new(Kept::default());
+            let mut stderr = Vec::new();
+            let mut started = begin_with(
+                ApplicationStart::with_files(program, &words, &[], &files),
+                &words,
+                &RunFiles::Receiver(kept.clone()),
+                &mut stderr,
+            )
+            .unwrap();
+            let place = started.messages_place();
+            started
+                .sink(&mut stderr)
+                .write_all(warning.as_bytes())
+                .unwrap();
+            started.finish().unwrap();
+            let label = format!("{program} -logfile {logfile}");
+            let to_file = follows && file;
+            let expected_stderr = format!(
+                "{}{}",
+                error.repeat(if twice { 2 } else { 1 }),
+                if to_file { "" } else { warning }
+            );
+            assert_eq!(
+                String::from_utf8(stderr).unwrap(),
+                expected_stderr,
+                "{label}"
+            );
+            let expected_files = match file {
+                true => vec![(
+                    logfile.as_bytes().to_vec(),
+                    format!("{error}{}", if follows { warning } else { "" }).into_bytes(),
+                )],
+                false => Vec::new(),
+            };
+            assert_eq!(*kept.0.lock().unwrap(), expected_files, "{label}");
+            let expected_place = match to_file {
+                true => TextPlace::LogFile,
+                false => TextPlace::StandardError,
+            };
+            assert_eq!(place, expected_place, "{label}");
+        }
+    }
+}

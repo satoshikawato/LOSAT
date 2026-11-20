@@ -161,7 +161,12 @@ impl Drop for Registered {
 // the `-logfile` file in TBLASTX and to the standard error in the other programs; the file is made
 // in every program and the outputs are the same as without it. In LOSAT Web the file comes in the
 // archive of the run's files (stream 8), `""` and `/dev/null` make none, `-` is the standard error
-// (stream 3), and a name with a directory is refused.
+// (stream 3). A name with a directory is a file of the run under its whole name, as the command line
+// makes it where the directory exists; so is `/dev/stdout`, whose bytes the command line writes into
+// its standard output. The names of the standard error, and of a directory (which NCBI cannot open
+// as a file), send the messages to stream 3, and another spelling of `/dev/null` nowhere (NCBI
+// BLAST+ 2.17.0 and LOSAT's command line: `fix-logfile-dir/native` of line WQA, D11, 2026-11-20; a
+// name with a directory was refused before).
 #[test]
 fn the_logfile_is_a_file_of_the_run() {
     for (program, _, _) in SEARCHES {
@@ -201,7 +206,10 @@ fn the_logfile_is_a_file_of_the_run() {
         };
         assert_eq!(
             (stream_text(&logged, STREAM_DIAGNOSTICS), run_files(&logged)),
-            (stderr, Some(vec![("run.log".to_string(), file)])),
+            (
+                stderr.clone(),
+                Some(vec![("run.log".to_string(), file.clone())])
+            ),
             "{program}"
         );
         let place = match to_log {
@@ -213,7 +221,48 @@ fn the_logfile_is_a_file_of_the_run() {
         let mut joined = plain_words.clone();
         joined.push("-logfile=run.log");
         assert_eq!(run_of(&joined).1, logged, "{program}");
-        for (value, quiet) in [("", to_log), ("/dev/null", to_log), ("-", false)] {
+        for name in [
+            "logs/run.log",
+            "./run.log",
+            "a/b/run.log",
+            "/tmp/run.log",
+            "/dev/stdout",
+        ] {
+            let mut words = plain_words.clone();
+            words.extend(["-logfile", name]);
+            validate(&words).unwrap();
+            let (result, streams) = run_of(&words);
+            result.unwrap();
+            for stream in [0, 6, 7, 1] {
+                assert_eq!(
+                    streams.get(&stream),
+                    plain.get(&stream),
+                    "{program} {name} {stream}"
+                );
+            }
+            assert_eq!(
+                (
+                    stream_text(&streams, STREAM_DIAGNOSTICS),
+                    run_files(&streams)
+                ),
+                (stderr.clone(), Some(vec![(name.to_string(), file.clone())])),
+                "{program} {name}"
+            );
+            assert_eq!(messages_place(&streams), Some(place), "{program} {name}");
+        }
+        for (value, quiet) in [
+            ("", to_log),
+            ("/dev/null", to_log),
+            ("//dev/null", to_log),
+            ("-", false),
+            ("/dev/stderr", false),
+            ("/dev/fd/2", false),
+            ("/proc/self/fd/2", false),
+            (".", false),
+            ("..", false),
+            ("logs/", false),
+            ("logs/.", false),
+        ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", value]);
             let (result, streams) = run_of(&words);
@@ -235,14 +284,6 @@ fn the_logfile_is_a_file_of_the_run() {
             assert_eq!(messages_place(&streams), Some(place), "{program} {value:?}");
             assert_eq!(streams.get(&6), plain.get(&6), "{program} {value:?}");
         }
-        let mut words = plain_words.clone();
-        words.extend(["-logfile", "d/run.log"]);
-        let refusal = "the -logfile name d/run.log has a directory, which LOSAT Web does not have: give a file name without one";
-        assert_eq!(validate(&words).unwrap_err(), refusal, "{program}");
-        let (result, streams) = run_of(&words);
-        assert_eq!(result.unwrap_err(), refusal, "{program}");
-        assert_eq!(run_files(&streams), None, "{program}");
-        assert_eq!(messages_place(&streams), None, "{program}");
     }
 }
 

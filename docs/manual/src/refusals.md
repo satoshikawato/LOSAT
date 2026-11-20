@@ -71,7 +71,6 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-dryrun` | Reads and checks the arguments, then stops. It refuses what a normal run refuses. |
 | `-conffile` with a name that is not UTF-8 | Refused. |
 | `-logfile` with `tblastx`, `rpsblast` or `rpstblastn` in the WASI command-line build | Refused. That build cannot send its standard error to a file. |
-| `-logfile` with a name that has a directory, in the Web engine | Refused. The browser has no directories. |
 | `-remote`, `-entrez_query`, `-gilist`, `-negative_gilist` | Refused. They need NCBI's servers or GI databases. See the end of this page. |
 
 <details>

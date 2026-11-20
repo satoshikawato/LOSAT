@@ -1834,6 +1834,13 @@ pub enum DiagTarget {
     /// (`Write for &File`), and a target stays `Sync` and `RefUnwindSafe` (`api::Batches` holds
     /// one; a `RefCell` would take both away from that public type).
     Memory(std::sync::Mutex<Vec<u8>>),
+    /// The file of `-logfile` of a run whose files LOSAT Web gives its host, where the name is the
+    /// process's standard error (`report::run_files::RunFiles::log_target`: `/dev/stderr`): a file,
+    /// as NCBI opens one there (`CFileHandleDiagHandler`), whose bytes go to `cerr`. It differs from
+    /// `Stderr` only in that it gets the messages collected before it was opened
+    /// (`write_collected`), which `cerr` then has twice, as on the command line (line WQA's sweep,
+    /// D11, 2026-11-20).
+    StderrFile,
 }
 
 /// Where the text written to a `DiagTarget` ends up (`DiagTarget::place`, which `write_text`
@@ -1853,7 +1860,7 @@ impl DiagTarget {
     /// Where the text written to this target ends up (`write_text`).
     pub fn place(&self) -> TextPlace {
         match self {
-            DiagTarget::Stderr => TextPlace::StandardError,
+            DiagTarget::Stderr | DiagTarget::StderrFile => TextPlace::StandardError,
             DiagTarget::File(_) | DiagTarget::Memory(_) => TextPlace::LogFile,
             DiagTarget::Discard => TextPlace::Nowhere,
         }
@@ -1874,7 +1881,9 @@ impl DiagTarget {
     }
 
     /// Writes `text` to the file of `-logfile` (on disk or in memory); nothing for `cerr` and for
-    /// no output.
+    /// no output, nor for a file that is the standard error (`StderrFile`), whose text the caller's
+    /// diagnostics have where the caller writes it: the error that ends a run there is the run's
+    /// error, as for `cerr` (`api::start::RunLog::post`).
     pub fn write_to_file(&self, text: &[u8]) {
         match self {
             DiagTarget::File(file) => {
@@ -1886,7 +1895,23 @@ impl DiagTarget {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .extend_from_slice(text),
-            DiagTarget::Stderr | DiagTarget::Discard => {}
+            DiagTarget::Stderr | DiagTarget::Discard | DiagTarget::StderrFile => {}
+        }
+    }
+
+    /// Writes `text`, the messages that NCBI collected before `-logfile` set up its diagnostics
+    /// (`ApplicationStart::write_log_setup`), to the file of `-logfile`, which gets them when it is
+    /// opened: the file (`write_to_file`), or `stderr` for a file that is the standard error
+    /// (`StderrFile`), where `cerr` has them already (NCBI BLAST+ 2.17.0 `-logfile /dev/stderr`
+    /// writes the usage report's messages to its standard error twice); nothing for `cerr` and for
+    /// no output.
+    pub fn write_collected(&self, text: &[u8], stderr: &mut dyn Write) {
+        match self {
+            DiagTarget::StderrFile => {
+                let _ = stderr.write_all(text);
+                let _ = stderr.flush();
+            }
+            _ => self.write_to_file(text),
         }
     }
 }
@@ -1935,7 +1960,8 @@ impl DiagTarget {
             )
         };
         let file = match self {
-            DiagTarget::Stderr => return Ok(()),
+            // The messages go to the standard error, which is where the target writes.
+            DiagTarget::Stderr | DiagTarget::StderrFile => return Ok(()),
             DiagTarget::File(file) => file,
             DiagTarget::Discard => {
                 let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
@@ -2442,10 +2468,11 @@ impl ApplicationStart {
 
     /// NCBI's first `SetupDiag` with a `-logfile` file: the file gets the messages collected
     /// so far, the usage report's (`CDiagContext::SetupDiag` with `eDCM_NoChange` flushes them
-    /// to a new log; ncbiapp.cpp:868-871, ncbidiag.cpp:3863-3874).
-    pub fn write_log_setup(&self, target: &mut DiagTarget) {
+    /// to a new log; ncbiapp.cpp:868-871, ncbidiag.cpp:3863-3874), wherever the file's bytes go
+    /// (`DiagTarget::write_collected`: `stderr` for a file that is the standard error).
+    pub fn write_log_setup(&self, target: &mut DiagTarget, stderr: &mut dyn Write) {
         if let Ok(text) = &self.usage_report {
-            target.write_to_file(text.as_bytes());
+            target.write_collected(text.as_bytes(), stderr);
         }
     }
 
@@ -4198,7 +4225,7 @@ mod tests {
             "file" => diag_target(Some(file.as_os_str())),
             _ => diag_target(Some(OsStr::new("/dev/null"))),
         };
-        start.write_log_setup(&mut diag);
+        start.write_log_setup(&mut diag, &mut stderr);
         let status = start.write_config_load(&mut diag, &mut stderr).unwrap();
         drop(diag);
         let logged = std::fs::read_to_string(&file).unwrap_or_default();

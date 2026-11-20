@@ -141,8 +141,7 @@ jobs:
       # tests run stand-in runners; the tool also calls node and git (both on the runner image).
       - name: WASI benchmark tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_benchmark_wasm_threading.py'
-      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-      # result *= expl(-z * z) / z;
+      # Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143 (a long-double product)
       # LOSAT's one mul_add emulates that long-double line; nothing else may fuse or
       # reassociate floating-point operations (docs/agents/diagnostics.md, "Floating-point contract").
       - name: Floating-point contract (sources and cargo configuration)

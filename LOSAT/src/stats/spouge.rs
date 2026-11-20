@@ -105,7 +105,7 @@ pub fn lookup_protein_gumbel_params(
     })
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:1-35,52-255 is adapted
+// Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:1-35,52-255, which NCBI adapted
 // from Boost. (C) Copyright John Maddock 2006.
 // Boost Software License - Version 1.0 - August 17th, 2003
 // Permission is hereby granted, free of charge, to any person or organization
@@ -127,9 +127,8 @@ pub fn lookup_protein_gumbel_params(
 // FOR ANY DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
-// NCBI boost_erf.c:54-64,252-255:
-// if (z < 0) { ... }
-// double ErfC(double z) { return ErfImpl(z, TRUE); }
+// Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:54-64,252-255 (`ErfC` is
+// `ErfImpl` with `invert` set).
 // NCBI blast_stat.c:5216,5223 calls ErfC, not NCBI_ErfC.
 #[inline]
 fn erfc_ncbi(z: f64) -> f64 {
@@ -237,13 +236,7 @@ fn x_erfc_slot(key: u64, slots: usize) -> usize {
     (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> (64 - slots.trailing_zeros())) as usize
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:52-244:
-// static double ErfImpl(double z, int invert) {
-//   if (z < 0) { if (!invert) return -ErfImpl(-z, invert);
-//     else if (z < -0.5) return 2.0 - ErfImpl(-z, invert);
-//     else return 1 + ErfImpl(-z, FALSE); }
-//   ... if(invert) result = 1 - result; return result;
-// }
+// Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:52-244 (`ErfImpl`)
 #[inline]
 fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
     if z < 0.0 {
@@ -257,9 +250,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
     }
     let mut result;
     if z < 0.5 {
-        // NCBI boost_erf.c:71-110:
-        // if (z < 1e-10) result = z * 1.125 + z * c;
-        // else result = z * (Y + p / q);
+        // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:71-110
         if z < 1e-10 {
             result = if z == 0.0 {
                 0.0
@@ -286,9 +277,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
             result = z * (Y + horner_ncbi(&P, zz) / horner_ncbi(&Q, zz));
         }
     } else if (invert && z < 28.0) || (!invert && z < 5.8) {
-        // NCBI boost_erf.c:111-231:
-        // invert = !invert; result = Y + p / q;
-        // result *= expl(-z * z) / z;
+        // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:111-231
         invert = !invert;
         let (y, p, q, x): (f64, &[f64], &[f64], f64);
         if z < 1.5 {
@@ -381,8 +370,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
         result = y + horner_ncbi(p, x) / horner_ncbi(q, x);
         result = exp_long_double_product_ncbi(result, z);
     } else {
-        // NCBI boost_erf.c:232-237:
-        // result = 0; invert = !invert;
+        // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:232-237
         result = 0.0;
         invert = !invert;
     }
@@ -535,9 +523,8 @@ fn exp_long_double_product_ncbi(result: f64, z: f64) -> f64 {
         .to_f64()
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:139-140,167-168,195-196,225-226:
-// p = (((P[last] * x + P[last-1]) * x + ...) * x + P[1]) * x + P[0];
-// q is evaluated in the same order.
+// Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:139-140,167-168,195-196,225-226
+// (each polynomial by Horner's rule, from the last coefficient to the first).
 #[inline]
 fn horner_ncbi(coefficients: &[f64], x: f64) -> f64 {
     let mut result = *coefficients
@@ -788,8 +775,7 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/boost_erf.c:252-255:
-    // double ErfC(double z) { return ErfImpl(z, TRUE); }
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:252-255
     // NCBI c++/src/algo/blast/core/blast_stat.c:5180-5231:
     // double scale_factor = kbp->Lambda / gbp->Lambda;
     // e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;

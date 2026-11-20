@@ -225,9 +225,9 @@ the WASI imports.
   DECISIONS F2-Q1). A strategy whose subject is a database is the CLI's `-db` run of the browser: it
   fails with `-db (a database search) is not supported in the browser yet`. A strategy that the
   engine does not run yet (a PSSM query, standard XML, a query by Seq-id, another program's
-  strategy) is refused as the CLI refuses it. The engine reads a strategy through a temporary file
-  on a target that has a file system; the browser's WASI has none, so a browser host cannot run
-  the option until the engine's reader takes the strategy as bytes (line RG item F2-4, open: the reader's bytes entry).
+  strategy) is refused as the CLI refuses it. The engine reads the strategy from the registered
+  bytes (no file system is used, so the browser's WASI runs the option); the warnings that the CLI
+  posts before an error of the import come first in that error's text.
 - `-out` is rejected: the adapter writes every format the program supports (`describe` lists
   them).
 - `-outfmt` (once, as on the command line; `-outfmt=value` too) is read as the CLI reads it, with

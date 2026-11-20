@@ -1022,7 +1022,7 @@ pub fn run(
     // `RecoverSearchStrategy` first (tblastx_app.cpp:106-111): the strategy's options and inputs
     // become the run's arguments (`archive::apply_strategy`).
     if args.import_search_strategy.is_some() {
-        args = crate::algorithm::tblastx::archive::apply_strategy(args)?;
+        args = crate::algorithm::tblastx::archive::apply_strategy(args, &mut std::io::stderr())?;
     }
     args.id_scope = args.parse_deflines.then(Default::default);
     // NCBI's score block looks for the file of a `-matrix` that its tables do not have when it
@@ -1316,7 +1316,9 @@ fn read_subject_set(
         args.import.as_ref().and_then(|run| run.subjects.as_ref()),
         &args.subject,
     ) {
-        (Some(file), _) => input_files::InputFile::from(file.try_clone()?),
+        (Some(text), _) => {
+            crate::report::archive::read::import::ImportRun::input_of("subject", text)?
+        }
         (None, Some(subject_path)) => {
             input_files::check_utf8_file_name(subject_path, "subject", "TBLASTX")?;
             input_files::open_input(subject_path, "subject", "TBLASTX")?

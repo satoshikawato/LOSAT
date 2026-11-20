@@ -740,6 +740,7 @@ fn carried(args: BlastxArgs) -> crate::report::archive::read::import::Carried {
     crate::report::archive::read::import::Carried {
         app: "blastx",
         path: args.import_search_strategy.expect("an import"),
+        source: args.import.as_ref().and_then(|run| run.source.clone()),
         query: args.query,
         query_loc: args.query_loc,
         strand: args.strand,
@@ -804,20 +805,26 @@ pub(crate) fn from_carried(
 /// on them in the file's order, and from `args` only what NCBI's re-read argument classes take:
 /// the query options, `-out`, the formatting options, the threads and the database arguments
 /// when `-db` or `-subject` is given. The run then goes on as any other (one search path).
-pub(crate) fn apply_strategy(args: BlastxArgs) -> Result<BlastxArgs> {
+pub(crate) fn apply_strategy(
+    args: BlastxArgs,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<BlastxArgs> {
     use crate::report::archive::read::import::{self, Command, Start};
     use crate::report::archive::read::options::{EProgram, Setter};
     let program = Program::Blastx.name();
     let path = args.import_search_strategy.clone().expect("an import");
+    let source = args.import.as_ref().and_then(|run| run.source.clone());
     let start = import::start(
         &Command {
             path: &path,
+            bytes: source.as_deref().map(Vec::as_slice),
             program,
             override_query: args.query.as_os_str() != "-",
             override_subject: args.db.is_some() || args.subject.is_some(),
             use_index_set: false,
         },
         args.import.as_ref().map_or("blastx", |run| run.app),
+        diagnostics,
     )?;
     if start.imported.program() != EProgram::Blastx {
         return Err(start.run_as(program, || carried(args)));

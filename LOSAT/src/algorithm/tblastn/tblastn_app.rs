@@ -111,7 +111,7 @@ impl TblastnArgs {
         // `RecoverSearchStrategy` first (tblastn_app.cpp:123-128): the strategy's options and
         // inputs become the run's arguments (`archive::apply_strategy`).
         if args.import_search_strategy.is_some() && matches!(io, RunIo::Files) {
-            args = super::archive::apply_strategy(args)?;
+            args = super::archive::apply_strategy(args, &mut std::io::stderr())?;
         }
         args.id_scope = args.parse_deflines.then(Default::default);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
@@ -230,7 +230,7 @@ impl TblastnArgs {
             // Web ABI v1's subjects are the call's bytes: no file to name or open.
             let subject_input = match &io {
                 RunIo::Files if imported.is_some() => Input::File(
-                    input_files::InputFile::from(imported.expect("imported subjects").try_clone()?),
+                    crate::report::archive::read::import::ImportRun::input_of("subject", imported.expect("imported subjects"))?,
                 ),
                 RunIo::Files => {
                     input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTN")?;

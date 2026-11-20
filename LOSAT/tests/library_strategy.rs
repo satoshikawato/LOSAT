@@ -55,12 +55,6 @@ fn strategy_bytes(file: &str) -> Vec<u8> {
     std::fs::read(fixtures().join("ss").join(file)).expect("a strategy file")
 }
 
-/// Rows whose report differs from NCBI's while the engine's search of records (`run_local_blastx`)
-/// reads `-query_loc` alone, where the command line's run reads the strategy's query range first
-/// (`blastx::native::run_inner`; `blastx::local::parse_query_range` is the place). Open; the row
-/// must differ until that is fixed.
-const OPEN_REPORTS: &[&str] = &["I.blastx.qloc.alone"];
-
 #[test]
 fn a_strategy_as_bytes_is_the_command_lines_import() {
     let rows = rows();
@@ -81,44 +75,17 @@ fn a_strategy_as_bytes_is_the_command_lines_import() {
         })();
         match outcome {
             Ok((report, diagnostics)) => {
-                let want = frozen(&row.err);
-                if OPEN_REPORTS.contains(&row.name.as_str()) {
-                    if report == frozen(&row.out) {
-                        failed.push(format!(
-                            "{}: equal to NCBI's now; drop it from OPEN_REPORTS",
-                            row.name
-                        ));
-                    }
-                } else if report != frozen(&row.out) {
+                if report != frozen(&row.out) {
                     failed.push(format!(
                         "{}: report differs: {}",
                         row.name,
                         crate::outfmt11_blastx::first_difference(&report, &frozen(&row.out))
                     ));
-                } else if diagnostics != want {
-                    // Open: NCBI writes the import's option warnings after the formatting
-                    // handler's (`x_IssueWarningsForIgnoredOptions` comes after the
-                    // `-max_target_seqs` warning); the library writes them first, the engine's
-                    // `run_local` not knowing them. The same lines, another order.
-                    let lines = |bytes: &[u8]| {
-                        let mut lines: Vec<String> = String::from_utf8_lossy(bytes)
-                            .lines()
-                            .map(str::to_string)
-                            .collect();
-                        lines.sort();
-                        lines
-                    };
-                    if !(row.name.ends_with(".hits.alone") && lines(&diagnostics) == lines(&want)) {
-                        failed.push(format!(
-                            "{}: diagnostics {:?}",
-                            row.name,
-                            String::from_utf8_lossy(&diagnostics)
-                        ));
-                    }
-                } else if row.name.ends_with(".hits.alone") {
+                } else if diagnostics != frozen(&row.err) {
                     failed.push(format!(
-                        "{}: the order is NCBI's now; drop the exception",
-                        row.name
+                        "{}: diagnostics {:?}",
+                        row.name,
+                        String::from_utf8_lossy(&diagnostics)
                     ));
                 }
             }

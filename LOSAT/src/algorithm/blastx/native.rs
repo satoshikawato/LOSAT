@@ -394,9 +394,12 @@ fn run_inner(
     let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
-        (None, _) if imported.is_some() => Some(crate::blastinput::input_files::InputFile::from(
-            imported.expect("imported subjects").try_clone()?,
-        )),
+        (None, _) if imported.is_some() => {
+            Some(crate::report::archive::read::import::ImportRun::input_of(
+                "subject",
+                imported.expect("imported subjects"),
+            )?)
+        }
         (None, Some(path)) => Some(
             crate::blastinput::input_files::open_input(path, "subject", program.upper)
                 .map_err(early_archive_error)?,

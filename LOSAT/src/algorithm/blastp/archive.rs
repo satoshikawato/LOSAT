@@ -561,20 +561,26 @@ mod tests {
 /// re-read argument classes take: the query options, `-out`, the formatting options, the
 /// threads, and the database arguments when `-db` or `-subject` is given. The run then goes on
 /// as any other (one search path).
-pub(crate) fn apply_strategy(args: BlastpArgs) -> Result<BlastpArgs> {
+pub(crate) fn apply_strategy(
+    args: BlastpArgs,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<BlastpArgs> {
     use crate::report::archive::read::import::{self, Command, Start};
     use crate::report::archive::read::options::{EProgram, Setter};
     let program = Program::Blastp.name();
     let path = args.import_search_strategy.clone().expect("an import");
+    let source = args.import.as_ref().and_then(|run| run.source.clone());
     let start = import::start(
         &Command {
             path: &path,
+            bytes: source.as_deref().map(Vec::as_slice),
             program,
             override_query: args.query.as_os_str() != "-",
             override_subject: args.db.is_some() || args.subject.is_some(),
             use_index_set: false,
         },
         "blastp",
+        diagnostics,
     )?;
     if start.imported.program() != EProgram::Blastp {
         return Err(start.unported_program(program));

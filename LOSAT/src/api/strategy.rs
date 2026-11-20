@@ -11,8 +11,7 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3836
 #![warn(missing_docs, unused)]
 
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::error::Error;
 use super::input::read_search_inputs;
@@ -51,93 +50,29 @@ pub fn import_name(command: &Commands) -> Option<&Path> {
     }
 }
 
-/// Points the arguments' `-import_search_strategy` at `path`.
-fn set_import_name(command: &mut Commands, path: PathBuf) {
+/// Gives the arguments the strategy's `bytes` for their `apply_strategy` to read, in place of the
+/// file that `-import_search_strategy` names (the name stays as the parser kept it, for the
+/// messages that quote it), and the running program's NCBI name for the warnings.
+fn set_source(command: &mut Commands, bytes: &[u8]) {
+    use crate::report::archive::read::import::ImportRun;
+    let source = std::sync::Arc::new(bytes.to_vec());
+    let run = |app: &'static str| ImportRun {
+        source: Some(source.clone()),
+        app,
+        ..ImportRun::default()
+    };
     match command {
-        Commands::Blastp(args) => args.import_search_strategy = Some(path),
-        Commands::Tblastn(args) => args.import_search_strategy = Some(path),
-        Commands::Blastn(args) => args.import_search_strategy = Some(path),
-        Commands::Tblastx(args) => args.import_search_strategy = Some(path),
-        Commands::Blastx(args) => args.import_search_strategy = Some(path),
+        Commands::Blastp(args) => args.import = Some(run("blastp")),
+        Commands::Tblastn(args) => args.import = Some(run("tblastn")),
+        Commands::Blastn(args) => args.import = Some(run("blastn")),
+        Commands::Tblastx(args) => args.import = Some(run("tblastx")),
+        Commands::Blastx(args) => args.import = Some(run("blastx")),
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {}
     }
-}
-
-/// A strategy file made of bytes, which the engine's reader opens by its name; it is removed
-/// when this value is dropped.
-///
-/// No NCBI counterpart. The reader of the strategy takes a path (`report::archive::read::import`),
-/// so the bytes go to a file for the one call of `apply_strategy`. Where there is no file system
-/// (the WASI targets, whose browser host preopens no directory) there is no such file: the reader
-/// has to take the bytes before the Web can import a strategy (the note at `apply`).
-struct StrategyFile {
-    path: PathBuf,
-}
-
-impl StrategyFile {
-    #[cfg(not(target_os = "wasi"))]
-    fn create(bytes: &[u8]) -> Result<Self, Error> {
-        use std::io::Write;
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        #[allow(clippy::disallowed_methods)] // not WASI: `temp_dir()` panics on the WASI targets
-        let directory = std::env::temp_dir();
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|since| since.as_nanos())
-            .unwrap_or(0);
-        let path = directory.join(format!(
-            ".losat-strategy-{}-{stamp}-{}",
-            crate::utils::process_id::process_id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        let made = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .and_then(|mut file| file.write_all(bytes));
-        match made {
-            Ok(()) => Ok(Self { path }),
-            Err(error) => {
-                let _ = std::fs::remove_file(&path);
-                Err(Error::Search(format!(
-                    "the search strategy could not be written to a temporary file: {error}"
-                )))
-            }
-        }
-    }
-
-    #[cfg(target_os = "wasi")]
-    fn create(_bytes: &[u8]) -> Result<Self, Error> {
-        Err(Error::Search(
-            "-import_search_strategy is not available on this target: it has no file system for the strategy"
-                .to_string(),
-        ))
-    }
-}
-
-impl Drop for StrategyFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-/// The bytes of an imported file (NCBI's temporary FASTA file of the strategy's queries or
-/// subjects), from its start.
-fn bytes_of(file: &std::fs::File) -> Result<Vec<u8>, Error> {
-    let mut reader = file;
-    let mut bytes = Vec::new();
-    reader
-        .seek(SeekFrom::Start(0))
-        .and_then(|_| reader.read_to_end(&mut bytes))
-        .map_err(|error| {
-            Error::Search(format!("the strategy's sequences cannot be read: {error}"))
-        })?;
-    Ok(bytes)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:128-133
@@ -148,35 +83,24 @@ fn bytes_of(file: &std::fs::File) -> Result<Vec<u8>, Error> {
 /// besides (`-outfmt`, `-num_threads`, `-query_loc` ...) are those that the strategy's import
 /// takes from them, as there.
 ///
-/// Errors are the command line's messages: a file that is not a strategy is NCBI's `Failed to
+/// Errors are the command line's messages (after the warnings it posts before them): a file that is not a strategy is NCBI's `Failed to
 /// read search strategy`, a strategy of another program or with a PSSM query is refused as on the
 /// command line.
 pub fn apply(mut command: Commands, bytes: &[u8]) -> Result<Applied, Error> {
-    let file = StrategyFile::create(bytes)?;
-    set_import_name(&mut command, file.path.clone());
-    let mut command = apply_one(command).map_err(|error| Error::Input(format!("{error:#}")))?;
-    let (queries, subjects) = {
-        let run = import_run(&command);
-        let read = |file: Option<&std::sync::Arc<std::fs::File>>| match file {
-            Some(file) => bytes_of(file),
-            None => Ok(Vec::new()),
-        };
-        (
-            read(run.and_then(|run| run.queries.as_ref()))?,
-            read(run.and_then(|run| run.subjects.as_ref()))?,
-        )
-    };
+    set_source(&mut command, bytes);
+    // The warnings that the command line posts before a failure (to its standard error) come
+    // first in the error's text, as the two come on a terminal.
+    let mut posted = Vec::new();
+    let command = apply_one(command, &mut posted)
+        .map_err(|error| Error::Input(format!("{}{error:#}", String::from_utf8_lossy(&posted))))?;
+    let text =
+        |held: Option<&std::sync::Arc<Vec<u8>>>| held.map(|text| text.to_vec()).unwrap_or_default();
+    let run = import_run(&command);
+    let (queries, subjects) = (
+        text(run.and_then(|run| run.queries.as_ref())),
+        text(run.and_then(|run| run.subjects.as_ref())),
+    );
     let database = database_of(&command);
-    // BLASTX's search of records reads the name of the subject set from `-subject`, where the
-    // command line's run reads the strategy's subjects with no name (the empty name: `User
-    // specified sequence set.`, `report::pairwise::scan_mode_definition`); the other programs'
-    // searches of records take their labels from the call.
-    if let Commands::Blastx(args) = &mut command {
-        if args.subject.is_none() && args.db.is_none() && !subjects.is_empty() {
-            args.subject = Some(PathBuf::new());
-        }
-    }
-    drop(file);
     Ok(Applied {
         command,
         queries,
@@ -186,14 +110,24 @@ pub fn apply(mut command: Commands, bytes: &[u8]) -> Result<Applied, Error> {
 }
 
 /// The program's `apply_strategy` (one engine path for the command line, the library and Web).
-fn apply_one(command: Commands) -> anyhow::Result<Commands> {
+fn apply_one(command: Commands, diagnostics: &mut dyn std::io::Write) -> anyhow::Result<Commands> {
     use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
     Ok(match command {
-        Commands::Blastp(args) => Commands::Blastp(blastp::archive::apply_strategy(args)?),
-        Commands::Tblastn(args) => Commands::Tblastn(tblastn::archive::apply_strategy(args)?),
-        Commands::Blastn(args) => Commands::Blastn(blastn::archive::apply_strategy(args)?),
-        Commands::Tblastx(args) => Commands::Tblastx(tblastx::archive::apply_strategy(args)?),
-        Commands::Blastx(args) => Commands::Blastx(blastx::archive::apply_strategy(args)?),
+        Commands::Blastp(args) => {
+            Commands::Blastp(blastp::archive::apply_strategy(args, diagnostics)?)
+        }
+        Commands::Tblastn(args) => {
+            Commands::Tblastn(tblastn::archive::apply_strategy(args, diagnostics)?)
+        }
+        Commands::Blastn(args) => {
+            Commands::Blastn(blastn::archive::apply_strategy(args, diagnostics)?)
+        }
+        Commands::Tblastx(args) => {
+            Commands::Tblastx(tblastx::archive::apply_strategy(args, diagnostics)?)
+        }
+        Commands::Blastx(args) => {
+            Commands::Blastx(blastx::archive::apply_strategy(args, diagnostics)?)
+        }
         other => {
             anyhow::bail!("-import_search_strategy is not available for this program: {other:?}")
         }
@@ -259,17 +193,17 @@ fn set_out(command: &mut Commands, path: &Path) {
 }
 
 /// The warnings that the import posts before the program's own (`RecoverSearchStrategy`'s and
-/// `x_IssueWarningsForIgnoredOptions`'), taken from the arguments so that the search, which
-/// writes the first of them itself in one of its entries (tblastn's), does not write them twice.
-/// A search of records writes them once at its start, first.
+/// the strategy's own, before the arguments' options are checked), taken from the arguments so
+/// that the search, which writes them itself in one of its entries (tblastn's), does not write
+/// them twice. A search of records writes them once at its start, first. The warnings for the
+/// options that the strategy replaces (`x_IssueWarningsForIgnoredOptions`) are the search's own,
+/// after the formatting handler's.
 pub fn take_warnings(command: &mut Commands) -> Vec<u8> {
     let Some(run) = import_run_mut(command) else {
         return Vec::new();
     };
-    let mut lines = run.warning_lines();
-    lines.extend(run.option_warning_lines());
+    let lines = run.warning_lines();
     run.warnings.clear();
-    run.option_warnings.clear();
     lines
 }
 

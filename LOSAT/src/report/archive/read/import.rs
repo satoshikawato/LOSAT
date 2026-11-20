@@ -61,6 +61,9 @@ use crate::report::serial::asn_types::Value;
 pub(crate) struct Command<'a> {
     /// `-import_search_strategy`'s value (`-`: the standard input).
     pub(crate) path: &'a Path,
+    /// The strategy's bytes when the caller holds them (the library API and LOSAT Web, which have
+    /// no file to name): read in place of the file `path`.
+    pub(crate) bytes: Option<&'a [u8]>,
     /// The running program's name in LOSAT's refusals (`BLASTN`, ...).
     pub(crate) program: &'static str,
     /// `override_query`: `-query` has a value other than `-`.
@@ -85,7 +88,7 @@ pub(crate) struct Imported {
     /// range and PSI-BLAST's iteration count).
     pub(crate) options: ImportedOptions,
     /// The queries as NCBI's temporary FASTA file, `None` when `-query` overrides them.
-    pub(crate) queries: Option<std::fs::File>,
+    pub(crate) queries: Option<Vec<u8>>,
     /// The subject, `None` when `-db` or `-subject` overrides it.
     pub(crate) subject: Option<ImportedSubject>,
     /// The warnings posted so far, in order (the text after `Warning: [<program>] `).
@@ -333,8 +336,13 @@ pub(crate) fn recover(command: &Command<'_>) -> std::result::Result<Imported, Im
         warnings.push("Overriding megablast BLAST DB indexed options in saved strategy".into());
     }
     let program = command.program;
-    let input = open_strategy(command.path, program).map_err(|e| fail(&warnings, e))?;
-    let value = extract_request(input, program).map_err(|e| fail(&warnings, e))?;
+    let value = match command.bytes {
+        Some(bytes) => extract_request(std::io::Cursor::new(bytes), program),
+        None => {
+            open_strategy(command.path, program).and_then(|input| extract_request(input, program))
+        }
+    }
+    .map_err(|e| fail(&warnings, e))?;
     let request =
         Request::from_strategy(value).map_err(|stop| fail(&warnings, stop_error(stop, program)))?;
     let options = import_request(&request).map_err(|e| fail(&warnings, caught(&e)))?;
@@ -429,12 +437,9 @@ fn import_subject(
 //         NCBI_THROW(CBlastException, eNotSupported, msg);
 //     }
 // ```
-/// `s_ImportPssm` and `s_ImportQueries`: the queries as NCBI's temporary FASTA file.
-fn import_queries(
-    queries: &Queries,
-    options: &ImportedOptions,
-    program: &str,
-) -> Result<std::fs::File> {
+/// `s_ImportPssm` and `s_ImportQueries`: the queries as the text of NCBI's temporary FASTA file
+/// (`ImportRun::queries_input` makes the file where a run reads one).
+fn import_queries(queries: &Queries, options: &ImportedOptions, program: &str) -> Result<Vec<u8>> {
     match queries {
         Queries::Pssm(_) => {
             if matches!(program, "BLASTN" | "BLASTP" | "BLASTX" | "TBLASTX") {
@@ -456,9 +461,7 @@ fn import_queries(
                     RenderError::Exception(exception) => caught(&exception),
                     RenderError::Unsupported(part) => unported(&part, program),
                 })?;
-            crate::blastinput::input_files::temporary_input("query", &text).map_err(|error| {
-                anyhow::anyhow!("cannot write the strategy's queries to a temporary file: {error}")
-            })
+            Ok(text)
         }
     }
 }
@@ -712,11 +715,16 @@ pub(crate) fn ignored_option_warnings(
 /// NCBI posts during the import.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ImportRun {
-    /// The strategy's queries (NCBI's temporary FASTA file), read in place of `-query`.
-    pub(crate) queries: Option<std::sync::Arc<std::fs::File>>,
+    /// The strategy's queries (the text of NCBI's temporary FASTA file), read in place of
+    /// `-query` (`queries_input`).
+    pub(crate) queries: Option<std::sync::Arc<Vec<u8>>>,
     /// The strategy's subject Bioseqs as FASTA text (`queries::render_subjects`), read in place
     /// of `-subject` and named in no report (`User specified sequence set.`).
-    pub(crate) subjects: Option<std::sync::Arc<std::fs::File>>,
+    pub(crate) subjects: Option<std::sync::Arc<Vec<u8>>>,
+    /// The strategy's bytes, which a caller without a file gives before the import reads them
+    /// (`apply_strategy` reads them in place of the file of `-import_search_strategy`); `None` on
+    /// the command line.
+    pub(crate) source: Option<std::sync::Arc<Vec<u8>>>,
     /// `RecoverSearchStrategy`'s warnings, posted before the program's own.
     pub(crate) warnings: Vec<String>,
     /// `x_IssueWarningsForIgnoredOptions`' warnings, posted after the formatting handler's.
@@ -761,9 +769,20 @@ impl ImportRun {
         program: &str,
     ) -> Result<crate::blastinput::input_files::InputFile> {
         match import.and_then(|run| run.queries.as_ref()) {
-            Some(file) => Ok(file.try_clone()?.into()),
+            Some(text) => Self::input_of("query", text),
             None => crate::blastinput::input_files::open_input(path, "query", program),
         }
+    }
+
+    /// An input file of the strategy's `text` (an unnamed temporary file, which a run that reads
+    /// its sequences from a file opens in place of `-query` or `-subject`).
+    pub(crate) fn input_of(
+        role: &str,
+        text: &[u8],
+    ) -> Result<crate::blastinput::input_files::InputFile> {
+        Ok(crate::blastinput::input_files::InputFile::from(
+            crate::blastinput::input_files::temporary_input(role, text)?,
+        ))
     }
 
     /// `old_fsc` of a run: `-searchsp` sets it, the strategy's effective search space does not.
@@ -784,9 +803,13 @@ pub(crate) struct Start {
 }
 
 /// `RecoverSearchStrategy` for the running program `ncbi_name` (`blastp` ...): the strategy, or
-/// the error after the warnings posted before it (written to the standard error here, as NCBI
-/// posts them before its `CATCH_ALL` reports the error).
-pub(crate) fn start(command: &Command<'_>, ncbi_name: &'static str) -> Result<Start> {
+/// the error after the warnings posted before it (written to `diagnostics` here, as NCBI posts
+/// them before its `CATCH_ALL` reports the error; the command line's are its standard error).
+pub(crate) fn start(
+    command: &Command<'_>,
+    ncbi_name: &'static str,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<Start> {
     let arguments = NcbiArguments::new(ncbi_name, &crate::cli::given_arguments());
     match recover(command) {
         Ok(imported) => Ok(Start {
@@ -795,8 +818,7 @@ pub(crate) fn start(command: &Command<'_>, ncbi_name: &'static str) -> Result<St
             app: ncbi_name,
         }),
         Err(failure) => {
-            use std::io::Write;
-            let _ = std::io::stderr().write_all(&ImportRun::lines(&failure.warnings, ncbi_name));
+            let _ = diagnostics.write_all(&ImportRun::lines(&failure.warnings, ncbi_name));
             Err(failure.error)
         }
     }
@@ -820,19 +842,15 @@ impl Start {
                             RenderError::Unsupported(part) => unported(&part, program),
                         }
                     })?;
-                Some(std::sync::Arc::new(
-                    crate::blastinput::input_files::temporary_input("subject", &text)?,
-                ))
+                Some(std::sync::Arc::new(text))
             }
             _ => None,
         };
         let task = self.imported.program().task_name();
         Ok(ImportRun {
-            queries: match &self.imported.queries {
-                Some(file) => Some(std::sync::Arc::new(file.try_clone()?)),
-                None => None,
-            },
+            queries: self.imported.queries.clone().map(std::sync::Arc::new),
             subjects,
+            source: None,
             warnings: self.imported.warnings.clone(),
             option_warnings: ignored_option_warnings(
                 &self.arguments,
@@ -1271,6 +1289,8 @@ pub(crate) struct Carried {
     /// The running program's NCBI name ([`Start::app`]).
     pub(crate) app: &'static str,
     pub(crate) path: std::path::PathBuf,
+    /// The strategy's bytes of a caller without a file ([`ImportRun::source`]).
+    pub(crate) source: Option<std::sync::Arc<Vec<u8>>>,
     pub(crate) query: std::path::PathBuf,
     pub(crate) query_loc: Option<String>,
     /// `-strand` (`both` when not given).
@@ -1301,6 +1321,7 @@ impl Carried {
     pub(crate) fn import_app(&self) -> Option<ImportRun> {
         Some(ImportRun {
             app: self.app,
+            source: self.source.clone(),
             ..ImportRun::default()
         })
     }

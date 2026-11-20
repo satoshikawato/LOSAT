@@ -8021,7 +8021,7 @@ pub fn run(
     // `RecoverSearchStrategy` first (blastn_app.cpp:128-133): the strategy's options and inputs
     // become the run's arguments (`archive::apply_strategy`).
     if args.import_search_strategy.is_some() {
-        args = crate::algorithm::blastn::archive::apply_strategy(args)?;
+        args = crate::algorithm::blastn::archive::apply_strategy(args, &mut std::io::stderr())?;
     }
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
     // ```c
@@ -8399,7 +8399,9 @@ fn read_cli_subjects(
         }
     };
     let subject_file = match (imported, subject_path) {
-        (Some(file), _) => crate::blastinput::input_files::InputFile::from(file.try_clone()?),
+        (Some(text), _) => {
+            crate::report::archive::read::import::ImportRun::input_of("subject", text)?
+        }
         (None, Some(path)) => {
             check_utf8_file_name(path, "subject", "BLASTN")?;
             open_input(path, "subject", "BLASTN")?

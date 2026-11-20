@@ -113,8 +113,16 @@ fn search_records(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    let Some(subject_path) = args.subject.as_deref() else {
-        return Err(app::missing_subject_error());
+    // An imported strategy's subjects stand for `-subject`, with no name (`native::run_inner`).
+    let subject_path = match (
+        args.subject.as_deref(),
+        args.import
+            .as_ref()
+            .is_some_and(|run| run.subjects.is_some()),
+    ) {
+        (Some(path), _) => path,
+        (None, true) => std::path::Path::new(""),
+        (None, false) => return Err(app::missing_subject_error()),
     };
     let diagnostics = &mut outputs.diagnostics;
     let subject_range = parse_subject_range(args)?;
@@ -1260,7 +1268,11 @@ pub(super) fn check_filtering(args: &BlastxArgs) -> Result<()> {
 /// `-query_loc`, which the command line reads after the subjects, with the query options and
 /// before the formatting handler (`native::run_inner`).
 fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
-    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query)
+    // An imported strategy's query range stands for `-query_loc`'s (`archive::apply_strategy`).
+    match args.import.as_ref().and_then(|import| import.query_range) {
+        Some(range) => Ok(Some(range)),
+        None => parse_optional_range(args.query_loc.as_deref(), RangeRole::Query),
+    }
 }
 
 /// The output formats `outfmts` as `run_local` reads them and the options of each, before the
@@ -1368,6 +1380,11 @@ fn check_resolutions(
         &args.formatting,
     )?;
     diagnostics.write_all(&warnings)?;
+    // An imported strategy's warnings for the options it replaces
+    // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
+    if let Some(import) = &args.import {
+        diagnostics.write_all(&import.option_warning_lines())?;
+    }
     resolutions
         .into_iter()
         .map(|resolution| resolution.map_err(options_error))

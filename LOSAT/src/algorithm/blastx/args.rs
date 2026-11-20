@@ -1614,7 +1614,7 @@ impl BlastxArgs {
         // `RecoverSearchStrategy` first (blastx_app.cpp:130-135): the strategy's options and
         // inputs become the run's arguments (`archive::apply_strategy`).
         let args = if self.import_search_strategy.is_some() && self.rpstblastn.is_none() {
-            super::archive::apply_strategy(self)?
+            super::archive::apply_strategy(self, &mut std::io::stderr())?
         } else {
             self
         };

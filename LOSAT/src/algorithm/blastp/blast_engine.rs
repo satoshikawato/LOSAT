@@ -5530,7 +5530,7 @@ pub fn run(
     // `RecoverSearchStrategy` first (blastp_app.cpp:128-133): the strategy's options and inputs
     // become the run's arguments (`archive::apply_strategy`).
     if args.import_search_strategy.is_some() && args.app == BlastpApp::Blastp {
-        args = super::archive::apply_strategy(args)?;
+        args = super::archive::apply_strategy(args, &mut std::io::stderr())?;
     }
     args.id_scope = args.parse_deflines.then(Default::default);
     use crate::blastinput::app;
@@ -5884,7 +5884,7 @@ fn read_cli_subjects(
     // fails there), before the query and the output are opened.
     // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for `-subject`.
     let subject_file = match args.import.as_ref().and_then(|run| run.subjects.as_ref()) {
-        Some(file) => input_files::InputFile::from(file.try_clone()?),
+        Some(text) => crate::report::archive::read::import::ImportRun::input_of("subject", text)?,
         None => {
             let Some(subject_path) = args.subject.as_deref() else {
                 return Err(app::missing_subject_error());

@@ -144,9 +144,14 @@ pub(super) const INCONSISTENT: &str = "CWinMaskConfigException::inconsistent pro
 /// The function of the `CWinMaskConfig` constructor in NCBI's reports.
 pub(super) const CONFIG: &str = "ncbi::CWinMaskConfig::CWinMaskConfig";
 
-/// `CMaskReader::GetNextSequence` of a source of sequences.
+/// `CMaskReader::GetNextSequence` of a source of sequences; `out` is the output, which comes
+/// out before a post of the reader (NCBI's `cerr` is tied to `cout`).
 pub(super) trait SequenceSource {
-    fn next_record(&mut self, diag: &mut Diag) -> Result<Option<Record>, Failure>;
+    fn next_record(
+        &mut self,
+        out: &mut Ostream<'_>,
+        diag: &mut Diag,
+    ) -> Result<Option<Record>, Failure>;
 }
 
 /// The reader of `-infmt` (`CWinMaskConfig`'s `reader`): `CMaskFastaReader( *is, true,
@@ -206,24 +211,39 @@ struct FastaSource<R: Read> {
 impl<R: Read> SequenceSource for FastaSource<R> {
     // windowmasker posts at the level Warning (`SetDiagPostLevel( eDiag_Warning )`,
     // win_mask_app.cpp:118): the reader's warnings are written, each on its line (the line
-    // warnings, `LOG_POST`) or as `ERR_POST_X` of the Seq-id parser (error code 1306).
-    fn next_record(&mut self, diag: &mut Diag) -> Result<Option<Record>, Failure> {
-        let record = self
-            .reader
-            .next(&mut |warning| match warning {
+    // warnings, `LOG_POST`) or as `ERR_POST_X` of the Seq-id parser (error code 1306). The
+    // output written so far comes out first, whatever its last byte (`cerr` is tied to `cout`);
+    // a closed pipe ends the run there, as SIGPIPE ends NCBI's.
+    fn next_record(
+        &mut self,
+        out: &mut Ostream<'_>,
+        diag: &mut Diag,
+    ) -> Result<Option<Record>, Failure> {
+        let mut closed = false;
+        let record = self.reader.next(&mut |warning| {
+            let _ = out.flush();
+            closed |= out.closed();
+            if closed {
+                return;
+            }
+            match warning {
                 ReaderWarning::Line(line) => diag.post_bytes(line),
                 ReaderWarning::SeqId(warning) => {
                     let mut line = format!("Warning: (1306.{}) ", warning.subcode).into_bytes();
                     line.extend_from_slice(&warning.message);
                     diag.post_bytes(&line)
                 }
-            })
-            .map_err(|error| match error {
-                MaskReadError::Ncbi(exception) => Failure::Ncbi(exception),
-                MaskReadError::Read(error) => read_failure(error),
-                MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
-                MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
-            })?;
+            }
+        });
+        if closed {
+            return Err(Failure::closed_pipe());
+        }
+        let record = record.map_err(|error| match error {
+            MaskReadError::Ncbi(exception) => Failure::Ncbi(exception),
+            MaskReadError::Read(error) => read_failure(error),
+            MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+            MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
+        })?;
         Ok(record.map(|record| Record {
             ids: record.ids,
             title: record.title,
@@ -270,7 +290,11 @@ fn database_failure(error: BdbError) -> Failure {
 }
 
 impl SequenceSource for DatabaseSource {
-    fn next_record(&mut self, _diag: &mut Diag) -> Result<Option<Record>, Failure> {
+    fn next_record(
+        &mut self,
+        _out: &mut Ostream<'_>,
+        _diag: &mut Diag,
+    ) -> Result<Option<Record>, Failure> {
         let record = self.reader.next_record().map_err(database_failure)?;
         Ok(record.map(|record| Record {
             ids: record.ids,
@@ -425,7 +449,7 @@ fn mask_input(
 ) -> Result<(), Failure> {
     let masker = masker(options, diag)?;
     let mut duster = options.dust_level.map(SDustMasker::new);
-    while let Some(record) = source.next_record(diag)? {
+    while let Some(record) = source.next_record(out, diag)? {
         post_read_texts::<Failure>(&record.texts, out, diag)?;
         if record.iupac.is_empty() || !considered(lists, &record)? {
             continue;

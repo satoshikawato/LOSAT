@@ -47,7 +47,11 @@ fn replay(stream: NcbiStdio, ops: &str) -> Vec<u64> {
             _ => panic!("operation {op}"),
         }
         let kept = buffer.held();
-        assert!(kept <= pending.len(), "{ops}: held {kept} of {}", pending.len());
+        assert!(
+            kept <= pending.len(),
+            "{ops}: held {kept} of {}",
+            pending.len()
+        );
         let out = pending.len() - kept;
         written += out as u64;
         pending.drain(..out);

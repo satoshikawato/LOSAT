@@ -676,8 +676,9 @@ mod tests {
         }
     }
 
-    /// Windows zones and the POSIX rule strings of the same changes, which the glibc reader
-    /// above takes (it matches glibc, `glibc_tsv`).
+    /// Windows zones and the POSIX rule strings of the same changes, as jiff reads them
+    /// (`offset_from_posix_tz`; jiff reads these strings as glibc does,
+    /// LOSAT/tests/unit/local_time_glibc_vectors.tsv).
     fn system_zones() -> Vec<(&'static str, WinZone, &'static str)> {
         vec![
             (
@@ -728,8 +729,8 @@ mod tests {
         ]
     }
 
-    // UCRT places the changes of the year of the local standard time, glibc those of the UTC
-    // year: they meet for zones whose changes are not at the turn of the year.
+    // UCRT places the changes of the year of the local standard time, glibc (and jiff) those of
+    // the UTC year: they meet for zones whose changes are not at the turn of the year.
     #[test]
     fn ucrt_system_zones_change_as_their_rules_say() {
         for (name, info, posix) in system_zones() {

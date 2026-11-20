@@ -542,7 +542,7 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
         ArgsError::Invalid(ArgException {
             code: "eConvert",
             messages: vec![
-                error.text(),
+                String::from_utf8_lossy(&error.text()).into_owned(),
                 arg_message(desc.name, "Argument cannot be converted", value),
             ],
         })
@@ -565,7 +565,7 @@ fn double_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
         Err(error) => Err(ArgsError::Invalid(ArgException {
             code: "eConvert",
             messages: vec![
-                error.text(),
+                String::from_utf8_lossy(&error.text()).into_owned(),
                 arg_message(desc.name, "Argument cannot be converted", value),
             ],
         })),

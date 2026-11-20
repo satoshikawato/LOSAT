@@ -622,7 +622,7 @@ impl<'a> BuildDatabase<'a> {
         let start = std::time::Instant::now();
         let mut count = 0u64;
         while let Some(mut bioseq) = source.next_bioseq(warn).map_err(|error| match error.kind {
-            SourceErrorKind::Creation => WriteDbError::Creation(error.message),
+            SourceErrorKind::Creation => WriteDbError::creation(error.message),
             SourceErrorKind::OutOfMemory => WriteDbError::OutOfMemory,
         })? {
             let bioseq_id = bioseq.first_id_fasta();
@@ -793,13 +793,17 @@ impl<'a> BuildDatabase<'a> {
                         if let Some(id) = find_best(&parsed.ids, best_rank_score) {
                             crate::seqid::label::fasta(id, &mut out);
                         }
-                        String::from_utf8_lossy(&out).into_owned()
+                        out
                     }
-                    None => format!("lcl|{}", bioseq.local_id),
+                    None => format!("lcl|{}", bioseq.local_id).into_bytes(),
                 };
                 WriteDbError::Exception(NcbiException::new(
                     PROTEIN_DELTA,
-                    format!("{best_id}: Protein delta sequences are not supported."),
+                    [
+                        best_id.as_slice(),
+                        b": Protein delta sequences are not supported.",
+                    ]
+                    .concat(),
                 ))
             }
             PastSeqPos::Refused { length } => WriteDbError::Other(format!(
@@ -880,9 +884,7 @@ impl<'a> BuildDatabase<'a> {
                 | WriteDbError::Database(message)
                 | WriteDbError::Other(message),
             ) => Err(WriteDbError::Creation(message)),
-            Some(WriteDbError::Exception(e)) => {
-                Err(WriteDbError::Creation(e.get_msg().to_string()))
-            }
+            Some(WriteDbError::Exception(e)) => Err(WriteDbError::creation(e.get_msg().to_vec())),
             // A creation error whose text is not UTF-8, an error of a write of LMDB's
             // data file (`Io`) and a failed allocation keep their kind.
             Some(error) => Err(error),

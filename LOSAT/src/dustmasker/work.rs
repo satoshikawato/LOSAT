@@ -102,7 +102,7 @@ pub(super) trait SequenceSource {
 /// What the application posts and returns for a failure: the diagnostic lines and the exit
 /// status, or LOSAT's refusal.
 pub(super) enum Report {
-    Posts { lines: String, status: i32 },
+    Posts { lines: Vec<u8>, status: i32 },
     Refused(String),
     Arg(crate::ncbi_app::args::ArgException),
 }
@@ -117,13 +117,14 @@ pub(super) fn report(failure: Failure) -> Report {
             status: 3,
         },
         Failure::Std(what) => Report::Posts {
-            lines: err_post_x(106, 7, &format!("Application's execution failed: {what}")),
+            lines: err_post_x(106, 7, &format!("Application's execution failed: {what}"))
+                .into_bytes(),
             status: 3,
         },
         Failure::Refused(reason) => Report::Refused(reason),
         Failure::Arg(error) => Report::Arg(error),
         Failure::ClosedPipe => Report::Posts {
-            lines: String::new(),
+            lines: Vec::new(),
             status: 0,
         },
     }

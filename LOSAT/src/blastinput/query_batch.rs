@@ -1186,10 +1186,10 @@ mod tests {
         ] {
             let error = get_query_batch_size(Some(OsStr::new(text))).unwrap_err();
             assert_eq!(error.site().line, line, "{text:?}");
+            let what = String::from_utf8(error.what()).unwrap();
             assert!(
-                error.what().ends_with(&format!("(position {pos})\n")),
-                "{text:?}: {}",
-                error.what()
+                what.ends_with(&format!("(position {pos})\n")),
+                "{text:?}: {what}"
             );
         }
         assert_eq!(get_query_batch_size(None), Ok(0));

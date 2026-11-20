@@ -47,7 +47,8 @@ pub(super) const NO_RANGE: SeqRange = SeqRange {
 /// exception as `GetMsg` gives it (`Int8` for the text that is not a number or passes a 64-bit
 /// integer, `int` for one that fits 64 bits but not 32).
 fn string_to_int(text: &str) -> Result<i32, String> {
-    crate::ncbi_str::string_to_int(text.as_bytes(), 0).map_err(|error| error.get_msg().to_string())
+    crate::ncbi_str::string_to_int(text.as_bytes(), 0)
+        .map_err(|error| String::from_utf8_lossy(error.get_msg()).into_owned())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:181-219

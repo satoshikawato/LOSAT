@@ -951,7 +951,7 @@ fn compare_id_list(file_ids: &[Vec<u8>], input_ids: &[&[u8]]) -> Result<bool, St
             format!(
                 "{}: {}",
                 String::from_utf8_lossy(text),
-                error.what().trim_end()
+                String::from_utf8_lossy(&error.what()).trim_end()
             )
         })
     };

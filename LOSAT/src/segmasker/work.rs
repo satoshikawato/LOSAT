@@ -83,7 +83,7 @@ fn database_failure(error: BdbError) -> Failure {
             Failure::Refused(unsupported(&format!(
                 "the report of the database error '{}', which names the place in NCBI's source \
                  that throws it,",
-                exception.get_msg()
+                String::from_utf8_lossy(exception.get_msg())
             )))
         }
         BdbError::Ncbi(exception) => Failure::Caught(exception),
@@ -108,7 +108,7 @@ pub(super) fn run(
     match run_masks(args, settings, stdin, out, diag) {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
-            diag.cerr(format!("{}\n", exception.what()).as_bytes());
+            diag.cerr(&[exception.what().as_slice(), b"\n"].concat());
             1
         }
         Err(Failure::Std(what)) => {

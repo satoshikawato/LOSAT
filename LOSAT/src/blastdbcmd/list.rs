@@ -266,7 +266,7 @@ impl From<SeqDbError> for ListStop {
     // alias file's value that does not convert is `Error: <what()>`, exit status 255.
     fn from(error: SeqDbError) -> Self {
         if let Some(exception) = error.ncbi_exception() {
-            return ListStop::Ncbi(format!("Error: {}", exception.what()).into_bytes(), 255);
+            return ListStop::Ncbi([b"Error: ".as_slice(), &exception.what()].concat(), 255);
         }
         match error.ncbi_message() {
             Some(text) => ListStop::Ncbi([b"BLAST Database error: ".as_slice(), &text].concat(), 2),

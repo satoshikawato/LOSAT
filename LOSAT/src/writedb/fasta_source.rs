@@ -34,7 +34,7 @@ use reader::{
 /// An error that ends the reading: its message and how makeblastdb reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceError {
-    pub message: String,
+    pub message: Vec<u8>,
     pub kind: SourceErrorKind,
 }
 
@@ -56,7 +56,7 @@ impl SourceError {
     // either reaches this clause (after `AddFasta` has ended the build).
     fn out_of_memory() -> Self {
         Self {
-            message: "BLAST ran out of memory".to_string(),
+            message: b"BLAST ran out of memory".to_vec(),
             kind: SourceErrorKind::OutOfMemory,
         }
     }
@@ -139,7 +139,7 @@ impl<R: Read> FastaBioseqSource<R> {
                 // Only convert2blastmask's reader throws other exceptions.
                 self.reader = None;
                 return Err(SourceError {
-                    message: exception.get_msg().to_string(),
+                    message: exception.get_msg().to_vec(),
                     kind: SourceErrorKind::Creation,
                 });
             }
@@ -151,7 +151,7 @@ impl<R: Read> FastaBioseqSource<R> {
                     .map(str::to_string)
                     .unwrap_or(message);
                 return Err(SourceError {
-                    message,
+                    message: message.into_bytes(),
                     kind: SourceErrorKind::Creation,
                 });
             }
@@ -173,7 +173,7 @@ impl<R: Read> FastaBioseqSource<R> {
                 Err(message) => {
                     self.reader = None;
                     return Err(SourceError {
-                        message: message.to_string(),
+                        message: message.to_string().into_bytes(),
                         kind: SourceErrorKind::Creation,
                     });
                 }
@@ -223,7 +223,7 @@ impl<R: Read> FastaBioseqSource<R> {
 
 fn read_error_message(error: &std::io::Error) -> SourceError {
     SourceError {
-        message: format!("Read error: {error}"),
+        message: format!("Read error: {error}").into_bytes(),
         kind: SourceErrorKind::Creation,
     }
 }

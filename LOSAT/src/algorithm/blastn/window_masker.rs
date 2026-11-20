@@ -280,29 +280,23 @@ pub(crate) fn batch_error(
     later_loads: &Posts,
 ) -> Option<(Posts, NativeError)> {
     let text = match error {
-        WinMaskError::BadIndex { .. } => error.to_string(),
+        WinMaskError::BadIndex { .. } => error.to_string().into_bytes(),
         _ => error.create_report()?,
     };
     // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:171-174
     let mut warnings = Posts::new();
-    let mut message = String::from("BLAST engine error: ");
+    let mut message = b"BLAST engine error: ".to_vec();
     for query in 0..queries {
         warnings.append(if query == 0 { first_load } else { later_loads });
         for warning in error.warnings() {
             warnings.lines(format!("Warning: [blastn] {warning}\n").as_bytes());
         }
-        message.push_str("Warning: ");
-        message.push_str(&text);
-        message.push(' ');
+        message.extend_from_slice(b"Warning: ");
+        message.extend_from_slice(&text);
+        message.push(b' ');
     }
-    message.push('\n');
-    Some((
-        warnings,
-        NativeError {
-            exit: 3,
-            message: message.into(),
-        },
-    ))
+    message.push(b'\n');
+    Some((warnings, NativeError { exit: 3, message }))
 }
 
 /// LOSAT's rejection of the errors that NCBI does not report as `batch_error` does: an ascii
@@ -474,6 +468,7 @@ mod tests {
         // "AAAAAAAAA" is a unit beyond `Uint4` (base 16).
         let ascii = open_taxid(10, root, &FileCounts).unwrap();
         let report = ascii.build_error().unwrap().create_report().unwrap();
+        let report = String::from_utf8(report).unwrap();
         assert!(
             report.contains("Cannot convert string 'AAAAAAAAA' to unsigned int, overflow"),
             "{report}"

@@ -1382,7 +1382,7 @@ mod tests {
         // A Glimmer3 frame beyond `int` (fg `f08`): NCBI's `CStringException`.
         assert!(matches!(
             guess_format(b">x\nA 1 2 99999999999 1.0\n"),
-            P::Exception(e) if e.what().contains("Cannot convert string '99999999999' to int, overflow")
+            P::Exception(e) if String::from_utf8(e.what()).unwrap().contains("Cannot convert string '99999999999' to int, overflow")
         ));
         // TestFormatFasta's `NStr::Find` past a buffer of four bytes (fg `f11`): refused.
         assert!(matches!(

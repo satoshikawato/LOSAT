@@ -485,7 +485,7 @@ fn xml_report_made(
             match (kind, thrown) {
                 (Xml2Kind::Single16, Some(thrown)) => {
                     let exception = thrown.exception();
-                    let message = exception.what_after(exception.get_msg()).into_bytes();
+                    let message = exception.what_after(exception.get_msg());
                     made.posts.push(DocumentPost {
                         at: report.len(),
                         text: crate::ncbi_exception::error_post_line(None, Some(program), &message),

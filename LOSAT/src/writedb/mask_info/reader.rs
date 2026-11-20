@@ -155,8 +155,11 @@ impl Fail {
 /// the reading path around it keeps nothing for its return.
 #[cold]
 #[inline(never)]
-pub(super) fn throw_error(site: ThrowSite, position: &str, message: impl fmt::Display) -> Fail {
-    Fail::serial(NcbiException::new(site, format!("{position}: {message}")))
+pub(super) fn throw_error(site: ThrowSite, position: &str, message: impl AsRef<[u8]>) -> Fail {
+    Fail::serial(NcbiException::new(
+        site,
+        [position.as_bytes(), b": ", message.as_ref()].concat(),
+    ))
 }
 
 /// A `ThrowError` of `CObjectIStream` (objistr.cpp) at `line` of `function`.
@@ -675,7 +678,7 @@ impl<I: Input> Rd<I> {
         throw_error(
             EXPECTED_MEMBER,
             &self.inp.position(),
-            format_args!("member {} expected", m.name),
+            format!("member {} expected", m.name),
         )
     }
 
@@ -1474,11 +1477,13 @@ impl<I: Input> Rd<I> {
                 Some(name) if !name.is_empty() && name != def.name.as_bytes() => Err(throw_error(
                     SKIP_FILE_HEADER,
                     &s.inp.position(),
-                    format_args!(
-                        "incompatible type {}<>{}",
-                        String::from_utf8_lossy(&name),
-                        def.name
-                    ),
+                    [
+                        b"incompatible type ".as_slice(),
+                        &name,
+                        b"<>",
+                        def.name.as_bytes(),
+                    ]
+                    .concat(),
                 )),
                 _ => Ok(()),
             }

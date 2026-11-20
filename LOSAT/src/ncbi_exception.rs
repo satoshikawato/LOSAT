@@ -79,19 +79,22 @@ impl ThrowSite {
 /// An exception of NCBI's C++ Toolkit (`CException`): where it was thrown, its message, the
 /// extra text of its class, and the exception it was thrown for (`NCBI_RETHROW`).
 ///
+/// The message is bytes, as NCBI's `std::string`: a name or a word of the input that is not UTF-8
+/// (a member name of a text ASN.1 file, a file name) keeps its bytes in the report.
+///
 /// The chain of predecessors is as long as the frames an error leaves (`rethrow_same`: one for
 /// each value open in a PSSM nested to any depth), so it is dropped, cloned, compared and
 /// shown link by link, never by a recursion as deep as the chain (below).
 pub struct NcbiException {
     site: ThrowSite,
-    message: String,
+    message: Vec<u8>,
     extra: Option<String>,
     predecessor: Option<Box<NcbiException>>,
 }
 
 impl NcbiException {
     /// `NCBI_THROW(class, code, message)` at `site`.
-    pub fn new(site: ThrowSite, message: impl Into<String>) -> Self {
+    pub fn new(site: ThrowSite, message: impl Into<Vec<u8>>) -> Self {
         NcbiException {
             site,
             message: message.into(),
@@ -105,7 +108,7 @@ impl NcbiException {
     // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:4435-4439
     /// `NCBI_THROW2(CStringException, code, message, pos)` at `site`: the report adds the
     /// position.
-    pub fn with_pos(site: ThrowSite, message: impl Into<String>, pos: usize) -> Self {
+    pub fn with_pos(site: ThrowSite, message: impl Into<Vec<u8>>, pos: usize) -> Self {
         let mut exception = Self::new(site, message);
         exception.extra = Some(format!("m_Pos = {pos}"));
         exception
@@ -113,7 +116,7 @@ impl NcbiException {
 
     /// `NCBI_RETHROW(self, class, code, message)` at `site`: a new exception whose predecessor
     /// is `self`.
-    pub fn rethrow(self, site: ThrowSite, message: impl Into<String>) -> Self {
+    pub fn rethrow(self, site: ThrowSite, message: impl Into<Vec<u8>>) -> Self {
         let mut exception = Self::new(site, message);
         exception.predecessor = Some(Box::new(self));
         exception
@@ -131,7 +134,7 @@ impl NcbiException {
         file: &'static str,
         line: u32,
         function: &'static str,
-        message: impl Into<String>,
+        message: impl Into<Vec<u8>>,
     ) -> Self {
         NcbiException {
             site: ThrowSite {
@@ -185,27 +188,27 @@ impl NcbiException {
     }
 
     /// `GetMsg()`: the message, without the place or the extra text.
-    pub fn get_msg(&self) -> &str {
+    pub fn get_msg(&self) -> &[u8] {
         &self.message
     }
 
     /// `ReportThis()`: the line of this exception, without its predecessors, with the build tree
     /// `root`.
-    fn report_this(&self, out: &mut String, root: &str) {
+    fn report_this(&self, out: &mut Vec<u8>, root: &str) {
         let ThrowSite {
             file,
             line,
             kind,
             function,
         } = self.site;
-        out.push_str(&format!(
-            "T0 \"{root}/{file}\", line {line}: Error: ({kind}) "
-        ));
+        out.extend_from_slice(
+            format!("T0 \"{root}/{file}\", line {line}: Error: ({kind}) ").as_bytes(),
+        );
         if let Some(function) = function {
-            out.push_str(function);
-            out.push_str("() - ");
+            out.extend_from_slice(function.as_bytes());
+            out.extend_from_slice(b"() - ");
         }
-        out.push_str(&self.text());
+        out.extend_from_slice(&self.text());
     }
 
     /// The exceptions of the chain, newest first (`this`, then each `GetPredecessor()`).
@@ -221,33 +224,33 @@ impl NcbiException {
 
     /// `CException::what()` (`ReportAll`): the report of the chain, oldest exception first,
     /// ending with a line feed, in BLAST+ 2.17.0's build ([`NCBI_BUILD_ROOT`]).
-    pub fn what(&self) -> String {
+    pub fn what(&self) -> Vec<u8> {
         self.what_in(NCBI_BUILD_ROOT)
     }
 
     /// [`NcbiException::what`] of the build whose tree is `root` ([`build_root`]), in LOSAT's
     /// words: the messages of the chain, without NCBI's header and places
     /// (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
-    pub fn what_in(&self, root: &str) -> String {
-        crate::wording::losat_text(&self.ncbi_what_in(root)).into_owned()
+    pub fn what_in(&self, root: &str) -> Vec<u8> {
+        crate::wording::losat_bytes(&self.ncbi_what_in(root)).into_owned()
     }
 
     /// `<text><what()>`, as NCBI posts an exception after a text (`ERR_POST(e.GetMsg() << e.what())`,
     /// `"... Q(0/1" << e.what()`), in LOSAT's words: the joined text is mapped as a whole, so the
     /// report is set off from the text before it as in the mapping of NCBI's post
     /// (`crate::wording::losat_text`).
-    pub(crate) fn what_after(&self, text: &str) -> String {
-        crate::wording::losat_text(&format!("{text}{}", self.ncbi_what_in(NCBI_BUILD_ROOT)))
+    pub(crate) fn what_after(&self, text: &[u8]) -> Vec<u8> {
+        crate::wording::losat_bytes(&[text, &self.ncbi_what_in(NCBI_BUILD_ROOT)].concat())
             .into_owned()
     }
 
     /// NCBI's text of [`NcbiException::what_in`], which LOSAT's maps.
-    fn ncbi_what_in(&self, root: &str) -> String {
-        let mut os = String::from("NCBI C++ Exception:\n");
+    fn ncbi_what_in(&self, root: &str) -> Vec<u8> {
+        let mut os = b"NCBI C++ Exception:\n".to_vec();
         for e in self.chain().iter().rev() {
-            os.push_str("    ");
+            os.extend_from_slice(b"    ");
             e.report_this(&mut os, root);
-            os.push('\n');
+            os.push(b'\n');
         }
         os
     }
@@ -271,11 +274,12 @@ impl NcbiException {
     /// `s_GetExceptionText`: the message and the extra text of the class (the text of each
     /// exception of a chain that NCBI's diagnostics post, `ncbi_app::args`).
     /// In LOSAT's words (`crate::wording::losat_text`: the position as `(position <n>)`).
-    pub(crate) fn text(&self) -> String {
+    pub(crate) fn text(&self) -> Vec<u8> {
         match &self.extra {
-            Some(extra) => {
-                crate::wording::losat_text(&format!("{} ({extra})", self.message)).into_owned()
-            }
+            Some(extra) => crate::wording::losat_bytes(
+                &[self.message.as_slice(), b" (", extra.as_bytes(), b")"].concat(),
+            )
+            .into_owned(),
             None => self.message.clone(),
         }
     }
@@ -301,23 +305,33 @@ impl NcbiException {
     /// oldest first, then `Error: (<err_code>.<err_subcode>) <title> (<class>::<code>)
     /// <message>` of the newest, each line ending with a line feed; in LOSAT's words
     /// (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
-    pub fn report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> String {
-        crate::wording::losat_text(&self.ncbi_report_default_ex(err_code, err_subcode, title))
+    pub fn report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> Vec<u8> {
+        crate::wording::losat_bytes(&self.ncbi_report_default_ex(err_code, err_subcode, title))
             .into_owned()
     }
 
     /// NCBI's text of [`Self::report_default_ex`].
-    fn ncbi_report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> String {
-        let mut out = String::new();
+    fn ncbi_report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> Vec<u8> {
+        let mut out = Vec::new();
         for e in self.chain().iter().rev() {
-            out.push_str(&post_error(e.site.kind, &e.text()));
+            out.extend(post_error_bytes(e.site.kind, &e.text()));
         }
-        out.push_str(&err_post_x(
+        out.extend(err_post_x_bytes(
             err_code,
             err_subcode,
-            &format!("{title} ({}) {}", self.site.kind, self.text()),
+            &self.titled_text(title),
         ));
         out
+    }
+
+    /// `<title> (<class>::<code>) <message>` of the newest exception, the line that ends NCBI's
+    /// report of an exception with a title.
+    fn titled_text(&self, title: &str) -> Vec<u8> {
+        [
+            format!("{title} ({}) ", self.site.kind).as_bytes(),
+            &self.text(),
+        ]
+        .concat()
     }
 
     // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:580-584, 755-757
@@ -330,16 +344,12 @@ impl NcbiException {
     pub(crate) fn report_default(&self, prefix: &str, title: &str) -> Vec<u8> {
         let mut out = Vec::new();
         for e in self.chain().iter().rev() {
-            out.extend(error_post_line(
-                Some(e.site.kind),
-                Some(prefix),
-                e.text().as_bytes(),
-            ));
+            out.extend(error_post_line(Some(e.site.kind), Some(prefix), &e.text()));
         }
         out.extend(error_post_line(
             None,
             Some(prefix),
-            format!("{title} ({}) {}", self.site.kind, self.text()).as_bytes(),
+            &self.titled_text(title),
         ));
         out
     }
@@ -404,7 +414,7 @@ impl std::fmt::Debug for NcbiException {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.debug_struct("NcbiException")
                     .field("site", &self.0.site)
-                    .field("message", &self.0.message)
+                    .field("message", &String::from_utf8_lossy(&self.0.message))
                     .field("extra", &self.0.extra)
                     .finish()
             }
@@ -415,10 +425,12 @@ impl std::fmt::Debug for NcbiException {
     }
 }
 
-/// `what()` ([`NcbiException::what`]).
+/// `what()` ([`NcbiException::what`]) as text, for the places that show an error as text only (a
+/// panic, a test's message): a writer of messages finds the exception in an error chain and writes
+/// the bytes of `what()` (`cli::NativeError`, `api::error::chain_bytes`).
 impl std::fmt::Display for NcbiException {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.what())
+        f.write_str(&String::from_utf8_lossy(&self.what()))
     }
 }
 
@@ -428,12 +440,7 @@ impl std::error::Error for NcbiException {}
 /// A message of severity `Error` with the error id `id` (`m_ErrText`, or `<err_code>.<err_subcode>`)
 /// as an application with NCBI's default diagnostic flags writes it (`SDiagMessage::x_OldWrite`,
 /// cited at [`NcbiException::report_default_ex`]): `Error: (<id>) <message>` and a line feed.
-fn post_error(id: &str, message: &str) -> String {
-    String::from_utf8(post_error_bytes(id, message.as_bytes()))
-        .expect("the text of UTF-8 parts is UTF-8")
-}
-
-/// `post_error` of a message that is bytes: NCBI's diagnostic stream writes them as they are.
+/// The message is bytes: NCBI's diagnostic stream writes them as they are.
 fn post_error_bytes(id: &str, message: &[u8]) -> Vec<u8> {
     error_post_line(Some(id), None, message)
 }
@@ -614,7 +621,8 @@ pub(crate) fn set_main_diag_failbit() {
 /// application's report of an exception's title line, and of a `std::exception`
 /// (ncbiapp.cpp:675-679: rpsbproc's data loader).
 pub fn err_post_x(err_code: u32, err_subcode: u32, message: &str) -> String {
-    post_error(&format!("{err_code}.{err_subcode}"), message)
+    String::from_utf8(err_post_x_bytes(err_code, err_subcode, message.as_bytes()))
+        .expect("the text of UTF-8 parts is UTF-8")
 }
 
 /// `err_post_x` of a message that is bytes (a `std::exception`'s `what()` that quotes data
@@ -660,7 +668,10 @@ mod tests {
                 assert!(copy == long);
                 let other = copy.clone().rethrow_same("x", 2, "g", "one more");
                 assert!(other != long);
-                assert_eq!(long.what().lines().count(), 1 + 100_001);
+                assert_eq!(
+                    long.what().iter().filter(|&&byte| byte == b'\n').count(),
+                    1 + 100_001
+                );
                 let mut shown = Count(0);
                 std::fmt::write(&mut shown, format_args!("{long:?}")).expect("shown");
                 assert!(shown.0 > 100_000);
@@ -717,10 +728,10 @@ mod tests {
             function: Some("ncbi::NStr::StringToInt8"),
         };
         let e = NcbiException::with_pos(site, "Cannot convert string '-1x' to Int8", 2);
-        assert_eq!(e.get_msg(), "Cannot convert string '-1x' to Int8");
+        assert_eq!(e.get_msg(), b"Cannot convert string '-1x' to Int8");
         assert_eq!(e.site(), site);
         assert_eq!(
-            e.what(),
+            String::from_utf8(e.what()).unwrap(),
             crate::wording::losat_text(
                 "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp\", line 870: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '-1x' to Int8 (m_Pos = 2)\n",
             )
@@ -752,10 +763,10 @@ mod tests {
         );
         assert_eq!(
             factory.get_msg(),
-            "could not create a unit counts container"
+            b"could not create a unit counts container"
         );
         assert_eq!(
-            factory.what(),
+            String::from_utf8(factory.what()).unwrap(),
             crate::wording::losat_text(
                 "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp\", line 63: Error: (Exception::format error) file too short\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n",
             )
@@ -775,7 +786,7 @@ mod tests {
         };
         let e = NcbiException::with_pos(site, "Invalid registry entry format: 'garbage'", 1);
         assert_eq!(
-            e.report_default_ex(106, 15, "Application's initialization failed"),
+            String::from_utf8(e.report_default_ex(106, 15, "Application's initialization failed")).unwrap(),
             crate::wording::losat_text(
                 "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n",
             )
@@ -788,7 +799,7 @@ mod tests {
             "second",
         );
         assert_eq!(
-            outer.report_default_ex(106, 15, "T"),
+            String::from_utf8(outer.report_default_ex(106, 15, "T")).unwrap(),
             crate::wording::losat_text(
                 "Error: (CRegistryException::eEntry) first\nError: (CAppException::eSetupDiag) second\nError: (106.15) T (CAppException::eSetupDiag) second\n",
             )
@@ -809,7 +820,7 @@ mod tests {
         };
         let e = NcbiException::with_pos(site, "Cannot convert string '' to Uint8", 0);
         assert_eq!(
-            e.report_default_ex(106, 15, "Application's initialization failed"),
+            String::from_utf8(e.report_default_ex(106, 15, "Application's initialization failed")).unwrap(),
             crate::wording::losat_text(
                 "Error: (CStringException::eConvert) Cannot convert string '' to Uint8 (m_Pos = 0)\nError: (106.15) Application's initialization failed (CStringException::eConvert) Cannot convert string '' to Uint8 (m_Pos = 0)\n",
             )
@@ -819,7 +830,7 @@ mod tests {
             "CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local",
         );
         assert_eq!(
-            e.report_default_ex(106, 16, "Application's execution failed"),
+            String::from_utf8(e.report_default_ex(106, 16, "Application's execution failed")).unwrap(),
             crate::wording::losat_text(
                 "Error: (CInvalidChoiceSelection::eFail) CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local\nError: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail) CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local\n",
             )

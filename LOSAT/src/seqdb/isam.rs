@@ -1490,14 +1490,14 @@ pub enum SimplifyError {
     SeqId(SeqIdError),
     /// Another exception, with its message: a string tag read as a number, an integer read from
     /// a string tag.
-    Exception(String),
+    Exception(Vec<u8>),
 }
 
 impl std::fmt::Display for SimplifyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SimplifyError::SeqId(error) => f.write_str(&error.what()),
-            SimplifyError::Exception(message) => f.write_str(message),
+            SimplifyError::SeqId(error) => f.write_str(&String::from_utf8_lossy(&error.what())),
+            SimplifyError::Exception(message) => f.write_str(&String::from_utf8_lossy(message)),
         }
     }
 }
@@ -1510,8 +1510,7 @@ fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
     match tag {
         ObjectId::Id(n) => Ok(i64::from(*n)),
         ObjectId::Str(_) => Err(SimplifyError::Exception(
-            "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str"
-                .to_string(),
+            b"CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str".to_vec(),
         )),
     }
 }
@@ -1562,7 +1561,7 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
                 out.simpler = true;
                 out.num_id = match &dbt.tag {
                     ObjectId::Str(text) => string_to_int8(text, 0)
-                        .map_err(|error| SimplifyError::Exception(error.get_msg().to_string()))?,
+                        .map_err(|error| SimplifyError::Exception(error.get_msg().to_vec()))?,
                     ObjectId::Id(n) => i64::from(*n),
                 };
                 out.id_type = SeqDbIdType::Ti;

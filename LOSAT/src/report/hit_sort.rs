@@ -3,10 +3,12 @@
 //! BLASTP, BLASTX, TBLASTN and TBLASTX, and the values that the description table's columns of
 //! `-sorthits` read.
 //!
-//! NCBI sorts `std::list`s with comparators of which some are not strict weak orders (`>=`) and
-//! some sort the HSP lists of both hits they compare as a side effect, so the order is the one
-//! that libstdc++'s merge sort gives with that comparator: `list_sort` is that algorithm, call
-//! for call, and the comparators keep their side effects on the hits' HSP orders.
+//! NCBI sorts `std::list`s with comparators of which some are not strict weak orders (`>=`, and
+//! the percent-identity comparators on a list with an HSP without identities) and some sort the
+//! HSP lists of both hits they compare as a side effect, so the order is the one that the C++
+//! library's list sort gives with that comparator: `list_sort` hands the comparator the same
+//! elements in the same order (as observed with g++ 13), and the comparators keep their side
+//! effects on the hits' HSP orders.
 
 use super::pairwise::PairwiseHit;
 
@@ -131,61 +133,90 @@ impl HspScores {
     }
 }
 
-// libstdc++ (GCC 13, the C++ library of NCBI BLAST+'s Linux builds): bits/list.tcc:614-662
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3072-3075
-/// libstdc++'s `std::list::sort(comp)` of `list`: the bottom-up merge sort of 64 buckets, with
-/// `comp(a, b)` (whether `a` goes before `b`) called on the same elements in the same order as
-/// libstdc++ calls it (`comp` may change state that later calls read). A list of 0 or 1
-/// elements is left as it is without a call. The Vec stands for the list: `merge` builds the
-/// merged list as libstdc++ splices it.
-pub(crate) fn list_sort<T>(list: &mut Vec<T>, mut comp: impl FnMut(&T, &T) -> bool) {
-    if list.len() < 2 {
+/// `list.sort(less)` of a C++ `std::list` holding the elements of `list` (NCBI's sorts of hits and
+/// HSPs): `less` is called with the same elements, in the same argument order and in the same
+/// sequence as the list sort of the C++ library that NCBI's BLAST+ 2.17.0 is built with (GCC 13),
+/// and the elements end in the order that the answers give. The steps were written from what
+/// g++ 13's `std::list::sort` did with comparators that recorded each call and answered from a
+/// script or at random (every answer sequence for lists of up to 9 elements, and random answers
+/// for lists of up to 20,000 elements); the fixture of the test `list_sort_calls_as_observed`
+/// (`tests/unit/list_sort_observed`) keeps a part of those records.
+///
+/// A list of fewer than two elements is left as it is, without a call. Otherwise the sort reads
+/// the elements from the front, one at a time, and keeps those read as runs: stretches of
+/// consecutive elements, merged in order, whose lengths are distinct powers of two, the longer
+/// runs nearer the front. Each element read is a new run of one at the back; then, while the run
+/// before the last one has the same length as the last one, the two are merged into one. When all
+/// the elements are read, the runs are merged from the back: the last run with the one before it,
+/// then that run with the one before it, up to the first run.
+///
+/// Two neighbouring runs are merged by taking their elements from the front: while both have
+/// elements left, `less(later, earlier)` is asked with the first element left of the run behind
+/// (`later`) and the first one left of the run in front (`earlier`); the answer true takes the
+/// element of the run behind, false the one of the run in front. When one run is used up, the rest
+/// of the other follows without a call. With a strict weak order `less` this is a stable sort
+/// (elements that compare equal keep their order); with any other comparator the order is still
+/// the one that the same answers give in NCBI's sort.
+fn list_sort(list: &mut [usize], mut less: impl FnMut(&usize, &usize) -> bool) {
+    let len = list.len();
+    if len < 2 {
         return;
     }
-    let mut tmp: Vec<Vec<T>> = (0..64).map(|_| Vec::new()).collect();
-    let mut fill = 0usize;
-    for item in std::mem::take(list) {
-        let mut carry = vec![item];
-        let mut counter = 0usize;
-        while counter != fill && !tmp[counter].is_empty() {
-            merge(&mut tmp[counter], &mut carry, &mut comp);
-            std::mem::swap(&mut carry, &mut tmp[counter]);
-            counter += 1;
-        }
-        std::mem::swap(&mut carry, &mut tmp[counter]);
-        if counter == fill {
-            fill += 1;
+    let mut front_run = Vec::with_capacity(len);
+    for read in 1..=len {
+        // The runs are the binary digits of `read - 1` before this element is read.
+        let mut size = 1;
+        while (read - 1) & size != 0 {
+            merge_runs(
+                list,
+                read - 2 * size,
+                read - size,
+                read,
+                &mut front_run,
+                &mut less,
+            );
+            size *= 2;
         }
     }
-    // `__counter->merge(__counter[-1])`: bucket `counter` holds the older elements (`this`),
-    // bucket `counter - 1` the newer ones (`x`).
-    for counter in 1..fill {
-        let (newer, older) = tmp.split_at_mut(counter);
-        merge(&mut older[0], &mut newer[counter - 1], &mut comp);
+    // The runs in front of `start` have the lengths of the binary digits of `start`, the shortest
+    // last; the merged back part runs from `start` to the end.
+    let mut start = len;
+    while start != 0 {
+        let size = start & start.wrapping_neg();
+        merge_runs(list, start - size, start, len, &mut front_run, &mut less);
+        start -= size;
     }
-    *list = std::mem::take(&mut tmp[fill - 1]);
 }
 
-// libstdc++ (GCC 13): bits/stl_list.h:194-214
-/// `this.merge(x, comp)`: an element of `x` goes before the element of `this` it is compared
-/// with only when `comp(x's, this's)`; the rest of `x` goes after `this`. `x` is left empty.
-fn merge<T>(this: &mut Vec<T>, x: &mut Vec<T>, comp: &mut impl FnMut(&T, &T) -> bool) {
-    if x.is_empty() {
+/// Merges the run `list[start..middle]` with the run `list[middle..end]` behind it, as
+/// `list_sort` describes; `front_run` is scratch space for the run in front.
+fn merge_runs(
+    list: &mut [usize],
+    start: usize,
+    middle: usize,
+    end: usize,
+    front_run: &mut Vec<usize>,
+    less: &mut impl FnMut(&usize, &usize) -> bool,
+) {
+    if start == middle || middle == end {
         return;
     }
-    let mut merged = Vec::with_capacity(this.len() + x.len());
-    let mut first1 = std::mem::take(this).into_iter().peekable();
-    let mut first2 = std::mem::take(x).into_iter().peekable();
-    while let (Some(older), Some(newer)) = (first1.peek(), first2.peek()) {
-        if comp(newer, older) {
-            merged.extend(first2.next());
+    front_run.clear();
+    front_run.extend_from_slice(&list[start..middle]);
+    let (mut front, mut behind, mut next) = (0, middle, start);
+    while front < front_run.len() && behind < end {
+        if less(&list[behind], &front_run[front]) {
+            list[next] = list[behind];
+            behind += 1;
         } else {
-            merged.extend(first1.next());
+            list[next] = front_run[front];
+            front += 1;
         }
+        next += 1;
     }
-    merged.extend(first1);
-    merged.extend(first2);
-    *this = merged;
+    // The rest of the run behind is in place already; the rest of the run in front fills the gap.
+    let rest = &front_run[front..];
+    list[next..next + rest.len()].copy_from_slice(rest);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1382-1400

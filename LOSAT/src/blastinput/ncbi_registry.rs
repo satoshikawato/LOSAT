@@ -117,10 +117,22 @@ pub(crate) fn running_syntax_error_notice(error: &NcbiException, program: &str) 
 /// The post of `syntax_error_notice` of `program` with the diagnostics' `prefix`.
 fn syntax_error_post(error: &NcbiException, program: &str, prefix: &str) -> String {
     let what = error.what_in(crate::ncbi_exception::build_root(program));
-    let what = what.split('\0').next().unwrap_or_default();
-    format!(
-        "Critical: (110.6) {prefix}CNcbiRegistry: Syntax error in system-wide configuration file: {what}\n"
+    let what = what.split(|&byte| byte == 0).next().unwrap_or_default();
+    registry_text(
+        [
+            format!("Critical: (110.6) {prefix}CNcbiRegistry: Syntax error in system-wide configuration file: ")
+                .as_bytes(),
+            what,
+            b"\n",
+        ]
+        .concat(),
     )
+}
+
+/// The report of an exception of a registry read as text: such an exception holds only UTF-8
+/// (`registry_exception` refuses a line that is not), so nothing is lost.
+pub(crate) fn registry_text(report: Vec<u8>) -> String {
+    String::from_utf8_lossy(&report).into_owned()
 }
 
 /// The registry that NCBI reads a file into, which decides how often the byte order mark is

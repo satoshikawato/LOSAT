@@ -52,9 +52,8 @@ impl SeqIdError {
         }
     }
 
-    /// The exception NCBI throws (`NCBI_THROW(CSeqIdException, eFormat, message)`). Its
-    /// callers (makeblastdb's deflines, blastdbcmd's `-entry`) parse ids that end at a byte of
-    /// 0x80 or more or words that are UTF-8, so the message is UTF-8 text here.
+    /// The exception NCBI throws (`NCBI_THROW(CSeqIdException, eFormat, message)`), with the
+    /// message's bytes.
     pub fn exception(&self) -> NcbiException {
         let site = ThrowSite {
             file: self.file,
@@ -62,11 +61,11 @@ impl SeqIdError {
             kind: "CSeqIdException::eFormat",
             function: Some(self.function),
         };
-        NcbiException::new(site, String::from_utf8_lossy(&self.message))
+        NcbiException::new(site, self.message.clone())
     }
 
     /// `CException::what()`: the report of the exception, ending with a newline.
-    pub fn what(&self) -> String {
+    pub fn what(&self) -> Vec<u8> {
         self.exception().what()
     }
 }
@@ -819,7 +818,7 @@ pub fn parse_ids(
                 }
                 warn(SeqIdWarning {
                     subcode: 7,
-                    message: error.what().into_bytes(),
+                    message: error.what(),
                 });
                 while let Some(front) = pieces.front() {
                     if front.len() != 2 && front.len() != 3 {

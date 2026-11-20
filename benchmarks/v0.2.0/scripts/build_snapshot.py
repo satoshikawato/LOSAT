@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Build frozen benchmark snapshot tables in benchmarks/v0.2.0/snapshot/ from measured TSV/JSON outputs."""
+"""Build frozen benchmark snapshot tables in benchmarks/v0.2.0/snapshot/ from measured TSV/JSON outputs.
+
+Every input path is an argument (defaults: the v0.2.0 runs on the release candidate 93ca2f652).
+metadata.json records the sha256 of every input file read and the LOSAT build of each source:
+--losat-commit for the standard grid and its extension (psiblast, rpsblast, rpstblastn, utilities,
+thread and size scaling), the `build` field of toolmt.json (downstream tools at the tool's thread
+count, cold-cache and core_nt rows), <dt-dir>/<tag>_sha.txt (downstream tools at one thread) and the
+`commit` column of the WebAssembly CSV.
+"""
 
 from __future__ import annotations
 
@@ -147,11 +155,16 @@ def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> tuple[list[dict[s
     # Load dt1/dt13/dt15 for single-thread tools
     dt_cache: dict[str, dict[tuple[str, str], list[float]]] = {}
     dt_meta: dict[str, dict[tuple[str, str], set[str]]] = {}
+    wanted: dict[str, set[str]] = defaultdict(set)
+    for _prog, _tool, _th, tag, case_ids in ST_TOOLS:
+        wanted[tag].update(case_ids)
     for tag, fn in (("dt1", "dt1.tsv"), ("dt13", "dt13.tsv"), ("dt15", "dt15.tsv")):
         p = dt_dir / fn
         g: dict[tuple[str, str], list[float]] = defaultdict(list)
         s: dict[tuple[str, str], set[str]] = defaultdict(set)
         for row in read_tsv(p):
+            if row["case"] in wanted.get(tag, set()) and row.get("rc", "0") != "0":
+                sys.exit(f"{tag} rc != 0: {row}")
             g[(row["case"], row["arm"])].append(float(row["wall_s"]))
             s[(row["case"], row["arm"])].add(row.get("sha16", ""))
         dt_cache[tag] = g
@@ -204,10 +217,10 @@ def build_webassembly(wasm_csv: Path, j_tblastx_ncbi: dict[int, tuple[float, flo
             nat = float(r["native_s"])
             was = float(r["wasm_s"])
             ncbi = float(r["ncbi_s"]) if r["ncbi_s"] else None
-            note = "paired_7f7db49c"
+            note = f"commit_{r['commit']}"
             if c == "tbx" and ncbi is None and j_tblastx_ncbi and th in j_tblastx_ncbi:
                 ncbi, _ = j_tblastx_ncbi[th]
-                note = "wasm_7f7db49c_ncbi_j2"
+                note = f"commit_{r['commit']}_ncbi_j2"
             rows.append({
                 "case": c,
                 "mode_label": r["mode_label"],
@@ -236,6 +249,9 @@ def main() -> int:
     ap.add_argument("--dt-dir", type=Path, default=base / "dropin-survey-20261029/perf/ws_results")
     ap.add_argument("--wasm-csv", type=Path, default=base / "v020-board-20261030/compact/data/wasm_scale.csv")
     ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "snapshot")
+    ap.add_argument("--losat-commit", default="93ca2f652617acac09d416c28c293cc8a1a501d1",
+                    help="full SHA of the LOSAT build measured in --j2-dir and --ext-dir")
+    ap.add_argument("--losat-version", default="0.2.0")
     ap.add_argument("--static-only", action="store_true", help="Only build downstream_tools (and webassembly if complete).")
     args = ap.parse_args()
 
@@ -526,18 +542,27 @@ def main() -> int:
               [{k: r.get(k, "") for k in ["source", "case", "role", "file", "sequences", "residues", "disk_bytes", "sha256", "db_name"]} for r in in_rows])
 
     bp_par = read_tsv(ext_bp_path) if ext_bp_path.is_file() else []
+    toolmt_builds = sorted({str(r.get("build", "")) for r in json.loads(args.toolmt.read_text(encoding="utf-8"))} - {""})
+    wasm_commits = sorted({str(r["commit"]) for r in wasm_rows})
+    dt_builds = {}
+    for tag in ("dt1", "dt13", "dt15"):
+        sp = args.dt_dir / f"{tag}_sha.txt"
+        dt_builds[tag] = sp.read_text(encoding="utf-8").strip() if sp.is_file() else ""
     meta = {
-        "losat_version": "0.2.0",
-        "losat_commit": "93ca2f652617acac09d416c28c293cc8a1a501d1",
+        "losat_version": args.losat_version,
+        "losat_commit": args.losat_commit,
         "ncbi_version": "2.17.0",
         "rpsbproc_version": "0.5.1",
-        "wasm_commit": "7f7db49c",
-        "toolmt_commit": "095ff0c16",
+        "wasm_commit": ",".join(wasm_commits),
+        "toolmt_commit": ",".join(toolmt_builds),
+        "dt_commits": dt_builds,
         "hardware": "Dual Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz (2 NUMA nodes, 64 physical cores total)",
         "bp_db_parity": bp_par,
         "input_checksums": {
             str(p): sha256_file(p)
-            for p in [j_n16_path, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path, args.wasm_csv, *map(Path, dt_sources)]
+            for p in [j_n16_path, *j_n1_paths, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path, ext_bp_path,
+                      args.wasm_csv, *map(Path, dt_sources)]
+            + [args.dt_dir / f"{tag}_sha.txt" for tag in ("dt1", "dt13", "dt15")]
             if p.is_file()
         },
     }

@@ -1,51 +1,54 @@
 # WebAssembly and Browser
 
-LOSAT builds to two WebAssembly families from the same Rust codebase:
+LOSAT runs as WebAssembly in two forms, built from the same code as the native `losat`:
 
-1. **Command-line WASI modules (`losat.wasm`)** — run `losat` subcommands directly in WASI runtimes such as Node.js (`wasm32-wasip1` serial and `wasm32-wasip1-threads` multi-threaded). Released directly in [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases).
-2. **Browser / npm host package (`web/packages/losat`)** — TypeScript `WasmEngine` host wrapping the ABI v2 serial and threaded reactor builds for local in-browser BLAST searches (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`) inside Web Workers. Used by LOSAT Web and third-party web tools such as [gbdraw](https://github.com/satoshikawato/gbdraw).
+1. **WASI command modules (`losat.wasm`).** The command line for WASI runtimes such as Node.js, in a serial (`wasm32-wasip1`) and a threaded (`wasm32-wasip1-threads`) build. Both are release files on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases).
+2. **The npm package `losat`, for web pages.** It runs `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` in the user's browser, so sequences never leave the user's machine. LOSAT Web runs its searches through this package, and the browser version of [gbdraw](https://github.com/satoshikawato/gbdraw) uses the same WebAssembly engine.
 
-## WASI Command Modules (`losat.wasm`)
+## WASI command modules (`losat.wasm`)
 
-Both WASI archives (`LOSAT-0.2.0-wasm32-wasip1.tar.gz` and `LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz`) accept programs directly as the first argument (`blastn ...` rather than `losat blastn ...`).
-
-Use the bundled Node.js 24+ launchers in `LOSAT/tests/` to pass working directory (`PWD`), time zones (`TZ`), file handles, and >2 GiB unsigned linear-memory pointers:
+The modules take the same arguments as the native `losat`. The repository's Node.js runners in `LOSAT/tests` give a module what it needs from its host (files, the working directory, the time zone, and memory past 2 GiB):
 
 ```bash
-# Serial WASI build
+# serial module
 node LOSAT/tests/run_losat_wasi.js losat.wasm blastn -query query.fna -subject subject.fna -outfmt 6
 
-# Threaded WASI build
+# threaded module
 node LOSAT/tests/run_losat_wasi_threads.js losat-threads.wasm blastn -query query.fna -subject subject.fna -num_threads 4 -outfmt 6
 ```
 
-See [Platforms and WebAssembly](../platforms.md#wasi-losatwasm) for required WASI host capabilities, compression limits, and throughput benchmarks vs native execution.
+[Platforms and WebAssembly](../platforms.md#wasi-losatwasm) lists what a WASI host must pass, the limits of WASI (such as compressed inputs), and other hosts. [Threads, speed and memory](../performance.md#webassembly) compares their speed with the native binary.
 
-## Embedding the Browser Reactors (`WasmEngine`)
+## The npm package `losat`
 
-The TypeScript package in `web/packages/losat` exports a worker-backed `WasmEngine` alongside `ENGINE_ASSETS`:
+The package holds two WebAssembly builds of the engine and the TypeScript host that runs them:
 
-```ts
-import { WasmEngine, instantiateSerial, loadReactor, reactorControl } from 'losat';
-import { ENGINE_ASSETS } from 'losat/reactors';
+- `losat-web-serial.wasm` runs one thread and works in any browser and in Node.js.
+- `losat-web-threads.wasm` runs a search on several threads. It needs a cross-origin isolated page.
 
-const open = async () =>
-  (await instantiateSerial((await loadReactor(ENGINE_ASSETS.serial)).module)).abi;
+A search takes an argv, as on the command line, and FASTA sequences that the page gives it. It writes `-outfmt 0`, `6` and `7` byte for byte as the command line does, and an HSP record for each hit. It does not search BLAST databases: `-db` is refused.
 
-const control = reactorControl(open, open);
-const engine = new WasmEngine({ assets: ENGINE_ASSETS, control });
-```
+### Getting the package
 
-### Key requirements for browsers
+The package is not on npm. Build it from the repository:
 
-- **Cross-origin isolation for threads:** Browsers require `SharedArrayBuffer` for `losat-web-threads.wasm`. Serve your app with:
+1. Build the two WebAssembly modules: `python3 web/adapter/tools/build_reactors.py --target-dir <build directory> --output-dir <modules directory>`.
+2. Install the web workspace's dependencies with `npm ci` in `web/`.
+3. In `web/packages/losat`, run `LOSAT_WEB_REACTORS=<modules directory> npm run build`. The package is written to `dist/`; `npm pack` there makes a file you can install.
+
+The build needs Node.js 22.18 or later, Python 3.11 or later, and Rust 1.92 with the `wasm32-wasip1` and `wasm32-wasip1-threads` targets.
+
+### What a page must do
+
+- **Serve the modules** as `application/wasm`. The host checks their SHA-256 before it runs them.
+- **Isolate the page for threads.** The threaded module needs `SharedArrayBuffer`, which a browser gives only to a cross-origin isolated page. Serve the page and its scripts with:
+
   ```text
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
   ```
-  Non-isolated pages automatically fall back to `losat-web-serial.wasm` and record the fallback in `RuntimeInfo.fallbackReason`.
-- **MIME type and digests:** Serve `.wasm` assets with `application/wasm`. `WasmEngine` checks each reactor's SHA-256 digest against `ENGINE_ASSETS` before startup.
-- **Memory probing:** Shared linear memory defaults up to 65,535 pages (4 GiB minus 64 KiB) and steps down (`49,152`, `32,768`, `24,576`, `16,384` pages) if the browser restricts large shared allocations.
-- **Stream discards (`DISCARD_STREAM`):** When using lower-level direct ABI calls, listen for stream `9` (`DISCARD_STREAM`) via `RunOutputReceiver` so aborted partial format chunks are discarded cleanly, preserving byte parity on surviving outputs.
 
-Browser reactors accept FASTA payloads in memory (`-subject`) and do not open `-db` database volumes. For full API signatures, see `web/packages/losat/README.md` and the [ABI v2 specification](https://github.com/satoshikawato/LOSAT/blob/main/docs/web/abi_v2.md).
+  On a page that is not isolated, a search that asks for more than one thread runs on the serial module with one thread, and `RuntimeInfo.fallbackReason` says why.
+- **Drop the outputs that the engine discards.** When an output cannot be written, the engine tells the host to drop what arrived of it (stream 9). The outputs are the command line's bytes only for a host that does this. `RunOutputReceiver` reports each such signal through its `onDiscard` callback.
+
+The package's [README](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/web/packages/losat/README.md) shows how to start `WasmEngine`, how the outputs arrive, how memory is reserved, and how to call the serial module directly. The [ABI v2 specification](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/web/abi_v2.md) describes the interface between the host and the modules.

@@ -1,17 +1,13 @@
 # pylosat
 
-Python bindings for [LOSAT](https://github.com/satoshikawato/LOSAT), a pure-Rust reimplementation of NCBI BLAST+ (`2.17.0` compatible CLI and output).
-
-`pylosat` runs sequence searches directly inside your Python process without spawning subprocesses, exposing the exact CLI option parser, byte-identical BLAST reports, Karlin-Altschul statistics, and zero-copy [Apache Arrow](https://arrow.apache.org/) HSP tables (`polars`, `pyarrow`, `pandas`).
+The Python package of [LOSAT](https://github.com/satoshikawato/LOSAT), a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. A search runs inside your Python process, with the command line's options, and returns the command line's reports byte for byte. The HSPs come as a table that pandas, Polars and PyArrow read without a copy. No executable is started. It supports CPython 3.10 and later.
 
 - **Documentation:** [satoshikawato.github.io/LOSAT/libraries/python.html](https://satoshikawato.github.io/LOSAT/libraries/python.html)
 - **Repository:** [github.com/satoshikawato/LOSAT](https://github.com/satoshikawato/LOSAT)
 - **Issues:** [github.com/satoshikawato/LOSAT/issues](https://github.com/satoshikawato/LOSAT/issues)
 
-## Quick Start
-
 ```python
-import polars as pl
+import polars
 import pylosat
 
 search = pylosat.Search("blastn", task="megablast", evalue=1e-5, num_threads=4)
@@ -19,123 +15,104 @@ query = pylosat.Sequences.from_fasta("query.fna")
 subject = pylosat.Sequences.from_fasta("subject.fna")
 
 outcome = search.run(query, subject, outfmt=["6", "0"])
-
-# Exact CLI report bytes / text
-print(outcome.reports[0].text)
-
-# Zero-copy Arrow HSP table into Polars (or pyarrow.table / pandas.DataFrame.from_arrow)
-df = pl.DataFrame(outcome.hsps)
-
-# Search-space statistics per query
-print(outcome.query_stats[0].eff_space)
+print(outcome.reports[0].text)          # the -outfmt 6 report, as `losat blastn ... -outfmt 6` writes it
+outcome.reports[1].bytes                # the bytes of -outfmt 0
+hits = polars.DataFrame(outcome.hsps)   # one row per HSP, the numbers not rounded
+outcome.query_stats[0].eff_space        # what fixed the E-values of the first query
+outcome.diagnostics                     # what the command line writes to its standard error
 ```
 
 ## Installation
 
-Pre-built wheels for Linux (`x86_64`, `aarch64`), macOS (Apple silicon and Intel), and Windows (`x64`) on Python 3.10+ are scheduled for PyPI immediately after v0.2.0:
+pylosat is not on PyPI. Build a wheel from the repository with [maturin](https://www.maturin.rs/) and Rust 1.92 or later:
 
 ```bash
-pip install pylosat
-```
-
-You can also download wheels built for every release architecture from the [Python wheels GitHub Actions workflow](https://github.com/satoshikawato/LOSAT/actions/workflows/python-wheels.yml), or build locally from the `python/` directory with [maturin](https://www.maturin.rs/) and Rust 1.92+:
-
-```bash
-cd python
+git clone https://github.com/satoshikawato/LOSAT.git
+cd LOSAT/python
 pip install maturin
 maturin build --release
 pip install target/wheels/pylosat-*.whl
 ```
 
-## Supported Programs and Tools
+For development, `maturin develop` builds the extension into the active virtual environment.
 
-`pylosat.PROGRAMS` lists the search programs available through `pylosat.Search`:
+The repository's [Python wheels workflow](https://github.com/satoshikawato/LOSAT/actions/workflows/python-wheels.yml) also builds a wheel for each platform of LOSAT's release binaries (Linux x86_64 and aarch64, macOS arm64 and x86_64, Windows x64), each for CPython 3.10 and later, installs it and checks one search against the command line's output. A run keeps its wheels for 7 days.
 
-- **Search**: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`
-- **Databases and Masking**: `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`
+## Programs
 
-For `rpsblast`, `rpstblastn`, and `rpsbproc`, use the [`losat` CLI](https://satoshikawato.github.io/LOSAT/installation.html).
+`pylosat.PROGRAMS` names the search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` are functions of their own (below). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the command line.
 
-## Building Searches and Reading Options
+## Options
 
-`Search` accepts any CLI option as a keyword argument without the leading hyphen (`evalue=1e-5` corresponds to `-evalue 1e-5`; boolean flags take `True`/`False`, such as `ungapped=True`):
+`Search` takes the program and the command line's options, each as a keyword without its dash: `evalue=1e-5` is `-evalue 1e-5`, and `ungapped=True` is `-ungapped`. `pylosat.describe("blastn")` lists them from the engine's own table, and the type stubs list them by program. `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. An unknown keyword, or a value of the wrong Python type, raises `TypeError`; the command line's parser checks the rest, so an option means, and fails, as it does there (`ArgumentError`).
 
-```python
-# Inspect every parameter accepted by a program directly from the engine
-desc = pylosat.describe("blastp")
-for param in desc.parameters[:5]:
-    print(param.flag, param.value_kind, param.default)
-
-# Or construct directly from CLI tokens (excluding I/O routing flags)
-search = pylosat.Search.from_argv("blastn", ["-task", "dc-megablast", "-evalue", "1e-5"])
-```
-
-Input/output routing options (`-query`, `-subject`, `-db`, `-in_pssm`, `-out`, `-outfmt`) are passed via Python arguments to `run`, `run_to_file`, or `batches` instead of `Search`.
+`-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not options here: the inputs and the formats are arguments of `run`. psiblast runs its rounds (`num_iterations`) as on the command line, and its `-out_pssm` and `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM files under their names.
 
 ## Inputs
 
-- **FASTA files and in-memory sequences**:
-  - `Sequences.from_fasta(path)` (automatically decompresses `.gz`, `.bz2`, and `.zst` files)
-  - `Sequences.from_text(text)`
-  - `Sequences.from_pairs([(title, sequence), ...])`
-- **Formatted BLAST databases (`-db`)**: `Database("core_nt")` resolves names using `BLASTDB` and `.ncbirc` exactly like the CLI:
+A `Sequences` is one FASTA input, and the search reads it with the command line's reader:
+
+- `Sequences.from_fasta(path)`: a file, inflated when it is named `.gz`, `.bz2` or `.zst`.
+- `Sequences.from_text(text)`: FASTA text.
+- `Sequences.from_pairs([(title, sequence), ...])`: the FASTA file of those records.
+
+A PSSM takes the place of the query of psiblast and tblastn: `Pssm.from_file(path)` is `-in_pssm path` (a PSSM file as `-out_pssm` writes it). Its one query is the PSSM's sequence: `q_idx` 0.
+
+A BLAST database takes the place of the subject: `Database("core_nt")` is `-db core_nt`, found as the command line finds it (`BLASTDB`, `.ncbirc`). The options of a database search (`taxids`, `seqidlist`, ...) go to `Search` with the others. Then `hsp.s_idx` is the sequence's ordinal id, the same in every search of that database.
 
 ```python
-search = pylosat.Search("blastn", taxids="9606", evalue=1e-5, num_threads=4)
+search = pylosat.Search("blastn", taxids="9606", evalue=1e-5)
 outcome = search.run(query, pylosat.Database("core_nt"), outfmt="6")
 ```
 
-- **PSI-BLAST and PSSM Checkpoints (`-in_pssm`)**: Pass `Pssm.from_file("model.asn")` to `psiblast` or `tblastn`. For iterative `psiblast`, `outcome.rounds[q]` holds per-round `QueryStats` and `converged` (`Search has CONVERGED!`), while `outcome.queries()[q].rounds()` splits HSPs per iteration (`hsp.round`). `-out_pssm` and `-out_ascii_pssm` write checkpoint files to disk as on the CLI.
+## Results
 
-## Results and Arrow `HspTable`
+`outcome.hsps` is an `HspTable` of 31 columns. Any Arrow consumer reads it without a copy, through the Arrow PyCapsule interface: `polars.DataFrame(hsps)`, `pyarrow.table(hsps)`, `pandas.DataFrame.from_arrow(hsps)`. pylosat itself needs no Arrow library. The columns have the names of `-outfmt`, the default report's first (`qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`), then `score nident positive gaps qlen slen qframe sframe sstrand qseq sseq`, then pylosat's own `query_strand sum_n comp_adjust_method index q_idx s_idx rank round`.
 
-`outcome.hsps` implements the Arrow PyCapsule C Data Interface (`__arrow_c_array__` / `__arrow_c_stream__`) with unrounded numeric values and zero-copy consumption by `polars.DataFrame(outcome.hsps)`, `pyarrow.table(outcome.hsps)`, or `pandas.DataFrame.from_arrow(outcome.hsps)`. No external Arrow Python dependency is required.
+The numbers are the engine's, not rounded. Text to show comes from a report: `report.spans[hsp.index]` is the slice of `report.bytes` that holds the row or section of an HSP. `qframe` and `sframe` are null where the program does not translate that side; the reports print a number there.
 
-All 31 schema columns exposed by `HspTable`:
+`hsps[i]` is an `Hsp` with the field names of LOSAT's Rust API (`bit_score`, `e_value`, `q_start`). Its coordinates are 1-based, as in the reports; `query_range` and `subject_range` are 0-based slices on the record's plus strand. `outcome.query_stats[q]` holds the statistics of query `q` (`eff_space`, `hsp_len`, `lambda_`, `kappa`, `entropy`). `outcome.queries()` and `QueryHits.subjects()` group the rows by query and by subject. Everything that a search returns can be pickled, so a process pool can return it.
 
-| Group | Columns |
-| :--- | :--- |
-| **Default `-outfmt 6`** | `qaccver`, `saccver`, `pident`, `length`, `mismatch`, `gapopen`, `qstart`, `qend`, `sstart`, `send`, `evalue`, `bitscore` |
-| **Extended alignment** | `score`, `nident`, `positive`, `gaps`, `qlen`, `slen`, `qframe`, `sframe`, `sstrand`, `qseq`, `sseq` |
-| **Metadata & PSI-BLAST** | `query_strand`, `sum_n`, `comp_adjust_method`, `index`, `q_idx`, `s_idx`, `rank`, `round` |
+psiblast's rounds of each query follow one another in the table, round 1 first: `hsp.round` (the `round` column) is the round that found the HSP, 1 in the other searches. `outcome.rounds[q]` holds the statistics of each round of query `q` and whether its rounds converged (`Search has CONVERGED!`), and `QueryHits.rounds()` gives each round's HSPs with its statistics.
 
-Row access via `outcome.hsps[i]` returns an `Hsp` object with 1-based inclusive coordinates (`q_start`, `q_end`, `s_start`, `s_end`) plus 0-based half-open Python `slice` helpers (`q_range`/`query_range`, `subject_range`). All `Outcome`, `QueryHits`, `SubjectHits`, `QueryStats`, `QueryRounds`, `Report`, and `Search` objects are picklable.
+## Files
 
-To write `-outfmt 13` / `-outfmt 14` reports (with side files next to `-out`) or large outputs directly to disk:
+`search.run_to_file(query, subject, outfmt="14", path="report.xml")` is the command line's `-out`, and the way to outfmt 13 and 14: their side files lie next to `path`. It returns what the command line writes to its standard error.
 
-```python
-diagnostics = search.run_to_file(query, subject, outfmt="14", path="report.xml")
-```
-
-## Streaming Large Query Sets and Interruption
-
-Iterate over NCBI query batches incrementally with `search.batches(query, subject)` to bound peak memory and track progress:
+## Long searches
 
 ```python
 batches = search.batches(query, subject)
 for batch in batches:
-    print(f"Processed up to query {batch.query_indices.stop} / {batches.query_count}")
+    print(f"{batch.query_indices.stop} of {batches.query_count} queries")
+    hits = polars.DataFrame(batch.hsps)
 ```
 
-The Python GIL is released while searches execute. Between query batches (or when leaving the loop / pressing Ctrl-C during `batches` or report-free `run`), execution stops cleanly.
+`batches` searches one of NCBI's query batches at a time, so a run holds the results of one batch. Their rows and statistics, one batch after the other, are those of the whole search. Leaving the loop stops the search.
 
-## Database and Masking Helpers
+The GIL is released while a search runs, so other Python threads go on. Python cannot stop a thread inside its process, so Ctrl-C takes effect between two query batches, in `batches` and in a `run` without reports. A `run` with reports is one call of the engine, and Ctrl-C takes effect when it returns.
 
-Run `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, and `convert2blastmask` with optional `input=` for standard input and receive a `ToolOutput` (`.bytes`, `.text`, `.diagnostics`):
+## Databases and masks
 
 ```python
-pylosat.makeblastdb("-dbtype", "prot", "-out", "proteins", input=fasta_text)
-info = pylosat.blastdbcmd("-db", "proteins", "-info").text
-masked = pylosat.dustmasker("-outfmt", "fasta", input=nucleotide_fasta).text
+pylosat.makeblastdb("-dbtype", "prot", "-title", "proteins", "-out", "proteins", input=fasta_text)
+print(pylosat.blastdbcmd("-db", "proteins", "-info").text)
+print(pylosat.dustmasker("-outfmt", "fasta", input=nucleotide_fasta).text)
+print(pylosat.segmasker("-outfmt", "fasta", input=protein_fasta).text)
+print(pylosat.convert2blastmask("-masking_algorithm", "other", "-masking_options", "mine",
+                                input=lowercase_masked_fasta).text)
 ```
 
-## Exceptions
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`bytes`, `text`) and to standard error (`diagnostics`). `input` is what the command line reads as standard input, so a database can be built from FASTA in memory (with `-title`, which makeblastdb needs for standard input), ids given to `blastdbcmd -entry_batch -`, sequences in memory masked, and the lower case letters of FASTA in memory turned into masking information.
 
-- `LosatError`: Base exception for all `pylosat` errors
-  - `ArgumentError`: Invalid CLI options or values
-  - `InputError`: Invalid FASTA or input data
-  - `SearchError`: Runtime search, database, or tool failure
+## Errors
+
+`ArgumentError` (the options), `InputError` (a FASTA input) and `SearchError` (the search or a tool) derive from `LosatError`, each with the command line's message for the same failure.
+
+## Development
+
+See [`python/AGENTS.md`](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/python/AGENTS.md). The boundary of this package is set by [`PD-LOSAT-PYTHON-BINDING-BOUNDARY`](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PYTHON-BINDING-BOUNDARY.md).
 
 ## License
 
-Released under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/main/LICENSE).
+MIT. See [LICENSE](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE).

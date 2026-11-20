@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-"""Deterministically render Figures 1-4 (light and dark PNGs) for LOSAT v0.2.0 benchmarks."""
+"""Deterministically render Figures 1-4 (light and dark PNGs) for LOSAT v0.2.0 benchmarks.
+
+Writes benchmarks/v0.2.0/figures/ and the same files to docs/manual/src/images/ (the manual's copy;
+--manual-images '' skips it). Each figure names its LOSAT builds, the baseline and the machine from
+snapshot/metadata.json in a footer line.
+"""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import hashlib
+import json
 import math
 import os
+import re
+import shutil
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -17,7 +25,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.ticker import NullFormatter
+from matplotlib.ticker import FuncFormatter, NullFormatter
+from matplotlib.transforms import blended_transform_factory
 
 LIGHT = dict(
     surface="#fcfcfb",
@@ -74,6 +83,37 @@ def fmt_fold(val: float) -> str:
     if val >= 9.95:
         return f"{round(val):.0f}\u00d7"
     return f"{val:.1f}\u00d7"
+
+
+def read_meta(snap: Path) -> dict:
+    p = snap / "metadata.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+
+
+def short_hw(meta: dict) -> str:
+    hw = re.sub(r"\(R\)", "", meta.get("hardware", ""))
+    hw = re.sub(r" CPU @ \S+", "", hw)
+    return re.sub(r"\s*\(.*\)$", "", hw).strip()
+
+
+def short_sha(sha: str) -> str:
+    return ", ".join(x.strip()[:9] for x in str(sha).split(",") if x.strip())
+
+
+def footer(fig: plt.Figure, text: str, theme: dict[str, str]) -> None:
+    fig.text(0.012, 0.012, text, ha="left", va="bottom", fontsize=7.4, color=theme["muted"])
+
+
+def plain_log(v: float, _pos: object = None) -> str:
+    return f"{v:,.0f}" if v >= 1 else f"{v:g}"
+
+
+# A downstream-tool ratio is start-up dominated when BLAST+ took under 1 s per BLAST run of the tool's test set.
+STARTUP_S = 1.0
+
+
+def startup_dominated(ncbi_total: str, cases: str) -> bool:
+    return bool(ncbi_total) and float(ncbi_total) / max(1, int(cases)) < STARTUP_S
 
 
 def save_png(fig: plt.Figure, out_path: Path, theme: dict[str, str]) -> None:
@@ -172,7 +212,7 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
     specs = [
         ("a", "Wall time, 1 thread", 1, "wall", [5, 1e6], [10, 100, 1000, 10000], ["10", "100", "1,000", "10,000"], "Wall time (s)"),
         ("b", "Wall time, 16 threads", 16, "wall", [0.3, 1e4], [1, 10, 100, 1000], ["1", "10", "100", "1,000"], "Wall time (s)"),
-        ("c", "Peak memory, 16 threads", 16, "rss", [10, 2e4], [20, 100, 500, 2500, 10000], ["20", "100", "500", "2,500", "10,000"], "Peak resident memory (MiB)"),
+        ("c", "Peak memory (max RSS), 16 threads", 16, "rss", [10, 2e4], [20, 100, 500, 2500, 10000], ["20", "100", "500", "2,500", "10,000"], "Max RSS (MiB)"),
     ]
 
     for ax_i, ((prect, rrect), (let, title, th, metric, xlim, xticks, xlbls, xlabel)) in enumerate(zip(panel_rects, specs)):
@@ -188,6 +228,7 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
         ax.set_ylim(ymin, ymax)
         ax.set_yticks([])
         panel_title(ax, let, title, theme)
+        ax_r.text(0.95, 0.0, "BLAST+ \u00f7\nLOSAT", ha="right", va="center", fontsize=7.6, color=theme["muted"])
 
         vals_all = []
         for kind, yv, txt in y_rows:
@@ -253,6 +294,10 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
                 edgecolors=theme["losat"], linewidths=1.6, zorder=4,
             )
 
+    meta = read_meta(snap)
+    footer(fig, f"LOSAT {short_sha(meta.get('losat_commit', ''))} vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, "
+                f"{short_hw(meta)}. FASTA subjects: LOSAT -subject, BLAST+ -db made from the same FASTA. "
+                f"Numbers right of each panel: BLAST+ \u00f7 LOSAT (above 1: LOSAT faster or smaller).", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig1_standard_workloads{suffix}"
     save_png(fig, p, theme)
@@ -299,7 +344,9 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
 
         for x, yn, yl in zip(xs, ys_n, ys_l):
             if x in (1, 16):
-                ax.text(x, math.sqrt(yn * yl), fmt_fold(yn / yl), ha="center", va="center", fontsize=7.8,
+                # inside the plot, clear of the y axis (x = 1) and the right edge (x = 16)
+                ax.text(x * 1.1 if x == 1 else x / 1.1, math.sqrt(yn * yl), fmt_fold(yn / yl),
+                        ha="left" if x == 1 else "right", va="center", fontsize=7.8,
                         color=theme["ink"], bbox=dict(boxstyle="round,pad=0.12", facecolor=theme["surface"], edgecolor="none", alpha=0.82))
 
         ax.set_xscale("log", base=2)
@@ -311,7 +358,7 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
         y_lo = min(ys_l) * 0.45
         y_hi = max(ys_n) * 1.9
         ax.set_ylim(y_lo, y_hi)
-        yt = [c for c in [0.5, 1, 5, 10, 50, 100, 500] if y_lo <= c <= y_hi]
+        yt = [c for c in [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500] if y_lo <= c <= y_hi]
         ax.set_yticks(yt)
         ax.set_yticklabels([f"{int(c):,}" if c >= 1 else f"{c:g}" for c in yt], fontsize=7.8, color=theme["muted"])
         ax.set_xlabel("Threads", fontsize=8.3)
@@ -342,6 +389,7 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
     ax_b.set_xticklabels(["10,000", "100,000", "1,000,000"], fontsize=7.8, color=theme["muted"])
     ax_b.xaxis.set_minor_formatter(NullFormatter())
     ax_b.yaxis.set_minor_formatter(NullFormatter())
+    ax_b.yaxis.set_major_formatter(FuncFormatter(plain_log))
     ax_b.set_ylabel("Wall time (s)", fontsize=8.3)
     ax_b.set_xlabel("Query reads", fontsize=8.3)
     panel_title(ax_b, "b", "Query set size", theme, y=1.14)
@@ -356,8 +404,8 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
     cold = sorted([r for r in cd_rows if r["cache"] == "cold"], key=lambda x: float(x["x_value"]))
 
     for p_i, (ax, let, title, sub, ylab, key_n, key_l) in enumerate([
-        (fig.add_subplot(gs[1, 1]), "c", "Database size, wall time", "blastn  210 contigs, 16 threads", "Wall time (s)", "ncbi_wall_s", "losat_wall_s"),
-        (fig.add_subplot(gs[1, 2]), "d", "Database size, memory", "blastn  same runs as c", "Peak memory (MiB)", "ncbi_rss_mib", "losat_rss_mib"),
+        (fig.add_subplot(gs[1, 1]), "c", "Database size, wall time", "megablast  210 contigs, 16 threads", "Wall time (s)", "ncbi_wall_s", "losat_wall_s"),
+        (fig.add_subplot(gs[1, 2]), "d", "Database size, peak memory", "megablast  same runs as c", "Max RSS (MiB)", "ncbi_rss_mib", "losat_rss_mib"),
     ]):
         ax.set_facecolor(theme["surface"])
         xs_w = [float(r["x_value"]) for r in warm]
@@ -396,6 +444,7 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
         ax.set_xticklabels(["1 MB", "100 MB", "10 GB", "1 TB"], fontsize=7.8, color=theme["muted"])
         ax.xaxis.set_minor_formatter(NullFormatter())
         ax.yaxis.set_minor_formatter(NullFormatter())
+        ax.yaxis.set_major_formatter(FuncFormatter(plain_log))
         ax.set_ylabel(ylab, fontsize=8.3)
         ax.set_xlabel("Database size on disk", fontsize=8.3)
         panel_title(ax, let, title, theme, y=1.14)
@@ -404,6 +453,13 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
             ax.spines[sp].set_visible(False)
         ax.grid(True, which="major", color=theme["grid"], linewidth=0.6, zorder=0)
 
+    meta = read_meta(snap)
+    note = ""
+    tm = short_sha(meta.get("toolmt_commit", ""))
+    if tm and tm != short_sha(meta.get("losat_commit", "")):
+        note = f" c, d: the core_nt points and the cold-cache points are LOSAT {tm}."
+    footer(fig, f"LOSAT {short_sha(meta.get('losat_commit', ''))} vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, "
+                f"{short_hw(meta)}.{note} Labels: BLAST+ \u00f7 LOSAT.", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig2_scaling{suffix}"
     save_png(fig, p, theme)
@@ -495,19 +551,27 @@ def render_fig3(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
 
             x1 = float(r["n1_speedup"]) if r["n1_speedup"] else None
             xm = float(r["mt_speedup"]) if r["mt_speedup"] else None
+            st1 = startup_dominated(r["ncbi_n1_s"], r["cases_count"])
+            stm = startup_dominated(r["ncbi_mt_s"], r["cases_count"])
             if x1 is not None and xm is not None:
                 ax.plot([x1, xm], [yv, yv], color=theme["line"], linewidth=1.4, zorder=2)
             if x1 is not None:
                 ax.scatter([x1], [yv], marker="o", s=40, facecolors=theme["surface"], edgecolors=theme["losat"], linewidths=1.5, zorder=3)
-                ax_r.text(0.45, yv, fmt_fold(x1), ha="right", va="center",
-                          fontsize=7.9, fontweight="bold" if x1 >= 9.95 else "normal", color=theme["ink"])
+                ax_r.text(0.45, yv, fmt_fold(x1) + ("*" if st1 else ""), ha="right", va="center", fontsize=7.9,
+                          fontweight="bold" if x1 >= 9.95 and not st1 else "normal", color=theme["muted"] if st1 else theme["ink"])
             else:
                 ax_r.text(0.45, yv, "\u2014", ha="right", va="center", fontsize=8.0, color=theme["muted"])
             if xm is not None:
                 ax.scatter([xm], [yv], marker="o", s=44, color=theme["losat"], zorder=4)
-                ax_r.text(0.95, yv, fmt_fold(xm), ha="right", va="center",
-                          fontsize=7.9, fontweight="bold" if xm >= 9.95 else "normal", color=theme["ink"])
+                ax_r.text(0.95, yv, fmt_fold(xm) + ("*" if stm else ""), ha="right", va="center", fontsize=7.9,
+                          fontweight="bold" if xm >= 9.95 and not stm else "normal", color=theme["muted"] if stm else theme["ink"])
 
+    meta = read_meta(snap)
+    dt = meta.get("dt_commits", {})
+    one = short_sha(",".join(dt[k] for k in sorted(dt) if dt[k]))
+    footer(fig, f"Threads passed by the tool: LOSAT {short_sha(meta.get('toolmt_commit', ''))}; 1 thread: LOSAT {one}; "
+                f"NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, {short_hw(meta)}. "
+                f"* (grey) BLAST+ took under {STARTUP_S:g} s per run: start-up dominated, not a search-speed ratio.", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig3_downstream_tools{suffix}"
     save_png(fig, p, theme)
@@ -536,7 +600,7 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
 
     fig, axes = plt.subplots(1, 2, figsize=(11.6, 5.4), sharey=True)
     fig.patch.set_facecolor(theme["surface"])
-    fig.subplots_adjust(left=0.20, right=0.895, top=0.815, bottom=0.125, wspace=0.38)
+    fig.subplots_adjust(left=0.27, right=0.895, top=0.815, bottom=0.125, wspace=0.38)
 
     handles = [
         Line2D([0], [0], marker="o", linestyle="none", markersize=6.5, color=theme["losat"], label="LOSAT native"),
@@ -558,14 +622,15 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
         ax.text(1.03, ymax - 0.15, "Wasm \u00f7 native", transform=ax.get_yaxis_transform(), ha="left", va="center", fontsize=8.0, color=theme["muted"])
 
         filled = th == 16
+        lbl = blended_transform_factory(fig.transFigure, ax.transData)  # labels in the left margin, clear of the plot
         for kind, yv, txt in y_rows:
             if kind == "hdr":
                 if ax_i == 0:
-                    ax.text(-0.46, yv, txt, transform=ax.get_yaxis_transform(), ha="left", va="center", fontsize=8.2, fontweight="bold", color=theme["ink"])
+                    ax.text(0.012, yv, txt, transform=lbl, ha="left", va="center", fontsize=8.2, fontweight="bold", color=theme["ink"])
                 continue
             r = by_kt[(txt, th)]
             if ax_i == 0:
-                ax.text(-0.41, yv, r["mode_label"], transform=ax.get_yaxis_transform(), ha="left", va="center", fontsize=8.3, color=theme["ink"])
+                ax.text(0.03, yv, r["mode_label"], transform=lbl, ha="left", va="center", fontsize=8.3, color=theme["ink"])
             ov = float(r["wasm_overhead"])
             ax.text(1.03, yv, f"{ov:.1f}\u00d7", transform=ax.get_yaxis_transform(), ha="left", va="center", fontsize=8.0, color=theme["ink"])
 
@@ -582,6 +647,9 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
                 ax.plot([max(1.0, min(ws, 18.0)), 22.0], [yv, yv], linestyle=":", color=theme["line"], linewidth=1.4, zorder=2)
                 ax.text(10.0, yv + 0.25, f"{fmt_fold(ws)} and {fmt_fold(ns)} (off scale)", ha="center", va="bottom", fontsize=7.6, color=theme["ink"])
 
+    meta = read_meta(snap)
+    footer(fig, f"LOSAT {short_sha(meta.get('wasm_commit', ''))}, native and wasm32-wasip1-threads under Node.js, vs native NCBI BLAST+ "
+                f"{meta.get('ncbi_version', '2.17.0')}, {short_hw(meta)}. Wasm \u00f7 native: WebAssembly time over native LOSAT time.", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig4_webassembly{suffix}"
     save_png(fig, p, theme)
@@ -593,9 +661,14 @@ def main() -> int:
     ap.add_argument("--snapshot", type=Path, default=Path(__file__).resolve().parent.parent / "snapshot")
     ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "figures")
     ap.add_argument("--only", choices=["fig1", "fig2", "fig3", "fig4"], default=None)
+    ap.add_argument("--manual-images", default=str(Path(__file__).resolve().parents[3] / "docs/manual/src/images"),
+                    help="also copy every PNG here (the user manual's copy); '' to skip")
     args = ap.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
+    mirror = Path(args.manual_images) if args.manual_images else None
+    if mirror:
+        mirror.mkdir(parents=True, exist_ok=True)
     renderers = {
         "fig1": render_fig1,
         "fig2": render_fig2,
@@ -608,6 +681,8 @@ def main() -> int:
         for dark, theme in ((False, LIGHT), (True, DARK)):
             p = renderers[k](args.snapshot, args.out, theme, dark)
             outputs.append(p)
+            if mirror:
+                shutil.copyfile(p, mirror / p.name)
             print(p.name, sha256_file(p)[:16])
     return 0
 

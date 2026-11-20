@@ -1,20 +1,20 @@
 # Installation
 
-LOSAT ships as a single self-contained executable (`losat`, or `losat.exe` on Windows), plus embeddable Rust and Python packages and WebAssembly modules. Searching and building databases require no C/C++ runtime libraries and no local NCBI BLAST+ installation. (For conserved-domain annotation in v0.2.0, `losat rpsbproc` reads `-outfmt 11` archives written by NCBI's `rpsblast` or `rpstblastn`.)
+LOSAT is one executable, `losat` (`losat.exe` on Windows). Install it from Bioconda, download a pre-built file from the GitHub release page, or build it from source. Searching and building databases need nothing else: no NCBI BLAST+ and no extra libraries. In v0.2.0 the domain annotation of `rpsbproc` reads an archive written by NCBI's `rpsblast` or `rpstblastn`, and NCBI's prebuilt databases are downloaded from NCBI.
 
-## Release channels at a glance
+## Where LOSAT is published
 
-| Channel | Target | Availability |
-| :--- | :--- | :--- |
-| **[Bioconda](https://anaconda.org/bioconda/losat)** | Linux (`x86_64`, `aarch64`), macOS (Apple silicon & Intel) | Available with v0.2.0 |
-| **[GitHub Releases](https://github.com/satoshikawato/LOSAT/releases)** | Linux, macOS, Windows binaries, WASI modules, `.crate`, SBOM & attestations | Available with v0.2.0 |
-| **crates.io (`losat`)** | Rust crate (`losat::api`) & CLI via `cargo install losat` | Publishing right after v0.2.0 |
-| **PyPI (`pylosat`)** | Python 3.10+ wheels (`pip install pylosat`) | Publishing right after v0.2.0 |
-| **From source** | Any platform with Rust 1.92+ | Repository `HEAD` / release tag |
+| Channel | What you get |
+|:---|:---|
+| [Bioconda](https://anaconda.org/bioconda/losat) | `losat` for Linux (x86_64, aarch64) and macOS (Intel, Apple silicon) |
+| [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) | `losat` for Linux, macOS and Windows, the two WASI modules, and the source crate |
+| This repository | Build `losat` from source; the Rust library, the Python binding `pylosat` and the WebAssembly engine for web pages |
+
+LOSAT is not published on crates.io, Homebrew, PyPI, Docker Hub or npm. Bioconda is the only package-manager channel.
 
 ## Bioconda
 
-[Bioconda](https://anaconda.org/bioconda/losat) packages LOSAT for Linux (`x86_64` and `aarch64`) and macOS (Intel and Apple silicon). For Windows, use the GitHub Release archive below.
+[Bioconda](https://anaconda.org/bioconda/losat) carries LOSAT for Linux (x86_64 and aarch64) and macOS (Intel and Apple silicon). Windows is not part of Bioconda; use the release file below.
 
 ```bash
 # conda
@@ -23,77 +23,92 @@ conda install -c bioconda -c conda-forge losat
 # mamba
 mamba install -c bioconda losat
 
-# pixi (requires bioconda and conda-forge channels)
+# pixi
 pixi add losat
 ```
 
-Confirm the installed version (Bioconda updates shortly after each GitHub Release):
+For `pixi`, the project needs the `bioconda` and `conda-forge` channels. Bioconda gets a release after it is published on GitHub, so it can lag behind. Run `losat --version` to see which one you have; this manual describes v0.2.0.
 
 <!-- example: installation-1 -->
 ```bash
 losat --version
 ```
 
+This prints `losat 0.2.0` for v0.2.0.
+
 ## Pre-built release files
 
-Each release on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) provides eight archives plus checksums, a CycloneDX SBOM (`LOSAT-0.2.0.cdx.json`), and GitHub artifact attestations:
+Each release from v0.2.0 on lists eight items on the [Releases](https://github.com/satoshikawato/LOSAT/releases) page. Earlier releases list their own items on their release pages.
 
-| Item | Target | Archive | Binary | Status in v0.2.0 |
-| :--- | :--- | :--- | :--- | :--- |
-| Linux x86_64 | `x86_64-unknown-linux-gnu` | `.tar.gz` | `losat` | Supported |
-| Linux aarch64 | `aarch64-unknown-linux-gnu` | `.tar.gz` | `losat` | Supported |
-| macOS arm64 (Apple silicon) | `aarch64-apple-darwin` | `.tar.gz` | `losat` | Supported |
-| macOS x86_64 (Intel) | `x86_64-apple-darwin` | `.tar.gz` | `losat` | Supported |
-| Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip` | `losat.exe` | Supported |
-| WASI serial | `wasm32-wasip1` | `.tar.gz` | `losat.wasm` | Supported |
-| WASI threads | `wasm32-wasip1-threads` | `.tar.gz` | `losat.wasm` | Supported (tested in CI, outside NCBI parity scope) |
-| Source crate | — | `.crate` | — | Source package |
+| Item | Target | File type | Program inside |
+|:---|:---|:---|:---|
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `.tar.gz` | `losat` |
+| Linux aarch64 | `aarch64-unknown-linux-gnu` | `.tar.gz` | `losat` |
+| macOS arm64 (Apple silicon) | `aarch64-apple-darwin` | `.tar.gz` | `losat` |
+| macOS x86_64 (Intel) | `x86_64-apple-darwin` | `.tar.gz` | `losat` |
+| Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip` | `losat.exe` |
+| WASI serial | `wasm32-wasip1` | `.tar.gz` | `losat.wasm` |
+| WASI threads | `wasm32-wasip1-threads` | `.tar.gz` | `losat.wasm` |
+| Source crate | none | `.crate` | none |
 
-"Supported" denotes matching NCBI BLAST+ 2.17.0 outputs across the release test suite; see [Platforms and WebAssembly](platforms.md) for details.
+The archives keep the name `LOSAT` of v0.1.0, for example `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz`. The program inside is `losat`. The source crate is `losat-0.2.0.crate`. An archive unpacks into a folder of its own name that holds the program, `LICENSE`, `README.md` and `RELEASE-METADATA.json`.
 
-### Install a native binary
+The release also carries `SHA256SUMS`, a software bill of materials (`LOSAT-0.2.0.cdx.json`) and GitHub artifact attestations for the eight files.
 
-On Linux or macOS, unpack the archive and place `losat` on your `PATH`:
+### Which file for which platform
+
+| Platform | File | Status in v0.2.0 |
+|:---|:---|:---|
+| Linux x86_64 | `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz` | Supported |
+| Linux aarch64 | `LOSAT-0.2.0-aarch64-unknown-linux-gnu.tar.gz` | Supported |
+| Windows x86_64 | `LOSAT-0.2.0-x86_64-pc-windows-msvc.zip` | Supported |
+| macOS arm64 | `LOSAT-0.2.0-aarch64-apple-darwin.tar.gz` | Supported |
+| macOS x86_64 | `LOSAT-0.2.0-x86_64-apple-darwin.tar.gz` | Supported |
+| WASI serial | `LOSAT-0.2.0-wasm32-wasip1.tar.gz` | Supported |
+| WASI threads | `LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz` | Supported: tested in CI, outside the release's NCBI parity claim |
+
+"Supported" without a note means the output matches NCBI BLAST+ 2.17.0 on the release test set; on macOS, the last digit of a full-precision E value can differ by 1. [Platforms and WebAssembly](platforms.md) gives the details for each platform, including the macOS and WASI notes.
+
+### Install a native file
+
+On Linux or macOS, unpack the archive and put `losat` on your `PATH`:
 
 ```bash
 tar -xzf LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz
 mkdir -p ~/.local/bin
 cp LOSAT-0.2.0-x86_64-unknown-linux-gnu/losat ~/.local/bin/
-losat --version
+~/.local/bin/losat --version
 ```
 
-On Windows, extract the `.zip` archive and add its directory containing `losat.exe` to `PATH`. Pre-built binaries are not Apple-notarized or Authenticode-signed; see [Troubleshooting](troubleshooting.md) if macOS Gatekeeper or Windows SmartScreen warns on first launch.
+If `~/.local/bin` is not on your `PATH` yet, add it (for example `export PATH="$HOME/.local/bin:$PATH"` in your shell's start-up file).
+
+On Windows, unzip the `.zip` file and put `losat.exe` in a folder that is on your `PATH`. The binaries are not code-signed or notarized; see [Troubleshooting](troubleshooting.md) if macOS or Windows stops a downloaded file.
 
 ### Check a download
 
-Compare your downloaded archive against `SHA256SUMS`:
+`SHA256SUMS` lists the SHA-256 checksum of each release file, in the format that `sha256sum` reads. Download it next to the files, then check the file you have:
 
 ```bash
-# Linux
 sha256sum --check --ignore-missing SHA256SUMS
-
-# macOS
-shasum -a 256 --check --ignore-missing SHA256SUMS
 ```
 
-On Windows PowerShell: `Get-FileHash FILE -Algorithm SHA256`.
+On macOS, use `shasum -a 256 --check --ignore-missing SHA256SUMS` (or compare the output of `shasum -a 256 FILE` with the line in `SHA256SUMS`). On Windows PowerShell, `Get-FileHash FILE -Algorithm SHA256` prints the value to compare.
 
-With the GitHub CLI (`gh`), you can also check build provenance and SBOM attestations:
+If you use the GitHub command line tool, you can also check the attestation of a file. It shows that the file was built by the repository's release workflow:
 
 ```bash
 gh attestation verify LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz --repo satoshikawato/LOSAT
+```
+
+A second attestation covers the software bill of materials of the same files. Check it with the SBOM predicate type:
+
+```bash
 gh attestation verify LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz --repo satoshikawato/LOSAT --predicate-type https://cyclonedx.org/bom
 ```
 
-## Rust crate and Cargo (`losat`)
+## Build from source
 
-Once `losat` is published on crates.io immediately after v0.2.0 (Rust **1.92+** required):
-
-```bash
-cargo install losat
-```
-
-Or build from a local repository clone:
+You need the [Rust toolchain](https://rustup.rs/) (Rust 1.92 or later; the repository pins 1.92.0). LOSAT is not on crates.io, so `cargo` builds it from the repository:
 
 ```bash
 git clone https://github.com/satoshikawato/LOSAT.git
@@ -101,29 +116,30 @@ cd LOSAT/LOSAT
 cargo build --release
 ```
 
-The built binary is `target/release/losat` (`target\release\losat.exe` on Windows). See [Rust (`losat`)](libraries/rust.md) to use `losat::api` in your own Rust crate.
+The program is `target/release/losat` (`target\release\losat.exe` on Windows). It needs no C or C++ compiler.
 
-## Python library (`pylosat`)
+## The libraries
 
-Pre-built wheels for `pylosat` are scheduled for PyPI right after v0.2.0 (`pip install pylosat`). Until then, build with `maturin` from `python/` or fetch workflow wheels as described in [Python (`pylosat`)](libraries/python.md).
+The libraries are used from this repository; none of them is published on a package registry.
 
-## WebAssembly (WASI modules)
+- **Rust.** Depend on the crate `losat` in the repository's `LOSAT/` folder, by path or by git. See [Rust (`losat`)](libraries/rust.md).
+- **Python.** Build `pylosat` from the repository's `python/` folder (Python 3.10 or later). See [Python (`pylosat`)](libraries/python.md).
+- **Web pages.** The WebAssembly engine for the browser is in `web/packages/losat`. See [WebAssembly and Browser](libraries/webassembly.md).
 
-The two WASI modules (`losat.wasm`) run in WebAssembly hosts such as Node.js 24+:
+## The WASI files
+
+The two WASI files are WebAssembly command modules, `losat.wasm`, for hosts such as Node.js. The serial module (`wasm32-wasip1`) runs on one thread. The threads module (`wasm32-wasip1-threads`) needs a host that provides shared memory and threads. The repository's Node.js runners (Node.js 24 or later) handle what the host must pass in; how to run them is on the [Platforms and WebAssembly](platforms.md) page.
+
+To build them yourself, add the two targets with `rustup target add wasm32-wasip1 wasm32-wasip1-threads`, then, from the `LOSAT` folder of the repository:
 
 ```bash
-rustup target add wasm32-wasip1 wasm32-wasip1-threads
-cd LOSAT
-
 # serial WASI command
 cargo build --release --bin losat --target wasm32-wasip1 --no-default-features
 
-# threaded WASI command (requires host thread/shared-memory support)
+# threaded WASI command (needs a shared-memory host)
 cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads
 ```
 
-See [Platforms and WebAssembly](platforms.md) and [WebAssembly and Browser](libraries/webassembly.md) for host requirements and Node.js launcher scripts.
-
 ## Next steps
 
-Follow the five-minute [Quick start](quick-start.md), browse [Common workflows](workflows.md), or read [Coming from NCBI BLAST+](from-ncbi-blast.md) to alias `blastn`, `blastp`, and the other NCBI command names to `losat`.
+Try the [Quick start](quick-start.md), then the recipes in [Common workflows](workflows.md). If you use NCBI BLAST+ today, read [Coming from NCBI BLAST+](from-ncbi-blast.md) to make `blastn`, `blastp` and the other names run LOSAT.

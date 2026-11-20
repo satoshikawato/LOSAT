@@ -1,73 +1,66 @@
 # LOSAT
 
-A pure-Rust reimplementation of [NCBI BLAST+](https://blast.ncbi.nlm.nih.gov/) (`2.17.0` compatible CLI and output).
+LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ command lines and matches NCBI BLAST+ 2.17.0 on its [release test set](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/release/v0.2.0.md). This crate builds the `losat` command line and the library `losat::api`.
 
-LOSAT replaces the standard BLAST+ executables (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, `rpsbproc`) with a single Rust binary and embeddable library crate (`losat`), producing byte-identical outputs across standard tabular, pairwise, XML/ASN.1, and PSI/CDD profile workflows while substantially reducing runtime and peak resident memory.
+- **User manual:** [satoshikawato.github.io/LOSAT](https://satoshikawato.github.io/LOSAT/)
+- **Repository:** [github.com/satoshikawato/LOSAT](https://github.com/satoshikawato/LOSAT)
+- **Issues:** [github.com/satoshikawato/LOSAT/issues](https://github.com/satoshikawato/LOSAT/issues)
 
-- **Documentation & User Manual:** [satoshikawato.github.io/LOSAT](https://satoshikawato.github.io/LOSAT/)
-- **Source Repository & Benchmarks:** [github.com/satoshikawato/LOSAT](https://github.com/satoshikawato/LOSAT)
-- **API Reference:** [docs.rs/losat](https://docs.rs/losat)
-- **Python Package (`pylosat`):** [pypi.org/project/pylosat](https://pypi.org/project/pylosat/)
+## Programs
 
-## Supported Programs
+| Program | What it does |
+|:---|:---|
+| `blastn` | Nucleotide search; tasks `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` |
+| `blastp` | Protein search; tasks `blastp` (default), `blastp-fast`, `blastp-short` |
+| `blastx` | Translated nucleotide query against proteins; tasks `blastx` (default), `blastx-fast` |
+| `tblastn` | Protein query against translated nucleotides; tasks `tblastn` (default), `tblastn-fast`; a PSSM query with `-in_pssm` |
+| `tblastx` | Translated nucleotide query against translated nucleotides |
+| `psiblast` | Iterative protein search from a FASTA query or a PSSM (`-in_pssm`); writes PSSMs (`-out_pssm`, `-out_ascii_pssm`) |
+| `rpsblast` | Protein queries against a profile database such as CDD |
+| `rpstblastn` | Translated nucleotide queries against a profile database |
+| `rpsbproc` | Conserved-domain annotation of RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 |
+| `makeblastdb` | Builds BLAST databases from FASTA, also from `.gz`, `.bz2` and `.zst` files |
+| `blastdbcmd` | Reads sequences and information from BLAST databases |
+| `dustmasker` | Masks low-complexity regions of nucleotide sequences |
+| `segmasker` | Masks low-complexity regions of protein sequences |
+| `convert2blastmask` | Turns lower-case masking in FASTA into masking information for `makeblastdb -mask_data` |
 
-| Category | Program | Notes |
-| :--- | :--- | :--- |
-| **Search** | `blastn` | Tasks `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` |
-| **Search** | `blastp` | Tasks `blastp` (default), `blastp-fast`, `blastp-short` |
-| **Search** | `blastx` | Tasks `blastx` (default), `blastx-fast` |
-| **Search** | `tblastn` | Tasks `tblastn` (default), `tblastn-fast`; supports `-in_pssm` |
-| **Search** | `tblastx` | Translated nucleotide vs. translated nucleotide |
-| **Profile & Iterative** | `psiblast` | Iterative search with `-query` or `-in_pssm` (`-out_pssm`, `-out_ascii_pssm`) |
-| **Profile & Iterative** | `rpsblast` | Protein queries against conserved domain PSSM databases (such as CDD) |
-| **Profile & Iterative** | `rpstblastn` | Translated nucleotide queries against profile databases |
-| **Database & Masking** | `makeblastdb` | Builds BLAST v4/v5 databases directly from FASTA (supports `.gz`/`.bz2`/`.zst` inputs) |
-| **Database & Masking** | `blastdbcmd` | Extracts sequences, metadata, and masks from BLAST databases |
-| **Database & Masking** | `dustmasker` | Masks low-complexity nucleotide regions |
-| **Database & Masking** | `segmasker` | Masks low-complexity protein regions |
-| **Database & Masking** | `convert2blastmask` | Converts lowercase FASTA masking for `makeblastdb -mask_data` |
-| **Annotation** | `rpsbproc` | Annotates domain hits, superfamilies, sites, and motifs from CDD archives |
+Options that need NCBI's servers (`-remote`, `-entrez_query`) or GI lists (`-gilist`), and the few that LOSAT does not run, stop with an error instead of changing the results. See [What LOSAT refuses](https://satoshikawato.github.io/LOSAT/refusals.html).
 
-Options that require NCBI network access (`-remote`, `-entrez_query`), GI/IPG server lists (`-gilist`, `-ipglist`), or unimplemented flags fail loudly instead of silently changing semantics. See [What LOSAT refuses](https://satoshikawato.github.io/LOSAT/refusals.html) in the user manual.
+## Installing the command line
 
-## Installing the CLI
-
-The v0.2.0 release is distributed through [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) (Linux `x86_64`/`aarch64`, macOS Intel/Apple silicon, Windows `x86_64`, and WASI) and [Bioconda](https://anaconda.org/bioconda/losat), with crates.io publishing right after v0.2.0:
+LOSAT v0.2.0 is published on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) (Linux x86_64 and aarch64, macOS arm64 and x86_64, Windows x86_64, WASI serial and threads, and this source crate) and on [Bioconda](https://anaconda.org/bioconda/losat) (Linux and macOS). It is not on crates.io.
 
 ```bash
-# Bioconda (Linux and macOS)
 conda install -c bioconda -c conda-forge losat
-
-# Or via Cargo (once published to crates.io after v0.2.0, requires Rust >= 1.92)
-cargo install losat
 ```
 
-Run any BLAST+ subcommand through `losat <program>`, or symlink `blastn`, `blastp`, `psiblast`, etc. to `losat` for drop-in pipeline compatibility:
+To build it from source, with Rust 1.92 or later:
 
 ```bash
-losat blastn -query reads.fna -subject reference.fna -outfmt 6
-losat makeblastdb -in proteins.faa -dbtype prot -out proteins_db
-losat psiblast -query query.faa -db proteins_db -num_iterations 3 -outfmt 6
-losat rpsblast -query proteins.faa -db Cdd -evalue 0.01 -outfmt 6
+git clone https://github.com/satoshikawato/LOSAT.git
+cd LOSAT/LOSAT
+cargo build --release
 ```
 
-## Using `losat` as a Rust Library
+The binary is `target/release/losat`. Run a program as `losat <program>`, or make the NCBI names with `losat --install-shims` so that existing scripts call LOSAT:
 
-Add `losat` to `Cargo.toml` (requires Rust **1.92** or later; default features enable multi-threading via `parallel`):
+```bash
+losat blastn -query query.fna -subject subject.fna -outfmt 6
+losat makeblastdb -in proteins.faa -dbtype prot -out proteins
+losat psiblast -query query.faa -db proteins -num_iterations 3 -outfmt 6
+```
+
+## Using `losat` as a Rust library
+
+The crate is not on crates.io. Depend on the repository's `LOSAT/` directory by git or by path:
 
 ```toml
 [dependencies]
-losat = "0.2"
+losat = { git = "https://github.com/satoshikawato/LOSAT.git", tag = "v0.2.0" }
 ```
 
-To build without Rayon multi-threading (e.g., single-thread or `wasm32` targets):
-
-```toml
-[dependencies]
-losat = { version = "0.2", default-features = false }
-```
-
-The stable, supported public library surface lives in `losat::api`. Searches run directly in-process over FASTA bytes, prebuilt BLAST databases, or PSSM checkpoints, returning exact BLAST report bytes alongside typed `HspRecord` structs and Karlin-Altschul `QueryStats`.
+The library is the module `losat::api`. Every other module is the command line or the engine: hidden from the documentation and outside the compatibility promise. A search runs in your process with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP (`HspRecord`) and the statistics of each query (`QueryStats`):
 
 ```rust
 use std::io::Write as _;
@@ -77,43 +70,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let query = read_fasta(Program::Blastp, Role::Query, &std::fs::read("query.faa")?)?;
     let subject = read_fasta(Program::Blastp, Role::Subject, &std::fs::read("subject.faa")?)?;
 
-    // Validated with the exact CLI option parser (excluding input/output routing flags).
+    // The command line's options, checked by its parser (without the inputs, -out and -outfmt).
     let search = validate(Program::Blastp, &["-evalue", "1e-5", "-num_threads", "4"])?;
     let inputs = Inputs::new(&query, &subject).named("query.faa", "subject.faa");
 
     let outcome = run_collect(&search, inputs, &["6", "0"])?;
-    std::io::stdout().write_all(&outcome.reports[0].bytes)?;
+    std::io::stdout().write_all(&outcome.reports[0].bytes)?; // the -outfmt 6 report
 
     for hsp in &outcome.hsps {
-        println!(
-            "q[{}] vs s[{}]: {} bits (E={:.2e})",
-            hsp.q_idx, hsp.s_idx, hsp.bit_score, hsp.e_value
-        );
+        println!("query {} subject {}: {} bits, E = {:e}", hsp.q_idx, hsp.s_idx, hsp.bit_score, hsp.e_value);
     }
     Ok(())
 }
 ```
 
-### Main `losat::api` Building Blocks
+- `validate(program, &argv)` checks the options and returns a reusable `Search`; `describe(program)` lists the options.
+- `Inputs::database(&query, "swissprot")` searches a BLAST database, found as the command line finds `-db`. `Inputs::pssm` and `Inputs::pssm_database` take the PSSM of `-in_pssm` (`psiblast`, `tblastn`).
+- `run_collect` returns the reports, the HSP records, the statistics and the diagnostics. `run_batches` gives them one of NCBI's query batches at a time. `run` writes the reports to your writers, and `run_to_file` is `-out` (and the way to `-outfmt 13` and `14`).
+- `run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker` and `run_convert2blastmask` run the tools with your reader and writers as their standard streams.
+- The library writes nothing to standard output or standard error, and its errors carry the command line's messages.
 
-- **Programs (`losat::api::Program`)**: `Blastn`, `Blastp`, `Blastx`, `Tblastn`, `Tblastx`, and `Psiblast` in library search calls (plus `run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`, `run_convert2blastmask` for database and masking workflows).
-- **In-memory & streaming searches**:
-  - `validate(program, args)` builds a reusable validated `Search`.
-  - `run_collect(&search, inputs, formats)` collects report bytes, `Vec<HspRecord>`, per-query `QueryStats`, PSI-BLAST `QueryRounds`, and CLI diagnostics.
-  - `run_batches(&search, inputs)` yields one NCBI query batch (`Batch`) at a time so callers can stream results and cancel early.
-  - `run(&search, inputs, writers)` and `run_to_file(&search, inputs, format, path)` stream reports directly to writers or disk (required for `-outfmt 13`/`14` side files).
-  - `describe(program)` exposes the CLI option schema programmatically.
-- **Database and PSSM inputs**: `Inputs::database(&query, "swissprot")` searches formatted BLAST databases (following `BLASTDB` and `.ncbirc` resolution), while `Inputs::pssm` and `Inputs::pssm_database` search saved ASN.1 PSSMs from `psiblast` / `tblastn`.
+`cargo doc --no-deps --open` in `LOSAT/` shows the API. The [Rust library page](https://satoshikawato.github.io/LOSAT/libraries/rust.html) of the user manual has more.
 
-Internal engine modules outside `losat::api` are `pub(crate)` and hidden from public docs. See the [Rust library guide](https://satoshikawato.github.io/LOSAT/libraries/rust.html) for complete details.
+## Cargo features
 
-## Cargo Features
+| Feature | Default | What it does |
+|:---|:---|:---|
+| `parallel` | on | Searches with more than one thread (`-num_threads`), through Rayon |
+| `wasm-threads` | off | Turns on `parallel` for the `wasm32-wasip1-threads` target |
 
-| Feature | Default | Description |
-| :--- | :--- | :--- |
-| `parallel` | Yes | Enables multi-threaded search via `rayon` (`-num_threads`) |
-| `wasm-threads` | No | Enables `parallel` for `wasm32-wasip1-threads` reactor/command builds |
+With `default-features = false` the build has no Rayon and searches on one thread. The other features are for LOSAT's own diagnostics.
 
 ## License
 
-Released under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/main/LICENSE).
+MIT. See [LICENSE](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE).

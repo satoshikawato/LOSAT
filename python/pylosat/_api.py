@@ -1,7 +1,8 @@
-"""The Python binding shapes matching `losat::api`.
+"""The Python side of the binding: the shapes of `losat::api`, in Python's terms.
 
-Options become command-line arguments and results return what the engine computed
-and formatted directly, without rewriting sequences, scores, or report bytes.
+Nothing here computes a BLAST value or formats one
+(docs/product_decisions/PD-LOSAT-PYTHON-BINDING-BOUNDARY.md): options become the command line's
+words, and results are what the engine returned.
 """
 
 from __future__ import annotations

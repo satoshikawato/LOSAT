@@ -71,8 +71,8 @@ authoritative, current guidance for agent behavior in LOSAT.
      stops LOSAT with a message and exit 4, and a failed write to its standard error
      (NCBI: SIGPIPE) with exit 4 and no message (exception 9); on a terminal, the command line's
      `blastn` draws a progress bar on the standard error while it searches with `-num_threads` 2
-     or more against two subjects or more, and a standard error sent to a file or a pipe gets none
-     of it (exception 11). Errors raised after argument parsing, the outfmt 0 write
+     or more against two subjects or more and clears it when each batch's search ends; a standard
+     error sent to a file or a pipe gets none of it (exception 11). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
      file names and `.ncbirc` keys that change output are explicit rejections, not

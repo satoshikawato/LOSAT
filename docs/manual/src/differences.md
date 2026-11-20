@@ -117,7 +117,7 @@ These cases are about what the program prints around the search, not the search 
 
 ### `blastn`'s progress bar on a terminal
 
-- **What you see.** While `blastn` searches with `-num_threads` 2 or more against two subjects or more (the records of `-subject` or the sequences of `-db`), it draws a progress bar on the standard error: the elapsed time, a bar and the number of subjects done (`33/33`). The finished bar stays on the screen without a newline, so the first line of the report (when the standard output is the same terminal) or the shell's prompt goes on after it on the same line. NCBI BLAST+ writes nothing there during a search.
+- **What you see.** While `blastn` searches with `-num_threads` 2 or more against two subjects or more (the records of `-subject` or the sequences of `-db`), it draws a progress bar on the standard error: the elapsed time, a bar and the number of subjects done (`19/33`). When the search of each batch of queries ends, the bar is erased, so nothing of it stays on the screen: the report and the shell's prompt appear where they would without it. NCBI BLAST+ writes nothing there during a search.
 - **When.** Only when the standard error is a terminal and, outside Windows, `TERM` is set and is not `dumb`. A standard error sent to a file or a pipe (`2> log.txt`, `2>&1 | less`) gets no byte of it. The library, pylosat and LOSAT Web never draw it.
 - **What does not change.** The bytes of the standard output, the `-out` file and the exit status.
 

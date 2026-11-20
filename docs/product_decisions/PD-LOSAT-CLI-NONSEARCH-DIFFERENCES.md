@@ -40,7 +40,8 @@
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
   E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction); 1.22 2026-11-20 (exception
   11, BLASTN's progress bar on a terminal, recorded for the v0.2.0 release on the Owner's choice of
-  2026-11-20; the text is pending the Owner's review)
+  2026-11-20; the text is pending the Owner's review; the bar is cleared at the end of each batch's
+  search since this version, Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -235,28 +236,32 @@ BLAST+.
    batch with `-num_threads` 2 or more against two subjects or more (the records of `-subject`, or
    the sequences of `-db`); the serial WASI command runs on one thread and draws none. The bar is
    one line, redrawn in place: a spinner, the elapsed time, a bar of 40 columns and the number of
-   subjects traced over the number of subjects (`33/33`). When the batch's search ends, the bar is
-   drawn complete and stays on the terminal; no newline follows it, so what the terminal shows next
-   continues on the bar's line: the first row of the batch's report when the standard output is the
-   same terminal, else the next batch's bar (which redraws the line) or, after the run, the shell's
-   prompt. A batch that stops with an error clears its bar. NCBI's blastn writes nothing to its
-   standard error while it searches its query batches (`blastn_app.cpp:277-279`). The bar is drawn
-   only when the standard error is a terminal (a pseudo-terminal too, such as the one of `script`)
-   and, outside Windows, `TERM` is set and is not `dumb` (the check of the `indicatif` crate:
-   `console::Term::is_term` and `console::is_dumb`); a standard error sent to a file or a pipe
-   receives no byte of it. A failed write of the bar is ignored. The bytes of the standard output,
-   the `-out` file and the exit status are the same with and without the bar. The library API (and
-   pylosat), the Web engine and the other programs draw no bar: only the command line's
-   `blastn::run` sets `BlastnArgs::progress_bar` (`LOSAT/src/algorithm/blastn/args.rs:798`,
-   `blast_engine/run.rs:8018`); the library and the Web engine search through `run_local` and
-   `run_local_database`, which leave it off, and ABI v1 sets it off (`LOSAT/src/web_api.rs:364`).
-   The bar is made in `blast_engine/subject_env.rs:130-140` (`ProgressBar::new`, which draws on the
-   standard error), moves on by one for each subject traced
-   (`blast_engine/traceback_subject.rs:292-294` and `418-420`) and is finished at
-   `blast_engine/run.rs:13535-13537`. No test checks the bar. Release-notes sentence: On a
-   terminal, `losat blastn` with `-num_threads` 2 or more and two subjects or more shows a progress
-   bar on the standard error, where NCBI BLAST+ 2.17.0 shows none; a standard error sent to a file
-   or a pipe gets none of it.
+   subjects traced over the number of subjects (`19/33`). When the traceback of the batch ends, or
+   fails, the bar is cleared before anything else is written (the batch's report, or an error): its
+   line is blanked and the cursor goes back to the start of that line, so nothing of the bar stays
+   on the terminal and what follows appears where it would appear without the bar. NCBI's blastn
+   writes nothing to its standard error while it searches its query batches
+   (`blastn_app.cpp:277-279`). The bar is drawn only when the standard error is a terminal (a
+   pseudo-terminal too, such as the one of `script`) and, outside Windows, `TERM` is set and is not
+   `dumb` (the check of the `indicatif` crate: `console::Term::is_term` and `console::is_dumb`); a
+   standard error sent to a file or a pipe receives no byte of it. A failed write of the bar is
+   ignored. The bytes of the standard output, the `-out` file and the exit status are the same with
+   and without the bar. The library API (and pylosat), the Web engine and the other programs draw
+   no bar: only the command line's `blastn::run` sets `BlastnArgs::progress_bar`
+   (`LOSAT/src/algorithm/blastn/args.rs:798`, `blast_engine/run.rs:8018`); the library and the Web
+   engine search through `run_local` and `run_local_database`, which leave it off, and ABI v1 sets
+   it off (`LOSAT/src/web_api.rs:364`). The bar is made by `batch_progress_bar`
+   (`blast_engine/subject_env.rs:49-57`: the standard error as its target,
+   `ProgressFinish::AndClear` as its end, which also clears a bar dropped unfinished), moves on by
+   one for each subject traced (`blast_engine/traceback_subject.rs:292-294` and `418-420`) and is
+   finished at `blast_engine/run.rs:13533-13535`. Tests: `the_end_of_a_batch_clears_the_bar` and
+   `a_search_that_stops_with_an_error_clears_the_bar` (`blast_engine/subject_env.rs`) draw the bar
+   on a terminal kept in memory and check that nothing of it stays; no test runs it on a real
+   terminal. Up to version 1.21 (LOSAT v0.1.0 and dev before this version) the finished bar stayed
+   on the terminal, one line per query batch. Release-notes sentence: On a terminal, `losat blastn`
+   with `-num_threads` 2 or more and two subjects or more shows a progress bar on the standard
+   error while it searches, where NCBI BLAST+ 2.17.0 shows none; the bar is cleared when the search
+   of each query batch ends, and a standard error sent to a file or a pipe gets none of it.
 
 ## Decided handling that is not an exception
 

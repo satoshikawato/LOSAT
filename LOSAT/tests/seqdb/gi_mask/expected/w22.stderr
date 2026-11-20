@@ -1,0 +1,2 @@
+Error: [makeblastdb] Ignoring mask file 'missing.asnb' as it does not exist.
+BLAST Database error: Illegal configuration: DB alias files are mutually recursive.

@@ -1065,8 +1065,9 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   volume gets an alias file whose `DBLIST` is the database's own absolute path, so the metadata
   step after the build (`CSeqDB`) reads the alias as itself: every file but the `.njs`/`.pjs` is
   written and the run ends with `BLAST Database error: Illegal configuration: DB alias files are
-  mutually recursive.`, exit status 2; a later build in the same place without `-gi_mask` removes
-  the old database through the same alias and ends the same way (the alias file stays). The masks
+  mutually recursive.`, exit status 2; a later build into the same `-out`, with or without
+  `-gi_mask`, keeps that alias file (the removal of the old database cannot read it and ignores
+  the error, `seqdb.cpp:1542, 1573-1574`) and ends the same way. The masks
   of a sequence without a GI are dropped before their ranges are checked (a range past such a
   sequence's end is no error), and an algorithm that reached no sequence with a GI writes no files
   and is left out of `MASKLIST`. A data volume takes its first record

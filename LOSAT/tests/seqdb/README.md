@@ -143,6 +143,23 @@ without a masked sequence. A rebuild changes the dates stored in the index and c
 compares the exit status, the log and the standard error of each with NCBI's, and every file of the database.
 `mask_parse/expected_stdout.tsv` holds the log of each run of `mask_parse/expected.tsv` the same way.
 
+## GI-indexed masks (`gi_mask/`)
+
+`make_gi_mask_fixtures.py` (`--ncbi-bin DIR --work DIR`, 2026-11-20, makeblastdb, dustmasker, segmasker and
+convert2blastmask 2.17.0 with `BLAST_USAGE_REPORT=false`) writes the inputs (`gi_mask/in/`: FASTA files from fixed
+seeds, their masks, one hand-written mask file) and runs makeblastdb on each row of `gi_mask/cases.tsv` (name, what
+LOSAT does, setup, the words after `makeblastdb`) in a directory of its own, as `losat makeblastdb -gi_mask` is
+tested: `-gi_mask` and `-gi_mask_name` on single-volume (version 5 and 4) and multi-volume databases, nucleotide and
+protein, the argument rules, masks of sequences without a GI, ranges past a sequence's end, `-logfile`, a missing
+directory, a rebuild in the same directory, duplicate GIs of version 4, 1 to 1100 GIs (pages of 512), data volumes
+cut by `-max_file_sz`, and descriptions that pad the index header. Each run's exit status, standard output and error
+(the run directory, time and seconds masked as `<C>`, `<T>`, `<S>`) and its files with their sizes are in
+`gi_mask/expected/<case>.{rc,stdout,stderr,files}`; `gi_mask/db/<case>/` keeps the files that `-gi_mask` writes or
+changes (GI-mask files, alias, metadata, mask column, log) and, for six cases, the volume files too.
+`tests/makeblastdb_gi_mask.rs` runs every case through the `losat` binary and compares them;
+`src/writedb/gi_mask_tests.rs` writes every GI mask of `db/` again from the records, GIs, description and dates it
+holds and compares the six files byte for byte. A rerun changes the dates of the `.gmi`/`.gni` and alias files.
+
 ## Masks ordered by address, and the errors that come first (`mask_order/`)
 
 `make_mask_order_fixtures.py` (`--ncbi-bin DIR --work DIR`, 2026-11-14, makeblastdb 2.17.0 with

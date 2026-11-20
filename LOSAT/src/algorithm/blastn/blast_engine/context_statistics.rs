@@ -42,9 +42,9 @@ pub(super) struct ContextInputs<'a> {
     pub(super) batching: QueryBatching,
     pub(super) first_batch: bool,
     pub(super) stage: BatchStage<'a>,
-    /// Whether NCBI searches the batch chunk by chunk (`search_query_chunks`): the subjects are
-    /// then checked by the set-up of each chunk (`BLAST_GapAlignSetUp` in the chunk's
-    /// `CPrelimSearchRunner`), after the chunk's masks, not by the batch's.
+    /// Whether NCBI searches the batch chunk by chunk (`search_query_chunks`): the subjects and
+    /// the greedy set-up are then checked by the set-up of each chunk (`BLAST_GapAlignSetUp` in
+    /// the chunk's `CPrelimSearchRunner`), after the chunk's masks, not by the batch's.
     pub(super) split: bool,
     pub(super) subjects: SubjectSource<'a>,
     pub(super) seq_data: &'a SequenceData<'a>,
@@ -332,8 +332,10 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     // than subjects post the registry of `-window_masker_taxid` for the batch and for chunk 0,
     // then `The average subject length is too short`). The search spaces of the batch below
     // (`SplitQuery_SetEffectiveSearchSpace`) check nothing.
-    let check_subjects = any_valid_context && !split;
-    if check_subjects {
+    // `BLAST_GapAlignSetUp` of this batch or chunk: the subjects first, then the greedy
+    // set-up below (blast_setup.c:976-979 before :993, `BLAST_GapAlignStructNew`).
+    let gap_align_setup = any_valid_context && !split;
+    if gap_align_setup {
         if let SubjectSource::Database(database) = subjects {
             if database.first_oid_read_fails() {
                 return Err(database_search_error(
@@ -346,7 +348,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
             }
         }
     }
-    if check_subjects {
+    if gap_align_setup {
         let total_length = seq_data.db_len_total;
         let (total_length, num_seqs) = if total_length > 0 {
             (total_length, seq_data.db_num_seqs)
@@ -406,15 +408,18 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         }
     }
     // Gap costs that the tables accept but LOSAT's greedy extension does not (`scoring.rs`);
-    // with no valid context, NCBI extends nothing.
-    if any_valid_context && !UNGAPPED {
+    // with no valid context, NCBI extends nothing. A split batch checks them in each chunk,
+    // after the chunk's subjects: NCBI 2.17.0 reports `The average subject length is too
+    // short` (exit status 3) for a split query with these gap costs or matrix-only scoring
+    // (`CHUNK_SIZE=200`, a database whose average length is too short; line RG D1a-6).
+    if gap_align_setup && !UNGAPPED {
         check_greedy_gap_costs(args)?;
     }
     // Matrix-only scoring with the greedy extension, where NCBI divides by zero or does not end
     // (`check_greedy_matrix_only`): NCBI meets it in the greedy set-up of `BLAST_GapAlignSetUp`
     // (`s_BlastGreedyAlignMemAlloc`), which it reaches with a valid context only, for an ungapped
     // search too.
-    if any_valid_context {
+    if gap_align_setup {
         check_greedy_matrix_only(args, UNGAPPED)?;
     }
     let search_karlin: Vec<ContextKarlin> = {

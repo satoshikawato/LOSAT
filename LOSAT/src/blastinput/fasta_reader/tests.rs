@@ -1062,7 +1062,7 @@ fn read_subjects_writes_messages_per_record_and_stops_at_a_range_past_the_end() 
         native(&error),
         (
             1,
-            "BLAST query/options error: Invalid from coordinate (greater than sequence length)\nPlease refer to the BLAST+ user manual.\n".to_string()
+            "BLAST query/options error: Invalid from coordinate (greater than sequence length)\nPlease refer to the LOSAT user manual.\n".to_string()
         )
     );
     // s1's hyphen and title warnings and s2's title warning; s3 is never read.
@@ -1140,7 +1140,7 @@ fn subjects_without_a_first_defline_end_with_the_input_error_of_get_all_seqs() {
                     1,
                     format!(
                         "BLAST query/options error: Query input doesn't start with a defline or \
-                         comment, line {line}\0\nPlease refer to the BLAST+ user manual.\n"
+                         comment, line {line}\0\nPlease refer to the LOSAT user manual.\n"
                     )
                 ),
                 "{text:?}"

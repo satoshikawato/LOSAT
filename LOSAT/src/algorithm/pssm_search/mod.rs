@@ -77,6 +77,13 @@ pub struct PsiSearch {
     pub(crate) stats: PssmStats,
     /// The query record as the reports show it without `-parse_deflines` (`query_record`).
     pub(crate) query: FastaRecord,
+    /// The letters of the query's Bioseq as NCBI's reports read them where they are not the
+    /// record's (`query`): a PSSM query (`-in_pssm`) of iupacaa letters with one in lower case,
+    /// which the search reads as its capital (the record's letter) and the reports show and
+    /// compare as it is (`in_pssm::query_residues`, `report::row_letters::QueryLetters`). `None`
+    /// otherwise. The query source is fixed for the run: a PSSM query's later rounds keep it
+    /// (`blast_engine::psi_round`); a FASTA query's rounds have none.
+    pub(crate) bioseq_letters: Option<std::sync::Arc<[u8]>>,
     /// The Seq-ids of the PSSM's query Bioseq of `-in_pssm` (at least one), the one owner of them:
     /// the first is the id of the query's Seq-loc (psiblast_app.cpp:540, `GetFirstId()`), which
     /// its Seq-aligns, the later rounds' PSSMs and the warnings take; the reports show them as
@@ -88,6 +95,12 @@ pub struct PsiSearch {
     /// (`PsiBlastComputePssmScores` in `CPsiBlastImpl`'s constructor; `in_pssm::psi_search_and_object`),
     /// which comes after the search strategy's request (`PssmQueryStop::Scores`).
     pub(crate) scores_error: Option<String>,
+    /// The error of the query set-up of the PSSM's search (`SetupQueries_OMF`: the query's invalid
+    /// residues, `in_pssm::query_residues`), which NCBI raises in `CPsiBlast::Run` after the search
+    /// strategy's request and, in psiblast, after round 1's PSSM files (`PssmQueryStop::Setup`). A
+    /// PSSM of frequency ratios only meets that set-up in `CPsiBlastImpl`'s constructor, where the
+    /// PSSM engine reads the query: its error is then `scores_error`.
+    pub(crate) setup_error: Option<String>,
     /// The warnings of `PsiBlastSetupScoreBlock` for the search's options (the frequency ratios
     /// all zero, the composition-based statistics reset to mode 1), which the query's warning
     /// line carries (`algorithm::psiblast::in_pssm::setup_messages`).
@@ -164,7 +177,7 @@ pub(crate) fn pssm_request_written(strategy: bool, database: bool) -> bool {
 
 /// What stops a PSSM query's run before its search, after the outfmt 0 prolog, in NCBI's order
 /// (`PsiSearch::stop_before_search`): the search strategy's request of a run with `-subject`, NCBI's
-/// check of the PSSM, then the PSSM engine's scores.
+/// check of the PSSM, the PSSM engine's scores, then the search's set-up of the query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PssmQueryStop {
     /// "Remote PSI-BL2SEQ is not supported" (`s_InitializeExportStrategy`): the options error, no
@@ -177,6 +190,10 @@ pub(crate) enum PssmQueryStop {
     /// `CPsiBlastImpl`'s constructor, after `SaveSearchStrategy` wrote the request: the engine
     /// error, after the request (`after_request`).
     Scores(String),
+    /// The error of the query set-up (`PsiSearch::setup_error`), in `CPsiBlast::Run`: the engine
+    /// error, after the request and after psiblast's round 1 wrote the input PSSM's files
+    /// (`after_round_files`).
+    Setup(String),
 }
 
 impl PssmQueryStop {
@@ -186,16 +203,31 @@ impl PssmQueryStop {
             PssmQueryStop::Bl2seq => {
                 crate::blastinput::app::options_error("Remote PSI-BL2SEQ is not supported")
             }
-            PssmQueryStop::Invalid(message) | PssmQueryStop::Scores(message) => {
-                crate::blastinput::app::engine_error(message)
-            }
+            PssmQueryStop::Invalid(message)
+            | PssmQueryStop::Scores(message)
+            | PssmQueryStop::Setup(message) => crate::blastinput::app::engine_error(message),
         }
     }
 
     /// Whether NCBI has written the search strategy's request when it stops (a run that writes
     /// one, `pssm_request_written`).
     pub(crate) fn after_request(&self) -> bool {
-        matches!(self, PssmQueryStop::Scores(_))
+        matches!(self, PssmQueryStop::Scores(_) | PssmQueryStop::Setup(_))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-262
+    // ```c++
+    //             while (itr) {
+    //
+    //                 SavePssmToFile(pssm, &itr);
+    //                 ...
+    //                    results = psiblast->Run();
+    // ```
+    /// Whether psiblast's round 1 has written the input PSSM's files (`SavePssmToFile`, `-out_pssm`
+    /// and `-out_ascii_pssm`) when NCBI stops: the query set-up fails in `CPsiBlast::Run`, after
+    /// them; the other stops come before the rounds.
+    pub(crate) fn after_round_files(&self) -> bool {
+        matches!(self, PssmQueryStop::Setup(_))
     }
 }
 
@@ -261,8 +293,8 @@ impl PsiSearch {
     /// with `-export_search_strategy` (`strategy`) and no database (`database`), the request's
     /// "Remote PSI-BL2SEQ" before anything else; then NCBI's check of the PSSM (the request makes
     /// it, and `CPsiBlastImpl` without one); then the PSSM engine's scores of a PSSM of frequency
-    /// ratios only, which `CPsiBlastImpl` computes after the request was written. `None` for a run
-    /// that searches.
+    /// ratios only, which `CPsiBlastImpl` computes after the request was written; then the query
+    /// set-up that `CPsiBlast::Run` starts with (`setup_error`). `None` for a run that searches.
     pub(crate) fn stop_before_search(
         &self,
         strategy: bool,
@@ -274,7 +306,19 @@ impl PsiSearch {
         if let Some(message) = &self.validation_error {
             return Some(PssmQueryStop::Invalid(message.clone()));
         }
-        self.scores_error.clone().map(PssmQueryStop::Scores)
+        if let Some(message) = &self.scores_error {
+            return Some(PssmQueryStop::Scores(message.clone()));
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:149-151
+        // ```c++
+        //     // 1. Initialize the query data (borrow it from the factory)
+        //     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
+        //     retval->m_InternalData->m_Queries = query_data->GetSequenceBlk();
+        // ```
+        // The search's first step (`CBlastPrelimSearch`'s set-up in `CPsiBlast::Run`) sets the
+        // query up (`SetupQueries_OMF`), before the score block, the lookup table and any read of
+        // the database.
+        self.setup_error.clone().map(PssmQueryStop::Setup)
     }
 
     /// The PSSM that the search strategy's request holds (`PssmQueryRequest`), `None` without one.
@@ -526,9 +570,11 @@ impl PsiSearch {
                 h: stat(pssm.gapped.h),
             },
             query,
+            bioseq_letters: None,
             query_ids: Vec::new(),
             validation_error: None,
             scores_error: None,
+            setup_error: None,
             setup_messages,
             warning_title: None,
             request: None,

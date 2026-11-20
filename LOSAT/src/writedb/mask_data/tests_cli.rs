@@ -307,46 +307,23 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
                 "{file}: files left behind: {left:?}"
             );
         };
-        match class {
-            Class::UnknownEncoding | Class::NoDatabase | Class::Equal => {
-                assert_eq!(run.status, ncbi.rc, "{context}");
-                assert_eq!(run.stderr, ncbi.stderr, "{file}: standard error");
-                assert_eq!(run.stdout, logs[file], "{file}: standard output");
-                if run.status == 0 && class == Class::Equal {
-                    compared += assert_database(&base, protein, file, ncbi);
-                } else {
-                    no_files();
-                }
-            }
-            Class::Serial | Class::OutOfMemory => {
-                assert_eq!(run.status, 255, "{context}");
-                assert!(
-                    run.stderr
-                        .starts_with(&format!("Error: mask data in '{file}': ")),
-                    "{context}"
-                );
-                assert_eq!(
-                    run.stderr.ends_with(DESTRUCTOR_MESSAGE),
-                    ncbi.stderr.ends_with(DESTRUCTOR_MESSAGE),
-                    "{file}: the message of the destructor"
-                );
-                assert_eq!(run.stdout, logs[file], "{file}: standard output");
-                no_files();
-            }
-            Class::Unsupported => {
-                assert_eq!(run.status, 1, "{context}");
-                assert!(
-                    run.stderr
-                        .starts_with("losat makeblastdb: mask data that LOSAT does not read: "),
-                    "{context}"
-                );
-                no_files();
-            }
+        assert_eq!(run.status, ncbi.rc, "{context}");
+        // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
+        assert_eq!(
+            run.stderr,
+            crate::wording::losat_text(&ncbi.stderr),
+            "{file}: standard error"
+        );
+        assert_eq!(run.stdout, logs[file], "{file}: standard output");
+        if run.status == 0 && class == Class::Read {
+            compared += assert_database(&base, protein, file, ncbi);
+        } else {
+            no_files();
         }
     }
     assert!(compared > 300, "{compared} rows compared");
-    assert_eq!(classes["Equal"], 109);
-    assert_eq!(classes.values().sum::<usize>(), 162);
+    assert_eq!(classes["Read"], 149);
+    assert_eq!(classes.values().sum::<usize>(), 223);
 }
 
 #[test]

@@ -43,6 +43,7 @@ from pathlib import Path
 import subprocess
 
 from run_oracle import DEVIATION, ENGINE, is_sam_outfmt, outfmt, read_manifest, search_argv, strip_sam_cl, xinclude
+import losat_wording  # noqa: E402  (on the path of run_oracle: LOSAT's words in NCBI's frozen bytes)
 
 FIXTURES = ENGINE / "tests/fixtures/outfmt0"
 
@@ -125,8 +126,9 @@ def main() -> int:
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         expected_err_path = FIXTURES / f"{row['fixture_id']}.err"
-        expected_err = expected_err_path.read_bytes() if row["stderr_sha256"] else b""
-        expected_out = (FIXTURES / f"{row['fixture_id']}.out").read_bytes()
+        # LOSAT's words in NCBI's frozen bytes (AGENTS.md rule 8, `losat_wording`).
+        expected_err = losat_wording.losat_bytes(expected_err_path.read_bytes() if row["stderr_sha256"] else b"")
+        expected_out = losat_wording.losat_output_bytes((FIXTURES / f"{row['fixture_id']}.out").read_bytes())
         problems = []
         deviation = row.get("contract") == DEVIATION
         if deviation:

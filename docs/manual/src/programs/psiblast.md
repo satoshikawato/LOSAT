@@ -21,6 +21,8 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 - **Database filters.** `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-no_taxid_expansion`, `-seqidlist` and `-negative_seqidlist` keep every round to the sequences they select.
 - **Alignment.** `-in_msa FILE` starts from a multiple sequence alignment in Clustal format. LOSAT builds the PSSM from the alignment as NCBI BLAST+ does, and searches it as it searches an `-in_pssm` PSSM, with the same rounds and PSSM files. The first sequence is the query. `-msa_master_idx N` takes the N-th sequence instead (1 is the first), and `-ignore_msa_master` builds the PSSM without counting the query sequence. A lower-case letter of the query sequence is left out of the alignment. The PSSM from the alignment is built with a pseudocount of 0; `-pseudocount` applies to the PSSMs of later rounds. `-matrix` and the gap costs name the scoring of the PSSM.
 - **PSSM file.** `-in_pssm` reads a PSSM in NCBI's ASN.1 text form, the form `-out_pssm` writes. It is searched with the BLOSUM62 matrix and gap costs 11/1.
+  - The reports show the PSSM's query as the file holds it: lower-case letters stay lower case and match no subject letter, and a gap residue (`-`) is shown as `-`. NCBI BLAST+ shows the same.
+  - A query residue that its coding does not have (such as `*` in `iupacaa`) stops the run with `BLAST engine error: Warning: Invalid residues found at positions ...` and exit status 3, as in NCBI BLAST+. [tblastn](tblastn.md) `-in_pssm` does the same.
 
 ## Rounds and PSSMs
 

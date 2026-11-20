@@ -1281,9 +1281,11 @@ mod tests {
             ),
             (9, 1, 18.0, 15)
         );
+        // `-ungapped` with composition-based statistics F (0): NCBI's ungapped search, which
+        // LOSAT runs (line O4c).
+        assert!(check_options(&parse(&["-ungapped", "-comp_based_stats", "F"]).unwrap()).is_ok());
         for extra in [
-            &["-ungapped", "-comp_based_stats", "F"][..],
-            &["-max_target_seqs", "1073741799"],
+            &["-max_target_seqs", "1073741799"][..],
             &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
         ] {
             assert!(

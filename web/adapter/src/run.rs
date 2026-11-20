@@ -2567,7 +2567,9 @@ mod tests {
     // place of its error; stream 3 is the warnings before the error.
     #[test]
     fn a_failed_run_sends_the_output_of_its_argv_and_drops_the_others() {
-        let query = fasta(b">q\nACGTACGTACGTACGTAGCTAGCTAGCTAGCATCGATCGATCGACTGACTAGCTAGCTAGCATGCATCGATCGATC\n");
+        let query = fasta(
+            b">q\nACGTACGTACGTACGTAGCTAGCTAGCTAGCATCGATCGATCGACTGACTAGCTAGCTAGCATGCATCGATCGATC\n",
+        );
         let subject = fasta(b">s1\n>s2\n");
         for (outfmt, kept) in [
             (None, 0),
@@ -2583,14 +2585,21 @@ mod tests {
             }
             crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
             let error = run(&words, &query, &subject).unwrap_err();
-            assert!(error.contains("The average subject length is too short"), "{outfmt:?}: {error}");
+            assert!(
+                error.contains("The average subject length is too short"),
+                "{outfmt:?}: {error}"
+            );
             let emitted = crate::emit::EMITTED.with(|emitted| emitted.borrow().clone());
             let mut sent = std::collections::BTreeMap::<u32, Vec<u8>>::new();
             let mut dropped = Vec::new();
             for (stream, bytes) in &emitted {
                 if *stream == crate::emit::STREAM_DISCARD {
                     let place = u32::from_le_bytes(bytes[4..].try_into().unwrap());
-                    assert_eq!(place, crate::emit::PLACE_RUN, "{outfmt:?}: the place of the error");
+                    assert_eq!(
+                        place,
+                        crate::emit::PLACE_RUN,
+                        "{outfmt:?}: the place of the error"
+                    );
                     dropped.push(u32::from_le_bytes(bytes[..4].try_into().unwrap()));
                 } else {
                     sent.entry(*stream).or_default().extend_from_slice(bytes);
@@ -2598,21 +2607,34 @@ mod tests {
             }
             dropped.sort_unstable();
             // The program's formats besides the argv's own, which a custom -outfmt adds to.
-            let others: Vec<u32> = [0, 6, 7].into_iter().filter(|&stream| stream != kept).collect();
+            let others: Vec<u32> = [0, 6, 7]
+                .into_iter()
+                .filter(|&stream| stream != kept)
+                .collect();
             assert_eq!(dropped, others, "{outfmt:?}: the outputs dropped");
             for stream in &dropped {
-                assert!(!sent.contains_key(stream), "{outfmt:?}: nothing of dropped stream {stream}");
+                assert!(
+                    !sent.contains_key(stream),
+                    "{outfmt:?}: nothing of dropped stream {stream}"
+                );
             }
             // The outfmt 0 prolog is the file that the CLI's run of outfmt 0 leaves; the others leave none.
             let output = sent.get(&kept).map(|bytes| text(bytes));
             if kept == 0 {
                 let prolog = output.expect("the prolog of outfmt 0");
                 assert!(prolog.starts_with("BLASTN 2."), "{outfmt:?}: {prolog}");
-                assert!(prolog.contains("2 sequences; 0 total letters"), "{outfmt:?}: {prolog}");
+                assert!(
+                    prolog.contains("2 sequences; 0 total letters"),
+                    "{outfmt:?}: {prolog}"
+                );
             } else {
                 assert_eq!(output, None, "{outfmt:?}: an empty output is no chunk");
             }
-            assert!(text(&sent[&crate::emit::STREAM_DIAGNOSTICS]).contains("Subject sequence contains no data"), "{outfmt:?}: stream 3");
+            assert!(
+                text(&sent[&crate::emit::STREAM_DIAGNOSTICS])
+                    .contains("Subject sequence contains no data"),
+                "{outfmt:?}: stream 3"
+            );
         }
     }
 
@@ -5187,11 +5209,14 @@ mod tests {
         )
     }
 
-    /// A failed run sent nothing of its outputs and records (each fits in one chunk).
+    /// A failed run sent no hits and no output with rows: what it keeps of its outputs is the CLI's file before the
+    /// error (outfmt 0's prolog, `a_failed_run_sends_the_output_of_its_argv_and_drops_the_others`), and the records
+    /// (each fits in one chunk) are none.
     fn assert_outputs_empty(streams: &std::collections::BTreeMap<u32, Vec<u8>>, label: &str) {
         for stream in [0, 6, 7, STREAM_CUSTOM, STREAM_HITS] {
+            let bytes = streams.get(&stream).map_or(&[][..], Vec::as_slice);
             assert!(
-                streams.get(&stream).is_none_or(Vec::is_empty),
+                bytes.is_empty() || (stream == 0 && bytes.starts_with(b"BLAST")),
                 "{label}: stream {stream}"
             );
         }

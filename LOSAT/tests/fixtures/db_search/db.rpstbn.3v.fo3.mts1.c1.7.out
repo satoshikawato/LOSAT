@@ -1,0 +1,7 @@
+# RPSTBLASTN 2.17.0+
+# Query: n103 YP_009220649.1 residues 1101-1290 back-translated (first codon of each amino acid)
+# Database: fo3rps3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+n103	CDD:103	100.000	190	0	0	1	570	1	190	5.42e-123	333
+# BLAST processed 1 queries

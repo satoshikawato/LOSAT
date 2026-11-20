@@ -189,7 +189,8 @@
   1.53 2026-11-20 (BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u`, line RG item X5:
   the e-value adjustment with the values of the next query of the batch reproduced, rule 2;
   exception 16 for the last query of a batch, whose values NCBI reads past its array of query
-  contexts: approval pending the Owner's answer to question Q-X5 (asked 2026-11-20); the rule-2
+  contexts: the Owner's decision of 2026-11-20 on question Q-X5 (「Q1=A」, Q1 of that day's batch of
+  questions = Q-X5); the rule-2
   rejection of a batch in which a query is followed by a query without a search space,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.52, line
   NP item M4a-1c)
@@ -854,10 +855,13 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
     (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
 
-## Exception 16, approval pending (BLASTP unified P-values, the last query of a query batch, version 1.53)
+## Approved exception 16 (BLASTP unified P-values, the last query of a query batch, version 1.53)
 
-Version 1.53, line RG item X5 (line RG `DECISIONS.md` X5-1 to X5-4). Approval: pending the Owner's
-answer to question Q-X5 (asked 2026-11-20). Until this version LOSAT refused every request for
+Version 1.53, line RG item X5 (line RG `DECISIONS.md` X5-1 to X5-4). The Owner decided on 2026-11-20
+(words 「Q1=A Q2=B Q3=A Q4=A Q5=A Q6=B Q7=A Q8=OK」, whose Q1 was this question) question Q-X5: option A,
+running unified P-values with NCBI's bytes for a query that has a next query in its batch (rule 2
+below), the query's own values for the last query of a batch (this exception) and the refusal of a
+batch whose next query has no search space (rule 2's rejections). Until this version LOSAT refused every request for
 unified P-values (NCBI parity line `DECISIONS.md` 23 a, 2026-10-25; `OWNER_DECISIONS.md` row 23).
 Not taken: keeping that refusal for every query (a search of one query is the commonest use, and
 all but the last query of a batch have NCBI's bytes, rule 2 below); the query's own values for

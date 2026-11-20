@@ -710,10 +710,10 @@ describe('Coordinator', () => {
     await waitFor(coordinator, failed, 'failed');
     expect(viewOf(coordinator, failed)!.record).toMatchObject({ error: 'BLAST engine error: The average subject length is too short', diagnostics: warning });
     expect('runFiles' in viewOf(coordinator, failed)!.record).toBe(false);
-    // The run is committed as a completed run is, with no output but the warnings (line WQA's sweep, D15, 2026-11-20); it is kept once.
-    await expect(data.readDiagnostics(failed)).resolves.toBe(warning);
+    // The run kept no output (none has bytes), so it is dropped as before version 7: only its record holds the warnings.
+    await expect(data.readDiagnostics(failed)).rejects.toThrow();
     await expect(data.keepFailedRun(failed)).resolves.toBeUndefined();
-    expect(viewOf(coordinator, failed)!.result).toMatchObject({ byteLengths: { 0: 0, 6: 0, 7: 0 }, hitCount: 0 });
+    expect(viewOf(coordinator, failed)!.result).toBeUndefined();
 
     // The rejection before the chunks and the `fail`: the data layer waits for them.
     const late = (await coordinator.enqueue(request)).runId!;

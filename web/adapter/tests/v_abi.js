@@ -524,7 +524,8 @@ function checkFailure(run, expected, search, label) {
   const sent = run.streams.get(own) || Buffer.alloc(0);
   const cli = expected.outputs.get(own);
   if (search.files) {
-    // The side files written before the error, with a central directory, and no master file.
+    // The side files written before the error and the master file as the CLI leaves it (empty), with a
+    // central directory (D15 review round 2, 2026-11-21).
     const entries = sent.length === 0 ? [] : storedZipEntries(sent);
     assert.deepEqual(entries.map(([name]) => name), cli.map(([name]) => name), `${label}: -outfmt ${search.outfmt} files before the failure`);
     for (const [index, [name, bytes]] of entries.entries()) assert.equal(sha256(bytes), sha256(cli[index][1]), `${label}: ${name}`);

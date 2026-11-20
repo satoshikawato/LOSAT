@@ -519,11 +519,12 @@ def failed_outputs() -> list[dict]:
         searches.append({"program": "blastp",
                          "argv": ["blastp", "-query", f"{batch}/later_batch.q.faa", "-subject", f"{batch}/later_batch.s.faa"],
                          "cwd": str(REPO), "cases": [f"failed_outputs.blastp.later_batch.{name}"], "frozen": {},
-                         "expect": "failure", **({"outfmt": outfmt} if outfmt else {})})
+                         "expect": "failure", **({"outfmt": outfmt} if outfmt else {}),
+                         **({"files": True} if outfmt in ("13", "14") else {})})
     searches.append({"program": "blastn",
                      "argv": ["blastn", "-query", f"{batch}/later_batch.q.fna", "-subject", f"{batch}/later_batch.s.fna"],
                      "cwd": str(REPO), "cases": ["failed_outputs.blastn.later_batch.outfmt13"], "frozen": {},
-                     "expect": "failure", "outfmt": "13"})
+                     "expect": "failure", "outfmt": "13", "files": True})
     searches.append({"program": "blastn",
                      "argv": ["blastn", "-query", "tests/fasta/outfmt0/pd_self_n.fna", "-subject", "tests/fasta/outfmt0/pd_self_n.fna",
                               "-parse_deflines", "-dust", "yes"],

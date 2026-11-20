@@ -3,7 +3,7 @@
 // stages, commits, discards and reads them. Vitest runs it in one thread; Playwright runs
 // it with the writer in a separate worker and the real Data worker (OPFS). S09 runs it with
 // the writer inside the real Engine worker.
-import { CUSTOM_OUTPUT } from 'losat/domain';
+import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import { DIAGNOSTICS_STREAM, HITS_STREAM, type OutputStream } from 'losat/ports';
 import type { RunStore } from '../../src/ports/data';
 import {
@@ -64,8 +64,8 @@ function hitLine(index: number): string {
   return `${JSON.stringify({ index, q_idx: 0, s_idx: 0, rank: index, out6: null, out0: null, out0_subject: null })}\n`;
 }
 
-async function openWriter(env: RunOutputEnv, runId: string): Promise<RemoteWriter> {
-  return env.writer(await env.data.openRun(runId));
+async function openWriter(env: RunOutputEnv, runId: string, outputs?: readonly RunOutput[]): Promise<RemoteWriter> {
+  return env.writer(await env.data.openRun(runId, outputs));
 }
 
 export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
@@ -311,7 +311,7 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
       same(await env.usage(), baseline, 'bytes held at the end');
 
       const emptyArchive = zip([['results.json', '']]);
-      const hollow = await openWriter(env, 'run-v');
+      const hollow = await openWriter(env, 'run-v', [CUSTOM_OUTPUT]);
       await hollow.write(CUSTOM_OUTPUT, emptyArchive);
       await hollow.write(DIAGNOSTICS_STREAM, bytes('Warning: two\n'));
       await hollow.post({ type: 'fail', chunks: 2, bytes: emptyArchive.length + 13 });
@@ -320,7 +320,7 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
       same(dropped?.diagnostics, 'Warning: two\n', 'its warnings');
 
       const full = zip([['results_1.json', '{"a":1}'], ['results.json', '']]);
-      const filled = await openWriter(env, 'run-w');
+      const filled = await openWriter(env, 'run-w', [CUSTOM_OUTPUT]);
       await filled.write(CUSTOM_OUTPUT, full);
       await filled.post({ type: 'fail', chunks: 1, bytes: full.length });
       const keptArchive = await env.data.keepFailedRun('run-w');

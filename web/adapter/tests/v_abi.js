@@ -816,7 +816,47 @@ const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>
   // own, for the files that the CLI makes outside the run's directory.
   "/var/lock/<id>.log", "/var/run/../tmp/<id>.log", "/data/run.log", "/lost+found/run.log", "/snap/run.log",
   "/bin/../tmp/<id>.log", "/var/lock/../tmp/<id>.log", "/dev/fd/../../tmp/<id>.log", "a".repeat(256),
-  `logs/${"b".repeat(256)}`];
+  `logs/${"b".repeat(256)}`,
+  // Round 5: a name climbs out of directories of root's that the model does not list, as the CLI passes them.
+  "/etc/default/../../tmp/<id>.log", "/usr/share/doc/../../../tmp/<id>.log"];
+
+// The rows of `/`-names (LOG_NAMES) compare the Web with the CLI of the host, which must be a Linux like LOSAT Web's
+// (Ubuntu 24.04, as CI's runner): a user that is not root, `/var/lock` and `/var/run` links to `/run/lock` and `/run`,
+// `/run/lock` and `/tmp` where every user makes files (mode 1777), and `/etc/default` and `/usr/share/doc`. Returns
+// why this host differs, or undefined.
+function hostDiffers() {
+  const sticky = (directory) => {
+    try {
+      return (fs.statSync(directory).mode & 0o1777) === 0o1777;
+    } catch {
+      return false;
+    }
+  };
+  const resolves = (link, target) => {
+    try {
+      return fs.realpathSync(link) === target;
+    } catch {
+      return false;
+    }
+  };
+  const isDirectory = (directory) => {
+    try {
+      return fs.statSync(directory).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+  const differences = [
+    [process.getuid?.() === 0, "the run is root's"],
+    [!resolves("/var/lock", "/run/lock"), "/var/lock is not /run/lock"],
+    [!resolves("/var/run", "/run"), "/var/run is not /run"],
+    [!sticky("/run/lock"), "/run/lock is not mode 1777"],
+    [!sticky("/tmp"), "/tmp is not mode 1777"],
+    [!isDirectory("/etc/default"), "no /etc/default"],
+    [!isDirectory("/usr/share/doc"), "no /usr/share/doc"],
+  ].filter(([differs]) => differs).map(([, why]) => why);
+  return differences.length > 0 ? differences.join(", ") : undefined;
+}
 
 // The CLI's run with its standard output and error on pipes, as a shell's `|` or a terminal gives them: node's child
 // processes get sockets, which `/dev/stdout` and `/dev/stderr` cannot open (ENXIO), so that NCBI and the CLI send the
@@ -843,6 +883,9 @@ function filesIn(directory) {
 }
 
 async function checkLogfileNames(reactor, native, scratch, engine, waitForWorkers) {
+  const differs = hostDiffers();
+  assert.ok(differs === undefined, `-logfile names: this host is not a Linux like LOSAT Web's (${differs}); ` +
+            "run V-ABI as a user on Ubuntu 24.04 or a Linux like it");
   const inputs = path.join(ROOT, "LOSAT/tests/fasta/outfmt11");
   const query = path.join(inputs, "arch_tbx_q.fna"), subject = path.join(inputs, "arch_tbx_s.fna");
   const standardOutput = new Set(["/dev/stdout"]);

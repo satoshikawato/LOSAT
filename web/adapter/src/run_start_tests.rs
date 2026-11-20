@@ -265,6 +265,7 @@ fn the_logfile_is_a_file_of_the_run() {
             "/var/lock/run.log",
             "/var/crash/run.log",
             "/home/me/run.log",
+            "/etc/default/../../tmp/run.log",
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", name]);
@@ -321,6 +322,7 @@ fn the_logfile_is_a_file_of_the_run() {
             ("/data/run.log", false),
             ("/run/user/1000/run.log", false),
             ("/bin/../tmp/run.log", false),
+            ("/etc/default/../tmp/run.log", false),
             (LONG_NAME, false),
         ] {
             let mut words = plain_words.clone();

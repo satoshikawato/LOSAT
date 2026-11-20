@@ -1038,8 +1038,10 @@ impl PathRules {
     }
 }
 
-/// `CDirEntry::NormalizePath` on Unix (`PathRules::normalize`, where it is quoted). rpsbproc's
-/// launch path (`rpsbproc::program_paths`, `eIgnoreLinks`) is normalized here on every target.
+/// `CDirEntry::NormalizePath` on Unix (`PathRules::normalize`). rpsbproc's launch path
+/// (`rpsbproc::program_paths`, `eIgnoreLinks`) is normalized here on every target.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-971
 pub(crate) fn normalize_path(
     path: &[u8],
     read_link: Option<&dyn Fn(&[u8]) -> Option<Vec<u8>>>,
@@ -2233,7 +2235,7 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
 /// (`log_file_name`).
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct LogFileName {
-    /// `CDir(CFile(file_name).GetDir())`'s path (`SetLogFile`, quoted at `diag_target`), as
+    /// `CDir(CFile(file_name).GetDir())`'s path (`SetLogFile`, ncbidiag.cpp:7570-7608), as
     /// `CDirEntry::Reset` leaves it: unless it is a directory, the log is not set up and the
     /// messages stay on `cerr`. Empty (the directory of `//run.log`): no directory; `None`: not
     /// checked (a name of separators only, `///`).
@@ -2246,7 +2248,9 @@ pub(crate) struct LogFileName {
     pub space: Vec<u8>,
 }
 
-/// The free space under which NCBI's log file gets no message (`Reopen`, quoted above).
+/// The free space under which NCBI's log file gets no message (`Reopen`).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6604
 const LOW_DISK_SPACE: u64 = 1024 * 20;
 
 /// NCBI's reading of the `-logfile` name `name` by the path rules `rules`, in the working
@@ -2259,10 +2263,10 @@ const LOW_DISK_SPACE: u64 = 1024 * 20;
 /// only where it is opened, and its free space is that of its directory as written (`/dev/fd/2`:
 /// `/dev/fd/`, which is procfs). NCBI keeps 2047 bytes of the name it makes. `None` where NCBI's
 /// `CreateAbsolutePath` throws (Windows: `C:run.log`), which ends NCBI's program in its C++
-/// runtime (`AppMain`, quoted above): how it ends is the runtime's, not ported (the license rule
+/// runtime (`AppMain`, ncbiapp.cpp:870-878): how it ends is the runtime's, not ported (the license rule
 /// of 2026-11-20, rule 2), so the command line keeps the messages on `cerr` (unverified: no
 /// Windows run). On Windows NCBI opens the path as UTF-16, which its UTF-8 string becomes
-/// (`_T_XCSTRING`, quoted at `decodes`): where one of NCBI's cuts of bytes splits a character (the
+/// (`_T_XCSTRING`, ncbidiag.cpp:6514-6515): where one of NCBI's cuts of bytes splits a character (the
 /// first 3 bytes of the working directory, the 2047 of the name, the 2 of a part with a ':' in
 /// `NormalizePath`), the conversion throws, which leaves `AppMain` as `CreateAbsolutePath`'s
 /// exception does: `None` too (unverified: no Windows run). On Unix NCBI opens the bytes as they
@@ -2425,8 +2429,10 @@ fn free_disk_space(directory: &[u8], _cwd: Option<&OsStr>) -> Option<u64> {
     }
 }
 
-/// `(Uint8)st.f_bsize * st.f_bavail` (`GET_STATFS_INFO`, quoted above): the product of 64-bit
-/// unsigned integers, modulo 2^64.
+/// The free bytes as NCBI's `GET_STATFS_INFO` counts them: the block size times the blocks free to
+/// a user, multiplied as 64-bit unsigned integers, modulo 2^64.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:4819-4830
 #[cfg(any(test, target_os = "linux", target_os = "macos"))]
 fn free_space(block_size: u64, blocks: u64) -> u64 {
     block_size.wrapping_mul(blocks)
@@ -4606,7 +4612,7 @@ mod tests {
         ));
     }
 
-    /// NCBI's reading of a `-logfile` name on Unix (quoted at `log_file_name`): the directory that
+    /// NCBI's reading of a `-logfile` name on Unix (`log_file_name`): the directory that
     /// `SetLogFile` checks, the file that is opened and the directory whose free space counts
     /// (line WQA's D11 round 2, 2026-11-20; NCBI BLAST+ 2.17.0 makes `logs` for `logs/`,
     /// `run.log` for ` run.log`, `run.log` for `a/../run.log` where `a` is a link, and

@@ -131,45 +131,13 @@ fn user_makes(directory: &[u8]) -> bool {
             .any(|shared| within(directory, shared))
 }
 
-/// The directories of root's on LOSAT Web's Linux, an Ubuntu of merged `/usr` (`is_directory`),
-/// each with its ancestors: those that the Filesystem Hierarchy Standard 3.0 requires at the
-/// root, in `/usr` and in `/var` (`/bin`, `/lib`, `/lib64` and `/sbin` being links, `LINKS`), the
-/// shared ones (`SHARED_DIRECTORIES`), `/dev/mqueue`, and those of procfs, sysfs and the devices
-/// that `opens` reads. A directory of root's that it does not list is not there (`/data`, which
-/// only root makes).
-const DIRECTORIES: [&[u8]; 32] = [
-    b"/boot",
-    b"/dev/mqueue",
-    b"/dev/net",
-    b"/dev/pts",
-    b"/dev/shm",
-    b"/etc/opt",
-    b"/home",
-    b"/media",
-    b"/mnt",
-    b"/opt",
-    b"/proc/self/attr",
-    b"/proc/self/fd",
-    b"/proc/thread-self/attr",
-    b"/root",
-    b"/run/lock",
-    b"/srv",
-    b"/sys",
-    b"/tmp",
-    b"/usr/bin",
-    b"/usr/lib",
-    b"/usr/lib64",
-    b"/usr/local",
-    b"/usr/sbin",
-    b"/usr/share",
-    b"/var/cache",
-    b"/var/crash",
-    b"/var/lib",
-    b"/var/local",
-    b"/var/log",
-    b"/var/opt",
-    b"/var/spool",
-    b"/var/tmp",
+/// The directories at the root of LOSAT Web's Linux, an Ubuntu of merged `/usr` (`directory_at`):
+/// those that the Filesystem Hierarchy Standard 3.0 requires there and its Linux annex (`/proc`,
+/// `/sys`), with `/home` and `/root` (`/bin`, `/lib`, `/lib64` and `/sbin` are links, `LINKS`).
+/// Another name at the root is not there (`/data`, `/snap`, `/lost+found`, which only root makes).
+const ROOT_DIRECTORIES: [&[u8]; 15] = [
+    b"/boot", b"/dev", b"/etc", b"/home", b"/media", b"/mnt", b"/opt", b"/proc", b"/root", b"/run",
+    b"/srv", b"/sys", b"/tmp", b"/usr", b"/var",
 ];
 
 /// The links of LOSAT Web's Linux and their targets (`log_name`), besides `/proc/self/cwd` and
@@ -216,14 +184,18 @@ const LOST_DEVICES: [&[u8]; 8] = [
 
 /// The files of procfs that a process may open for writing as a user, of the process
 /// (`/proc/self`) and of its thread (`/proc/thread-self`): those of Linux 5.15, which
-/// `open(O_WRONLY | O_APPEND | O_CREAT)` opens (line WQA's sweep, D11 round 2, 2026-11-20). The
-/// file descriptors 0 to 2 (`fd/0`...) are the standard streams.
-const PROCESS_FILES: [&[u8]; 18] = [
+/// `open(O_WRONLY | O_APPEND | O_CREAT)` opens (line WQA's sweep, D11 round 2, 2026-11-20), and
+/// the process's `autogroup` (mode 0644), which the kernels of Ubuntu 24.04 have (automatic group
+/// scheduling; Linux 6.8: fs/proc/base.c, `tgid_base_stuff`) and the measured one did not (line
+/// WQA's D11 round 5, 2026-11-21). The file descriptors 0 to 2 (`fd/0`...) are the standard
+/// streams.
+const PROCESS_FILES: [&[u8]; 19] = [
     b"attr/current",
     b"attr/exec",
     b"attr/fscreate",
     b"attr/keycreate",
     b"attr/sockcreate",
+    b"autogroup",
     b"clear_refs",
     b"comm",
     b"coredump_filter",
@@ -276,13 +248,70 @@ fn within(path: &[u8], directory: &[u8]) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest[0] == b'/' || directory.ends_with(b"/"))
 }
 
-/// Whether `directory`, a path without links, is a directory of LOSAT Web's Linux: one of root's
-/// (`DIRECTORIES`) or an ancestor of one, or one where the user makes entries (`user_makes`),
-/// which the model takes as made where a name gives it (`logs/run.log`, `/tmp/a/run.log`; the
-/// working directory and its ancestors in the working directory's tree). Not a directory of
-/// root's that it does not list, nor a file (`/dev/null/x`, `/dev/stdout/../stderr`).
-fn is_directory(directory: &[u8]) -> bool {
-    DIRECTORIES.iter().any(|known| within(known, directory)) || user_makes(directory)
+/// Whether `path`, a path without links, is one of the files that the model knows (`opens`): a
+/// device of `LOST_DEVICES`, a standard stream (`/proc/self/fd/0` to `2`) or a file of procfs's
+/// `PROCESS_FILES` and `THREAD_FILES`. Such a file is no directory (`/dev/null/x`,
+/// `/dev/stdout/../stderr`, `/dev/fd/2/..`).
+fn is_known_file(path: &[u8]) -> bool {
+    LOST_DEVICES.contains(&path)
+        || path.strip_prefix(b"/proc/self/").is_some_and(|file| {
+            matches!(file, b"fd/0" | b"fd/1" | b"fd/2") || PROCESS_FILES.contains(&file)
+        })
+        || path
+            .strip_prefix(b"/proc/thread-self/")
+            .is_some_and(|file| THREAD_FILES.contains(&file))
+}
+
+/// Whether `directory` holds a file that the model knows (`is_known_file`): `/dev`, `/dev/net`,
+/// `/proc/self` and its `fd` and `attr`, `/proc/thread-self` and its `attr`.
+fn holds_known_file(directory: &[u8]) -> bool {
+    let holds = |path: &[u8]| path.len() > directory.len() && within(path, directory);
+    LOST_DEVICES.iter().any(|device| holds(device))
+        || [b"fd/0".as_slice()]
+            .iter()
+            .chain(&PROCESS_FILES)
+            .any(|file| holds(&[b"/proc/self/".as_slice(), file].concat()))
+        || THREAD_FILES
+            .iter()
+            .any(|file| holds(&[b"/proc/thread-self/".as_slice(), file].concat()))
+}
+
+/// What LOSAT Web's Linux has at `directory`, a path without links (`log_name`).
+#[derive(Debug, PartialEq, Eq)]
+enum Directory {
+    /// A directory that the model knows: `/`, one where the user makes entries (`user_makes`),
+    /// which the model takes as made where a name gives it (`logs`, `/tmp/a`; the working
+    /// directory and its ancestors), a directory at the root (`ROOT_DIRECTORIES`), a mount of
+    /// `NO_FREE_SPACE` (`/dev/pts`) and a directory of a file that the model knows (`/dev/net`,
+    /// `/proc/self/fd`).
+    Known,
+    /// Any other path in root's directories, which may be a directory there or not
+    /// (`/etc/default`, `/usr/tmp`): the user cannot change them, and the model does not list
+    /// them.
+    Unknown,
+    /// No directory: a file that the model knows (`/dev/null`, `/proc/self/fd/1`), a name at the
+    /// root that is not there (`/data`, `/snap`), or a path in `/root`, whose entries a user
+    /// cannot reach (mode 0700).
+    None,
+}
+
+/// What the model knows of `directory`, a path without links (`Directory`).
+fn directory_at(directory: &[u8]) -> Directory {
+    if directory == b"/"
+        || user_makes(directory)
+        || ROOT_DIRECTORIES.contains(&directory)
+        || NO_FREE_SPACE.contains(&directory)
+        || holds_known_file(directory)
+    {
+        Directory::Known
+    } else if is_known_file(directory)
+        || within(directory, b"/root")
+        || !ROOT_DIRECTORIES.iter().any(|root| within(directory, root))
+    {
+        Directory::None
+    } else {
+        Directory::Unknown
+    }
 }
 
 /// Whether a user's system opens `path` for writing, a path without links in a directory that
@@ -313,23 +342,112 @@ fn opens(path: &[u8]) -> bool {
         || user_makes(&path[..path.iter().rposition(|byte| *byte == b'/').unwrap_or(0)])
 }
 
+/// A path of LOSAT Web's Linux walked component by component as the system walks it (No NCBI
+/// counterpart: the system's resolution, `log_name`): `.` and empty components stay, `..` goes to
+/// the parent of the path walked so far (`/` stays), and a link (`LINKS`; `/proc/self/cwd` and
+/// `/proc/thread-self/cwd`, the working directory `cwd`) is replaced by its target, which is
+/// walked from `/`. Each step costs the component's length, so a name is read in time linear in
+/// its length (line WQA's D11 round 5, 2026-11-21: resolving each prefix again was cubic, a minute
+/// for a name of 4 KB in LOSAT Web's serial engine).
+struct Walk<'a> {
+    /// The path walked so far, without links; empty for `/`.
+    resolved: Vec<u8>,
+    /// The working directory, `/proc/self/cwd`'s target.
+    cwd: &'a [u8],
+}
+
+impl<'a> Walk<'a> {
+    /// The walk of `path` before its first component: at `/` for an absolute path, else at the
+    /// working directory `cwd`.
+    fn at(path: &[u8], cwd: &'a [u8]) -> Self {
+        let mut walk = Walk {
+            resolved: Vec::new(),
+            cwd,
+        };
+        if path.first() != Some(&b'/') {
+            walk.walk(cwd);
+        }
+        walk
+    }
+
+    /// `path` with its links followed and its `.` and `..` taken.
+    fn resolve(path: &[u8], cwd: &'a [u8]) -> Vec<u8> {
+        let mut walk = Walk::at(path, cwd);
+        walk.walk(path);
+        walk.path().to_vec()
+    }
+
+    /// Takes every component of `path`.
+    fn walk(&mut self, path: &[u8]) {
+        for part in path.split(|byte| *byte == b'/') {
+            self.step(part);
+        }
+    }
+
+    /// Takes the component `part`.
+    fn step(&mut self, part: &[u8]) {
+        #[cfg(test)]
+        WALK_STEPS.with(|steps| steps.set(steps.get() + 1));
+        match part {
+            b"" | b"." => {}
+            b".." => {
+                let parent = self.resolved.iter().rposition(|byte| *byte == b'/');
+                self.resolved.truncate(parent.unwrap_or(0));
+            }
+            _ => {
+                self.resolved.push(b'/');
+                self.resolved.extend_from_slice(part);
+                let target = match self.resolved.as_slice() {
+                    b"/proc/self/cwd" | b"/proc/thread-self/cwd" => Some(self.cwd),
+                    path => LINKS
+                        .iter()
+                        .find(|(link, _)| *link == path)
+                        .map(|(_, target)| *target),
+                };
+                if let Some(target) = target {
+                    self.resolved.clear();
+                    self.walk(target);
+                }
+            }
+        }
+    }
+
+    /// The path walked so far (`/` at the root).
+    fn path(&self) -> &[u8] {
+        if self.resolved.is_empty() {
+            b"/"
+        } else {
+            &self.resolved
+        }
+    }
+}
+
+/// The components that `Walk::step` takes on this thread (the test of `log_name`'s cost).
+#[cfg(test)]
+thread_local! {
+    static WALK_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// What the `-logfile` name `name` gives on the command line on Linux (No NCBI counterpart: LOSAT
-/// Web has no file system; line WQA's sweep, D11, 2026-11-20 and its rounds 2 to 4). The name is
+/// Web has no file system; line WQA's sweep, D11, 2026-11-20 and its rounds 2 to 5). The name is
 /// read as NCBI reads it on Unix (`ncbi_environment::log_file_name`, the command line's reading
 /// too) in a working directory of the user's own (`WORKING_TREE`) on a file system with free
 /// space: `logs/run.log`, ` run.log` (`run.log`), `logs/` (the file `logs`) and `/tmp/run.log`
 /// are files. A directory of '/'s only (`//run.log`) is none, as `CDirEntry::Reset` leaves it
 /// empty. The system then follows the links of Linux (`LINKS`; `/proc/self/cwd` is the working
 /// directory) in the directory that NCBI checks, in the path that it opens and in the directory
-/// whose free space it reads, and refuses a component of more than 255 bytes and a path of 4096
-/// or more (`fits`: `aaa...`, a directory `x/../x/../...` of 4096 bytes). The directory that NCBI
-/// checks (the name's as written, with each directory in it) must be a directory of the system
-/// (`is_directory`): one of root's that the Filesystem Hierarchy Standard requires, or one where
-/// the user makes entries, which the user made (`logs`, `/tmp/a`, `/home/me/logs`); not `/data`,
-/// `/bin/..` (`/usr`, then `/usr/tmp` is none), `/var/lock/..` (`/run`, then `/run/tmp`) or a file
-/// (`/dev/null/x`). The opened path is a directory, which NCBI cannot open (`cerr`), where it is
-/// the working directory or one of its ancestors, a directory that the name gives, one of root's
-/// or an ancestor of any of them (`.`, `logs/.`, `a/b/..`, `/tmp/`, `/proc/self/cwd`); NCBI
+/// whose free space it reads (`Walk`, once over the name), and refuses a component of more than
+/// 255 bytes and a path of 4096 or more (`fits`: `aaa...`, a directory `x/../x/../...` of 4096
+/// bytes). The directory that NCBI checks (the name's as written) is walked as the system walks
+/// it (`directory_at`): each directory that it passes may be one of root's that the model does
+/// not know, which a name passes on its way back out (`/etc/default/../../tmp`, as on the command
+/// line), but none that is not there (`/data`, a file: `/dev/null/x`, `/dev/stdout/..`); the
+/// directory where it ends must be one that the model knows, root's or one where the user makes
+/// entries, which the user made (`logs`, `/tmp/a`, `/home/me/logs`); not `/bin/..` (`/usr`, then
+/// `/usr/tmp`) or `/var/lock/..` (`/run`, then `/run/tmp`). The opened path is a directory, which
+/// NCBI cannot open (`cerr`), where it is the working directory or one of its ancestors, or a
+/// directory that the walk passed or one of its ancestors (`.`, `logs/.`, `a/b/..`, `/tmp/`,
+/// `/proc/self/cwd`); a directory of root's opens to no user (`opens`: `/tmp`, `/proc/self/fd`); NCBI
 /// cannot open a path that the system does not open to a user either (`opens`: `/dev/fd/3`,
 /// `/proc/self/status`, `/sys/...`, `/dev/pts/0`, `/dev/tty`, a name in a directory of root's:
 /// `/run.log`, `/etc/run.log`, `/var/log/run.log`, `/dev/run.log`, `/dev/kmsg`). A file opened in
@@ -357,57 +475,37 @@ fn log_name(name: &[u8]) -> LogName {
         Some(&cwd),
     )
     .expect("NCBI's Unix reading reads every name");
-    let link = |path: &[u8]| -> Option<Vec<u8>> {
-        match path {
-            b"/proc/self/cwd" | b"/proc/thread-self/cwd" => Some(cwd.clone()),
-            _ => LINKS
-                .iter()
-                .find(|(link, _)| *link == path)
-                .map(|(_, target)| target.to_vec()),
-        }
-    };
-    let resolve = |path: &[u8]| {
-        crate::blastinput::ncbi_environment::normalize_path(path, Some(&link))
-            .expect("the links of LOSAT Web's Linux end")
-    };
+    // The directories that the walk of the checked directory passes, each a directory of the
+    // system: the opened path is none of them nor an ancestor of one.
     let mut directories: Vec<Vec<u8>> = Vec::new();
     if let Some(directory) = &file.directory {
         if directory.is_empty() || !fits(directory) {
             return LogName::Unopened;
         }
-        let given = if directory.first() == Some(&b'/') {
-            directory.clone()
-        } else {
-            [cwd.as_slice(), b"/", directory].concat()
-        };
-        for end in given
-            .iter()
-            .enumerate()
-            .filter(|(_, byte)| **byte == b'/')
-            .map(|(at, _)| at + 1)
-            .chain([given.len()])
-        {
-            let checked = resolve(&given[..end]);
-            if !is_directory(&checked) {
+        let mut walk = Walk::at(directory, &cwd);
+        for part in directory.split(|byte| *byte == b'/') {
+            walk.step(part);
+            if directory_at(walk.path()) == Directory::None {
                 return LogName::Unopened;
             }
-            directories.push(checked);
+            if directories.last().map(Vec::as_slice) != Some(walk.path()) {
+                directories.push(walk.path().to_vec());
+            }
+        }
+        if directory_at(walk.path()) != Directory::Known {
+            return LogName::Unopened;
         }
     }
     directories.push(cwd.clone());
-    let path = resolve(&file.path);
+    let path = Walk::resolve(&file.path, &cwd);
     if file.path.is_empty()
         || !fits(&file.path)
-        || directories
-            .iter()
-            .map(Vec::as_slice)
-            .chain(DIRECTORIES)
-            .any(|directory| within(directory, &path))
+        || directories.iter().any(|directory| within(directory, &path))
         || !opens(&path)
     {
         return LogName::Unopened;
     }
-    let space = resolve(&file.space);
+    let space = Walk::resolve(&file.space, &cwd);
     if NO_FREE_SPACE.iter().any(|system| within(&space, system)) {
         return LogName::Nowhere;
     }
@@ -539,6 +637,15 @@ mod tests {
             long_climbed.as_str(),
             directory_4096.as_str(),
             directory_4099.as_str(),
+            // Round 5: a name ends in a directory that the model knows, and passes none that is
+            // not there (a file, a name at the root that is not there, an entry of `/root`).
+            "/lib/../tmp/run.log",
+            "/var/run/lock/../run.log",
+            "/etc/default/../tmp/run.log",
+            "/dev/null/../../tmp/run.log",
+            "/dev/fd/2/../../../tmp/run.log",
+            "/root/x/../../tmp/run.log",
+            "/data/x/../../tmp/run.log",
         ] {
             assert!(matches!(target(Some(name)), DiagTarget::Stderr), "{name}");
         }
@@ -581,6 +688,8 @@ mod tests {
             "/dev/fuse",
             "/dev/net/tun",
             "//dev/ptmx",
+            // Round 5: Ubuntu 24.04's kernels have `autogroup` (automatic group scheduling).
+            "/proc/self/autogroup",
         ] {
             assert!(matches!(target(Some(name)), DiagTarget::Discard), "{name}");
         }
@@ -620,6 +729,17 @@ mod tests {
             component_255.as_str(),
             directory_4094.as_str(),
             directory_4095.as_str(),
+            // Round 5: a name climbs out of directories of root's that the model does not list,
+            // which a user's command line passes (NCBI BLAST+ 2.17.0 writes the file; review 3).
+            "/etc/default/../../tmp/run.log",
+            "/usr/include/../../tmp/run.log",
+            "/usr/share/doc/../../../tmp/run.log",
+            "/usr/lib/x86_64-linux-gnu/../../../tmp/run.log",
+            "/var/mail/../tmp/run.log",
+            "/var/backups/../tmp/run.log",
+            "/dev/disk/../../tmp/run.log",
+            "/var/log/../../tmp/run.log",
+            "/var/lock/../../tmp/run.log",
         ];
         for name in names {
             let log = target(Some(name));
@@ -649,6 +769,26 @@ mod tests {
     /// The file that is the standard error writes where `cerr` does, and gets the messages
     /// collected before it was opened, which `cerr` has already; a file in memory keeps them, and
     /// `cerr` gets none (line WQA's sweep, D11, 2026-11-20).
+    /// A name of 4 KB is read in time linear in its length (review 3 M1, line WQA's D11 round 5,
+    /// 2026-11-21: resolving each of its directories again from `/` took about a minute in LOSAT
+    /// Web's serial engine): the walk takes each component a few times, not once per directory
+    /// before it.
+    #[test]
+    fn a_long_log_name_is_read_in_linear_time() {
+        for name in [
+            format!("{}run.log", "a/".repeat(2040)),
+            format!("{}run.log", "../".repeat(1360)),
+        ] {
+            assert!(name.len() < 4096);
+            WALK_STEPS.with(|steps| steps.set(0));
+            let started = std::time::Instant::now();
+            assert_eq!(log_name(name.as_bytes()), LogName::File);
+            let steps = WALK_STEPS.with(std::cell::Cell::get);
+            assert!(steps < 4 * name.len(), "{steps} steps");
+            assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        }
+    }
+
     #[test]
     fn the_standard_error_file_writes_to_the_standard_error() {
         use crate::blastinput::ncbi_environment::TextPlace;

@@ -1401,7 +1401,6 @@ mod tests {
             query.len() as i32,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            true,
             25.0,
             local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
         )

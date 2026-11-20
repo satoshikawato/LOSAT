@@ -40,6 +40,9 @@ use super::hsp::{
 
 pub(crate) use crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams;
 
+// NCBI's Smith-Waterman redo of a match with a square matrix (`-use_sw_tback`; item X4).
+pub(crate) mod smith_waterman;
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1614-1646
 // ```c
 // for (idx = 0;  idx < seqData->length;  idx++) {
@@ -1923,6 +1926,146 @@ pub(crate) fn postprocess_preliminary_hits(
     // NCBI's engine positives (`recount_engine_positives`).
     engine_positives: bool,
 ) -> Result<BlastpPostprocessResult> {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3635-3640
+    // ```c
+    // matrix,                 // thread-local
+    // BLASTAA_SIZE,           // const
+    // NRrecord,               // thread-local
+    // &pvalueForThisPair,     // local
+    // compositionTestIndex,   // thread-local
+    // &LambdaRatio            // local
+    // ```
+    // The X-drop redo of the match (`Blast_RedoOneMatch`).
+    postprocess_with(
+        preliminary_hits,
+        query_workspace,
+        composition_workspace,
+        query_nomask,
+        subject,
+        matrix,
+        karlin_params,
+        gumbel_params,
+        redo_align_params,
+        expect_value,
+        gap_scratch,
+        subject_range_cache,
+        engine_positives,
+        |incoming_aligns, matching_seq, lambda, composition_workspace, matrix_state| {
+            blast_redo_one_match_with_workspace_queries_and_matrix(
+                incoming_aligns,
+                redo_align_params,
+                matching_seq,
+                std::slice::from_ref(&query_workspace.redo_query_info),
+                lambda,
+                &BLASTP_REDO_ALIGN_CALLBACKS,
+                composition_workspace,
+                matrix_state,
+            )
+        },
+    )
+}
+
+/// The redo of one match with `-use_sw_tback` (item X4): `postprocess_preliminary_hits` with
+/// NCBI's Smith-Waterman redo (`smith_waterman::redo_one_match_smith_waterman`) in place of the
+/// X-drop redo; the steps after it are the same. `would_insert(evalue, score)` asks the query's
+/// heap of redone matches (`BlastCompo_HeapWouldInsert` with the match's subject index). The
+/// errors `SwRedoFailed` and `SwRedoEndless` are NCBI's failed and endless redos.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3605
+/// ```c
+///                     if (smithWaterman) {
+///                         *pStatusCode =
+///                                 Blast_RedoOneMatchSmithWaterman(
+///                                         alignments,
+/// ```
+// Out of line: the one-thread loop calls it where `-use_sw_tback` asks for it, and the X-drop
+// redo's function keeps its own body.
+#[inline(never)]
+pub(crate) fn postprocess_preliminary_hits_smith_waterman(
+    preliminary_hits: &[BlastpPreliminaryHsp],
+    query_workspace: &BlastpKappaQueryWorkspace,
+    composition_workspace: &mut BlastCompositionWorkspace,
+    query_nomask: &[u8],
+    subject: &[u8],
+    matrix: ScoringMatrix,
+    karlin_params: &KarlinParams,
+    gumbel_params: Option<&BlastGumbelBlk>,
+    redo_align_params: &BlastRedoAlignParams,
+    expect_value: f64,
+    gap_scratch: &mut GapAlignScratch,
+    subject_range_cache: &mut BlastpKappaSubjectRangeCache,
+    engine_positives: bool,
+    sw_scratch: &mut smith_waterman::SwMatchScratch,
+    would_insert: &mut dyn FnMut(f64, i32) -> bool,
+) -> Result<BlastpPostprocessResult> {
+    postprocess_with(
+        preliminary_hits,
+        query_workspace,
+        composition_workspace,
+        query_nomask,
+        subject,
+        matrix,
+        karlin_params,
+        gumbel_params,
+        redo_align_params,
+        expect_value,
+        gap_scratch,
+        subject_range_cache,
+        engine_positives,
+        |incoming_aligns, matching_seq, lambda, composition_workspace, matrix_state| {
+            // BLASTP's match has the HSPs of one query: its heap is the query's
+            // (`significantMatches[query_index]`).
+            smith_waterman::redo_one_match_smith_waterman(
+                incoming_aligns,
+                redo_align_params,
+                matching_seq,
+                std::slice::from_ref(&query_workspace.redo_query_info),
+                lambda,
+                &BLASTP_REDO_ALIGN_CALLBACKS,
+                composition_workspace,
+                matrix_state,
+                expect_value,
+                &mut |_query_index, evalue, score| would_insert(evalue, score),
+                sw_scratch,
+            )
+        },
+    )
+}
+
+/// The redo of one match and the steps after it (`postprocess_preliminary_hits`): `redo` is the
+/// match's redo (`Blast_RedoOneMatch` or `Blast_RedoOneMatchSmithWaterman`) of the incoming
+/// alignments, the matching sequence, the redo's scaled Lambda, the composition workspace and the
+/// matrix state. One source with one instance per redo: the X-drop redo's instance is the body of
+/// `postprocess_preliminary_hits` (its only caller), the Smith-Waterman redo's that of
+/// `postprocess_preliminary_hits_smith_waterman`.
+#[inline(always)]
+fn postprocess_with<R>(
+    preliminary_hits: &[BlastpPreliminaryHsp],
+    query_workspace: &BlastpKappaQueryWorkspace,
+    composition_workspace: &mut BlastCompositionWorkspace,
+    query_nomask: &[u8],
+    subject: &[u8],
+    matrix: ScoringMatrix,
+    karlin_params: &KarlinParams,
+    gumbel_params: Option<&BlastGumbelBlk>,
+    redo_align_params: &BlastRedoAlignParams,
+    expect_value: f64,
+    gap_scratch: &mut GapAlignScratch,
+    subject_range_cache: &mut BlastpKappaSubjectRangeCache,
+    engine_positives: bool,
+    redo: R,
+) -> Result<BlastpPostprocessResult>
+where
+    R: FnOnce(
+        &Option<Box<BlastCompoAlignment>>,
+        &BlastCompoMatchingSequence<'_>,
+        f64,
+        &mut BlastCompositionWorkspace,
+        &mut Option<AdjustedProteinMatrix>,
+    ) -> Result<
+        crate::core::composition_adjustment::redo_alignment::BlastRedoOneMatchResult,
+    >,
+{
     if preliminary_hits.is_empty() {
         return Ok(BlastpPostprocessResult {
             hsp_list: None,
@@ -1987,24 +2130,13 @@ pub(crate) fn postprocess_preliminary_hits(
         .gapping_params
         .context
         .replace(Some(NonNull::from(&redo_context).cast::<c_void>()));
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3635-3640
-    // ```c
-    // matrix,                 // thread-local
-    // BLASTAA_SIZE,           // const
-    // NRrecord,               // thread-local
-    // &pvalueForThisPair,     // local
-    // compositionTestIndex,   // thread-local
-    // &LambdaRatio            // local
-    // ```
     // The matrix that the match's adjustments leave (NCBI's thread-local `sbp->matrix->data`,
     // which `Blast_AdjustScores` overwrites), read by `recount_engine_positives`; the call is
     // that of `blast_redo_one_match_with_workspace`, which starts every match with none.
     let mut matrix_state: Option<AdjustedProteinMatrix> = None;
-    let distinct_alignments = blast_redo_one_match_with_workspace_queries_and_matrix(
+    let distinct_alignments = redo(
         &incoming_aligns,
-        redo_align_params,
         &matching_seq,
-        std::slice::from_ref(&query_workspace.redo_query_info),
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2120-2128
         // ```c
         // if (sbp->kbp_gap[i] != NULL) {
@@ -2013,7 +2145,6 @@ pub(crate) fn postprocess_preliminary_hits(
         // }
         // ```
         redo_karlin_params.lambda,
-        &BLASTP_REDO_ALIGN_CALLBACKS,
         composition_workspace,
         &mut matrix_state,
     );

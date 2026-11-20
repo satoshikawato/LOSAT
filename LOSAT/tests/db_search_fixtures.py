@@ -56,7 +56,14 @@ LOSAT/tests/db_search (README.md there says how they were built).
   <row_id>.out by `freeze` (which runs NCBI for such a row and keeps only its stdout) and checked
   against `stdout_sha256`. Its `rc` and stderr are LOSAT's. Where NCBI crashes on such a row, the frozen
   stdout is the part of the report that LOSAT writes before it refuses; `freeze` keeps it when NCBI's
-  stdout stops earlier or later but agrees up to that point (`frozen_stdout`).
+  stdout stops earlier or later but agrees up to that point (`frozen_stdout`). A rejection row whose
+  `covers` cell has `ncbi-near: ROW_ID` takes its stdout from the `ncbi` row ROW_ID of the same outfmt,
+  NCBI's run of a near input that writes the bytes LOSAT writes before it refuses: an input that fails at
+  the same step where NCBI crashes on the row's own (line RG item X4: the failed batch of a
+  Smith-Waterman redo), or the query batches before the batch that LOSAT refuses and NCBI searches on
+  (X4: the negative CHUNK_SIZE pair whose chunks leave gaps). `freeze` runs nothing for such a row and
+  copies ROW_ID's stdout columns, `check` reads ROW_ID's frozen stdout (`frozen_id`), and the row keeps
+  its own rc and stderr (LOSAT's).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -498,7 +505,7 @@ def freeze(args: argparse.Namespace) -> int:
         if not selected(row, args):
             continue
         command = [str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"]
-        if row["kind"] == "losat-rejection" and row["stdout_bytes"]:
+        if row["kind"] == "losat-rejection" and row["stdout_bytes"] and not near_row_id(row):
             # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too.
             if xinclude.wants_pssm(row):
                 run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
@@ -565,12 +572,15 @@ def freeze(args: argparse.Namespace) -> int:
     by_id = {row["row_id"]: row for row in rows}
     for row in rows:
         near = near_row_id(row)
-        if not selected(row, args) or row["kind"] != "ncbi" or not near:
+        if not selected(row, args) or row["kind"] not in ("ncbi", "losat-rejection") or not near:
             continue
         source = by_id.get(near)
         if source is None or source["kind"] != "ncbi" or near_row_id(source) or source["outfmt"] != row["outfmt"]:
             raise SystemExit(f"{row['row_id']}: ncbi-near {near} is not an ncbi row of its own run with the same outfmt")
-        row.update({key: source[key] for key in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")})
+        # A rejection row keeps its own rc and stderr (LOSAT's) and takes the near run's stdout.
+        keys = ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256") if row["kind"] == "ncbi" \
+            else ("stdout_sha256", "stdout_bytes")
+        row.update({key: source[key] for key in keys})
         print(f"{row['row_id']}\tncbi-near={near}\trc={row['rc']}\tstdout={row['stdout_bytes']}")
     write_manifest(comments, rows)
     return 0
@@ -659,7 +669,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
         # library skips.
         if row["stdout_bytes"]:
-            out_path = FROZEN / f"{row['row_id']}.out"
+            out_path = FROZEN / f"{frozen_id(row)}.out"
             out = out_path.read_bytes() if out_path.exists() else b""
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")

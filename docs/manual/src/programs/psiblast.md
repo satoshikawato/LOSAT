@@ -92,6 +92,7 @@ Not yet supported:
 Also refused:
 
 - `-remote`, `-entrez_query`, `-html`, `-import_search_strategy`, `-gilist` and `-ipglist`.
+- `-use_sw_tback`.
 - With `-in_pssm` or `-in_msa`: any matrix or gap cost other than BLOSUM62 with 11/1. With `-in_pssm`: a PSSM in binary or XML form.
 - With `-in_msa`, where NCBI BLAST+ crashes: a query sequence of X or O alone, and `-matrix IDENTITY`.
 - A `-subject` file whose sequences all have no letters.

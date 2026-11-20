@@ -38,6 +38,10 @@ const PROGRAMS: &[(&str, &str)] = &[
         "convert2blastmask",
         include_str!("ncbi_xmlhelp/convert2blastmask.xml"),
     ),
+    (
+        "blast_formatter",
+        include_str!("ncbi_xmlhelp/blast_formatter.xml"),
+    ),
 ];
 
 /// NCBI 2.17.0's `-xmlhelp` of `program`, unchanged.

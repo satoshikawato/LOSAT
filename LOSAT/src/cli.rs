@@ -178,6 +178,7 @@ fn entry_program_description(name: &str) -> &'static str {
         "convert2blastmask" => {
             "Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb"
         }
+        "blast_formatter" => "Stand-alone BLAST formatter client, version 2.17.0+",
         _ => "",
     }
 }
@@ -1036,15 +1037,21 @@ pub(crate) fn run_refusal(program: &str, name: &str) -> String {
     }
 }
 
+/// LOSAT's refusal of NCBI's option `-name` in the program `shown` (its name in LOSAT's
+/// refusals, `BLASTN`): the options that need NCBI's servers (`-remote` in the search programs,
+/// `-rid` in blast_formatter) and the others that LOSAT does not run. The command line writes it
+/// as clap's errors (`command_line_message`, exit status 2).
+pub(crate) fn named_option_refusal(name: &str, shown: &str) -> clap::Error {
+    clap::Error::raw(
+        ErrorKind::InvalidValue,
+        format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's {shown}"),
+    )
+}
+
 /// LOSAT's refusal of NCBI's argument `-name`, which `program` does not define, by name; `None`
 /// for a name that LOSAT does not refuse by name (an unknown option, as NCBI's).
 fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
-    let refusal = |shown: &str| {
-        Some(clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's {shown}"),
-        ))
-    };
+    let refusal = |shown: &str| Some(named_option_refusal(name, shown));
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
     // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
     // The named NCBI options below have no Stage B Rust behavior.
@@ -2528,11 +2535,24 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
     } else {
         format!(":  `{}'", path.display())
     };
+    command_line_argument_error(&format!(
+        "Argument \"{name}\". File is not accessible{value}"
+    ))
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
+// ```c++
+//     catch (const CArgException& e) {                                        \
+//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
+//         exit_code = BLAST_INPUT_ERROR;                                      \
+//     }                                                                       \
+// ```
+/// `CATCH_ALL`'s report of a `CArgException` with the message `message` (`GetMsg()`) that a
+/// program's `Run` throws: exit status 1.
+pub(crate) fn command_line_argument_error(message: &str) -> anyhow::Error {
     NativeError {
         exit: 1,
-        message: format!(
-            "Command line argument error: Argument \"{name}\". File is not accessible{value}\n"
-        ),
+        message: format!("Command line argument error: {message}\n"),
     }
     .into()
 }

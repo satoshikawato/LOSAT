@@ -328,6 +328,17 @@ pub fn convert2blastmask<'py>(
     run_tool(py, argv, input, api::run_convert2blastmask)
 }
 
+/// `blast_formatter` with the command line's words: `input` is its standard input (`-archive -`).
+/// Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn blast_formatter<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    run_tool(py, argv, input, api::run_blast_formatter)
+}
+
 /// `run` without reports.
 fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTuple>> {
     let mut batches = api::run_batches(&loaded.search, loaded.inputs()).map_err(exception)?;

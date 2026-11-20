@@ -23,6 +23,8 @@
 //!   paragraph says ("It also refuses the `blastp` entries above that apply to it").
 //! - The NCBI executables are covered when `ENTRY_NAMES` holds them or a backticked name in the
 //!   headings `Programs LOSAT does not provide` and `Out of scope` is theirs.
+//! - blast_formatter's refusals (`crate::blast_formatter::refusals`, one list) are documented when
+//!   the lines of the heading `blast_formatter` hold the words of each one.
 
 use super::*;
 
@@ -248,4 +250,29 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
         }
     }
     assert!(wrong.is_empty(), "\n{}\n", wrong.join("\n"));
+}
+
+#[test]
+fn every_blast_formatter_refusal_is_in_its_readme_paragraph() {
+    let paragraph: Vec<&str> = refusal_lines()
+        .into_iter()
+        .filter(|(heading, _)| *heading == "blast_formatter")
+        .map(|(_, line)| line)
+        .collect();
+    assert!(
+        !paragraph.is_empty(),
+        "README.md's \"What LOSAT refuses\" has no paragraph **blast_formatter**"
+    );
+    let mut missing = Vec::new();
+    for refusal in crate::blast_formatter::refusals::documented() {
+        let words = refusal
+            .readme_words()
+            .expect("a refusal that a release has");
+        if !paragraph.iter().any(|line| line.contains(&words)) {
+            missing.push(format!(
+                "blast_formatter: {refusal:?} ({words}) is refused by LOSAT but README.md's paragraph **blast_formatter** does not name it"
+            ));
+        }
+    }
+    assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
 }

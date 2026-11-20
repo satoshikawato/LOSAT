@@ -37,7 +37,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 - `rpsblast` writes `0`, `6`, `7` and `10`.
 - `tblastn` with `-in_pssm` writes `0` to `4`, `6`, `7` and `10`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` have their own formats, listed on their pages.
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `8`, `9` and `12` from the `-outfmt 11` archive of a search (see [blast_formatter](programs/blast_formatter.md)).
 
 ## Pairwise and query-anchored text (0 to 4)
 

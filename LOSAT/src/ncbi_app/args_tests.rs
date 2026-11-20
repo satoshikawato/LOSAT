@@ -15,6 +15,7 @@ static TOOL: Tool = Tool {
     descs: &[
         key("n", Kind::Integer, Some("7"), None),
         key("m", Kind::Integer, None, Some(Constraint::AtLeast(1))),
+        key("b", Kind::Integer, None, Some(Constraint::Between(0, 4))),
         key("in", Kind::InputFile, Some("-"), None),
         key("opt", Kind::Text, None, None),
         flag("f"),
@@ -128,6 +129,12 @@ fn integer_keys_convert_as_ncbi_s_reader() {
         )
     );
     assert_eq!(
+        parse_words(&["-b", "0x1"]).unwrap_err(),
+        ArgsError::Refused(
+            "the hexadecimal value '0x1' of -b is not supported by LOSAT's T".to_string()
+        )
+    );
+    assert_eq!(
         messages(&["-m", "0"]),
         (
             "eConstraint",
@@ -184,4 +191,31 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
             strings(&["Too many positional arguments (1), the offending value: true"])
         )
     );
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:161-184
+// (quoted at `Constraint::usage`). NCBI BLAST+ 2.17.0 blast_formatter `-sorthits 5` and
+// `-sorthsps 5` (line RG item F3, probes P2.055 and P2.073): `Illegal value, expected (>=0 and
+// =<4):  `5'`.
+#[test]
+fn a_key_between_two_numbers_takes_both_ends() {
+    for (text, number) in [("0", 0), ("4", 4), ("+2", 2), ("004", 4)] {
+        assert_eq!(
+            parse_words(&["-b", text]).unwrap().integer("b"),
+            Some(number),
+            "{text}"
+        );
+    }
+    for text in ["5", "-1", "2147483647"] {
+        assert_eq!(
+            messages(&["-b", text]),
+            (
+                "eConstraint",
+                strings(&[&format!(
+                    "Argument \"b\". Illegal value, expected (>=0 and =<4):  `{text}'"
+                )])
+            ),
+            "{text}"
+        );
+    }
 }

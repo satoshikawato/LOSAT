@@ -203,7 +203,27 @@ pub fn report_counts(
     num_descriptions: Option<usize>,
     num_alignments: Option<usize>,
 ) -> ReportCounts {
-    let mut hitlist_size = BLAST_HITLIST_SIZE;
+    report_counts_from(
+        BLAST_HITLIST_SIZE,
+        outfmt,
+        max_target_seqs,
+        num_descriptions,
+        num_alignments,
+    )
+}
+
+/// `report_counts` of options whose hit list size is `hitlist_size` before the formatting handler
+/// reads the command line (`opt.GetHitlistSize()`): `BLAST_HITLIST_SIZE` in a search, the
+/// archive's in blast_formatter. A size above `BLAST_HITLIST_SIZE` that NCBI keeps
+/// (`kept_hitlist_counts`) is not handled here.
+pub fn report_counts_from(
+    hitlist_size: usize,
+    outfmt: i32,
+    max_target_seqs: Option<usize>,
+    num_descriptions: Option<usize>,
+    num_alignments: Option<usize>,
+) -> ReportCounts {
+    let mut hitlist_size = hitlist_size;
     if outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES {
         let mut counts = ReportCounts::default();
         if let Some(n) = num_descriptions {
@@ -234,6 +254,46 @@ pub fn report_counts(
             num_alignments: hitlist_size,
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
+// ```c++
+//     // Default hitlist size 500, value can be changed if import search strategy is used
+//     int hitlist_size = opt.GetHitlistSize();
+//
+//     // To preserve hitlist size in import search strategy > 500,
+//     // we need to increase the  num_ descriptions and num_alignemtns
+//     if(hitlist_size > BLAST_HITLIST_SIZE )
+//     {
+//     	if((!args.Exist(kArgNumDescriptions) || !args[kArgNumDescriptions]) &&
+//            (!args.Exist(kArgNumAlignments) || !args[kArgNumAlignments]) &&
+//     	   (m_OutputFormat <= eFlatQueryAnchoredNoIdentities)) {
+//     		m_NumDescriptions = hitlist_size;
+//     		m_NumAlignments = hitlist_size/ 2;
+//     		return;
+//     	}
+//     }
+// ```
+/// The counts of options whose hit list size `hitlist_size` is above `BLAST_HITLIST_SIZE` before
+/// the formatting handler reads the command line (an archive's in blast_formatter), when NCBI
+/// keeps it: output format `outfmt` up to 4 and neither `-num_descriptions` nor `-num_alignments`
+/// given. The handler then returns at once: `-max_target_seqs`, `-line_length`, `-sorthits` and
+/// `-sorthsps` are not read and no warning is written. `None` otherwise (`report_counts_from`).
+pub fn kept_hitlist_counts(
+    hitlist_size: usize,
+    outfmt: i32,
+    num_descriptions_given: bool,
+    num_alignments_given: bool,
+) -> Option<ReportCounts> {
+    (hitlist_size > BLAST_HITLIST_SIZE
+        && !num_descriptions_given
+        && !num_alignments_given
+        && outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
+        .then_some(ReportCounts {
+            hitlist_size,
+            num_descriptions: hitlist_size,
+            num_alignments: hitlist_size / 2,
+        })
 }
 
 impl ReportCounts {
@@ -298,31 +358,45 @@ impl ReportCounts {
         num_descriptions_given: bool,
         formatting: &FormattingArgs,
     ) -> Vec<u8> {
+        self.posted_warnings(Some(program), outfmt, num_descriptions_given, formatting)
+    }
+
+    /// `warnings_with` of an application whose posts have the prefix `prefix` (the search
+    /// programs' `[blastn] `; blast_formatter sets none, `blast_formatter::formatting`).
+    pub fn posted_warnings(
+        &self,
+        prefix: Option<&str>,
+        outfmt: i32,
+        num_descriptions_given: bool,
+        formatting: &FormattingArgs,
+    ) -> Vec<u8> {
+        use crate::report::query_warnings::{few_matches_warning, warning_line};
         let mut text = Vec::new();
-        let mut warn = |message: &str| {
-            text.extend_from_slice(format!("Warning: [{program}] {message}\n").as_bytes());
-        };
         if outfmt > output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES {
             if num_descriptions_given {
-                warn("The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output");
+                text.extend(warning_line(prefix, "The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output"));
             }
             if formatting.line_length.is_some() {
-                warn("The parameter -line_length is not applicable for output formats > 4 .");
+                text.extend(warning_line(
+                    prefix,
+                    "The parameter -line_length is not applicable for output formats > 4 .",
+                ));
             }
             if formatting.sort_hits.is_some() {
-                warn("The parameter -sorthits is ignored for output formats > 4.");
+                text.extend(warning_line(
+                    prefix,
+                    "The parameter -sorthits is ignored for output formats > 4.",
+                ));
             }
         }
         if self.hitlist_size < 5 {
-            text.extend_from_slice(&crate::report::query_warnings::few_matches_warning(program));
+            text.extend(few_matches_warning(prefix));
         }
         if formatting.sort_hsps.is_some() && outfmt != output_format::PAIRWISE {
-            text.extend_from_slice(
-                format!(
-                    "Warning: [{program}] The parameter -sorthsps is ignored for output formats != 0.\n"
-                )
-                .as_bytes(),
-            );
+            text.extend(warning_line(
+                prefix,
+                "The parameter -sorthsps is ignored for output formats != 0.",
+            ));
         }
         text
     }
@@ -592,5 +666,40 @@ mod tests {
             "Warning: [blastn] Examining 5 or more matches is recommended\n"
         );
         assert!(run_report_counts("blastn", &[], None, None, None).is_err());
+    }
+
+    // blast_args.cpp:2894-2908 (quoted at `kept_hitlist_counts`): the hit list size that the
+    // options held before the handler (an archive's in blast_formatter) is the start of the
+    // counts, and one above 500 is kept for the formats up to 4 when neither
+    // -num_descriptions nor -num_alignments is given.
+    #[test]
+    fn the_hit_list_size_of_the_options_is_the_start() {
+        let from = |start, outfmt, mts, nd, na| {
+            let c = report_counts_from(start, outfmt, mts, nd, na);
+            (c.hitlist_size, c.num_descriptions, c.num_alignments)
+        };
+        assert_eq!(from(100, 0, None, None, None), (100, 500, 250));
+        assert_eq!(from(100, 6, None, None, None), (100, 100, 100));
+        assert_eq!(from(3, 6, None, None, None), (3, 3, 3));
+        assert_eq!(from(100, 0, Some(7), None, None), (7, 7, 7));
+        assert_eq!(from(100, 6, None, None, Some(2)), (2, 2, 2));
+        assert_eq!(from(100, 0, None, Some(3), None), (250, 3, 250));
+        let kept = |start, outfmt, nd, na| {
+            kept_hitlist_counts(start, outfmt, nd, na)
+                .map(|c| (c.hitlist_size, c.num_descriptions, c.num_alignments))
+        };
+        assert_eq!(kept(1001, 0, false, false), Some((1001, 1001, 500)));
+        assert_eq!(kept(600, 4, false, false), Some((600, 600, 300)));
+        assert_eq!(kept(500, 0, false, false), None);
+        assert_eq!(kept(600, 5, false, false), None);
+        assert_eq!(kept(600, 0, true, false), None);
+        assert_eq!(kept(600, 0, false, true), None);
+        // blast_formatter's posts have no prefix.
+        let c = report_counts_from(3, 6, None, None, None);
+        assert_eq!(
+            String::from_utf8(c.posted_warnings(None, 6, false, &FormattingArgs::default()))
+                .unwrap(),
+            "Warning: Examining 5 or more matches is recommended\n"
+        );
     }
 }

@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 14] = [
+const PROGRAMS: [&str; 15] = [
     "blastn",
     "blastp",
     "blastx",
@@ -61,6 +61,7 @@ const PROGRAMS: [&str; 14] = [
     "segmasker",
     "convert2blastmask",
     "rpsbproc",
+    "blast_formatter",
 ];
 
 /// The program names that `losat --install-shims` listed on standard output (one path per
@@ -281,7 +282,13 @@ fn top_level_help_names_every_program() {
         assert!(text.contains("\nDESCRIPTION\n"), "{text}");
         assert!(text.contains("losat -install-shims [DIR]"), "{text}");
         // An "Other programs" line has a description.
-        for program in ["blastdbcmd", "dustmasker", "segmasker", "convert2blastmask"] {
+        for program in [
+            "blastdbcmd",
+            "dustmasker",
+            "segmasker",
+            "convert2blastmask",
+            "blast_formatter",
+        ] {
             let line = text
                 .lines()
                 .find(|line| line.split_whitespace().next() == Some(program))

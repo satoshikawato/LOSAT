@@ -274,7 +274,7 @@
         "J"
       ],
       "claim": "certified",
-      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (blastn: megablast, blastn, dc-megablast, blastn-short; blastp: blastp, blastp-fast, blastp-short; blastx: blastx, blastx-fast; tblastn: tblastn, tblastn-fast; tblastx; psiblast; rpsblast; rpstblastn; and the tools makeblastdb, blastdbcmd, dustmasker, segmasker, convert2blastmask, rpsbproc)"
+      "wording": "Supported: matches NCBI BLAST+ 2.17.0 on the release test set (blastn: megablast, blastn, dc-megablast, blastn-short; blastp: blastp, blastp-fast, blastp-short; blastx: blastx, blastx-fast; tblastn: tblastn, tblastn-fast; tblastx; psiblast; rpsblast; rpstblastn; and the tools makeblastdb, blastdbcmd, dustmasker, segmasker, convert2blastmask, blast_formatter, rpsbproc)"
     },
     {
       "platform": "Linux aarch64",

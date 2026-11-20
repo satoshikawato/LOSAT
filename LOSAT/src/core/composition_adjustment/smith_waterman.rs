@@ -51,6 +51,7 @@
 
 use super::compo_scale::COMPO_SCORE_MIN;
 use crate::core::blast_util::BLASTAA_SIZE;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:38-43
 // ```c
@@ -707,6 +708,397 @@ where
         match_start: best_match_seq_pos,
         query_start: best_query_pos,
     }
+}
+
+/// The memory of NCBI's Smith-Waterman round loop that the redo keeps from one window to the next
+/// (`smith_waterman_redo_window`): the forbidden ranges (NCBI's thread-local `forbidden_tld`) and
+/// the scans' memory (`scoreVector`).
+#[derive(Debug)]
+pub(crate) struct SwRounds {
+    forbidden: ForbiddenRanges,
+    scan: SwScratch,
+}
+
+impl Default for SwRounds {
+    // No ranges (`ForbiddenRanges::new`: `isEmpty` true, as `clear` leaves them at each window).
+    fn default() -> Self {
+        Self {
+            forbidden: ForbiddenRanges::new(),
+            scan: SwScratch::new(),
+        }
+    }
+}
+
+/// What the Smith-Waterman redo keeps from one match to the next: the round loop's memory, one
+/// owner for BLASTP's and RPS-BLAST's redo (`rounds`), and the caller's own memory of its windows
+/// (`window`: RPS-BLAST's copy of the subject between NCBI's two sentinels, BLASTP's rows of the
+/// adjusted square matrix and its X-drop traceback's memory).
+#[derive(Debug, Default)]
+pub(crate) struct SwRedoScratch<W> {
+    pub(crate) rounds: SwRounds,
+    pub(crate) window: W,
+}
+
+impl<W: Default> SwRedoScratch<W> {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// `s_EvalueFromScore`: the e-value of a Smith-Waterman score in the redo's significance test.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:943-947
+/// ```c
+/// static double
+/// s_EvalueFromScore(int score, double Lambda, double logK, double searchsp)
+/// {
+///     return searchsp * exp(-(Lambda * score) + logK);
+/// }
+/// ```
+pub(crate) fn evalue_from_score(score: i32, lambda: f64, log_k: f64, searchsp: f64) -> f64 {
+    searchsp * (-(lambda * f64::from(score)) + log_k).glibc_exp()
+}
+
+/// The significance test of a round (redo_alignment.c:1456-1474, quoted at
+/// `smith_waterman_redo_window`).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SwSignificance {
+    /// With linked HSPs (`do_link_hsps`): `aSwScore >= params->cutoff_s`.
+    CutoffScore(i32),
+    /// Otherwise the e-value of the score (`s_EvalueFromScore` with the redo's scaled `Lambda`,
+    /// `logK` and the query's `eff_search_space`) below `params->cutoff_e` (`-evalue`), and before
+    /// the query's first alignment the heap test (`BlastCompo_HeapWouldInsert`).
+    Evalue {
+        lambda: f64,
+        log_k: f64,
+        searchsp: f64,
+        cutoff_e: f64,
+    },
+}
+
+impl SwSignificance {
+    /// The e-value of `score` (`None` with linked HSPs) and whether it passes the threshold.
+    fn test(self, score: i32) -> (Option<f64>, bool) {
+        match self {
+            Self::CutoffScore(cutoff_s) => (None, score >= cutoff_s),
+            Self::Evalue {
+                lambda,
+                log_k,
+                searchsp,
+                cutoff_e,
+            } => {
+                let evalue = evalue_from_score(score, lambda, log_k, searchsp);
+                (Some(evalue), evalue < cutoff_e)
+            }
+        }
+    }
+}
+
+/// One window of the Smith-Waterman redo as the round loop reads it: NCBI's `subject.data - 1`
+/// (the sentinel before the window's letters, then the `subject_length` letters and a sentinel;
+/// `ALIGN_EX` reads it so), the window's query length and the score rows of its positions (a PSSM's
+/// `pssm[queryPos]`, or a square matrix's `matrix[query[queryPos]]`: one row source of the kernels),
+/// the gap costs and the window's count of preliminary HSPs (`window->hspcnt`).
+pub(crate) struct SwWindow<'a, F> {
+    pub(crate) subject_from_sentinel: &'a [u8],
+    pub(crate) subject_length: usize,
+    pub(crate) query_length: usize,
+    pub(crate) rows: F,
+    pub(crate) gap_open: i32,
+    pub(crate) gap_extend: i32,
+    pub(crate) hspcnt: usize,
+}
+
+/// The traceback of a Smith-Waterman alignment (`s_SWFindFinalEndsUsingXdrop`): its extents from
+/// the start in the query and the subject (`*queryAlignmentExtent`, `*matchAlignmentExtent`), the
+/// X-drop alignment's score and its edit script (`pssm_search::gapalign::pssm_sw_xdrop_traceback`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SwXdropTraceback {
+    pub(crate) query_extent: i32,
+    pub(crate) match_extent: i32,
+    pub(crate) score: i32,
+    pub(crate) edit_script: Vec<crate::common::GapEditOp>,
+}
+
+/// An alignment of the round loop, in the window's coordinates (`queryStart`, the updated
+/// `queryEnd`, `matchStart`, the updated `matchEnd` of `s_NewAlignmentUsingXdrop`), with the X-drop
+/// score and edit script; the caller adds the window's offsets, its frame and matrix rule
+/// (`BlastCompo_AlignmentNew`, blast_kappa.c:1856-1873).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SwAlignment {
+    pub(crate) score: i32,
+    pub(crate) query_start: i32,
+    pub(crate) query_end: i32,
+    pub(crate) match_start: i32,
+    pub(crate) match_end: i32,
+    pub(crate) edit_script: Vec<crate::common::GapEditOp>,
+}
+
+/// What the round loop of one window gives (`smith_waterman_redo_window`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SwWindowRedo {
+    /// The window's alignments in the order the rounds made them (NCBI prepends each one to
+    /// `alignments[query_index]`, so its list starts with the last).
+    Alignments(Vec<SwAlignment>),
+    /// NCBI's failed redo: a significant alignment whose X-drop traceback has no operation
+    /// (`GapEditScriptNew(0)` is NULL, `s_NewAlignmentUsingXdrop` returns -1); NCBI frees the
+    /// match's alignments and returns -1 (redo_alignment.c:1542-1548).
+    Failed,
+    /// NCBI's redo that does not end: a significant score of 0 in a window of two or more HSPs
+    /// whose first query position scores the subject's first letter above 0 (see
+    /// `smith_waterman_redo_window`); NCBI makes that one-cell alignment until an allocation fails.
+    Endless,
+}
+
+/// The round loop of one window of `Blast_RedoOneMatchSmithWaterman`, after its composition
+/// adjustment, for BLASTP's square matrix and RPS-BLAST's PSSM: the score-only scan, the
+/// significance test (`significance`; before the query's first alignment also
+/// `would_insert(evalue, score)`, NCBI's `BlastCompo_HeapWouldInsert` of the query's heap, which
+/// the window's first alignment is), the start scan, the X-drop traceback from the start
+/// (`traceback((query_start, query_end), (match_start, match_end), score)`, NCBI's
+/// `new_xdrop_align`), and for a window of two or more HSPs the range of each alignment made
+/// forbidden and the next round. The forbidden ranges are set to the window's query length
+/// (NCBI's `Blast_ForbiddenRangesInitialize` with the queries' longest length, every range of the
+/// window inside of it) and cleared.
+///
+/// The regime of a significant score of 0 is decided at the window's first significant round. When
+/// the score of 0 passes the threshold (`s_EvalueFromScore(0, ..) = searchsp * K < cutoff_e`, or
+/// `0 >= cutoff_s`) and the window has two or more HSPs, every round is significant (a later score
+/// is at least 0, its e-value at most that of 0, and the heap is asked at the first round only),
+/// and every round of a positive score forbids its start cell, which was free and whose diagonal
+/// step is positive (the reverse scan's first best comes from the diagonal), so the loop makes
+/// every positive alignment and comes to a round of score 0. That round's score-only scan ends at
+/// (0, 0) (`bestQueryPos = bestMatchSeqPos = 0`, a best only for `>`), its find-start stops at
+/// (0, 0) (`bestScore >= score_in` with 0), and `s_SWFindFinalEndsUsingXdrop` aligns the 1 x 1
+/// rectangle there: the first query position's row against the subject's first letter (after
+/// SEG). A positive score makes one substitution, prepends it and pushes `[0, 1]` onto row 0 again,
+/// which changes no score the scan sees (every cell scores 0 already): the next round is the same,
+/// and NCBI makes it until an allocation fails (`Endless`). Otherwise `ALIGN_EX` makes no
+/// operation, `GapEditScriptNew(0)` is NULL, the X-drop callback returns -1 and NCBI frees the
+/// match's alignments (`Failed`). Both outcomes follow from the cell, so they are answered at the
+/// first round, without the rounds. With one HSP the loop makes one round, whose score of 0 (all
+/// cells 0 or less) also fails, at its traceback.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1438-1529
+/// ```c
+///             Blast_ForbiddenRangesClear(forbidden);
+///             do {
+///                 int matchEnd, queryEnd;    /* end points of the alignments
+///                                             * computed by the Smith-Waterman
+///                                             * algorithm. */
+///                 status =
+///                     Blast_SmithWatermanScoreOnly(&aSwScore, &matchEnd,
+///                                                  &queryEnd,
+///                                                  subject.data,
+///                                                  subject.length,
+///                                                  query.data,
+///                                                  query.length, matrix,
+///                                                  gap_open, gap_extend,
+///                                                  positionBased,
+///                                                  forbidden);
+///                 ...
+///                 if (do_link_hsps) {
+///                     alignment_is_significant = aSwScore >= params->cutoff_s;
+///                 } else {
+///                     double newSwEvalue;     /* evalue as computed by the
+///                                              * Smith-Waterman algorithm */
+///                     newSwEvalue =
+///                         s_EvalueFromScore(aSwScore, Lambda, logK, searchsp);
+///
+///                     alignment_is_significant = newSwEvalue < params->cutoff_e;
+///                     if (alignments[query_index] == NULL) {
+///                         /* this is the most significant alignment; if
+///                          * it will not be accepted, no alignments from
+///                          * this match will */
+///                         alignment_is_significant =
+///                             alignment_is_significant &&
+///                             BlastCompo_HeapWouldInsert(
+///                                 &significantMatches[query_index],
+///                                 newSwEvalue, aSwScore, matchingSeq->index);
+///                     }
+///                 }
+///                 if (alignment_is_significant) {
+///                     ...
+///                     status =
+///                         Blast_SmithWatermanFindStart(&updatedScore,
+///                                                      &matchStart,
+///                                                      &queryStart,
+///                                                      subject.data,
+///                                                      subject.length,
+///                                                      query.data,
+///                                                      matrix, gap_open,
+///                                                      gap_extend,
+///                                                      matchEnd,
+///                                                      queryEnd,
+///                                                      aSwScore,
+///                                                      positionBased,
+///                                                      forbidden);
+///                     ...
+///                     status =
+///                         callbacks->
+///                         new_xdrop_align(&newAlign, &queryEnd, &matchEnd,
+///                                         queryStart, matchStart, aSwScore,
+///                                         &query, &window->query_range,
+///                                         ccat_query_length,
+///                                         &subject, &window->subject_range,
+///                                         matchingSeq->length,
+///                                         gapping_params, matrix_adjust_rule);
+///                     if (status != 0) {
+///                         goto window_index_loop_cleanup;
+///                     }
+///                     newAlign->next = alignments[query_index];
+///                     alignments[query_index] = newAlign;
+///
+///                     if (window->hspcnt > 1) {
+///                         /* We may compute more alignments; make the range
+///                            of the current alignment forbidden */
+///                         status =
+///                             Blast_ForbiddenRangesPush(forbidden,
+///                                                       queryStart, queryEnd,
+///                                                       matchStart, matchEnd);
+///                     }
+///                     ...
+///                 }
+///                 /* end if the next local alignment is significant */
+///             } while (alignment_is_significant && window->hspcnt > 1);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:437-446
+/// ```c
+///             if (newScore > bestScore) {
+///                 bestScore = newScore;
+///                 bestQueryPos = queryPos;
+///                 bestMatchSeqPos = matchSeqPos;
+///             }
+///             if (bestScore >= score_in)
+///                 break;
+///         }
+///         if (bestScore >= score_in)
+///             break;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:428-432
+/// ```c
+///     if (x_dropoff < gap_open_extend)
+///         x_dropoff = gap_open_extend;
+///
+///     if(N <= 0 || M <= 0)
+///         return 0;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/gapinfo.c:61-62
+/// ```c
+///     if (size <= 0)
+///        return NULL;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1856-1873
+/// ```c
+///     if (editScript != NULL) {
+///         ...
+///         obj = BlastCompo_AlignmentNew(newScore, matrix_adjust_rule,
+///                                       aqueryStart, aqueryEnd,
+///                                       query_range->context,
+///                                       amatchStart, amatchEnd,
+///                                       subject_range->context, editScript);
+///         ...
+///     }
+///     *pnewAlign = obj;
+///
+///     return obj != NULL ? 0 : -1;
+/// ```
+// Generic over the caller's rows, heap and traceback: one instance per redo (BLASTP's, RPS-BLAST's),
+// each on the Smith-Waterman path only.
+pub(crate) fn smith_waterman_redo_window<'r, F, H, T>(
+    window: &SwWindow<'_, F>,
+    significance: SwSignificance,
+    mut would_insert: H,
+    mut traceback: T,
+    rounds: &mut SwRounds,
+) -> SwWindowRedo
+where
+    F: Fn(usize) -> &'r [i32; BLASTAA_SIZE] + Copy,
+    H: FnMut(f64, i32) -> bool,
+    T: FnMut((usize, usize), (usize, usize), i32) -> SwXdropTraceback,
+{
+    let letters = &window.subject_from_sentinel[1..=window.subject_length];
+    let rows = window.rows;
+    rounds.forbidden.initialize(window.query_length);
+    rounds.forbidden.clear();
+    let mut alignments: Vec<SwAlignment> = Vec::new();
+    loop {
+        let end = smith_waterman_score_only(
+            letters,
+            window.query_length,
+            rows,
+            window.gap_open,
+            window.gap_extend,
+            &rounds.forbidden,
+            &mut rounds.scan,
+        );
+        let (evalue, mut alignment_is_significant) = significance.test(end.score);
+        if let (Some(evalue), true) = (evalue, alignments.is_empty()) {
+            alignment_is_significant = alignment_is_significant && would_insert(evalue, end.score);
+        }
+        if !alignment_is_significant {
+            break;
+        }
+        // The regime of a significant score of 0 (see above), at the first round.
+        if alignments.is_empty() && window.hspcnt > 1 && significance.test(0).1 {
+            // `ALIGN_EX`'s cell (1, 1): row 0 (`query_offset = queryStart - 1`) against `B[1]`, the
+            // subject's first letter (the sentinel when it has none).
+            let first_letter = window.subject_from_sentinel.get(1).copied().unwrap_or(0);
+            let first_cell = if window.query_length == 0 {
+                0
+            } else {
+                rows(0)[row_column(first_letter)]
+            };
+            return if first_cell > 0 {
+                SwWindowRedo::Endless
+            } else {
+                SwWindowRedo::Failed
+            };
+        }
+        let start = smith_waterman_find_start(
+            letters,
+            rows,
+            window.gap_open,
+            window.gap_extend,
+            end.match_end,
+            end.query_end,
+            end.score,
+            &rounds.forbidden,
+            &mut rounds.scan,
+        );
+        let traced = traceback(
+            (start.query_start, end.query_end),
+            (start.match_start, end.match_end),
+            end.score,
+        );
+        // An X-drop alignment without operations has no edit script (`GapEditScriptNew(0)` is
+        // NULL): the redo of the match fails and frees the match's alignments.
+        if traced.edit_script.is_empty() {
+            return SwWindowRedo::Failed;
+        }
+        let query_start = start.query_start as i32;
+        let match_start = start.match_start as i32;
+        let query_end = query_start + traced.query_extent;
+        let match_end = match_start + traced.match_extent;
+        alignments.push(SwAlignment {
+            score: traced.score,
+            query_start,
+            query_end,
+            match_start,
+            match_end,
+            edit_script: traced.edit_script,
+        });
+        if window.hspcnt <= 1 {
+            break;
+        }
+        // A significant score of 0 is decided above, so this round's score is positive and its
+        // range forbids its free start cell: the loop ends.
+        debug_assert!(end.score > 0);
+        rounds
+            .forbidden
+            .push(query_start, query_end, match_start, match_end);
+    }
+    SwWindowRedo::Alignments(alignments)
 }
 
 #[cfg(test)]

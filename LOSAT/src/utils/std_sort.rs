@@ -21,31 +21,7 @@
 
 /// `std::sort(first, last, comp)`.
 // libstdc++ (GCC 13): bits/stl_algo.h:1940-1951
-// ```c++
-//   template<typename _RandomAccessIterator, typename _Compare>
-//     _GLIBCXX20_CONSTEXPR
-//     inline void
-//     __sort(_RandomAccessIterator __first, _RandomAccessIterator __last,
-// 	   _Compare __comp)
-//     {
-//       if (__first != __last)
-// 	{
-// 	  std::__introsort_loop(__first, __last,
-// 				std::__lg(__last - __first) * 2,
-// 				__comp);
-// 	  std::__final_insertion_sort(__first, __last, __comp);
-// 	}
-//     }
-// ```
 // libstdc++ (GCC 13): bits/stl_algobase.h:1513-1518
-// ```c++
-//   template<typename _Tp>
-//     inline _GLIBCXX_CONSTEXPR _Tp
-//     __lg(_Tp __n)
-//     {
-// #if __cplusplus >= 201402L
-//       return std::__bit_width(make_unsigned_t<_Tp>(__n)) - 1;
-// ```
 pub(crate) fn std_sort<T: Copy>(slice: &mut [T], comp: &mut impl FnMut(&T, &T) -> bool) {
     try_std_sort(slice, comp).expect("a strict weak order keeps libstdc++'s sort in its range");
 }
@@ -71,32 +47,9 @@ pub(crate) fn try_std_sort<T: Copy>(
 
 /// `_S_threshold`.
 // libstdc++ (GCC 13): bits/stl_algo.h:1848
-// ```c++
-//   enum { _S_threshold = 16 };
-// ```
 const S_THRESHOLD: usize = 16;
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1916-1934
-// ```c++
-//     __introsort_loop(_RandomAccessIterator __first,
-// 		     _RandomAccessIterator __last,
-// 		     _Size __depth_limit, _Compare __comp)
-//     {
-//       while (__last - __first > int(_S_threshold))
-// 	{
-// 	  if (__depth_limit == 0)
-// 	    {
-// 	      std::__partial_sort(__first, __last, __last, __comp);
-// 	      return;
-// 	    }
-// 	  --__depth_limit;
-// 	  _RandomAccessIterator __cut =
-// 	    std::__unguarded_partition_pivot(__first, __last, __comp);
-// 	  std::__introsort_loop(__cut, __last, __depth_limit, __comp);
-// 	  __last = __cut;
-// 	}
-//     }
-// ```
 // (`__last - __first` is a signed difference: a cut past `__last`, which a comparison that is not
 // a strict weak order can give, makes it negative and ends the loop.)
 fn introsort_loop<T: Copy>(
@@ -120,16 +73,6 @@ fn introsort_loop<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1891-1900
-// ```c++
-//     __unguarded_partition_pivot(_RandomAccessIterator __first,
-// 				_RandomAccessIterator __last, _Compare __comp)
-//     {
-//       _RandomAccessIterator __mid = __first + (__last - __first) / 2;
-//       std::__move_median_to_first(__first, __first + 1, __mid, __last - 1,
-// 				  __comp);
-//       return std::__unguarded_partition(__first + 1, __last, __first, __comp);
-//     }
-// ```
 fn unguarded_partition_pivot<T: Copy>(
     s: &mut [T],
     first: usize,
@@ -142,27 +85,6 @@ fn unguarded_partition_pivot<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:81-102
-// ```c++
-//     __move_median_to_first(_Iterator __result,_Iterator __a, _Iterator __b,
-// 			   _Iterator __c, _Compare __comp)
-//     {
-//       if (__comp(__a, __b))
-// 	{
-// 	  if (__comp(__b, __c))
-// 	    std::iter_swap(__result, __b);
-// 	  else if (__comp(__a, __c))
-// 	    std::iter_swap(__result, __c);
-// 	  else
-// 	    std::iter_swap(__result, __a);
-// 	}
-//       else if (__comp(__a, __c))
-// 	std::iter_swap(__result, __a);
-//       else if (__comp(__b, __c))
-// 	std::iter_swap(__result, __c);
-//       else
-// 	std::iter_swap(__result, __b);
-//     }
-// ```
 fn move_median_to_first<T: Copy>(
     s: &mut [T],
     result: usize,
@@ -190,25 +112,6 @@ fn move_median_to_first<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1867-1887
-// ```c++
-//     __unguarded_partition(_RandomAccessIterator __first,
-// 			  _RandomAccessIterator __last,
-// 			  _RandomAccessIterator __pivot, _Compare __comp)
-//     {
-//       while (true)
-// 	{
-// 	  while (__comp(__first, __pivot))
-// 	    ++__first;
-// 	  --__last;
-// 	  while (__comp(__pivot, __last))
-// 	    --__last;
-// 	  if (!(__first < __last))
-// 	    return __first;
-// 	  std::iter_swap(__first, __last);
-// 	  ++__first;
-// 	}
-//     }
-// ```
 // (The first scan reads `*__first` until the comparison fails: past the slice's end it reads
 // outside the vector, `OutOfRange`. The second scan stops at the pivot at the latest, since
 // `comp(pivot, pivot)` is false for rpsbproc's comparison, NaN or not; past the slice's start it
@@ -243,16 +146,6 @@ fn unguarded_partition<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1902-1912
-// ```c++
-//     __partial_sort(_RandomAccessIterator __first,
-// 		   _RandomAccessIterator __middle,
-// 		   _RandomAccessIterator __last,
-// 		   _Compare __comp)
-//     {
-//       std::__heap_select(__first, __middle, __last, __comp);
-//       std::__sort_heap(__first, __middle, __comp);
-//     }
-// ```
 fn partial_sort<T: Copy>(
     s: &mut [T],
     first: usize,
@@ -265,17 +158,6 @@ fn partial_sort<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1628-1639
-// ```c++
-//     __heap_select(_RandomAccessIterator __first,
-// 		  _RandomAccessIterator __middle,
-// 		  _RandomAccessIterator __last, _Compare __comp)
-//     {
-//       std::__make_heap(__first, __middle, __comp);
-//       for (_RandomAccessIterator __i = __middle; __i < __last; ++__i)
-// 	if (__comp(__i, __first))
-// 	  std::__pop_heap(__first, __middle, __i, __comp);
-//     }
-// ```
 fn heap_select<T: Copy>(
     s: &mut [T],
     first: usize,
@@ -292,27 +174,6 @@ fn heap_select<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_heap.h:338-361
-// ```c++
-//     __make_heap(_RandomAccessIterator __first, _RandomAccessIterator __last,
-// 		_Compare& __comp)
-//     {
-//       ...
-//       if (__last - __first < 2)
-// 	return;
-//
-//       const _DistanceType __len = __last - __first;
-//       _DistanceType __parent = (__len - 2) / 2;
-//       while (true)
-// 	{
-// 	  _ValueType __value = _GLIBCXX_MOVE(*(__first + __parent));
-// 	  std::__adjust_heap(__first, __parent, __len, _GLIBCXX_MOVE(__value),
-// 			     __comp);
-// 	  if (__parent == 0)
-// 	    return;
-// 	  __parent--;
-// 	}
-//     }
-// ```
 fn make_heap<T: Copy>(
     s: &mut [T],
     first: usize,
@@ -335,17 +196,6 @@ fn make_heap<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_heap.h:417-427
-// ```c++
-//     __sort_heap(_RandomAccessIterator __first, _RandomAccessIterator __last,
-// 		_Compare& __comp)
-//     {
-//       while (__last - __first > 1)
-// 	{
-// 	  --__last;
-// 	  std::__pop_heap(__first, __last, __last, __comp);
-// 	}
-//     }
-// ```
 fn sort_heap<T: Copy>(
     s: &mut [T],
     first: usize,
@@ -359,18 +209,6 @@ fn sort_heap<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_heap.h:252-266
-// ```c++
-//     __pop_heap(_RandomAccessIterator __first, _RandomAccessIterator __last,
-// 	       _RandomAccessIterator __result, _Compare& __comp)
-//     {
-//       ...
-//       _ValueType __value = _GLIBCXX_MOVE(*__result);
-//       *__result = _GLIBCXX_MOVE(*__first);
-//       std::__adjust_heap(__first, _DistanceType(0),
-// 			 _DistanceType(__last - __first),
-// 			 _GLIBCXX_MOVE(__value), __comp);
-//     }
-// ```
 fn pop_heap<T: Copy>(
     s: &mut [T],
     first: usize,
@@ -384,33 +222,6 @@ fn pop_heap<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_heap.h:221-250
-// ```c++
-//     __adjust_heap(_RandomAccessIterator __first, _Distance __holeIndex,
-// 		  _Distance __len, _Tp __value, _Compare __comp)
-//     {
-//       const _Distance __topIndex = __holeIndex;
-//       _Distance __secondChild = __holeIndex;
-//       while (__secondChild < (__len - 1) / 2)
-// 	{
-// 	  __secondChild = 2 * (__secondChild + 1);
-// 	  if (__comp(__first + __secondChild,
-// 		     __first + (__secondChild - 1)))
-// 	    __secondChild--;
-// 	  *(__first + __holeIndex) = _GLIBCXX_MOVE(*(__first + __secondChild));
-// 	  __holeIndex = __secondChild;
-// 	}
-//       if ((__len & 1) == 0 && __secondChild == (__len - 2) / 2)
-// 	{
-// 	  __secondChild = 2 * (__secondChild + 1);
-// 	  *(__first + __holeIndex) = _GLIBCXX_MOVE(*(__first
-// 						     + (__secondChild - 1)));
-// 	  __holeIndex = __secondChild - 1;
-// 	}
-//       ...
-//       std::__push_heap(__first, __holeIndex, __topIndex,
-// 		       _GLIBCXX_MOVE(__value), __cmp);
-//     }
-// ```
 fn adjust_heap<T: Copy>(
     s: &mut [T],
     first: usize,
@@ -439,21 +250,6 @@ fn adjust_heap<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_heap.h:132-147
-// ```c++
-//     __push_heap(_RandomAccessIterator __first,
-// 		_Distance __holeIndex, _Distance __topIndex, _Tp __value,
-// 		_Compare& __comp)
-//     {
-//       _Distance __parent = (__holeIndex - 1) / 2;
-//       while (__holeIndex > __topIndex && __comp(__first + __parent, __value))
-// 	{
-// 	  *(__first + __holeIndex) = _GLIBCXX_MOVE(*(__first + __parent));
-// 	  __holeIndex = __parent;
-// 	  __parent = (__holeIndex - 1) / 2;
-// 	}
-//       *(__first + __holeIndex) = _GLIBCXX_MOVE(__value);
-//     }
-// ```
 // (`(__holeIndex - 1) / 2` of a hole at 0 is 0 in C++'s signed division; the loop then stops
 // at `__holeIndex > __topIndex`.)
 fn push_heap<T: Copy>(
@@ -474,20 +270,6 @@ fn push_heap<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1852-1865
-// ```c++
-//     __final_insertion_sort(_RandomAccessIterator __first,
-// 			   _RandomAccessIterator __last, _Compare __comp)
-//     {
-//       if (__last - __first > int(_S_threshold))
-// 	{
-// 	  std::__insertion_sort(__first, __first + int(_S_threshold), __comp);
-// 	  std::__unguarded_insertion_sort(__first + int(_S_threshold), __last,
-// 					  __comp);
-// 	}
-//       else
-// 	std::__insertion_sort(__first, __last, __comp);
-//     }
-// ```
 fn final_insertion_sort<T: Copy>(
     s: &mut [T],
     first: usize,
@@ -507,27 +289,6 @@ fn final_insertion_sort<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1810-1830
-// ```c++
-//     __insertion_sort(_RandomAccessIterator __first,
-// 		     _RandomAccessIterator __last, _Compare __comp)
-//     {
-//       if (__first == __last) return;
-//
-//       for (_RandomAccessIterator __i = __first + 1; __i != __last; ++__i)
-// 	{
-// 	  if (__comp(__i, __first))
-// 	    {
-// 	      typename iterator_traits<_RandomAccessIterator>::value_type
-// 		__val = _GLIBCXX_MOVE(*__i);
-// 	      _GLIBCXX_MOVE_BACKWARD3(__first, __i, __i + 1);
-// 	      *__first = _GLIBCXX_MOVE(__val);
-// 	    }
-// 	  else
-// 	    std::__unguarded_linear_insert(__i,
-// 				__gnu_cxx::__ops::__val_comp_iter(__comp));
-// 	}
-//     }
-// ```
 // (The walk of `__unguarded_linear_insert` stops at `__first` at the latest: `comp(val, *__first)`
 // was false, and `*__first` is not moved before the walk reaches it.)
 fn insertion_sort<T: Copy>(
@@ -552,23 +313,6 @@ fn insertion_sort<T: Copy>(
 }
 
 // libstdc++ (GCC 13): bits/stl_algo.h:1790-1806
-// ```c++
-//     __unguarded_linear_insert(_RandomAccessIterator __last,
-// 			      _Compare __comp)
-//     {
-//       typename iterator_traits<_RandomAccessIterator>::value_type
-// 	__val = _GLIBCXX_MOVE(*__last);
-//       _RandomAccessIterator __next = __last;
-//       --__next;
-//       while (__comp(__val, __next))
-// 	{
-// 	  *__last = _GLIBCXX_MOVE(*__next);
-// 	  __last = __next;
-// 	  --__next;
-// 	}
-//       *__last = _GLIBCXX_MOVE(__val);
-//     }
-// ```
 // (Before the slice's start `--__next` points outside the vector: `OutOfRange`, the moves made
 // so far left in place as the error ends the sort.)
 fn unguarded_linear_insert<T: Copy>(

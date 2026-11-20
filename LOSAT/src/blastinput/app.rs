@@ -48,6 +48,41 @@ pub fn engine_error(message: &str) -> anyhow::Error {
     .into()
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302 (TBLASTX's
+// loop is the same, tblastx_app.cpp:176-207)
+// ```c++
+//             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+// ...
+//                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
+//                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+//                     results = lcl_blast.Run();
+// ...
+//                     ITERATE(CSearchResultSet, result, *results) {
+//                         formatter.PrintOneResultSet(**result, query);
+//                     }
+// ```
+/// An error of a query batch's search that comes after the reports of the batches before, for
+/// every program: NCBI searches a batch and prints its reports before it reads the next one, so
+/// when the search of a batch stops NCBI has printed the reports of the batches before, without
+/// the epilog. The error held is the run's error as it is: NCBI's own (`engine_error`, exit 3) or
+/// LOSAT's refusal of a step where NCBI crashes, does not finish or stops (exit 1). The batch loop
+/// that meets it writes those reports (for the first batch, the prologs), then the failing batch's
+/// reader messages and search strategy posts, and returns the error it holds, its message
+/// unchanged: TBLASTX's (`tblastx::blast_engine::run_impl`, the X2c form, the Owner's decision of
+/// 2026-11-16 on line RG's Q-X2c: "the results of the query batches before are written") and
+/// TBLASTN's (`tblastn::tblastn_app::batch_failure`). Any other refusal of a batch's search comes
+/// before the run's first byte.
+#[derive(Debug)]
+pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
+
+impl std::fmt::Display for ErrorAfterBatchReports {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for ErrorAfterBatchReports {}
+
 /// NCBI's error for a search without `-subject` (and without `-db`), which the handler of
 /// the database arguments raises before the query and the output are opened.
 ///

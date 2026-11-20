@@ -19,7 +19,7 @@ print(outcome.reports[0].text)          # the -outfmt 6 report, as `losat blastn
 outcome.reports[1].bytes                # the bytes of -outfmt 0
 hits = polars.DataFrame(outcome.hsps)   # one row per HSP, the numbers not rounded
 outcome.query_stats[0].eff_space        # what fixed the E-values of the first query
-outcome.diagnostics                     # what the command line writes to its standard error
+outcome.diagnostics                     # what the command line writes to its standard error (bytes: diagnostics_bytes)
 ```
 
 ## Installation
@@ -81,7 +81,7 @@ psiblast's rounds of each query follow one another in the table, round 1 first: 
 
 ## Files
 
-`search.run_to_file(query, subject, outfmt="14", path="report.xml")` is the command line's `-out`, and the way to outfmt 13 and 14: their side files lie next to `path`. It returns what the command line writes to its standard error.
+`search.run_to_file(query, subject, outfmt="14", path="report.xml")` is the command line's `-out`, and the way to outfmt 13 and 14: their side files lie next to `path`. It returns what the command line writes to its standard error, as text (U+FFFD for a byte that is not UTF-8).
 
 ## Long searches
 
@@ -107,11 +107,13 @@ print(pylosat.convert2blastmask("-masking_algorithm", "other", "-masking_options
                                 input=lowercase_masked_fasta).text)
 ```
 
-`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`bytes`, `text`) and to standard error (`diagnostics`). `input` is what the command line reads as standard input, so a database can be built from FASTA in memory (with `-title`, which makeblastdb needs for standard input), ids given to `blastdbcmd -entry_batch -`, sequences in memory masked, and the lower case letters of FASTA in memory turned into masking information.
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`bytes`, `text`) and to standard error (`diagnostics_bytes`, `diagnostics`). `input` is what the command line reads as standard input, so a database can be built from FASTA in memory (with `-title`, which makeblastdb needs for standard input), ids given to `blastdbcmd -entry_batch -`, sequences in memory masked, and the lower case letters of FASTA in memory turned into masking information.
 
 ## Errors
 
-`ArgumentError` (the options), `InputError` (a FASTA input) and `SearchError` (the search or a tool) derive from `LosatError`, each with the command line's message for the same failure.
+`ArgumentError` (the options), `InputError` (a FASTA input) and `SearchError` (the search or a tool) derive from `LosatError`, each with the command line's message for the same failure: `message_bytes` holds its bytes, and `str(error)` is the text.
+
+Every text that pylosat gives of what the command line writes (`str(error)`, `outcome.diagnostics`, `batch.diagnostics`, `ToolOutput.diagnostics` and `.text`, the return of `run_to_file`) has one U+FFFD per maximal ill-formed subpart of its bytes, as `bytes.decode("utf-8", "replace")` gives; the bytes are `message_bytes`, `diagnostics_bytes` and `ToolOutput.bytes`.
 
 ## Development
 

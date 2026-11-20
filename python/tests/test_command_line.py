@@ -77,6 +77,24 @@ def test_the_table_holds_the_columns_of_the_command_line(case, command_line):
         ] == row
 
 
+def test_diagnostics_hold_the_bytes_that_the_command_line_writes(command_line, tmp_path):
+    # A subject without letters whose title is Latin-1 (`é` = E9): NCBI's warning quotes the title.
+    query, subject = tmp_path / "q.fna", tmp_path / "s.faa"
+    query.write_bytes(b">q\nATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGC\n")
+    subject.write_bytes(b">s\xe9 t\n\n>s2\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSG\n")
+    _, stderr = command_line("blastx", str(query), str(subject), ["-outfmt", "6"])
+    assert b"s\xe9 t: Subject sequence contains no data" in stderr
+    search = Search("blastx")
+    inputs = (Sequences.from_fasta(query), Sequences.from_fasta(subject))
+    outcome = search.run(*inputs, outfmt="6")
+    assert outcome.diagnostics_bytes == stderr
+    assert outcome.diagnostics == stderr.decode("utf-8", "replace")
+    assert "s\ufffd t: Subject sequence contains no data" in outcome.diagnostics
+    batches = list(search.batches(*inputs))
+    assert b"".join(batch.diagnostics_bytes for batch in batches) == stderr
+    assert "".join(batch.diagnostics for batch in batches) == outcome.diagnostics
+
+
 def test_the_keywords_mean_what_the_words_mean(command_line):
     query, subject = fasta("outfmt0/e2e_many_query.faa"), fasta("outfmt0/e2e_many_subject.faa")
     stdout, _ = command_line(

@@ -223,7 +223,7 @@ pub(super) fn link_subject_hits(
 ///                                          score_options->gapped_calculation,
 ///                                          isRPS, gap_align->sbp, 0, scale_factor);
 /// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1882-1891 (in
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1887-1893 (in
 /// `Blast_HSPListGetEvalues`; `sbp->gbp` is unset for an ungapped search)
 /// ```c
 ///           /* Get effective search space from the query information block */
@@ -689,7 +689,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:874-890 and
-    // c++/src/algo/blast/core/blast_hits.c:1882-1891 (quoted at `evalues_without_linking`), with
+    // c++/src/algo/blast/core/blast_hits.c:1887-1893 (quoted at `evalues_without_linking`), with
     // c++/src/algo/blast/core/blast_stat.c:4157-4171 (`BLAST_KarlinStoE_simple`).
     #[test]
     fn hsps_without_sum_statistics_get_their_own_evalues_in_their_order() {

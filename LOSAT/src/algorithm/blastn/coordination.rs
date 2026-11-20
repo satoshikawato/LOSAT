@@ -8,10 +8,11 @@
 
 use super::args::{BlastnArgs, QueryStrand};
 use super::constants::{
-    LUT_WIDTH_11_THRESHOLD_10, LUT_WIDTH_11_THRESHOLD_8, MAX_DIRECT_LOOKUP_WORD_SIZE,
-    MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN,
-    MIN_UNGAPPED_SCORE_MEGABLAST, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, X_DROP_GAPPED_FINAL,
-    X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_NUCL, X_DROP_UNGAPPED,
+    BLAST_PENALTY, BLAST_REWARD, LUT_WIDTH_11_THRESHOLD_10, LUT_WIDTH_11_THRESHOLD_8,
+    MAX_DIRECT_LOOKUP_WORD_SIZE, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST,
+    MIN_UNGAPPED_SCORE_BLASTN, MIN_UNGAPPED_SCORE_MEGABLAST, SCAN_RANGE_BLASTN,
+    SCAN_RANGE_MEGABLAST, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_NUCL,
+    X_DROP_UNGAPPED,
 };
 use super::disc_lookup::DiscWordType;
 use super::lookup::{
@@ -32,8 +33,16 @@ enum LookupTableKind {
 /// Task-specific configuration for BLASTN
 pub struct TaskConfig {
     pub effective_word_size: usize,
+    /// The option pair (`-reward`/`-penalty`, else the task's): the reports and the
+    /// endpoint re-evaluation of the traceback read it.
     pub reward: i32,
     pub penalty: i32,
+    /// NCBI's matrix-only scoring: the option pair is 0/0 (`-task rmblastn`).
+    pub matrix_only: bool,
+    /// The engine pair: the matrix, the score table and the Karlin-Altschul statistics
+    /// score with it (1/-3 under matrix-only scoring, else the option pair).
+    pub score_reward: i32,
+    pub score_penalty: i32,
     pub gap_open: i32,
     pub gap_extend: i32,
     pub min_ungapped_score: i32,
@@ -559,10 +568,35 @@ pub fn determine_window_size(args: &BlastnArgs) -> usize {
         })
 }
 
+/// The matrix-only flag and the engine pair of an option pair (reward, penalty).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:359-368
+/// ```c
+///         if ( scoring_options->penalty == 0 && scoring_options->reward == 0 )
+///         {
+///            sbp->matrix_only_scoring = TRUE;
+///            sbp->penalty = BLAST_PENALTY;
+///            sbp->reward = BLAST_REWARD;
+///         }else {
+///            sbp->penalty = scoring_options->penalty;
+///            sbp->reward = scoring_options->reward;
+///         }
+/// ```
+/// (`BLAST_REWARD`/`BLAST_PENALTY`: constants.rs.) The Karlin-Altschul blocks (blast_setup.c:90-96) and alpha/beta (blast_setup.c:796-799)
+/// take the same 1/-3 under matrix-only scoring.
+pub fn engine_scoring_pair(reward: i32, penalty: i32) -> (bool, i32, i32) {
+    if penalty == 0 && reward == 0 {
+        (true, BLAST_REWARD, BLAST_PENALTY)
+    } else {
+        (false, reward, penalty)
+    }
+}
+
 /// Configure task-specific parameters
 pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     let effective_word_size = determine_effective_word_size(args);
     let (reward, penalty, gap_open, gap_extend) = determine_scoring_params(args);
+    let (matrix_only, score_reward, score_penalty) = engine_scoring_pair(reward, penalty);
 
     let min_ungapped_score = match args.task.as_str() {
         "megablast" => MIN_UNGAPPED_SCORE_MEGABLAST,
@@ -661,6 +695,9 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         effective_word_size,
         reward,
         penalty,
+        matrix_only,
+        score_reward,
+        score_penalty,
         gap_open,
         gap_extend,
         min_ungapped_score,

@@ -517,6 +517,80 @@ fn hsp_survives_evalue_reap(evalue: f64, cutoff: f64) -> bool {
     !(evalue > cutoff)
 }
 
+/// The reap of a subject's preliminary HSP list after its e-values are computed (and kept in the
+/// HSPs), chosen once for the batch: by the e-value threshold, or, under matrix-only scoring, by
+/// the raw score.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:891-899 (the same at
+/// 1527-1535 for an ungapped search's finish)
+/// ```c
+///    /* Use score threshold rather than evalue if
+///     * matrix_only_scoring is used.  -RMH-
+///     */
+///     if ( sbp->matrix_only_scoring )
+///     {
+///         status = Blast_HSPListReapByRawScore(hsp_list_out, hit_options);
+///     }else {
+///        /* Discard HSPs that don't pass the e-value test. */
+///         status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+///     }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum PrelimReap {
+    /// `s_Blast_HSPListReapByPrelimEvalue`: an HSP whose e-value is above the threshold
+    /// (`hit_params->prelim_evalue`, the e-value option) is dropped (`hsp_survives_evalue_reap`).
+    Evalue(f64),
+    /// `Blast_HSPListReapByRawScore`: an HSP whose raw score is below the hit-saving option's
+    /// cutoff score (`-min_raw_gapped_score`, 0 when not given) is dropped.
+    RawScore(i32),
+}
+
+impl PrelimReap {
+    /// The reap of a search: by raw score under matrix-only scoring, else by e-value.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2087-2097
+    /// (`Blast_HSPListReapByRawScore`)
+    /// ```c
+    ///    for (index = 0; index < hsp_list->hspcnt; index++) {
+    ///       hsp = hsp_array[index];
+    ///
+    ///       ASSERT(hsp != NULL);
+    ///
+    ///       if ( hsp->score < hit_options->cutoff_score ) {
+    ///          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+    ///       } else {
+    /// ```
+    /// `min_raw_gapped_score` is `TaskConfig::min_raw_gapped_score` (the option above 0): a cutoff
+    /// of 0 or less keeps every HSP, whose scores are positive.
+    pub(super) fn new(
+        matrix_only: bool,
+        min_raw_gapped_score: Option<i32>,
+        evalue_threshold: f64,
+    ) -> Self {
+        if matrix_only {
+            PrelimReap::RawScore(min_raw_gapped_score.unwrap_or(0))
+        } else {
+            PrelimReap::Evalue(evalue_threshold)
+        }
+    }
+
+    /// Each HSP's e-value (`evalue_of`) kept in it, and the HSPs that the reap drops removed, in
+    /// place and in order. The choice is made outside the loop over the HSPs.
+    #[inline]
+    fn reap(self, hits: &mut Vec<PrelimHit>, evalue_of: impl Fn(&PrelimHit) -> f64) {
+        match self {
+            PrelimReap::Evalue(threshold) => hits.retain_mut(|hit| {
+                hit.prelim_evalue = evalue_of(hit);
+                hsp_survives_evalue_reap(hit.prelim_evalue, threshold)
+            }),
+            PrelimReap::RawScore(cutoff) => hits.retain_mut(|hit| {
+                hit.prelim_evalue = evalue_of(hit);
+                hit.prelim_score >= cutoff
+            }),
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4155-4160
 // ```c
 // #define MAX_SUBJECT_OFFSET 90000
@@ -9915,7 +9989,7 @@ fn ungapped_subject_stage(
     word_cutoffs: &[i32],
     percent_identity: f64,
     evalue_of: impl Fn(&PrelimHit) -> f64,
-    evalue_threshold: f64,
+    reap: PrelimReap,
 ) {
     hits.retain_mut(|hit| {
         let context_idx = hit.context_idx as usize;
@@ -9964,10 +10038,7 @@ fn ungapped_subject_stage(
         )
     });
     sort_prelim_hits_by_score(hits);
-    hits.retain_mut(|hit| {
-        hit.prelim_evalue = evalue_of(hit);
-        hsp_survives_evalue_reap(hit.prelim_evalue, evalue_threshold)
-    });
+    reap.reap(hits, evalue_of);
 }
 
 /// LOSAT's refusal of an HSP that NCBI keeps outside its query context
@@ -12875,9 +12946,21 @@ fn search_query_batch<const UNGAPPED: bool>(
     //    }
     // ```
     let discontig_template = config.mb_template_length > 0;
+    // The Karlin-Altschul blocks, alpha/beta and the gap-cost table check score with the engine
+    // pair (`TaskConfig::score_reward`: 1/-3 under matrix-only scoring).
+    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:89-96
+    // ```c
+    //             if ( scoring_options->reward == 0 &&  scoring_options->penalty == 0 )
+    //             {
+    //               retval =
+    //                 Blast_KarlinBlkNuclGappedCalc(sbp->kbp_gap_std[index],
+    //                     scoring_options->gap_open, scoring_options->gap_extend,
+    //                     BLAST_REWARD, BLAST_PENALTY,
+    //                     sbp->kbp_std[index], &(sbp->round_down), error_return);
+    // ```
     let scoring_spec = NuclScoringSpec {
-        reward: config.reward,
-        penalty: config.penalty,
+        reward: config.score_reward,
+        penalty: config.score_penalty,
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
     };
@@ -13234,6 +13317,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         search_karlin: search_karlin_ref,
         x_dropoff_init: &x_dropoff_init,
         min_raw_gapped_score: config.min_raw_gapped_score,
+        matrix_only: config.matrix_only,
         evalue_threshold,
         subject_length: None,
     };
@@ -13366,8 +13450,13 @@ fn search_query_batch<const UNGAPPED: bool>(
         encoded_query_concat_nomask,
         search_karlin_ref,
         round_down_evalue_score,
-        evalue_threshold,
+        prelim_reap: PrelimReap::new(
+            config.matrix_only,
+            config.min_raw_gapped_score,
+            evalue_threshold,
+        ),
         percent_identity,
+        matrix_only: config.matrix_only,
         debug_mode,
         blastn_debug,
         blastn_trace_enabled,
@@ -16046,7 +16135,7 @@ mod tests {
                 &[10, 10],
                 percent_identity,
                 |_| 0.0,
-                10.0,
+                PrelimReap::Evalue(10.0),
             );
             hits.iter()
                 .map(|h| {

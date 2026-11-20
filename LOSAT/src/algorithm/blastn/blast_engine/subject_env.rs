@@ -314,10 +314,16 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     let percent_identity = args.percent_identity_value();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1130 (BlastScoreBlkNuclMatrixCreate)
-    let score_matrix = build_blastna_matrix(reward, penalty);
+    // The matrix and the score table below score with `sbp->reward`/`sbp->penalty`, the engine
+    // pair (1/-3 under matrix-only scoring, `coordination::engine_scoring_pair`); the option pair
+    // (`reward`, `penalty`) stays for the traceback's re-evaluation (blast_hits.c:627,637).
+    let score_matrix = build_blastna_matrix(config.score_reward, config.score_penalty);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:236-259
     // ```c
+    // Int4 reward = sbp->reward;
+    // Int4 penalty = sbp->penalty;
+    // ...
     // for (i = 0; i < 256; i++) {
     //    Int4 score = 0;
     //    if (i & 3) score += penalty; else score += reward;
@@ -327,7 +333,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     //    table[i] = score;
     // }
     // ```
-    let nucl_score_table = build_nucl_score_table(reward, penalty);
+    let nucl_score_table = build_nucl_score_table(config.score_reward, config.score_penalty);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:218-221
     // ```c

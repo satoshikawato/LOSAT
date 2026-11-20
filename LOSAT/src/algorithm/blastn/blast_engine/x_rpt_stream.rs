@@ -502,8 +502,8 @@ fn check(
     // the queries.
     let config = configure_task(args);
     let spec = NuclScoringSpec {
-        reward: config.reward,
-        penalty: config.penalty,
+        reward: config.score_reward,
+        penalty: config.score_penalty,
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
     };

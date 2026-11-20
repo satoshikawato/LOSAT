@@ -201,3 +201,83 @@ fn ncbis_tabular_row_is_written_to_the_out_file_where_blastn_writes_it() {
     }
     assert_eq!(rows, 12);
 }
+
+/// The standard output writes (descriptor 1) of a row of `ncbi_rpsbproc_writes.tsv`.
+fn rpsbproc_stdout_writes(case: &str, destination: &str) -> Vec<usize> {
+    let table = include_str!("../../tests/fixtures/stdio_buffer/ncbi_rpsbproc_writes.tsv");
+    let row = table
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .find(|line| line.starts_with(&format!("{case}\t{destination}\t")))
+        .unwrap();
+    row.split('\t')
+        .nth(3)
+        .unwrap()
+        .split(' ')
+        .filter_map(|write| write.strip_prefix("1:"))
+        .map(|size| size.parse().unwrap())
+        .collect()
+}
+
+#[test]
+fn rpsbprocs_report_with_a_cut_line_is_written_to_a_pipe_or_file_where_ncbi_writes_it() {
+    // `-logfile /dev/stdout` on a database name of 9,000 bytes (`longdb`): NCBI's stdout writes
+    // 1127 bytes (the report so far, written by the `cerr` line that follows), then 4096 (a block
+    // of the SESSION line's long string), then the rest (930) at exit; the two diagnostics of the
+    // exception go to the other descriptor of the same pipe between them. `oracle` holds the
+    // bytes of the pipe: the report with those 296 bytes at offset 1127 + 4096. The insertions
+    // are the report's fields and delimiters (a field, a tab, ..., a line end), which the table
+    // does not record: this replays the sizes of the writes, not NCBI's insertions.
+    let oracle: &[u8] =
+        include_bytes!("../../tests/fixtures/rpsbproc/oracle/linux_cout_longdb.out");
+    let report = [&oracle[..1127 + 4096], &oracle[1127 + 4096 + 296..]].concat();
+    for destination in ["pipe", "file"] {
+        let observed = rpsbproc_stdout_writes("longdb", destination);
+        assert_eq!(observed, [1127, 4096, 930], "{destination}");
+        let mut buffer = NcbiBuffer::new(NcbiStdio::Cout {
+            block: 4096,
+            lines: false,
+        });
+        let mut pending: Vec<u8> = Vec::new();
+        let mut writes = Vec::new();
+        let insert = |buffer: &mut NcbiBuffer,
+                      pending: &mut Vec<u8>,
+                      writes: &mut Vec<usize>,
+                      bytes: &[u8]| {
+            pending.extend_from_slice(bytes);
+            buffer.sputn(bytes.len(), pending);
+            let out = pending.len() - buffer.held();
+            if out > 0 {
+                writes.push(out);
+                pending.drain(..out);
+            }
+        };
+        // The head, then the `cerr` line's flush.
+        insert(&mut buffer, &mut pending, &mut writes, &report[..1127]);
+        buffer.flush();
+        writes.push(pending.len());
+        pending.clear();
+        // The rest, one insertion per field (the string of `D`s is one insertion).
+        for piece in report[1127..].split_inclusive(|byte| *byte == b'\t' || *byte == b'\n') {
+            insert(&mut buffer, &mut pending, &mut writes, piece);
+        }
+        buffer.flush();
+        writes.push(pending.len());
+        assert_eq!(writes, observed, "{destination}");
+    }
+}
+
+#[test]
+fn rpsbprocs_terminal_writes_are_the_lines_and_blocks_of_a_line_buffered_stream() {
+    // The same run on a pty (block 1024, line-buffered): the table's writes cannot be replayed
+    // through the entry points, because NCBI's insertions are not recorded (a line of several
+    // fields is written, on a terminal, at its line end or where 1024 bytes are held, and the
+    // observed sizes 1024, 18, 9, 71, 5 split the head at the points of its insertions). What
+    // is checked here: the writes add up to the pipe's, the head's five writes, and that no
+    // write is longer than the block of the pipe.
+    let tty = rpsbproc_stdout_writes("longdb", "pty");
+    let pipe = rpsbproc_stdout_writes("longdb", "pipe");
+    assert_eq!(tty.iter().sum::<usize>(), pipe.iter().sum::<usize>());
+    assert_eq!(tty[..5], [1024, 18, 9, 71, 5]);
+    assert!(tty.iter().all(|&size| size <= 4096));
+}

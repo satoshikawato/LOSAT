@@ -616,7 +616,7 @@ impl PsiSearch {
         self.annot.abort.as_ref().map(|abort| {
             crate::cli::NativeError {
                 exit: abort.exit,
-                message: abort.message.clone(),
+                message: abort.message.clone().into(),
             }
             .into()
         })

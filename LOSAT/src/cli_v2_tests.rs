@@ -1458,7 +1458,7 @@ fn output_formats_follow_the_format_table() {
         formatting_handler_check, parse_formatting_string, report_format, xinclude_check,
     };
     let native = |error: anyhow::Error| match error.downcast::<crate::cli::NativeError>() {
-        Ok(native) => (native.exit, native.message),
+        Ok(native) => (native.exit, String::from_utf8(native.message).unwrap()),
         Err(other) => panic!("not NCBI's error: {other}"),
     };
     for &(programs, value, out, expected) in OUTFMT_ROWS {

@@ -80,7 +80,8 @@ use parse_flags::RAW_TEXT;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeqIdWarning {
     pub subcode: u32,
-    pub message: String,
+    /// The warning's text, as bytes (an id's text keeps its bytes: probe R3 of line LIB-B).
+    pub message: Vec<u8>,
 }
 
 /// A set of bit positions as `bm::bvector<>` holds them for a small special: sorted,
@@ -1640,11 +1641,15 @@ pub fn x_identify_accession(
             division => {
                 warn(SeqIdWarning {
                     subcode: 11,
-                    message: format!(
-                        "{}: Protein flag found with unexpected division {}",
-                        String::from_utf8_lossy(main),
-                        division >> 8
-                    ),
+                    message: [
+                        main,
+                        format!(
+                            ": Protein flag found with unexpected division {}",
+                            division >> 8
+                        )
+                        .as_bytes(),
+                    ]
+                    .concat(),
                 });
                 ai = (ai & (TYPE_MASK | DIVISION_MASK)) | F_PROT;
             }

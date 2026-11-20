@@ -64,7 +64,7 @@ impl From<SeqDbError> for Stop {
     /// refusal.
     fn from(error: SeqDbError) -> Stop {
         match error.ncbi_message() {
-            Some(text) => Stop::Ncbi(text),
+            Some(text) => Stop::NcbiBytes(text),
             None => Stop::refused(error.to_string()),
         }
     }
@@ -411,7 +411,7 @@ pub(super) fn numeric_target(text: &str) -> Option<i64> {
 /// target that is not a number; the message of NCBI's exception as the request reports it.
 pub(super) fn parse_target(text: &str) -> Result<ParsedSeqId, Stop> {
     seq_id_from_text(text.as_bytes(), PARTIAL_OK | DEFAULT, &mut |_| {})
-        .map_err(|error| Stop::Ncbi(error.message))
+        .map_err(|error| Stop::NcbiBytes(error.message))
 }
 
 /// Runs the retrieval of `args` on the open database `db` (`x_ProcessSearchRequest`), the
@@ -1079,9 +1079,9 @@ fn get_oids_v4(lookup: &IdLookup, id: &str) -> Lookup {
 /// `SeqDB_SimplifyAccession` and of the volumes as the request reports them.
 fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
     let simplified = seqdb_simplify_accession(id.as_bytes()).map_err(|error| {
-        Stop::Ncbi(match error {
+        Stop::NcbiBytes(match error {
             SimplifyError::SeqId(error) => error.message,
-            SimplifyError::Exception(message) => message,
+            SimplifyError::Exception(message) => message.into_bytes(),
         })
     })?;
     lookup
@@ -1343,9 +1343,11 @@ impl Run<'_, '_, '_> {
         if self.ids.version5 {
             let keys: Vec<Vec<u8>> = ids.iter().map(|id| id.as_bytes().to_vec()).collect();
             if let Err(error) = lookup.accessions_to_oids(&keys, &mut oids) {
-                let swallowed = error
-                    .ncbi_message()
-                    .is_some_and(|message| message.contains(NO_ACCESSION_INFO));
+                let swallowed = error.ncbi_message().is_some_and(|message| {
+                    message
+                        .windows(NO_ACCESSION_INFO.len())
+                        .any(|window| window == NO_ACCESSION_INFO.as_bytes())
+                });
                 if !swallowed {
                     return Err(error.into());
                 }

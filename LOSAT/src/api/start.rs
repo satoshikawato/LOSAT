@@ -286,7 +286,7 @@ impl RunLog {
     /// it. LOSAT's own refusals stay off the file, as on the command line (`cli::main_entry`).
     pub(super) fn post(&mut self, error: &anyhow::Error) {
         if let Some(native) = error.downcast_ref::<crate::cli::NativeError>() {
-            self.post_text(native.message.as_bytes());
+            self.post_text(&native.message);
         }
     }
 

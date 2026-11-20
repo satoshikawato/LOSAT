@@ -826,7 +826,7 @@ pub(super) fn run_local(
     // call's run, `CallStart::new`), `CATCH_ALL` writes its line feeds alone
     // (`cli::catch_all_text`), as the command line writes the error.
     if crate::ncbi_exception::main_diag_failbit() {
-        let message = crate::cli::catch_all_text(&native.message).into_owned();
+        let message = crate::cli::catch_all_text(&native.message).to_vec();
         return Err(crate::cli::NativeError {
             exit: native.exit,
             message,

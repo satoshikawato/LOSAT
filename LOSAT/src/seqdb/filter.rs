@@ -63,8 +63,9 @@ pub enum ListWarning {
     /// `ERR_POST(Warning << text)`: with the diagnostic prefix of the program.
     Posted(String),
     /// `ERR_POST(text)` at the default severity (an error that is reported before NCBI
-    /// throws): with the diagnostic prefix of the program.
-    Error(String),
+    /// throws): with the diagnostic prefix of the program. The text is bytes (a seqid list's
+    /// word keeps its bytes: probe R3 of line LIB-B).
+    Error(Vec<u8>),
     /// `ERR_POST_X(subcode, Warning << message)` of NCBI's Seq-id code: with its error code
     /// before the diagnostic prefix of the program.
     SeqId(SeqIdWarning),
@@ -1170,7 +1171,7 @@ impl LmdbEntry {
                 path: path.to_path_buf(),
                 message,
             },
-            other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path))),
+            other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path)).into()),
         };
         let mut found = if negative {
             let not_path = self.lookup_file("ot");
@@ -1203,7 +1204,7 @@ impl LmdbEntry {
                 path: ntf_path.clone(),
                 message,
             },
-            other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path))),
+            other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path)).into()),
         })
     }
 
@@ -1371,9 +1372,9 @@ impl LmdbEntry {
     fn lookup_error(&self, message: String) -> SeqDbError {
         let name = Self::base_name(&self.lmdb);
         if message == tax_files::NO_ACCESSION_INFO {
-            SeqDbError::NotFound(message)
+            SeqDbError::NotFound(message.into_bytes())
         } else if message.starts_with("MDB_BAD_VALSIZE") {
-            SeqDbError::NotFound(tax_files::accessions_lookup_error(&name))
+            SeqDbError::NotFound(tax_files::accessions_lookup_error(&name).into())
         } else {
             SeqDbError::Format {
                 path: self.lmdb.clone(),
@@ -1790,7 +1791,7 @@ fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
             message,
         };
     };
-    SeqDbError::NotFound(format!("LMDB runtime error: mdb_env_open: {what}"))
+    SeqDbError::NotFound(format!("LMDB runtime error: mdb_env_open: {what}").into())
 }
 
 /// The error of an LMDB file that does not open: the system's text in NCBI's words (a file
@@ -1801,9 +1802,9 @@ fn lmdb_file_error(error: SeqDbError) -> SeqDbError {
             let text = source.to_string();
             if let Some(strerror) = text.strip_suffix(&format!(" (os error {code})")) {
                 if cfg!(unix) && !strerror.contains("Too many open files") {
-                    return SeqDbError::NotFound(format!(
-                        "LMDB runtime error: mdb_env_open: {strerror}"
-                    ));
+                    return SeqDbError::NotFound(
+                        format!("LMDB runtime error: mdb_env_open: {strerror}").into(),
+                    );
                 }
             }
         }
@@ -1812,12 +1813,15 @@ fn lmdb_file_error(error: SeqDbError) -> SeqDbError {
 }
 
 fn missing_file(path: &Path) -> SeqDbError {
-    SeqDbError::NotFound(format!(
-        "File {} not found. If you renamed any BLAST database files, please use original file \
+    SeqDbError::NotFound(
+        format!(
+            "File {} not found. If you renamed any BLAST database files, please use original file \
          names, and makeblastdb to rename the database. If you deleted any BLAST database files, \
          you need to recreate the database.",
-        path.display()
-    ))
+            path.display()
+        )
+        .into(),
+    )
 }
 
 /// A lookup file names an OID the database does not have.
@@ -1953,7 +1957,7 @@ impl SeqDb {
     /// BLAST db`) and for the LMDB files ([`SeqDb::restrict_taxids`]).
     pub fn tax_id_lookup(&self) -> Result<TaxIdLookup<'_>, SeqDbError> {
         if !self.is_version5() {
-            return Err(SeqDbError::NotFound(V4_TAXID_LIST_ERROR.to_string()));
+            return Err(SeqDbError::NotFound(V4_TAXID_LIST_ERROR.to_string().into()));
         }
         Ok(TaxIdLookup {
             db: self,
@@ -1989,7 +1993,9 @@ impl TaxIdLookup<'_> {
     pub fn tax_ids_to_oids(&self, tax_ids: &BTreeSet<i32>) -> Result<Vec<u32>, SeqDbError> {
         let (oids, _) = entries_tax_oids(&self.entries, false, tax_ids)?;
         if oids.is_empty() {
-            return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
+            return Err(SeqDbError::NotFound(
+                tax_ids_not_found(&self.entries).into(),
+            ));
         }
         Ok(oids
             .into_iter()
@@ -2345,7 +2351,7 @@ impl SeqDb {
             let name = volume.index().lmdb_file.as_deref().unwrap_or_default();
             let lmdb = volume
                 .base()
-                .with_file_name(String::from_utf8_lossy(name).as_ref());
+                .with_file_name(crate::utils::os_bytes::path_from_bytes(name));
             match groups.last_mut() {
                 Some((path, range)) if *path == lmdb => range.end = at + 1,
                 _ => groups.push((lmdb, at..at + 1)),
@@ -2386,7 +2392,7 @@ impl SeqDb {
             let env = Env::open(&file).map_err(|message| lmdb_open_error(&file, message))?;
             let listed = tax_files::volumes(&env).map_err(|message| {
                 if tax_files::is_ncbi_volume_error(&message) {
-                    SeqDbError::NotFound(message)
+                    SeqDbError::NotFound(message.into_bytes())
                 } else {
                     SeqDbError::Format {
                         path: lmdb.clone(),
@@ -2396,7 +2402,7 @@ impl SeqDb {
             })?;
             let held = &self.volumes[range.clone()];
             if held.len() > listed.len() {
-                return Err(SeqDbError::NotFound(VOLUME_COUNT_ERROR.to_string()));
+                return Err(SeqDbError::NotFound(VOLUME_COUNT_ERROR.into()));
             }
             let mut next = 0;
             let mut volumes = Vec::with_capacity(listed.len());
@@ -2431,7 +2437,7 @@ impl SeqDb {
                 volumes.push((max_oid, if holds { 0 } else { *count }));
             }
             if included == 0 {
-                return Err(SeqDbError::NotFound(VOLUME_NAME_ERROR.to_string()));
+                return Err(SeqDbError::NotFound(VOLUME_NAME_ERROR.into()));
             }
             if next < held.len() {
                 return Err(SeqDbError::Unsupported {
@@ -2518,7 +2524,7 @@ impl SeqDb {
             TaxidList::Negative(tax_ids) => (true, tax_ids),
         };
         if !self.is_version5() {
-            return Err(SeqDbError::NotFound(V4_TAXID_ERROR.to_string()));
+            return Err(SeqDbError::NotFound(V4_TAXID_ERROR.to_string().into()));
         }
         let entries = self.lmdb_entries()?;
         let (oids, found) = entries_tax_oids(&entries, negative, tax_ids)?;
@@ -2526,7 +2532,7 @@ impl SeqDb {
         if oids.is_empty() {
             let text = tax_ids_not_found(&entries);
             if !negative {
-                return Err(SeqDbError::NotFound(text));
+                return Err(SeqDbError::NotFound(text.into()));
             }
             warning = Some(text);
         }
@@ -2733,7 +2739,7 @@ impl SeqDb {
             warnings.append(&mut posted);
             let ids = processed.map_err(|invalid| {
                 warnings.push(ListWarning::Error(invalid.error.message.clone()));
-                SeqDbError::NotFound(invalid.message())
+                SeqDbError::NotFound(invalid.message().into())
             })?;
             if ids.is_empty() {
                 warnings.push(ListWarning::Posted(EMPTY_LIST_WARNING.to_string()));
@@ -3008,7 +3014,9 @@ impl SeqDb {
         _warnings: &mut [ListWarning],
     ) -> Result<(), SeqDbError> {
         if !list.file.info.is_v4 {
-            return Err(SeqDbError::NotFound(BINARY_LIST_V4_ERROR.to_string()));
+            return Err(SeqDbError::NotFound(
+                BINARY_LIST_V4_ERROR.to_string().into(),
+            ));
         }
         let protein = matches!(self.seqtype, SeqType::Protein);
         let mut ids: Vec<Vec<u8>> = Vec::with_capacity(list.file.ids.len());
@@ -3028,9 +3036,9 @@ impl SeqDb {
             let base = self.volumes[at].base();
             let name = base.to_string_lossy();
             if !isam::StringIsam::index_exists(&name, protein) {
-                return Err(SeqDbError::NotFound(format!(
-                    "SI list specified but no ISAM file found for SI in {name}"
-                )));
+                return Err(SeqDbError::NotFound(
+                    format!("SI list specified but no ISAM file found for SI in {name}").into(),
+                ));
             }
             isam::StringIsam::open_volume(&name, protein)
         };
@@ -3583,7 +3591,7 @@ mod tests {
                     panic!("{line}: {result:?}");
                 };
                 assert_eq!(
-                    text, "Taxonomy ID(s) not found in the tx database.",
+                    text, b"Taxonomy ID(s) not found in the tx database.",
                     "{line}"
                 );
                 continue;
@@ -4068,7 +4076,10 @@ mod tests {
         let error = db
             .restrict(&DbList::Seqids(list_of(&binary, false)), &mut Vec::new())
             .unwrap_err();
-        assert_eq!(error.ncbi_message().as_deref(), Some(BINARY_LIST_V4_ERROR));
+        assert_eq!(
+            error.ncbi_message().as_deref(),
+            Some(BINARY_LIST_V4_ERROR.as_bytes())
+        );
     }
 
     #[test]
@@ -4080,7 +4091,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             error.ncbi_message().as_deref(),
-            Some("Taxonomy filtering is not supported in v4 BLAST dbs")
+            Some(b"Taxonomy filtering is not supported in v4 BLAST dbs".as_slice())
         );
     }
 

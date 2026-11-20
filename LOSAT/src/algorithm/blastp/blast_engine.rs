@@ -2344,6 +2344,10 @@ fn blastp_adjust_initial_hsp_offsets(init_hsp: &mut InitHSP, query_start: i32) {
 // ...
 // s_AdjustInitialHSPOffsets(init_hsp, query_start);
 // ```
+// Inlined into both callers (`prelim_kernel`'s `gapped_subject` and `ungapped_subject`): run once
+// per initial HSP, a call of its own cost gapped blastp 0.019 % more instructions than dev's one
+// inlined caller (callgrind, `O4b` A/B).
+#[inline(always)]
 fn blastp_adjust_hsp_offsets_and_get_query_data<'a>(
     concatenated_query: &'a [u8],
     contexts: &'a [QueryContext],

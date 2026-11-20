@@ -6,7 +6,7 @@
 //! The one owner of the hard chunks (series NP, M4a-2b review S1): BLASTN's preliminary stage
 //! searches these chunks (`algorithm::blastn::blast_engine::run::next_hard_chunk` turns each into
 //! the engine's chunk), and LOSAT's refusals of `-db_hard_mask` read them
-//! (`blastinput::db_mask::HardMaskShape::of`), so the two cannot disagree. The chunks of a subject
+//! (`blastinput::db_mask::HardMaskShape::of_scan`), so the two cannot disagree. The chunks of a subject
 //! without hard ranges (unmasked or soft-masked, `run::SubjectSplitState::next_chunk`) keep their
 //! own copy of the same arithmetic on `&full_range`, for the default path's code: the one
 //! function for both cost the chunk loop's closure 280,200 more instructions (14 per subject) in

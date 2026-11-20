@@ -338,7 +338,7 @@ fn the_archive_writes_the_key_of_a_name_or_the_id() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:241-268 and 579-584 (quoted
-// at `HardMaskShape::of`)
+// at `HardMaskShape::of_scan`)
 // A search with `-db_hard_mask` is refused, before anything is written, at the first searched
 // sequence whose masks NCBI's hard chunks do not handle (series NP, M4a-2b decisions H3-H5): a5's
 // s4 (OID 3) is masked whole ([0, 300): the "no chunking" branch scans the full range of a chunk
@@ -415,7 +415,7 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
     }
 }
 
-// The shapes of `HardMaskShape::of`, read off the chunks (blast_engine.c:221-276, 579-584, 1354,
+// The shapes of `HardMaskShape::of_scan`, read off the chunks (blast_engine.c:221-276, 579-584, 1354,
 // 1368-1370; na_ungapped.c:1647-1668): a mask that runs to the end after the chunk from 0 (empty
 // masks at 0 or at the end around it; the first range at or below MAX_DBSEQ_LEN), in a subject of
 // a word or more (`min_subj_seq_length` is 1 for BLASTN: 4 letters at word 4, review F2), at a
@@ -436,10 +436,7 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
             reads.set(reads.get() + 1);
             Some(length)
         };
-        (
-            HardMaskShape::of(masks, None, &read, word).unwrap(),
-            reads.get(),
-        )
+        (shape_of(masks, None, &read, word).unwrap(), reads.get())
     };
     let shape = |masks: &[(u32, u32)], length: usize| shape_at(masks, length, 11);
     let tail = |start, end| Some(HardMaskShape::TailMask { start, end });
@@ -514,31 +511,22 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     assert_eq!(shape(&[(101, 102), (102, 103)], 1200), (short(102, 103), 1));
     // The final chunk (1000-1012, scanned from 1002) holds a word of 10 letters, not of 11.
     assert_eq!(
-        HardMaskShape::of(&[(1001, 1002)], None, &|| Some(1012), 11),
+        shape_of(&[(1001, 1002)], None, &|| Some(1012), 11),
         Ok(None)
     );
     assert_eq!(
-        HardMaskShape::of(&[(1001, 1002)], None, &|| Some(1012), 10),
+        shape_of(&[(1001, 1002)], None, &|| Some(1012), 10),
         Ok(short(1001, 1002))
     );
     // A subject that the scan reads no word of: shorter than the word.
     assert_eq!(shape_at(&[(0, 6)], 6, 7), (None, 1));
     assert_eq!(shape_at(&[(0, 7)], 7, 7), (tail(0, 7), 1));
-    assert_eq!(HardMaskShape::of(&[(0, 4)], None, &|| Some(4), 5), Ok(None));
-    assert_eq!(
-        HardMaskShape::of(&[(2, 4)], None, &|| Some(4), 4),
-        Ok(tail(2, 4))
-    );
-    assert_eq!(
-        HardMaskShape::of(&[(0, 4)], None, &|| Some(4), 4),
-        Ok(tail(0, 4))
-    );
-    assert_eq!(HardMaskShape::of(&[(1, 3)], None, &|| Some(3), 4), Ok(None));
+    assert_eq!(shape_of(&[(0, 4)], None, &|| Some(4), 5), Ok(None));
+    assert_eq!(shape_of(&[(2, 4)], None, &|| Some(4), 4), Ok(tail(2, 4)));
+    assert_eq!(shape_of(&[(0, 4)], None, &|| Some(4), 4), Ok(tail(0, 4)));
+    assert_eq!(shape_of(&[(1, 3)], None, &|| Some(3), 4), Ok(None));
     // The length that cannot be read ends the check.
-    assert_eq!(
-        HardMaskShape::of(&[(100, 300)], None, &|| None, 11),
-        Err(())
-    );
+    assert_eq!(shape_of(&[(100, 300)], None, &|| None, 11), Err(()));
     // The bounds of the length that the index gives (review 2 S4): the length is read only where
     // the shape differs between them (a mask that runs to the end, here at 300 or at 1201 of
     // 1200-1203), not where it is the same at all four (none, or a refusal read off the chunks).
@@ -549,7 +537,7 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
             Some(length)
         };
         (
-            HardMaskShape::of(masks, Some(bounds), &read, word).unwrap(),
+            shape_of(masks, Some(bounds), &read, word).unwrap(),
             reads.get(),
         )
     };
@@ -721,4 +709,14 @@ fn a_masked_using_list_of_another_length_than_the_names_is_a_bug() {
     let (resolved, _) = resolve(&soft("11"), &db, &name);
     let resolved = resolved.unwrap().unwrap();
     crate::algorithm::common::database::pairwise_database_masked(&db, Some(&resolved.shown[..1]));
+}
+
+/// `HardMaskShape::of_scan` of BLASTN's scan, whose words have `scanned_word` letters.
+fn shape_of(
+    masks: &[(u32, u32)],
+    bounds: Option<(usize, usize)>,
+    length: &dyn Fn() -> Option<usize>,
+    scanned_word: usize,
+) -> Result<Option<HardMaskShape>, ()> {
+    HardMaskShape::of_scan(masks, bounds, length, HardScan::Nucleotide { scanned_word })
 }

@@ -15921,7 +15921,7 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310, 579-584 (quoted
     // at `SubjectSplitState::next_chunk`); na_ungapped.c:1647-1668, masksubj.inl:43-58,
-    // blast_engine.c:493-500, 565 and blast_hits.c:2873-2911, 2956 (quoted at `HardMaskShape::of`)
+    // blast_engine.c:493-500, 565 and blast_hits.c:2873-2911, 2956 (at `HardMaskShape::of_scan`)
     // The refusals of `-db_hard_mask` against NCBI's chunks (the model above, not the chunker
     // that the refusals run; reviews F1-F3 and T1 of M4a-2b, review 2 F1 and T1): a shape is
     // refused as `TailMask` exactly when a chunk shorter than the sequence scans the full range
@@ -15939,7 +15939,7 @@ mod tests {
     // are cut into several chunks and the final chunk can follow a full chunk of its own range.
     #[test]
     fn hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list() {
-        use crate::blastinput::db_mask::{HardMaskShape, TAIL_MASK_SEARCHED_WORD};
+        use crate::blastinput::db_mask::{HardMaskShape, HardScan, TAIL_MASK_SEARCHED_WORD};
         let mut seed = 0x2545_F491_4F6C_DD1Du64;
         let mut next = |bound: u64| {
             seed ^= seed << 13;
@@ -16015,16 +16015,19 @@ mod tests {
                 .iter()
                 .map(|&(start, end)| (start as u32, end as u32))
                 .collect();
-            let shape = HardMaskShape::of(&stored, None, &|| Some(length as usize), word as usize);
+            let scan = HardScan::Nucleotide {
+                scanned_word: word as usize,
+            };
+            let shape = HardMaskShape::of_scan(&stored, None, &|| Some(length as usize), scan);
             // The same shape from the bounds of the length that the index gives (the packed bytes
             // and 0 to 3 letters in the last one; review 2 S4).
             let low = (length - length % 4) as usize;
             assert_eq!(
-                HardMaskShape::of(
+                HardMaskShape::of_scan(
                     &stored,
                     Some((low, low + 3)),
                     &|| Some(length as usize),
-                    word as usize
+                    scan
                 ),
                 shape,
                 "{length} {masks:?} word {word}: bounds"

@@ -722,8 +722,9 @@ impl HardMaskShape {
     //         return BLASTERR_OPTION_VALUE_INVALID;
     // ```
     /// The shape of the stored masks `masks` (`[start, end)`, as stored, not empty) of a sequence
-    /// whose length `length` gives, that `-db_hard_mask` refuses in a search whose scan reads words
-    /// of `scanned_word` letters (the word size, or the discontiguous template's length), or
+    /// whose length `length` gives, that `-db_hard_mask` refuses in a search whose scan is `scan`
+    /// (BLASTN's `HardScan::Nucleotide`, whose words have `scanned_word` letters: the word size,
+    /// or the discontiguous template's length), or
     /// `None`; `Err(())` when the length cannot be read (`SeqDb::first_searched_masks`). With
     /// `bounds`, the lowest and highest length that the index gives (`Volume::
     /// nucleotide_length_bounds`; the sequence's length is one of the four), `length` is read
@@ -762,21 +763,12 @@ impl HardMaskShape {
     ///   `MAX_DBSEQ_LEN` letters) end after its offset, the merge is within the range and
     ///   LOSAT's overlap (`dbseq_chunk_overlap`) is kept, as the unmasked search keeps it
     ///   (decision B-d).
-    pub fn of(
-        masks: &[(u32, u32)],
-        bounds: Option<(usize, usize)>,
-        length: &dyn Fn() -> Option<usize>,
-        scanned_word: usize,
-    ) -> Result<Option<HardMaskShape>, ()> {
-        Self::of_scan(masks, bounds, length, HardScan::Nucleotide { scanned_word })
-    }
-
-    /// [`HardMaskShape::of`] of a search whose scan is `scan`: BLASTN's
-    /// (`HardScan::Nucleotide`), or the protein programs' (`HardScan::Protein`, series NP,
-    /// M4b), whose chunks start at their range's left, so that `ShortLastMask` (a residual before
-    /// the final chunk's range) never occurs, every chunk scans a word, a mask that runs to the end
-    /// after the chunk from the start is `TailMask` at every word, and a hard range longer than
-    /// `MAX_DBSEQ_LEN` is `LongRange`.
+    ///
+    /// The protein programs' scan (`HardScan::Protein`, series NP, M4b) has chunks that start at
+    /// their range's left, so that `ShortLastMask` (a residual before the final chunk's range)
+    /// never occurs, every chunk scans a word, a mask that runs to the end after the chunk from the
+    /// start is `TailMask` at every word, and a hard range longer than `MAX_DBSEQ_LEN` is
+    /// `LongRange`.
     pub fn of_scan(
         masks: &[(u32, u32)],
         bounds: Option<(usize, usize)>,
@@ -811,7 +803,7 @@ impl HardMaskShape {
     }
 
     /// The shape of the sorted masks `masks` of a sequence of `length` letters, read off its
-    /// chunks (`HardMaskShape::of`); `split` is the chunker, whose buffer of ranges is reused.
+    /// chunks (`HardMaskShape::of_scan`); `split` is the chunker, whose buffer of ranges is reused.
     fn of_chunks(
         masks: &[(u32, u32)],
         length: usize,

@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # own): ncbi/<name>.merged. The reader's warnings come between records, so where they fall among
 # the output's bytes shows NCBI's stdout buffer (`cerr` is tied to `cout`).
 MERGED = {"r_letters", "r_letters_fasta", "r_letters_slb", "r_gap_fasta_ps", "r_gap_mi",
-          "d_letters_fasta"}
+          "d_letters_fasta", "k_binary", "cd_two", "v_binary_stdout"}
 
 
 def environment():

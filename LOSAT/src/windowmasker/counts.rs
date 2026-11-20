@@ -9,7 +9,7 @@ use std::io::{BufWriter, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
-use crate::ncbi_app::files::Ostream;
+use crate::ncbi_app::files::{input_lines, LineEnds, Ostream};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::utils::winmask::{
@@ -104,8 +104,10 @@ fn finalize(writer: CountsWriter, sink: &mut Sink<'_>, diag: &mut Diag) -> Resul
 
 /// The file list of `-in` (`CWinMaskCountsGenerator::operator()`): the names between commas
 /// (`NStr::Split` without flags: empty names are kept, an empty value has none), or with
-/// `-fa_list` the lines of the file `-in` that are not empty (`getline`: a carriage return
-/// stays in the name; a file that does not open or read gives no more names).
+/// `-fa_list` the lines of the file `-in` that are not empty, as the C++ library's `getline`
+/// reads them from a text stream: lines end at `\n`, and a carriage return stays in the name
+/// except where the library reads a text file's `\r\n` as `\n` (Windows); a file that does not
+/// open or read gives no more names.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_gen_counts.cpp:228-242
 fn file_list(input: &str, fa_list: bool) -> Vec<String> {
@@ -119,9 +121,13 @@ fn file_list(input: &str, fa_list: bool) -> Vec<String> {
     if let Ok(mut file) = File::open(input) {
         let _ = std::io::Read::read_to_end(&mut file, &mut bytes);
     }
-    bytes
-        .split(|&b| b == b'\n')
-        .filter(|line| !line.is_empty())
+    let text_mode = if cfg!(windows) {
+        LineEnds::Windows
+    } else {
+        LineEnds::Unix
+    };
+    input_lines(&bytes, text_mode)
+        .into_iter()
         .map(|line| String::from_utf8_lossy(line).into_owned())
         .collect()
 }

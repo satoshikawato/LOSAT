@@ -14,8 +14,8 @@
 //!   Seq-inst. LOSAT does not write them; they show only where the input PSSM is written (the
 //!   run refuses there) and the molecule (where the Bioseq stops being protein, the run refuses).
 
-use crate::ncbi_str::{string_to_int, string_to_int8, string_to_uint, truncate_spaces};
 use super::descr::{self, Content};
+use crate::ncbi_str::{string_to_int, string_to_int8, string_to_uint, truncate_spaces};
 use std::collections::BTreeMap;
 
 /// `CModData`: a modifier as the defline gave it.
@@ -75,7 +75,7 @@ pub(crate) enum ModsStop {
     Failure(ModsFailure),
     /// An exception of NCBI's toolkit that nothing in the reader catches, after the warnings that
     /// NCBI posted before it.
-    Exception(crate::ncbi_exception::NcbiException, Vec<Vec<u8>>),
+    Exception(Box<crate::ncbi_exception::NcbiException>, Vec<Vec<u8>>),
     /// NCBI's reader does something here that LOSAT does not reproduce.
     Undefined(&'static str),
 }
@@ -272,7 +272,6 @@ const ORGMOD: &[&[u8]] = &[
     b"host",
     b"specific-host",
 ];
-
 
 /// `g_BiomolStringToEnum` and what `g_BiomolEnumToMolEnum` makes of each.
 ///
@@ -575,7 +574,7 @@ fn invalid_value(modifier: &ModData, extra: &[u8]) -> Vec<u8> {
 }
 
 impl Adder {
-    fn single_value<'a>(values: &'a [ModData]) -> &'a [u8] {
+    fn single_value(values: &[ModData]) -> &[u8] {
         &values[0].value
     }
 
@@ -710,7 +709,10 @@ impl Adder {
                     // `CUtf8::AsUTF8` of a token that is not UTF-8 throws, and the modifier is
                     // reported as an invalid value.
                     let tokens = tokenize(&modifier.value, b",; \t");
-                    if tokens.iter().any(|token| std::str::from_utf8(token).is_err()) {
+                    if tokens
+                        .iter()
+                        .any(|token| std::str::from_utf8(token).is_err())
+                    {
                         return fail(modifier, b"");
                     }
                     accessions.extend(tokens.into_iter().map(<[u8]>::to_vec));
@@ -733,7 +735,12 @@ impl Adder {
                             &mut |_| {},
                         ) {
                             Ok(parsed_id) => parsed.push(parsed_id),
-                            Err(error) => return Err(ModsStop::Exception(error.exception(), Vec::new())),
+                            Err(error) => {
+                                return Err(ModsStop::Exception(
+                                    Box::new(error.exception()),
+                                    Vec::new(),
+                                ))
+                            }
                         }
                     }
                     content.replaces = Some(parsed);
@@ -1052,4 +1059,61 @@ pub(crate) fn apply_defline(defline: &[u8], protein: bool) -> Result<ModsApplied
         applied.effects.mol = Some(adder.mol);
     }
     Ok(applied)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids(value: &str) -> Option<Vec<String>> {
+        match seq_id_range(value.as_bytes()) {
+            Ok(Some(ids)) => Some(
+                ids.into_iter()
+                    .map(|id| String::from_utf8(id).unwrap())
+                    .collect(),
+            ),
+            Ok(None) => None,
+            Err(_) => panic!("{value}: refused"),
+        }
+    }
+
+    // A secondary-accession range is spelled out with the zero padding of its first number
+    // (probes `f6b.m2.0xx`); a value that is not a range stays as it is.
+    #[test]
+    fn a_range_is_spelled_out() {
+        assert_eq!(
+            ids("AB000001-AB000003").unwrap(),
+            ["AB000001", "AB000002", "AB000003"]
+        );
+        assert!(ids("AB000009-10").is_none());
+        assert_eq!(ids("AB000001").unwrap(), ["AB000001"]);
+        assert!(ids("AB0000x1").is_none());
+        assert!(ids("AB000001-CD000003").is_none());
+    }
+
+    #[test]
+    fn a_backward_or_huge_range_is_refused() {
+        assert!(matches!(
+            seq_id_range(b"AB000003-AB000001"),
+            Err(ModsStop::Undefined(_))
+        ));
+        assert!(matches!(
+            seq_id_range(b"A1000000000-A9999999999"),
+            Err(ModsStop::Undefined(_))
+        ));
+        assert!(matches!(
+            seq_id_range(b"A0000001-A2000000"),
+            Err(ModsStop::Undefined(_))
+        ));
+    }
+
+    // The title is what the modifiers leave of the defline; an unrecognized modifier stays in it.
+    #[test]
+    fn the_title_is_the_defline_without_its_modifiers() {
+        let applied = apply_defline(b"a title [organism=Homo sapiens] more", true).unwrap();
+        assert_eq!(applied.title.as_deref(), Some(&b"a title more"[..]));
+        assert!(applied.effects.content.has_any());
+        let applied = apply_defline(b"[organism=Homo sapiens]", true).unwrap();
+        assert!(applied.title.is_none());
+    }
 }

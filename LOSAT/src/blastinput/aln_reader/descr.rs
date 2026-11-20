@@ -111,7 +111,7 @@ impl UserKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Item {
-    Source(Source),
+    Source(Box<Source>),
     MolInfo(MolInfo),
     Genbank(GbBlock),
     User(UserKind, Vec<Field>),
@@ -339,10 +339,12 @@ impl Source {
                         .map(|reaction| {
                             let mut parts = Vec::new();
                             if let Some(forward) = &reaction.forward {
-                                parts.push(("forward", primer_set(reaction_ty, "forward", forward)));
+                                parts
+                                    .push(("forward", primer_set(reaction_ty, "forward", forward)));
                             }
                             if let Some(reverse) = &reaction.reverse {
-                                parts.push(("reverse", primer_set(reaction_ty, "reverse", reverse)));
+                                parts
+                                    .push(("reverse", primer_set(reaction_ty, "reverse", reverse)));
                             }
                             seq(reaction_ty, parts)
                         })
@@ -434,7 +436,9 @@ impl Item {
                             (
                                 "data",
                                 Value::List(
-                                    data.iter().map(|field| user_field(field_ty, field)).collect(),
+                                    data.iter()
+                                        .map(|field| user_field(field_ty, field))
+                                        .collect(),
                                 ),
                             ),
                         ],
@@ -489,7 +493,7 @@ impl Content {
     fn source(&mut self) -> &mut Source {
         let at = self.slot(
             |item| matches!(item, Item::Source(_)),
-            Item::Source(Source::default()),
+            Item::Source(Box::default()),
         );
         match &mut self.items[at] {
             Item::Source(source) => source,
@@ -557,7 +561,11 @@ impl Content {
 
     /// `x_SetOrgMod`: the orgmod of each value (the list is made on the first call).
     pub(crate) fn add_orgmods(&mut self, kind: &'static str, values: &[Vec<u8>]) {
-        let orgname = self.source().org.orgname.get_or_insert_with(OrgName::default);
+        let orgname = self
+            .source()
+            .org
+            .orgname
+            .get_or_insert_with(OrgName::default);
         let list = orgname.mods.get_or_insert_with(Vec::new);
         for value in values {
             list.push((kind, value.clone()));
@@ -569,17 +577,28 @@ impl Content {
     }
 
     pub(crate) fn set_lineage(&mut self, value: &[u8]) {
-        self.source().org.orgname.get_or_insert_with(OrgName::default).lineage =
-            Some(value.to_vec());
+        self.source()
+            .org
+            .orgname
+            .get_or_insert_with(OrgName::default)
+            .lineage = Some(value.to_vec());
     }
 
     pub(crate) fn set_division(&mut self, value: &[u8]) {
-        self.source().org.orgname.get_or_insert_with(OrgName::default).div = Some(value.to_vec());
+        self.source()
+            .org
+            .orgname
+            .get_or_insert_with(OrgName::default)
+            .div = Some(value.to_vec());
     }
 
     /// `gcode`, `mgcode` or `pgcode`.
     pub(crate) fn set_code(&mut self, which: &[u8], code: i64) {
-        let orgname = self.source().org.orgname.get_or_insert_with(OrgName::default);
+        let orgname = self
+            .source()
+            .org
+            .orgname
+            .get_or_insert_with(OrgName::default);
         match which {
             b"gcode" => orgname.gcode = Some(code),
             b"mgcode" => orgname.mgcode = Some(code),
@@ -589,12 +608,15 @@ impl Content {
 
     /// `COrg_ref::GetTaxId` / `SetTaxId`: the `taxon` database tag of the organism.
     fn taxon_id(&mut self) -> Option<i64> {
-        self.source().org.db.as_ref()?.iter().find_map(|(name, tag)| {
-            match (name.as_slice() == b"taxon", tag) {
+        self.source()
+            .org
+            .db
+            .as_ref()?
+            .iter()
+            .find_map(|(name, tag)| match (name.as_slice() == b"taxon", tag) {
                 (true, Tag::Id(id)) => Some(*id),
                 _ => None,
-            }
-        })
+            })
     }
 
     fn set_taxon_id(&mut self, id: i64) {
@@ -645,8 +667,10 @@ impl Content {
     pub(crate) fn set_primers(&mut self, forward: bool, names: bool, values: &[Vec<u8>]) {
         let mut groups: Vec<Vec<u8>> = Vec::new();
         for value in values {
-            let mut parts: Vec<Vec<u8>> =
-                super::mods::tokenize(value, b",").into_iter().map(<[u8]>::to_vec).collect();
+            let mut parts: Vec<Vec<u8>> = super::mods::tokenize(value, b",")
+                .into_iter()
+                .map(<[u8]>::to_vec)
+                .collect();
             if !names && parts.len() > 1 {
                 if parts[0].first() == Some(&b'(') {
                     parts[0].remove(0);
@@ -657,7 +681,11 @@ impl Content {
                 }
             }
             for part in parts {
-                groups.push(if names { part } else { part.to_ascii_lowercase() });
+                groups.push(if names {
+                    part
+                } else {
+                    part.to_ascii_lowercase()
+                });
             }
         }
         if forward {
@@ -805,7 +833,11 @@ fn set_primer_texts(reaction: &mut Reaction, forward: bool, names: bool, group: 
     .get_or_insert_with(Vec::new);
     let size = set.len();
     let mut at = 0;
-    for (i, text) in group.split(|&c| c == b':').filter(|t| !t.is_empty()).enumerate() {
+    for (i, text) in group
+        .split(|&c| c == b':')
+        .filter(|t| !t.is_empty())
+        .enumerate()
+    {
         // a blank text is skipped
         if super::mods::is_blank(text) {
             continue;
@@ -913,7 +945,11 @@ impl Content {
             annot_ty,
             vec![(
                 "data",
-                choice(child(annot_ty, "data"), "ftable", Value::List(vec![feature])),
+                choice(
+                    child(annot_ty, "data"),
+                    "ftable",
+                    Value::List(vec![feature]),
+                ),
             )],
         )])
     }

@@ -49,8 +49,8 @@
 //! (No report of the readers has that text, so the branch never runs.)
 
 mod base;
-pub(crate) mod descr;
 mod clustal;
+pub(crate) mod descr;
 mod fasta_gap;
 mod format_guess;
 mod lines;
@@ -126,7 +126,7 @@ pub(crate) enum AlnError {
     Modifier(mods::ModsFailure),
     /// An exception that nothing in the reader catches, thrown while a defline's modifiers are
     /// applied, after the warnings that NCBI posted before it.
-    ModifierException(Vec<Vec<u8>>, crate::ncbi_exception::NcbiException),
+    ModifierException(Vec<Vec<u8>>, Box<crate::ncbi_exception::NcbiException>),
     /// A `std::exception` of the reader that nothing catches (`what()`): `Error: ` and its text,
     /// exit status 255.
     StdException(String),
@@ -474,4 +474,3 @@ fn entries(scanned: base::Scanned, ids: Vec<Vec<ParsedSeqId>>) -> Result<Alignme
         warnings,
     })
 }
-

@@ -759,7 +759,6 @@ fn longer_row_above_master(master_index: Option<i32>, row: usize) -> anyhow::Err
     )
 }
 
-
 /// LOSAT's refusal of a run whose alignment reader reached a state that no input gives (S3 of
 /// the PS6 review: the reader's two preconditions on the Seq-ids, `aln_reader::verify_alignment_info`).
 fn internal_error(what: &str) -> anyhow::Error {

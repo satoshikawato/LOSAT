@@ -48,10 +48,10 @@ use crate::core::psi::KarlinBlk;
 use crate::report::serial::pssm::{PssmWithParameters, SeqData, SeqEntry};
 
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
-use crate::report::serial::encoder::ReplacedChar;
 #[cfg(test)]
 use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
 use crate::algorithm::pssm_search::in_pssm::InPssmFile;
+use crate::report::serial::encoder::ReplacedChar;
 
 /// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): when a
 /// PSSM file is written, the object that `SavePssmToFile` writes. (The Seq-id that the PSSM of

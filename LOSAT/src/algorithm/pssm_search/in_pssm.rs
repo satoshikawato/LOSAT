@@ -1109,7 +1109,7 @@ pub(crate) fn psi_search_and_object_of(
             .map_or(0, |last| last + 1);
         title[..end].to_vec()
     };
-    if !matches!(query.inst.mol.1, 1 | 2 | 3 | 4) || query.inst.repr.1 != 2 {
+    if !matches!(query.inst.mol.1, 1..=4) || query.inst.repr.1 != 2 {
         return Err(reader.refuse(format!(
             "a PSSM query whose Seq-inst is not a raw protein (repr {}, mol {})",
             query.inst.repr.0, query.inst.mol.0

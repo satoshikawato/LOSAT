@@ -58,9 +58,8 @@ pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Scan<Scanned> {
         if count == 0 {
             return Err(ScanFailure::Undefined(ZERO_COUNT));
         }
-        let new_block = data_line_count % count_u == 0;
-        let data: Vec<u8>;
-        if data_line_count < count_u {
+        let new_block = data_line_count.is_multiple_of(count_u);
+        let data: Vec<u8> = if data_line_count < count_u {
             let (id, rest, _) = split_in_two(line, b" \t", true);
             if rest.is_empty() {
                 return Err(ScanFailure::Failed);
@@ -70,10 +69,10 @@ pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Scan<Scanned> {
             }
             ids.push(id.to_vec());
             sequences.push(Vec::new());
-            data = strip_blanks(rest);
+            strip_blanks(rest)
         } else {
-            data = strip_blanks(line);
-        }
+            strip_blanks(line)
+        };
         if new_block {
             block_line_length = data.len();
         } else if data.len() != block_line_length {
@@ -85,7 +84,7 @@ pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Scan<Scanned> {
     if count == 0 {
         return Err(ScanFailure::Undefined(ZERO_COUNT));
     }
-    if data_line_count % count_u != 0 {
+    if !data_line_count.is_multiple_of(count_u) {
         return Err(ScanFailure::Failed);
     }
     // `xVerifyAlignmentData`.

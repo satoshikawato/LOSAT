@@ -60,17 +60,21 @@ async function folder(relative: string, paths: Map<Blob, string>): Promise<Direc
   return files;
 }
 
-/** Reads a Blob's bytes from its file, synchronously; the bytes read in all. */
-function osReader(paths: Map<Blob, string>): { read: BlobReader; bytes: () => number } {
+/** Reads a Blob's bytes from its file, synchronously; the bytes read in all, and by file. */
+function osReader(paths: Map<Blob, string>): { read: BlobReader; bytes: () => number; byFile: Map<string, number> } {
   let total = 0;
+  const byFile = new Map<string, number>();
   return {
     bytes: () => total,
+    byFile,
     read: (blob, start, end) => {
       const bytes = new Uint8Array(end - start);
-      const descriptor = openSync(paths.get(blob)!, 'r');
+      const path = paths.get(blob)!;
+      const descriptor = openSync(path, 'r');
       try {
         const got = readSync(descriptor, bytes, 0, bytes.length, start);
         total += got;
+        byFile.set(path, (byFile.get(path) ?? 0) + got);
         return bytes.subarray(0, got);
       } finally {
         closeSync(descriptor);
@@ -98,6 +102,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
       expect(started.ok && started.start.database, row.id).toBe(true);
       const query = abi.register(row.program, ROLE_QUERY, readFileSync(join(LOSAT, row.query)));
       const before = reader.bytes();
+      reader.byFile.clear();
       let outfmt6: Uint8Array[] = [];
       abi.run(argv, query.handle, 0, (stream, bytes) => {
         if (stream === 6) outfmt6.push(bytes.slice());
@@ -106,13 +111,14 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
       abi.release(query.handle);
       const frozen = readFileSync(join(LOSAT, 'tests/fixtures/db_search', `${row.id}.out`));
       expect(Buffer.concat(outfmt6).equals(frozen), row.id).toBe(true);
-      // Only what the search reads: at most the bytes of the database's own files (`<db>.*`) and of the filter's list,
-      // never the rest of the folder (2.8 MB in all).
-      const own = files.filter(({ name }) => name.startsWith(`${row.db}.`) || row.extra.includes(name));
-      const ownBytes = own.reduce((total, { file }) => total + file.size, 0);
-      const read = reader.bytes() - before;
-      console.log(`${row.id}: read ${read} of the database's ${ownBytes} bytes (folder ${files.reduce((total, { file }) => total + file.size, 0)})`);
-      expect(read, row.id).toBeLessThanOrEqual(ownBytes);
+      // Only what the search reads: the database's own files (`<db>.*`) and the filter's list, by range, never
+      // another file of the folder (2.8 MB in all). A file may be read more than once in a run (its index at each
+      // open of the database, its sequences by the search and again by the traceback and the report), as the CLI
+      // reads it (line WQA D12a review, low 5).
+      const own = new Set(files.filter(({ name }) => name.startsWith(`${row.db}.`) || row.extra.includes(name)).map(({ name }) => join(LOSAT, name)));
+      const read = [...reader.byFile].map(([path, bytes]) => `${path.slice(LOSAT.length + 1)} ${bytes}/${statSync(path).size}`);
+      console.log(`${row.id}: read ${reader.bytes() - before} bytes: ${read.join(', ')}`);
+      expect([...reader.byFile.keys()].filter((path) => !own.has(path)), row.id).toEqual([]);
     }
     // A database that the directory does not hold: the CLI's message.
     directory.open([]);

@@ -129,12 +129,17 @@ test("-db searches read the user's picked Files from the disk, in the Engine wor
   }
 });
 
-test('a database file changed after its pick fails the run with the error of a file that cannot be read', async ({ context, browserName }) => {
+test('a database file changed or removed after its pick fails the run with the error of a file that cannot be read', async ({ context, browserName }) => {
   const page = await openHarness(context, server);
   const row = manifestRows().find((candidate) => candidate.id === 'db.d1.6')!;
   const search = searchOf(row, 1);
   // A copy of the folder, so that the repository's files stay as they are.
   const copy = mkdtempSync(join(tmpdir(), 'losat-e2e-pick-'));
+  const sequences = join(copy, `${row.db}.psq`);
+  const run = async () => {
+    const [result] = await page.evaluate((searches) => window.losatHarness!.engine.databaseSearches(searches, '#db-pick'), [search]);
+    return result!;
+  };
   try {
     const paths = search.files.map((path) => {
       const target = join(copy, path);
@@ -143,11 +148,19 @@ test('a database file changed after its pick fails the run with the error of a f
       return target;
     });
     await pick(page, paths);
-    // The sequences of the database change after the pick: the browser's File no longer reads them.
-    appendFileSync(join(copy, `${row.db}.psq`), Buffer.from([0]));
-    const [result] = await page.evaluate((searches) => window.losatHarness!.engine.databaseSearches(searches, '#db-pick'), [search]);
-    console.log(`${browserName} changed ${search.id}: ${result!.error ?? `ran, outfmt 6 ${result!.sha256}`}`);
-    expect(result!.error, browserName).toMatch(CHANGED_FILE_ERROR);
+    // The sequences change after the pick. Chromium and WebKit no longer read the picked File (NotReadableError, which
+    // the host gives the engine as EIO); Firefox reads the file's bytes as they are now (observed 2026-11-21), so its
+    // run completes.
+    appendFileSync(sequences, Buffer.from([0]));
+    const changed = await run();
+    console.log(`${browserName} changed ${search.id}: ${changed.error ?? `ran, outfmt 6 ${changed.sha256}`}`);
+    if (browserName === 'firefox') expect(changed.error, browserName).toBeUndefined();
+    else expect(changed.error, browserName).toMatch(CHANGED_FILE_ERROR);
+    // Removed after the pick: no browser reads it.
+    rmSync(sequences);
+    const removed = await run();
+    console.log(`${browserName} removed ${search.id}: ${removed.error ?? `ran, outfmt 6 ${removed.sha256}`}`);
+    expect(removed.error, browserName).toMatch(CHANGED_FILE_ERROR);
   } finally {
     rmSync(copy, { recursive: true, force: true });
   }

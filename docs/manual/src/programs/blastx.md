@@ -47,6 +47,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-matrix` | `BLOSUM62` | Scoring matrix: BLOSUM45, 50, 62, 80, 90 or PAM30, 70, 250 |
 | `-gapopen`, `-gapextend` | 11, 1 | Gap costs |
 | `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3 |
+| `-use_sw_tback` | off | Align the final results again with Smith-Waterman |
 | `-seg` | `12 2.2 2.5` | Low-complexity filter |
 | `-sum_stats` | `true` | Use sum statistics for groups of alignments |
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
@@ -84,7 +85,8 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `blastx` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-use_sw_tback`, `-best_hit_overhang` and `-best_hit_score_edge`.
+- `-best_hit_overhang` and `-best_hit_score_edge`.
+- With `-use_sw_tback`, the rare query batches on which NCBI BLAST+ never finishes, crashes or reads past its lists (see [What LOSAT refuses](../refusals.md)).
 - `-query_gencode 32`; `blastx` does not accept code 32.
 - An `-evalue` that is not a finite number.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastx-fast`), and matrix names that only begin with `IDENTITY`.

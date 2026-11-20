@@ -222,7 +222,6 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-use_sw_tback` | Refused. |
 | `-query_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7; 5 is the default of `-task blastx-fast`), or a name that begins with `IDENTITY` | Refused. NCBI aborts. |
 | An `-evalue` that is not finite (`+inf`, `1e999`, `-nan`) | Refused. |
@@ -231,6 +230,8 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | `-query_loc` or `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16 | Refused. Formats 0, 6, 7, 10 and 20 work. |
 | A protein subject of more than 5,000,000 residues, from `-subject` or from a database | Refused. NCBI searches it in overlapping parts, which LOSAT does not do yet. |
+| `-use_sw_tback` with `-ungapped` (which only `-comp_based_stats 0` allows) | Refused at the first query batch that is searched. NCBI crashes there, whether the batch has hits or not. |
+| `-use_sw_tback` on a query batch that NCBI never finishes or crashes on, or on which it reads past its lists | Refused, as in `blastp` and `tblastn`. See Rare inputs. |
 
 The error names the sequence and exits with status 1: `Error: subject sequence N has M residues; a subject longer than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX` for the N-th record of `-subject` (counted from 1), and the same sentence starting with `database sequence N` for a database sequence (N is its position in the database, counted from 0).
 
@@ -246,6 +247,10 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 - With `-ungapped -window_size 0` and a low `-threshold`, `-outfmt 1` to `4` is refused for a one-hit ungapped alignment of length 0 among the alignments shown, where NCBI's merge of the query-anchored alignments frees memory that it still reads. NCBI crashed in every such run we made.
 - One case is an alignment whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1. The other is an alignment followed on its query row by unaligned letters, whose segment the merge frees unless it is the last segment it made.
 - LOSAT stops before the first byte of the report, unless the report of a query before it ends with NCBI's exception.
+- With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.
+- With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, as in LOSAT.
+- With `-use_sw_tback` and E-values in place of sum statistics (`-sum_stats false`), NCBI checks each new Smith-Waterman alignment against a list of kept results. It picks the list by the alignment's reading frame (six per query: 6 × the query's place in the batch, counted from 0, plus 0 to 5 for frames +1, +2, +3, -1, -2, -3), but it keeps one list per query. A frame whose number is the batch's number of queries or more makes NCBI read past its lists: NCBI then crashes or goes on with what it read there. LOSAT refuses such a query batch. A smaller number makes NCBI check another query's list of the same batch, and LOSAT does the same.
+- For these three, LOSAT writes the results of the query batches before and then stops with the error.
 
 </details>
 

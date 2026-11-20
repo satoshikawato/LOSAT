@@ -210,7 +210,12 @@ impl RpstblastnArgs {
     pub(crate) fn rps_search(&self) -> Result<TranslatedRpsSearch> {
         // NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`);
         // outfmt 13 and 14 to the standard output get NCBI's own error (BLASTX's).
-        check_rps_outfmt(&self.outfmt, "RPSTBLASTN", self.out.as_deref())?;
+        check_rps_outfmt(
+            &self.outfmt,
+            "RPSTBLASTN",
+            self.out.as_deref(),
+            self.export_search_strategy.is_some(),
+        )?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         Ok(TranslatedRpsSearch {
             search: RpsSearch {

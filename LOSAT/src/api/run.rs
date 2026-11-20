@@ -954,9 +954,11 @@ fn psiblast_args(
     outputs: &ReportOutputs<'_>,
 ) -> anyhow::Result<crate::algorithm::blastp::args::BlastpArgs> {
     for format in &outputs.formats {
+        // The library writes no search strategy file (`search::validate`).
         crate::algorithm::psiblast::PsiblastArgs::check_outfmt(
             format.outfmt,
             format.side_out(args.out.as_deref()),
+            false,
         )?;
     }
     args.into_blastp_args()

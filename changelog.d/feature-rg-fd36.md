@@ -19,4 +19,6 @@
   `psiblast`'s PSSM (`-out_pssm`, `-out_ascii_pssm`) to the standard output, instead of LOSAT's refusal of that file:
   NCBI never writes them. `blastx` through the library gives NCBI's `Please provide a file name for outfmt 13.` for
   13 and 14 without a receiver of their side files, as its command line and the other programs' library do, instead
-  of LOSAT's own refusal (line RG, series F, D-36 review 2).
+  of LOSAT's own refusal. With an `-outfmt` value that NCBI cannot read (`99`), `psiblast`, `rpsblast` and
+  `rpstblastn` create the `-export_search_strategy` file before NCBI's error, as NCBI does (line RG, series F, D-36
+  review 2).

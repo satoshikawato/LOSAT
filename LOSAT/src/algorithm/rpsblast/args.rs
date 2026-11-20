@@ -346,7 +346,11 @@ impl RpsblastArgs {
     /// blastp's arguments of the RPS-BLAST search, after LOSAT's refusal of the output formats of
     /// a later item.
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
-        Self::check_outfmt(&self.outfmt, self.out.as_deref())?;
+        Self::check_outfmt(
+            &self.outfmt,
+            self.out.as_deref(),
+            self.export_search_strategy.is_some(),
+        )?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         let request_inputs = self
             .export_search_strategy
@@ -473,9 +477,10 @@ impl RpsblastArgs {
 
     /// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its
     /// errors are NCBI's); the formats that NCBI runs and LOSAT's RPSBLAST does not write yet are
-    /// refused (item PS15a, `check_rps_outfmt`), with `-out` `out`.
-    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>) -> Result<()> {
-        check_rps_outfmt(outfmt, "RPSBLAST", out)
+    /// refused (item PS15a, `check_rps_outfmt`), with `-out` `out` (`strategy`: the run writes a
+    /// search strategy file).
+    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
+        check_rps_outfmt(outfmt, "RPSBLAST", out, strategy)
     }
 }
 
@@ -486,14 +491,27 @@ impl RpsblastArgs {
 /// the field list uses, outfmt 13 and 14 without a file name in `-out` `out`) goes on to NCBI's
 /// error at its place, after the arguments' own errors (`-query` not accessible) and before the
 /// database is opened (NCBI 2.17.0, line RG F/d36 probes rps.conf20, rps.conf20.q,
-/// rps.conf20.nodb, rpst.conf20, rps.o14, rpst.o14), and never runs the format.
+/// rps.conf20.nodb, rpst.conf20, rps.o14, rpst.o14), and never runs the format. `strategy`: the
+/// run writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
+/// `-outfmt`.
 pub(crate) fn check_rps_outfmt(
     outfmt: &str,
     program: &str,
     out: Option<&std::path::Path>,
+    strategy: bool,
 ) -> Result<()> {
     use crate::blastinput::app::{Program, ReportFormat};
-    let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
+    let choice = match crate::blastinput::app::parse_formatting_string(outfmt) {
+        Ok(choice) => choice,
+        // With a search strategy file NCBI reads no `-outfmt` before its option handlers: the
+        // file is created first (`GetExportSearchStrategyStream(args) ||
+        // m_FormattingArgs->ArchiveFormatRequested(args)`, blast_args.cpp:3624-3627, quoted at
+        // `blastp::run`), and the value's error comes after it, from the engine's reading
+        // (`blastp::run`, BLASTX's `RunSetup::open`; line RG F/d36 review 2, probes
+        // ps.f99.essf, rps.f99.essf, rpst.f99.essf).
+        Err(_) if strategy => return Ok(()),
+        Err(error) => return Err(error),
+    };
     // RPSBLAST searches with blastp's options, RPSTBLASTN with blastx's (neither writes SAM).
     let search = if program == "RPSTBLASTN" {
         Program::Blastx

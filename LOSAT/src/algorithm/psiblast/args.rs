@@ -507,7 +507,11 @@ impl PsiblastArgs {
         // input PSSM (item PS5b), and a range of the query (`-query_loc`) runs them as NCBI does:
         // the later rounds search the range with the PSSM of the whole record
         // (`PsiSearch::from_engine`, series Q, Q4a).
-        Self::check_outfmt(&self.outfmt, self.out.as_deref())?;
+        Self::check_outfmt(
+            &self.outfmt,
+            self.out.as_deref(),
+            self.export_search_strategy.is_some(),
+        )?;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
         // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
         // `-in_pssm` in round 1)
@@ -662,10 +666,22 @@ impl PsiblastArgs {
     /// outfmt 13 and 14 without a file name) goes on to NCBI's error at its place (blastp's).
     /// The tabular reports with a field list, and outfmt 10 and 20, are blastp's
     /// (`blastp::tabular`), without a custom delimiter, which psiblast's formatter does not get
-    /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`).
-    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>) -> Result<()> {
+    /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`). `strategy`: the run
+    /// writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
+    /// `-outfmt`.
+    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
         use crate::blastinput::app::{Program, ReportFormat};
-        let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
+        let choice = match crate::blastinput::app::parse_formatting_string(outfmt) {
+            Ok(choice) => choice,
+            // With a search strategy file NCBI reads no `-outfmt` before its option handlers: the
+            // file is created first (`GetExportSearchStrategyStream(args) ||
+            // m_FormattingArgs->ArchiveFormatRequested(args)`, blast_args.cpp:3624-3627, quoted at
+            // `blastp::run`), and the value's error comes after it, from the engine's reading
+            // (`blastp::run`, BLASTX's `RunSetup::open`; line RG F/d36 review 2, probes
+            // ps.f99.essf, rps.f99.essf, rpst.f99.essf).
+            Err(_) if strategy => return Ok(()),
+            Err(error) => return Err(error),
+        };
         if crate::blastinput::app::ncbi_refuses_format(&choice, Program::Blastp, out) {
             return Ok(());
         }

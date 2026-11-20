@@ -332,6 +332,7 @@ blastx.sub.order.xmlmatrix.dupid.b3.f16	blastx	BATCH_SIZE=1	-query tests/fasta/s
 tblastx.sub.order.xmlmatrix.dupid.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup.fna -parse_deflines -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	refuse	1	-	two query records have the Seq-id lcl|dup
 psiblast.db.itdef	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.f14.stdout	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 14 -export_search_strategy -	ncbi	1	-	-
+psiblast.db.f99.ss	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 99 -export_search_strategy {ss}	ncbi	255	-	-
 psiblast.db.it2	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.it0	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -num_iterations 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.sub.it2	psiblast	-	-query tests/fasta/psiblast/tk.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
@@ -367,6 +368,7 @@ psiblast.db.gaps	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_sear
 psiblast.db.badopt.pre	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss} -evalue abc	parser	2	old	-
 rpsblast.q40	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.q40.f14.stdout	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 14 -export_search_strategy -	ncbi	1	-	-
+rpsblast.q40.f99.ss	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 99 -export_search_strategy {ss}	ncbi	255	-	-
 rpsblast.q40.b2000	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=2000	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.q40.cbs0	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.q40.ssp	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -searchsp 1000000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
@@ -384,6 +386,7 @@ rpsblast.mix2.q40	rpsblast	BLASTDB={rps:rps_mini+rps_mini3v}	-query tests/fasta/
 rpsblast.badopt.pre	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss} -evalue abc	parser	2	old	-
 rpstblastn.nq	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpstblastn.nq.f14.stdout	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -comp_based_stats 0 -outfmt 14 -export_search_strategy -	ncbi	1	-	-
+rpstblastn.nq.f99.ss	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -comp_based_stats 0 -outfmt 99 -export_search_strategy {ss}	ncbi	255	-	-
 rpstblastn.nq.b2000	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=2000	-query tests/fasta/rps/nq.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpstblastn.nq.opts	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -query_gencode 2 -evalue 1e-2 -seg yes -soft_masking true -xdrop_ungap 10 -xdrop_gap 20 -xdrop_gap_final 30 -window_size 30 -max_hsps 2 -max_target_seqs 3 -qcov_hsp_perc 10 -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpstblastn.nq.strand.minus	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -strand minus -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

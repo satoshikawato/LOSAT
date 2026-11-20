@@ -1465,6 +1465,7 @@ mod tests {
     // gap in each sequence.
     #[test]
     fn blosum62_rows_give_blastps_alignments() {
+        // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
         let query = encode("MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ");
         let subject_letters =
             encode("MKTAYIAKQRQISFVKSHFSRQDLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVKVKVKALPDAQ");

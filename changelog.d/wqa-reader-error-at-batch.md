@@ -33,3 +33,13 @@
   short for `-searchsp`, where `blastp` and `tblastn` refused. With `-export_search_strategy`,
   `blastn`, `blastx` and `tblastx` no longer write a search strategy for the refused batch; with
   one batch the file stays empty, as when NCBI stops at that batch.
+- Under `-parse_deflines`, the query batches are now those of NCBI BLAST+ 2.17.0 when a query ID is
+  repeated: like NCBI, LOSAT counts the repeated query into its batch by the first query's letters.
+  A reader error after a short repeat now comes in the batch where NCBI meets it, where LOSAT
+  refused the repeat before; a repeat that fills NCBI's batch is refused in that batch, where LOSAT
+  gave the reader error of a later record. NCBI's errors of the repeat's batch now come instead of
+  the refusal also where queries follow the repeat in the batch (subjects too short for
+  `-searchsp`), and with a database whose sequence file cannot be read (`blastp`, `blastx` and
+  `blastn` now give NCBI's "Database memory map file error", exit status 3, where they refused).
+  In `blastx`, a query with the ID of an earlier query that `-query_loc` skips is now refused, where
+  LOSAT searched it and NCBI stops with an error.

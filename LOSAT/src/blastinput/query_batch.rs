@@ -703,10 +703,10 @@ pub(crate) struct QueryScopes {
 }
 
 /// LOSAT's refusal of a query record with the id of another query record of its scope
-/// (`QueryScope::add`), with the records of the refused record's batch that NCBI's set-up of that
-/// batch surely reads with their own letters. The run stops at that batch in one form in every
-/// program, the command line's and the library's (line WQA D10 round 5, 2026-11-20;
-/// `refused_batch_error`).
+/// (`QueryScope::add`), with the records of the refused record's batch (NCBI's batch,
+/// `BatchCount`) that NCBI's set-up of that batch reads with their own letters. The run stops at
+/// that batch in one form in every program, the command line's and the library's (line WQA D10
+/// rounds 5 and 6, 2026-11-20; `refused_batch_error`).
 #[derive(Clone, Debug)]
 pub(crate) struct ScopeRefusal {
     message: String,

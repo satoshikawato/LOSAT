@@ -163,4 +163,10 @@ write('g2b_bp.faa', [('q1', g2_aa[:10]), ('q1', g2_aa[10:70]), bad])
 write('g2a_bn.fna', [('q1', g2_nt[:180]), ('q1', g2_nt[180:210]), bad])
 write('g2b_bn.fna', [('q1', g2_nt[:30]), ('q1', g2_nt[30:210]), bad])
 write('avgmid_bn.fna', [('q1', 'N' * 90), ('q1', rand_nt5(60)), ('q2', rand_nt5(120))])
+# A record that -query_loc skips joins NCBI's scope (rows .skipcount.*, .skiprep.*): with -query_loc 20-40 and
+# BATCH_SIZE=100, a skipped q1 of 10 letters, q2 of 60 and a second q1 of 60 count 0 + 60 + 10, so the batch reads the
+# refused line (NCBI's reader error); with -query_loc 15-50, blastx's second q1 after a skipped q1 of 10 nucleotides is
+# set up in the skipped record's letters (NCBI: BLAST engine error, exit 3), so LOSAT refuses it.
+write('skip_bp.faa', [('q1', g2_aa[100:110]), ('q2', g2_aa[:60]), ('q1', g2_aa[60:120]), bad])
+write('skip_bn.fna', [('q1', g2_nt[300:310]), ('q1', g2_nt[:60])])
 print(sorted(os.listdir(out)))

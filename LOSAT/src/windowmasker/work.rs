@@ -191,10 +191,11 @@ impl<R: Read> SequenceSource for FastaSource<R> {
             .reader
             .next(&mut |warning| match warning {
                 ReaderWarning::Line(line) => diag.post_bytes(line),
-                ReaderWarning::SeqId(warning) => diag.post(&format!(
-                    "Warning: (1306.{}) {}",
-                    warning.subcode, warning.message
-                )),
+                ReaderWarning::SeqId(warning) => {
+                    let mut line = format!("Warning: (1306.{}) ", warning.subcode).into_bytes();
+                    line.extend_from_slice(&warning.message);
+                    diag.post_bytes(&line)
+                }
             })
             .map_err(|error| match error {
                 MaskReadError::Ncbi(exception) => Failure::Ncbi(exception),

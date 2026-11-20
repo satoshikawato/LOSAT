@@ -85,7 +85,7 @@ impl Program {
                 "segmasker is not a search program: run_segmasker runs it".into(),
             )),
             "windowmasker" => Err(Error::Argv(
-                "windowmasker is not a search program: run_windowmasker runs it".to_string(),
+                "windowmasker is not a search program: run_windowmasker runs it".into(),
             )),
             "convert2blastmask" => Err(Error::Argv(
                 "convert2blastmask is not a search program: run_convert2blastmask runs it".into(),

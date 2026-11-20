@@ -13,7 +13,7 @@ Rust crates bzip2 and ruzstd; those quotes were removed and their citations kept
 
 Two checks, over the comments of the repository's source files (`COMMENT_STYLES`: line
 comments of Rust, C, C++, JavaScript and TypeScript; `#` comments of TOML, YAML, shell and
-Python, and Python's docstrings):
+Python, and Python's docstrings; every line of Markdown and text files):
 - QUOTE: a fenced block (```` ``` ````) in a comment is a quote of the source that the
   comment lines right above it cite: the last of them that starts with a citation label
   (`<label>: <path>...`, `NCBI reference ...`, `NCBI <path>`, `<project> <version>
@@ -21,12 +21,13 @@ Python, and Python's docstrings):
   above it in the file (a quote inside a function cited above the function). It fails when
   that citation is of another project: it names a source of `FOREIGN_SOURCES` or a path of
   `NON_NCBI_PATHS`, or its label is not one of `NCBI_LABEL_RE`. A comment line that is a
-  line of C or C++ (`CODE_LINE_RE`) right under such a citation, in the same comment, is a
-  quote without a fence and fails the same way.
+  line of C or C++ (`CODE_LINE_RE`) under such a labelled citation, in the same comment, is
+  a quote without a fence and fails the same way.
 - LABEL: a comment line labelled as NCBI's (`NCBI reference ...`, `NCBI <path>`) fails when
   its label or path names another project's source (the code is not NCBI's).
-A fenced block with no citation above it in its file is not a quote and is not checked.
-Markdown files are not read (their fences are commands and examples, not quotes).
+A fenced block with no citation above it in its file is not a quote and is not checked. In
+Markdown and text files only the paragraph right above a fence is read for its citation (their
+fences are mostly commands and examples).
 
 The tables below are the one place that says which sources are NCBI's. There is no
 allowlist of exceptions: cite the file and lines instead of quoting them.
@@ -119,13 +120,17 @@ COMMENT_STYLES: dict[str, str] = {
     ".yaml": "hash",
     ".sh": "hash",
     ".py": "python",
+    ".md": "text",
+    ".txt": "text",
 }
 FENCE_RE = re.compile(r"^\s*```")
 # A cited source: a path with a source extension, a libstdc++ header path, or `<path>:<line>`.
+# (Each path is matched from the start of its token only: a long token, such as a line of a
+# sequence in a text file, is then read once, not once from each of its letters.)
 CITE_RE = re.compile(
-    r"[\w.+-]*(?:/[\w.+-]+)*\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc|asn|def|prt)\b"
+    r"(?<![\w.+/-])[\w.+-]*(?:/[\w.+-]+)*\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc|asn|def|prt)\b"
     r"|\b(?:bits|ext|std)/\w+"
-    r"|[\w.+-]+(?:/[\w.+-]+)+:\d"
+    r"|(?<![\w.+/-])[\w.+-]+(?:/[\w.+-]+)+:\d"
 )
 # A labelled citation: the line starts with `<label>: <path>:<line>` or `<label>: <path> (`.
 LABELLED_RE = re.compile(
@@ -170,13 +175,17 @@ def source_files(root: Path) -> Iterable[Path]:
 def comment_texts(style: str, lines: Sequence[str]) -> list[str | None]:
     """The text of each line that is a comment (`style` of `COMMENT_STYLES`), None for the others.
 
-    A Python docstring is a comment from its opening line to its closing one."""
+    A Python docstring is a comment from its opening line to its closing one; every line of a
+    Markdown or text file is text."""
     texts: list[str | None] = []
     docstring: str | None = None
     for line in lines:
         if docstring is not None:
             if docstring in line:
                 docstring = None
+            texts.append(line.strip())
+            continue
+        if style == "text":
             texts.append(line.strip())
             continue
         if style == "slash":
@@ -264,40 +273,44 @@ def check_text(rel: str, lines: Sequence[str], style: str = "slash") -> list[Fin
     """The findings of one file, whose lines are `lines` (comments of `style`)."""
     findings: list[Finding] = []
     last_citation: tuple[int, str] | None = None
-    # The comment lines above the current line, back to a code line, an empty comment line or
-    # a fence: the citation of a fence that opens next is among them.
-    run: list[tuple[int, str]] = []
+    # The citations among the comment lines above the current line, back to a code line, an
+    # empty comment line or a fence (the run): the last labelled one decides; without one, every
+    # citation line of the run.
+    run_label: tuple[int, str] | None = None
+    run_citations: list[tuple[int, str]] = []
     in_fence = False
     for number, text in enumerate(comment_texts(style, lines), start=1):
         if text is None:
             in_fence = False  # a fence ends with its comment run
-            run = []
+            run_label, run_citations = None, []
             continue
-        # The last labelled citation of the run decides; without one, every citation line of
-        # the run.
-        labels = [(n, t) for n, t in run if is_label_line(t)]
-        cited = labels[-1:] or [(n, t) for n, t in run if is_citation(t)]
+        cited = [run_label] if run_label is not None else list(run_citations)
         if FENCE_RE.match(text):
             if not in_fence:
-                # Without a citation in the run, the last citation above in the file.
-                if not cited and last_citation is not None:
+                # Without a citation in the run, the last citation above in the file (in source
+                # files: a quote inside a function cited above the function).
+                if not cited and last_citation is not None and style != "text":
                     cited = [last_citation]
                 found = cited_source(cited)
                 if found is not None:
                     findings.append(Finding(rel, number, "QUOTE", found[0], found[1]))
             in_fence = not in_fence
-            run = []
+            run_label, run_citations = None, []
             continue
         if in_fence:
             continue
         if not text:
-            run = []
+            run_label, run_citations = None, []
             continue
-        if CODE_LINE_RE.search(text) and not is_citation(text):
-            found = cited_source(cited)
+        citation = is_citation(text)
+        if run_label is not None and not citation and CODE_LINE_RE.search(text):
+            found = cited_source([run_label])
             if found is not None:
                 findings.append(Finding(rel, number, "QUOTE", found[0], found[1]))
-        run.append((number, text))
+        if is_label_line(text):
+            run_label = (number, text)
+        elif citation:
+            run_citations.append((number, text))
         labelled = LABELLED_RE.match(text)
         if (
             NCBI_CITATION_RE.match(text)
@@ -307,7 +320,7 @@ def check_text(rel: str, lines: Sequence[str], style: str = "slash") -> list[Fin
             source = foreign_source(text)
             if source is not None:
                 findings.append(Finding(rel, number, "LABEL", source, text))
-        if is_citation(text):
+        if citation:
             last_citation = (number, text)
     return findings
 

@@ -134,6 +134,10 @@ class CheckTextTest(unittest.TestCase):
         text = "// glibc 2.39: libio/fileops.c:1310-1312\n// return EOF;\n// }\nfn f() {}\n"
         self.assertEqual(findings(text), [("QUOTE", 2, "glibc"), ("QUOTE", 3, "glibc")])
 
+    def test_a_code_line_after_a_mention_of_another_project_is_not_a_quote(self) -> None:
+        diff = "+// glibc's qsort is a stable merge sort, as slice::sort_by is\n+    v.sort_by(cmp);\n"
+        self.assertEqual(findings(diff, "text"), [])
+
     def test_prose_and_ncbis_code_lines_are_not_quotes(self) -> None:
         prose = (
             "// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:395,3969\n"
@@ -159,6 +163,16 @@ class CheckTextTest(unittest.TestCase):
         toml = "# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395\n# ```c\n# x\n# ```\n"
         self.assertEqual(findings(toml, "hash"), [("LABEL", 1, "LMDB"), ("QUOTE", 2, "LMDB")])
         self.assertEqual(findings("#!/bin/sh\n# ```\n# glibc 2.39: libio/a.c:1\n", "hash"), [])
+
+    def test_markdown_reads_only_the_paragraph_above_a_fence(self) -> None:
+        text = (
+            "The glibc 2.39 reference: libio/fileops.c:1310-1312.\n\n"
+            "Run it:\n\n```\nlosat blastn -query q.fa\n```\n\n"
+            "glibc 2.39: libio/fileops.c:1310-1312\n```c\nreturn EOF;\n```\n"
+        )
+        self.assertEqual(findings(text, "text"), [("QUOTE", 10, "glibc")])
+        long_paragraph = "glibc 2.39: libio/fileops.c:1\n" + "ACGT" * 50 + "\n" * 1 + "x\n" * 5000
+        self.assertEqual(findings(long_paragraph, "text"), [])
 
 
 class MainTest(unittest.TestCase):
@@ -186,7 +200,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("QUOTE\tLOSAT/src/b.rs:2\tSQLite", out)
         self.assertIn("findings=1", out)
 
-    def test_other_source_files_are_read_and_markdown_is_not(self) -> None:
+    def test_other_source_files_and_markdown_are_read(self) -> None:
         bad = "# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395\n# ```c\n# x\n# ```\n"
         code, out = self.run_main(
             {"LOSAT/Cargo.toml": bad, "ci.yml": bad, "README.md": bad.replace("# ", "")}
@@ -194,8 +208,8 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("QUOTE\tLOSAT/Cargo.toml:2\tLMDB", out)
         self.assertIn("QUOTE\tci.yml:2\tLMDB", out)
-        self.assertNotIn("README.md", out)
-        self.assertIn("findings=4", out)
+        self.assertIn("QUOTE\tREADME.md:2\tLMDB", out)
+        self.assertIn("findings=6", out)
 
     def test_build_output_is_skipped(self) -> None:
         bad = "// UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:1-2\n// ```c++\n// x\n// ```\n"

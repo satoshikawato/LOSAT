@@ -711,6 +711,52 @@ fn a_list_after_an_end_on_the_bit_before_its_first_word() {
 }
 
 #[test]
+fn a_list_that_drops_the_last_index_past_four_thousand_entries() {
+    // the entries past the new end that the calls leave are one per index between the new last
+    // index and the highest one reached: filling the one-bit runs of a block that is all one-bit
+    // runs drops the last index by 2 a call, so about 4,000 calls leave a stretch of about 8,000
+    // entries (the 13-bit limit is 8,190), whatever the order; against `gap_set_value` bit by bit
+    let mut bits: Box<Block> = Box::new([0; 1024]);
+    for case in 0..8u32 {
+        let ones: u16 = 7999;
+        let first_value = case & 1 != 0;
+        // run i is the bit i, for i below `ones`; the last run takes the rest
+        let ends: Vec<u16> = (0..ones).chain([65535]).collect();
+        let mut start = Arr::new(GAP_ENTRIES);
+        start.v[0] = (ends.len() as u16) << 3 | u16::from(first_value);
+        start.v[1..=ends.len()].copy_from_slice(&ends);
+        start.hw = ends.len() + 1;
+        // the bits that differ from `val` between two bits of `val`
+        let val = (case >> 1 & 1 != 0) == first_value;
+        let first_hole = u16::from(val == first_value);
+        let mut list: Vec<u16> = (first_hole..ones - 1).step_by(2).collect();
+        if case >> 2 == 1 {
+            list.reverse();
+        }
+        if case % 4 == 3 {
+            // and splits after the fills: the last index rises again
+            list.extend((ones + 100..ones + 160).step_by(3));
+        }
+        assert!(list.len() > 3900, "case {case}");
+        let mut by_bit = start.clone();
+        let mut valid = true;
+        for &pos in &list {
+            let end = gap_set_value(&mut by_bit, val, pos, valid, None).unwrap();
+            valid &= end < 1 << 13;
+        }
+        let mut at_once = start.clone();
+        let done = gap_set_list(&mut at_once, val, &list, &mut bits);
+        assert_eq!(done, list.len(), "case {case}");
+        assert_eq!(at_once.hw, by_bit.hw, "case {case}");
+        assert!(at_once.written() == by_bit.written(), "case {case}");
+        if case % 4 != 3 {
+            // the stretch of entries past the end is the long one
+            assert!(at_once.hw > 7990, "case {case}: {}", at_once.hw);
+        }
+    }
+}
+
+#[test]
 fn a_run_start_reads_the_block_where_no_word_is_held() {
     // `run_start` against the bits read one by one: those of the words held in `bits`, the
     // block's elsewhere (the held words hold anything; the others hold garbage that it must not

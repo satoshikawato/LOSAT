@@ -70,7 +70,7 @@ It prints the `-outfmt 6` report.
 - **Tools.** `run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker` and `run_convert2blastmask` run the tools with your reader as their standard input and your writers as their output.
 - **Errors and output.** Errors (`losat::api::Error`) carry the command line's messages. The library writes nothing to standard output or standard error; what the command line writes to its standard error comes back as diagnostics (`Outcome::diagnostics`, `Batch::diagnostics`).
 
-The numbers of an HSP record are the engine's, not rounded: each field that names an `-outfmt` column holds that column's value for the HSP's row. Read text to show from a report.
+The numbers of an HSP record are the engine's, not rounded: each field that names an `-outfmt` column holds that column's value for the HSP's row. The ids (`query_id`, `subject_id`) are an `AccVer`: the bytes of the `qaccver` and `saccver` columns, also those that are not UTF-8. Read text to show from a report.
 
 ## Differences from the command line
 

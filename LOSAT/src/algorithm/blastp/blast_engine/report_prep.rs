@@ -109,8 +109,10 @@ pub(super) struct ReportPrep<'a, 'o> {
 ///
 /// Also returned: by query, the queries' own messages that a structured first format does not
 /// write, kept for the later formats that do (`Posts::later`, `ReportOutputs::later_warnings`);
-/// empty where the caller takes none.
-pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+/// `None` where they are not kept (`ReportOutputs::keeps_later_query_warnings`).
+pub(super) fn query_warning_lines(
+    prep: &ReportPrep<'_, '_>,
+) -> (Vec<Vec<u8>>, Option<Vec<Vec<u8>>>) {
     let ReportPrep {
         args,
         outputs,
@@ -172,7 +174,7 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, V
             lines
         })
         .collect();
-    (lines, later_lines)
+    (lines, later.then_some(later_lines))
 }
 
 /// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).

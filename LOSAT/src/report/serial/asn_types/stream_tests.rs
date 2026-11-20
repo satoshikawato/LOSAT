@@ -12,6 +12,7 @@ use super::write::write_document;
 use super::Value;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
+use crate::report::serial::encoder::Encoder;
 
 /// The objects of `text` read as `root` until `EndOfData`, and the error that ended them.
 fn objects(text: &[u8], root: u16) -> (Vec<Value>, Option<ReadError>) {

@@ -100,6 +100,55 @@ pub fn render_queries(set: V<'_>) -> Result<Vec<u8>, RenderError> {
 /// The width of the sequence lines (`CFastaOstream::SetWidth(70)` in its constructor).
 const WIDTH: u32 = 70;
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:354-367
+// ```c++
+// static TSeqLocVector
+// s_ConvertBioseqs2TSeqLocVector(const CBlast4_subject::TSequences& subjects)
+// {
+//     TSeqLocVector retval;
+//     CRef<CScope> subj_scope(new CScope(*CObjectManager::GetInstance()));
+//     ITERATE(CBlast4_subject::TSequences, bioseq, subjects) {
+//         subj_scope->AddBioseq(**bioseq);
+//         CRef<CSeq_id> seqid = FindBestChoice((*bioseq)->GetId(),
+//                                              CSeq_id::BestRank);
+//         const TSeqPos length = (*bioseq)->GetInst().GetLength();
+//         CRef<CSeq_loc> sl(new CSeq_loc(*seqid, 0, length-1));
+//         retval.push_back(SSeqLoc(sl, subj_scope));
+//     }
+//     return retval;
+// }
+// ```
+/// The subject Bioseqs of a strategy (`s_ImportSubjects`: each Bioseq searched whole under its
+/// own id and title) as the FASTA text from which the program's `-subject` reader makes the same
+/// records: the Bioseq `i` (from 0) must have the one local id `Subject_<i + 1>` that NCBI's
+/// reader gives a subject without `-parse_deflines` (NCBI's own exports); without
+/// `parse_deflines` its definition line is its title alone (the reader numbers it again), with
+/// it `lcl|Subject_<i + 1>` and its title (the reader parses the id). Other ids are not modelled.
+pub fn render_subjects(bioseqs: &[V<'_>], parse_deflines: bool) -> Result<Vec<u8>, RenderError> {
+    let mut text = Vec::new();
+    for (index, value) in bioseqs.iter().enumerate() {
+        let mut stream = FastaOstream::default();
+        stream.write_bioseq(Bioseq::of(*value))?;
+        let id = format!(">lcl|Subject_{}", index + 1);
+        let rest = stream
+            .text
+            .strip_prefix(id.as_bytes())
+            .filter(|rest| matches!(rest.first(), Some(b' ' | b'\n')))
+            .ok_or_else(|| {
+                RenderError::Unsupported(
+                    "a subject Bioseq whose id is not the local id that NCBI's reader gives the subject in its place".into(),
+                )
+            })?;
+        if parse_deflines {
+            text.extend_from_slice(&stream.text);
+        } else {
+            text.push(b'>');
+            text.extend_from_slice(rest.strip_prefix(b" ").unwrap_or(rest));
+        }
+    }
+    Ok(text)
+}
+
 /// `CFastaOstream` with the constructor's flags: the text written, and `m_PreviousWholeIds`, the
 /// handles of the ids written so far.
 #[derive(Default)]

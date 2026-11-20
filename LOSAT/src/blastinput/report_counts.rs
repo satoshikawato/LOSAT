@@ -78,6 +78,10 @@ pub struct FormattingArgs {
     pub sort_hits: Option<u8>,
     #[arg(long = "sorthsps", value_name = "sort_hsps", value_parser = formatting_sort_option, help = "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0")]
     pub sort_hsps: Option<u8>,
+    /// The hit list size that the formatting handler starts from (`opt.GetHitlistSize()`): an
+    /// imported search strategy's `HitlistSize`, `None` for the default 500.
+    #[arg(skip)]
+    pub hitlist_start: Option<usize>,
 }
 
 impl FormattingArgs {
@@ -203,7 +207,56 @@ pub fn report_counts(
     num_descriptions: Option<usize>,
     num_alignments: Option<usize>,
 ) -> ReportCounts {
-    let mut hitlist_size = BLAST_HITLIST_SIZE;
+    report_counts_from(
+        BLAST_HITLIST_SIZE,
+        outfmt,
+        max_target_seqs,
+        num_descriptions,
+        num_alignments,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
+// ```c++
+//     // Default hitlist size 500, value can be changed if import search strategy is used
+//     int hitlist_size = opt.GetHitlistSize();
+//
+//     // To preserve hitlist size in import search strategy > 500,
+//     // we need to increase the  num_ descriptions and num_alignemtns
+//     if(hitlist_size > BLAST_HITLIST_SIZE )
+//     {
+//     	if((!args.Exist(kArgNumDescriptions) || !args[kArgNumDescriptions]) &&
+//            (!args.Exist(kArgNumAlignments) || !args[kArgNumAlignments]) &&
+//     	   (m_OutputFormat <= eFlatQueryAnchoredNoIdentities)) {
+//     		m_NumDescriptions = hitlist_size;
+//     		m_NumAlignments = hitlist_size/ 2;
+//     		return;
+//     	}
+//     }
+// ```
+/// [`report_counts`] from the hit list size `start` of the options (an imported search
+/// strategy's `HitlistSize`): above 500, with neither `-num_descriptions` nor `-num_alignments`
+/// and a pairwise format, the handler keeps it and returns early (`-max_target_seqs` is then not
+/// read).
+pub fn report_counts_from(
+    start: usize,
+    outfmt: i32,
+    max_target_seqs: Option<usize>,
+    num_descriptions: Option<usize>,
+    num_alignments: Option<usize>,
+) -> ReportCounts {
+    if start > BLAST_HITLIST_SIZE
+        && num_descriptions.is_none()
+        && num_alignments.is_none()
+        && outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES
+    {
+        return ReportCounts {
+            hitlist_size: start,
+            num_descriptions: start,
+            num_alignments: start / 2,
+        };
+    }
+    let mut hitlist_size = start;
     if outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES {
         let mut counts = ReportCounts::default();
         if let Some(n) = num_descriptions {
@@ -389,7 +442,15 @@ pub fn run_report_counts_with(
 ) -> anyhow::Result<(ReportCounts, Vec<u8>)> {
     let formats: Vec<ReportCounts> = outfmts
         .iter()
-        .map(|&outfmt| report_counts(outfmt, max_target_seqs, num_descriptions, num_alignments))
+        .map(|&outfmt| {
+            report_counts_from(
+                formatting.hitlist_start.unwrap_or(BLAST_HITLIST_SIZE),
+                outfmt,
+                max_target_seqs,
+                num_descriptions,
+                num_alignments,
+            )
+        })
         .collect();
     let counts = common_report_counts(outfmts, &formats)?;
     let warnings =

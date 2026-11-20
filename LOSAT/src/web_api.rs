@@ -670,6 +670,8 @@ fn parse_blastp_args(
         outfmt: "6".to_string(),
         archive: None,
         export_search_strategy: None,
+        import_search_strategy: None,
+        import: None,
         strategy: None,
         request_inputs: None,
         app: blastp::args::BlastpApp::Blastp,

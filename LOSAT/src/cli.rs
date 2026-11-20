@@ -679,12 +679,55 @@ where
         },
         matches => matches?,
     };
+    record_given_arguments(&command, &matches);
     let parsed = T::from_arg_matches_mut(&mut matches)
         .map_err(|error| error.format(&mut command.clone()))?;
     match non_utf8_value {
         Some((scope, name)) => Err(non_utf8_value_error(scope, &name)),
         None => Ok(parsed),
     }
+}
+
+thread_local! {
+    /// The arguments that the last command line this thread read gave (`record_given_arguments`).
+    static GIVEN_ARGUMENTS: std::cell::RefCell<Vec<(String, String)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Keeps the arguments that the program's command line gave, by NCBI's names (the long names)
+/// with the text of their first value (a flag's text is clap's), for the import of a search
+/// strategy, whose warnings compare the texts with NCBI's defaults
+/// (`report::archive::read::import::ignored_option_warnings`).
+fn record_given_arguments(command: &clap::Command, matches: &clap::ArgMatches) {
+    let Some((name, program)) = matches.subcommand() else {
+        return;
+    };
+    let Some(definition) = command.find_subcommand(name) else {
+        return;
+    };
+    let given = definition
+        .get_arguments()
+        .filter(|arg| {
+            program.value_source(arg.get_id().as_str())
+                == Some(clap::parser::ValueSource::CommandLine)
+        })
+        .filter_map(|arg| {
+            let long = arg.get_long()?;
+            let text = program
+                .get_raw(arg.get_id().as_str())
+                .and_then(|mut values| values.next())
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Some((long.to_string(), text))
+        })
+        .collect();
+    GIVEN_ARGUMENTS.with(|cell| *cell.borrow_mut() = given);
+}
+
+/// The arguments that the last command line this thread read gave (`record_given_arguments`):
+/// NCBI's names and the texts of their values.
+pub(crate) fn given_arguments() -> Vec<(String, String)> {
+    GIVEN_ARGUMENTS.with(|cell| cell.borrow().clone())
 }
 
 /// The value of a word `-name=value` that is not UTF-8: its bytes after the first `=`
@@ -908,7 +951,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "entrez_query",
     "gilist",
     "html",
-    "import_search_strategy",
     "ipglist",
     "negative_gilist",
     "negative_ipglist",
@@ -942,6 +984,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// of line RG).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     "ignore_msa_master",
+    "import_search_strategy",
     "in_msa",
     "msa_master_idx",
     "phi_pattern",
@@ -1679,6 +1722,23 @@ impl NativeError {
     /// errors of those codes are `common::database::database_error`'s). The one producer of these
     /// reports: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        // `CATCH_ALL`'s `CBlastException` clause (blast_app_util.hpp:220-228), its
+        // `CRemoteBlastException` subclass included (remote_blast.hpp:64).
+        if e.kind().starts_with("CBlastException::")
+            || e.kind().starts_with("CRemoteBlastException::")
+        {
+            return if e.kind() == "CBlastException::eInvalidOptions" {
+                NativeError {
+                    exit: 1,
+                    message: format!("BLAST options error: {}\n", e.get_msg()),
+                }
+            } else {
+                NativeError {
+                    exit: 3,
+                    message: format!("BLAST engine error: {}\n", e.get_msg()),
+                }
+            };
+        }
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,

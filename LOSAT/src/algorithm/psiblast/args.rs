@@ -576,6 +576,8 @@ impl PsiblastArgs {
             outfmt: self.outfmt,
             archive: None,
             export_search_strategy: self.export_search_strategy,
+            import_search_strategy: None,
+            import: None,
             strategy: None,
             request_inputs,
             app: BlastpApp::Psiblast,

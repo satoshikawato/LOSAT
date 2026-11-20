@@ -5527,6 +5527,11 @@ pub fn run(
     mut args: BlastpArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
+    // `RecoverSearchStrategy` first (blastp_app.cpp:128-133): the strategy's options and inputs
+    // become the run's arguments (`archive::apply_strategy`).
+    if args.import_search_strategy.is_some() && args.app == BlastpApp::Blastp {
+        args = super::archive::apply_strategy(args)?;
+    }
     args.id_scope = args.parse_deflines.then(Default::default);
     use crate::blastinput::app;
     use crate::blastinput::input_files;
@@ -5607,6 +5612,13 @@ pub fn run(
         }
         None => &mut stderr,
     };
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+    if let Some(import) = &args.import {
+        diagnostics.write_all(&crate::report::archive::read::import::ImportRun::lines(
+            &import.warnings,
+            args.app.ncbi_name(),
+        ))?;
+    }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
     // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
@@ -5688,7 +5700,11 @@ pub fn run(
         input_files::check_utf8_file_name(&args.query, "query", args.app.name())?;
         // NCBI opens the query file inside `Run` too: its error is saved and an error archive
         // follows.
-        match input_files::open_input(&args.query, "query", args.app.name()) {
+        match crate::report::archive::read::import::ImportRun::open_query(
+            args.import.as_ref(),
+            &args.query,
+            args.app.name(),
+        ) {
             Ok(file) => Some(file),
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -5869,11 +5885,17 @@ fn read_cli_subjects(
     // ```
     // The handler of the database arguments reads the subjects (an empty subject set
     // fails there), before the query and the output are opened.
-    let Some(subject_path) = args.subject.as_deref() else {
-        return Err(app::missing_subject_error());
+    // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for `-subject`.
+    let subject_file = match args.import.as_ref().and_then(|run| run.subjects.as_ref()) {
+        Some(file) => input_files::InputFile::from(file.try_clone()?),
+        None => {
+            let Some(subject_path) = args.subject.as_deref() else {
+                return Err(app::missing_subject_error());
+            };
+            input_files::check_utf8_file_name(subject_path, "subject", args.app.name())?;
+            input_files::open_input(subject_path, "subject", args.app.name())?
+        }
     };
-    input_files::check_utf8_file_name(subject_path, "subject", args.app.name())?;
-    let subject_file = input_files::open_input(subject_path, "subject", args.app.name())?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // ```c++
     //             subj_input_stream = &args[kArgSubject].AsInputFile();
@@ -12819,6 +12841,8 @@ mod tests {
             outfmt: "6".to_string(),
             archive: None,
             export_search_strategy: None,
+            import_search_strategy: None,
+            import: None,
             strategy: None,
             request_inputs: None,
             app: BlastpApp::Blastp,

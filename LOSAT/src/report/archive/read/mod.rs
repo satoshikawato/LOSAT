@@ -28,6 +28,7 @@
 //! - `queries`: the request's query Bioseqs as the FASTA text NCBI writes and reads back
 //!   (`s_ImportQueries`, `CFastaOstream`).
 
+pub(crate) mod import;
 pub mod options;
 pub mod queries;
 pub(crate) mod request;

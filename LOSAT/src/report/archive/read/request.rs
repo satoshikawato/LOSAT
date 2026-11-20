@@ -636,6 +636,11 @@ pub(super) fn entry_bioseqs<'a>(entry: V<'a>, out: &mut Vec<Bioseq<'a>>) {
 pub(crate) struct Bioseq<'a>(V<'a>);
 
 impl<'a> Bioseq<'a> {
+    /// The Bioseq of a value of type `Bioseq` (a subject of a request).
+    pub(super) fn of(value: V<'a>) -> Self {
+        Bioseq(value)
+    }
+
     /// The Bioseq value.
     pub(crate) fn value(self) -> V<'a> {
         self.0

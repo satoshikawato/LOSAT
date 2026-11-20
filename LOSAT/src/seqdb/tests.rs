@@ -781,12 +781,10 @@ fn alias_nseq_and_length_are_ncbis_walks() {
         let exception = error
             .ncbi_exception()
             .unwrap_or_else(|| panic!("{name}: {error}"));
+        let what = String::from_utf8(exception.what()).unwrap();
         assert!(
-            exception
-                .what()
-                .contains(&format!("Cannot convert string '{value}' to {kind}")),
-            "{name}: {}",
-            exception.what()
+            what.contains(&format!("Cannot convert string '{value}' to {kind}")),
+            "{name}: {what}"
         );
     }
 }
@@ -896,10 +894,11 @@ fn alias_value_errors_come_in_ncbis_order() {
     .unwrap();
     let name = dir.join("o").to_str().unwrap().to_string();
     let what = |error: SeqDbError| {
-        error
+        let what = error
             .ncbi_exception()
             .unwrap_or_else(|| panic!("{error}"))
-            .what()
+            .what();
+        String::from_utf8(what).unwrap()
     };
     let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
     assert!(what(error).contains("'n1'"));

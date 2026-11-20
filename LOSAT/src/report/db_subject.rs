@@ -301,11 +301,7 @@ impl LookupFailure {
     pub fn exception(&self) -> Option<crate::ncbi_exception::NcbiException> {
         let message = self.ncbi_message()?;
         let site = crate::seqdb::lookup_throw_site(message)?;
-        // Only the ASCII text of `lookup_throw_site` gets here: the conversion loses nothing.
-        Some(crate::ncbi_exception::NcbiException::new(
-            site,
-            String::from_utf8_lossy(message),
-        ))
+        Some(crate::ncbi_exception::NcbiException::new(site, message))
     }
 
     /// What NCBI does where it reads the subject ([`LookupFailure::NCBI_READS`],
@@ -3169,9 +3165,9 @@ mod tests {
     fn only_the_lookup_text_ncbi_was_seen_to_throw_gives_its_exception() {
         let failed = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO);
         let exception = failed.exception().unwrap();
-        assert_eq!(exception.get_msg(), "DB contains no accession info.");
+        assert_eq!(exception.get_msg(), b"DB contains no accession info.");
         assert_eq!(
-            exception.what(),
+            String::from_utf8(exception.what()).unwrap(),
             // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
             crate::wording::losat_text(&format!(
                 "NCBI C++ Exception:\n    T0 \"{}/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp\", line 142: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi() - DB contains no accession info.\n",
@@ -3245,7 +3241,7 @@ mod tests {
             loads
                 .thrown(0)
                 .map(crate::ncbi_exception::NcbiException::get_msg),
-            Some("DB contains no accession info.")
+            Some(b"DB contains no accession info.".as_slice())
         );
         for unread in [2, 3, 4] {
             assert_eq!(loads.load(unread), HitLoad::Unread, "{unread}");

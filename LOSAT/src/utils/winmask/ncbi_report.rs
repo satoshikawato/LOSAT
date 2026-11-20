@@ -17,14 +17,14 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 ///         NCBI_THROW( Exception, eOpen, string( "could not open " ) + name );
 ///     }
 /// ```
-fn open_exception(name: &str) -> NcbiException {
+fn open_exception(name: &[u8]) -> NcbiException {
     const OPEN: ThrowSite = ThrowSite {
         file: "src/algo/winmask/seq_masker_istat_factory.cpp",
         line: 171,
         kind: "Exception::open failed",
         function: Some("ncbi::CSeqMaskerIstatFactory::DiscoverStatType"),
     };
-    NcbiException::new(OPEN, format!("could not open {name}"))
+    NcbiException::new(OPEN, [b"could not open ".as_slice(), name].concat())
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:355-366
@@ -92,7 +92,7 @@ impl WinMaskError {
     /// ...
     /// 			default: NCBI_THROW(Exception, eCreateFail, "unrecognized unit counts format");
     /// ```
-    pub fn create_report(&self) -> Option<String> {
+    pub fn create_report(&self) -> Option<Vec<u8>> {
         let exception = match self {
             Self::Open { name } => rethrown(open_exception(name)),
             Self::Format { site, .. } => {
@@ -151,7 +151,7 @@ mod tests {
     fn the_reports_are_ncbis() {
         let root = NCBI_BUILD_ROOT;
         assert_eq!(
-            WinMaskError::Open { name: "nosuch.obinary".into() }.discover_exception().unwrap().what(),
+            String::from_utf8(WinMaskError::Open { name: "nosuch.obinary".into() }.discover_exception().unwrap().what()).unwrap(),
             crate::wording::losat_text(&format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n"))
         );
         let factory = format!("    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n");
@@ -177,7 +177,7 @@ mod tests {
         ];
         for (site, line) in cases {
             assert_eq!(
-                WinMaskError::format(site).create_report().unwrap(),
+                String::from_utf8(WinMaskError::format(site).create_report().unwrap()).unwrap(),
                 crate::wording::losat_text(&format!(
                     "NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/{line}\n{factory}"
                 )),
@@ -186,7 +186,7 @@ mod tests {
         }
         let substr = "could not create a unit counts container: basic_string::substr: __pos (which is 7) > this->size() (which is 6)";
         assert_eq!(
-            WinMaskError::CreateFail { message: substr.into() }.create_report().unwrap(),
+            String::from_utf8(WinMaskError::CreateFail { message: substr.into() }.create_report().unwrap()).unwrap(),
             crate::wording::losat_text(&format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 363: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - {substr}\n"))
         );
         assert_eq!(

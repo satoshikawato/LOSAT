@@ -239,7 +239,9 @@ impl std::fmt::Display for SeqDbError {
                 path.display(),
                 message
             ),
-            SeqDbError::Ncbi(exception) => f.write_str(exception.what().trim_end()),
+            SeqDbError::Ncbi(exception) => {
+                f.write_str(String::from_utf8_lossy(&exception.what()).trim_end())
+            }
         }
     }
 }

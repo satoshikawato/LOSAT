@@ -442,11 +442,7 @@ fn report_exception(
     } else {
         (16, "Application's execution failed", 3)
     };
-    diag.post_bytes(
-        exception
-            .report_default_ex(CORELIB_APP, subcode, title)
-            .as_bytes(),
-    );
+    diag.post_bytes(&exception.report_default_ex(CORELIB_APP, subcode, title));
     status
 }
 

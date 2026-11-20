@@ -1,3 +1,22 @@
+// The algorithms, constants and tables of `exp`, `log` and `pow` here are the code of Arm
+// Optimized Routines (math/exp.c, exp_data.c, log.c, log_data.c, pow.c, pow_log_data.c,
+// math_config.h, math_err.c at commit 11253b0b9d6b), which glibc 2.35
+// (sysdeps/ieee754/dbl-64) and musl also carry:
+//
+// Copyright (c) 2018, Arm Limited.
+// SPDX-License-Identifier: MIT
+//
+// The MIT License text is in THIRD_PARTY_NOTICES (section 4). `log10` follows
+// sysdeps/ieee754/dbl-64/e_log10.c of glibc 2.35, which is Sun's fdlibm code and carries
+// only this notice (THIRD_PARTY_NOTICES, section 5):
+//
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunPro, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+
 //! No NCBI counterpart: the C library that NCBI BLAST+ calls. `exp`, `log`, `log10` and `pow` with
 //! the bits of glibc 2.35 on x86-64 with FMA, where NCBI BLAST+ 2.17.0 wrote the frozen bytes of the
 //! tests, on every target LOSAT builds for.
@@ -9,10 +28,12 @@
 //! apart on a small share of the arguments (exp 0.07 %, log 0.01 %), and a TBLASTX sum E value
 //! printed with 15 digits (`-outfmt 8`/`11`) multiplies such a difference by ~50.
 //!
-//! Each function below is glibc's code: every fused multiply-add of the compiled glibc function
-//! (read from the disassembly of the library, libm.so.6 of Ubuntu 2.35-0ubuntu3.18) is one call of
-//! an [`Fma`] method here, every other operation is the same IEEE operation in the same order, and
-//! the tables are glibc's (`tables.rs`). An FMA rounds once, so its result is the same on every
+//! `exp`, `log` and `pow` are the code of Arm Optimized Routines (MIT, see the notice above), which
+//! glibc 2.35 carries, built to give glibc's bits; `log10` is Sun's fdlibm code as in glibc's
+//! e_log10.c. Every fused multiply-add of the compiled glibc function (read from the disassembly of
+//! the library, libm.so.6 of Ubuntu 2.35-0ubuntu3.18) is one call of an [`Fma`] method here, every
+//! other operation is the same IEEE operation in the same order, and the tables are the same bits as
+//! glibc's (`tables.rs`, read from that library). An FMA rounds once, so its result is the same on every
 //! target; how it is computed is the only thing that differs:
 //! - [`Fused`] (`f64::mul_add`): the FMA instruction on aarch64, in the x86-64 copies compiled with
 //!   the `fma` feature (taken when the CPU has it, `x86_fma`), and on x86-64 builds that enable
@@ -32,7 +53,7 @@
     clippy::unreadable_literal,
     clippy::eq_op,
     clippy::approx_constant,
-    reason = "glibc's code: its bit patterns, its `(x - x) / (x - x)` for NaN and its digits of 1/ln 10"
+    reason = "the upstream code: its bit patterns, its `(x - x) / (x - x)` for NaN and its digits of 1/ln 10"
 )]
 
 mod tables;

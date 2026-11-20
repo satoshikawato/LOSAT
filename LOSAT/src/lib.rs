@@ -6,10 +6,12 @@
 //! [`api::run_collect`]), with the command line's options and the command line's reports.
 //!
 //! Every other module is the command line or the engine: NCBI's algorithms, ported function by
-//! function. They are `pub(crate)`: their items change as the port advances. Two hidden items are
-//! `pub` for the crate's own two clients, outside the compatibility promise of the version number:
-//! the `losat` binary calls the function `main_entry`, and LOSAT Web's adapter names the engine
-//! through `api` and the module `web_adapter`.
+//! function. They are `pub(crate)`: their items change as the port advances. A few hidden items are
+//! `pub` for the crate's own clients, outside the compatibility promise of the version number: the
+//! `losat` binary calls the function `main_entry`; LOSAT Web's adapter names the engine through
+//! `api` and the module `web_adapter`, and reads and sets the field `FastaRecord::source` (what the
+//! BLAST archive writes besides the letters, with its method `FastaRecord::believed`); the tests
+//! use the module `wording`.
 
 // The NCBI BLAST+ release that LOSAT's output follows, and the spellings of it that the output
 // carries. This is the one place in the code that names the release; every report, archive and

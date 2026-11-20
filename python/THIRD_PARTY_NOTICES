@@ -1,0 +1,401 @@
+THIRD-PARTY NOTICES FOR LOSAT
+
+LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+
+2.17.0. LOSAT's own work is under the MIT License (the file LICENSE). This file lists the
+code in LOSAT's source that comes from other projects, one section each: what it is, the
+files that hold it, its license, and its notices and license text.
+
+  1. NCBI BLAST+ 2.17.0 (public domain in the United States)
+  2. LMDB 0.9.24 (OpenLDAP Public License 2.8)
+  3. Boost (Boost Software License 1.0)
+  4. Arm Optimized Routines (MIT License)
+  5. Sun's fdlibm (Sun Microsystems' notice)
+  6. Microsoft's C runtime, UCRT (MIT License)
+  7. The Rust crate bzip2 0.6.1 (MIT License)
+  8. The Rust crate ruzstd 0.9.1 (MIT License)
+
+Paths are relative to the losat crate (the directory LOSAT/ of the repository).
+
+The binaries (the losat command, the pylosat wheel and the WebAssembly builds) also contain
+the Rust crates they depend on, the Rust standard library and, in the WebAssembly builds,
+the C library wasi-libc. Their license texts are in the file THIRD_PARTY_LICENSES, which is
+distributed with those binaries.
+
+===============================================================================
+1. NCBI BLAST+ 2.17.0
+===============================================================================
+
+What: most of LOSAT's code is translated from the C and C++ source of NCBI BLAST+ 2.17.0
+(the NCBI C++ Toolkit), and the data files LOSAT carries (scoring matrices, genetic codes,
+help texts) are NCBI's. The comments cite NCBI's files as
+"NCBI reference (598d8ae6): c++/...".
+Files: the files of src/ that cite NCBI's source.
+License: the code and data written by NCBI are in the public domain in the United States.
+NCBI's notice (c++/scripts/projects/blast/LICENSE of the BLAST+ 2.17.0 source):
+
+-------------------------------------------------------------------------------
+                            PUBLIC DOMAIN NOTICE
+               National Center for Biotechnology Information
+
+  This software/database is a "United States Government Work" under the
+  terms of the United States Copyright Act.  It was written as part of
+  the author's official duties as a United States Government employee and
+  thus cannot be copyrighted.  This software/database is freely available
+  to the public for use. The National Library of Medicine and the U.S.
+  Government have not placed any restriction on its use or reproduction.
+
+  Although all reasonable efforts have been taken to ensure the accuracy
+  and reliability of the software and data, the NLM and the U.S.
+  Government do not and cannot warrant the performance or results that
+  may be obtained by using this software or data. The NLM and the U.S.
+  Government disclaim all warranties, express or implied, including
+  warranties of performance, merchantability or fitness for any particular
+  purpose.
+
+  Please cite the author in any work or product based on this material.
+
+-------------------------------------------------------------------------------
+
+===============================================================================
+2. LMDB 0.9.24, as bundled in NCBI BLAST+ 2.17.0 (c++/src/util/lmdb/)
+===============================================================================
+
+What: the writer and the reader of the LMDB files (.ndb, .pdb, .ntf, .ptf) of version 5
+BLAST databases, ported from LMDB's mdb.c, midl.c, midl.h and lmdb.h.
+Files: src/writedb/mdb/mod.rs, src/writedb/mdb/cursor.rs, src/writedb/mdb/page.rs,
+src/writedb/mdb/midl.rs, src/seqdb/lmdb_read.rs, src/writedb/platform.rs,
+src/seqdb/filter.rs.
+License: OpenLDAP Public License 2.8. mdb.c is derived from btree.c by Martin Hedenfalk,
+under the permission notice that follows his copyright line.
+
+Notice of mdb.c and lmdb.h:
+
+-------------------------------------------------------------------------------
+Copyright 2011-2019 Howard Chu, Symas Corp.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted only as authorized by the OpenLDAP
+Public License.
+
+A copy of this license is available in the file LICENSE in the
+top-level directory of the distribution or, alternatively, at
+<http://www.OpenLDAP.org/license.html>.
+
+This code is derived from btree.c written by Martin Hedenfalk.
+
+Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
+
+Permission to use, copy, modify, and distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+-------------------------------------------------------------------------------
+
+Notice of midl.c and midl.h:
+
+-------------------------------------------------------------------------------
+/* This work is part of OpenLDAP Software <http://www.openldap.org/>.
+
+Copyright 2000-2019 The OpenLDAP Foundation.
+Portions Copyright 2001-2018 Howard Chu, Symas Corp.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted only as authorized by the OpenLDAP
+Public License.
+
+A copy of this license is available in the file LICENSE in the
+top-level directory of the distribution or, alternatively, at
+<http://www.OpenLDAP.org/license.html>.
+-------------------------------------------------------------------------------
+
+COPYRIGHT of LMDB (c++/src/util/lmdb/COPYRIGHT):
+
+-------------------------------------------------------------------------------
+Copyright 2011-2019 Howard Chu, Symas Corp.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted only as authorized by the OpenLDAP
+Public License.
+
+A copy of this license is available in the file LICENSE in the
+top-level directory of the distribution or, alternatively, at
+<http://www.OpenLDAP.org/license.html>.
+
+OpenLDAP is a registered trademark of the OpenLDAP Foundation.
+
+Individual files and/or contributed packages may be copyright by
+other parties and/or subject to additional restrictions.
+
+This work also contains materials derived from public sources.
+
+Additional information about OpenLDAP can be obtained at
+<http://www.openldap.org/>.
+-------------------------------------------------------------------------------
+
+The OpenLDAP Public License 2.8 (c++/src/util/lmdb/LICENSE):
+
+-------------------------------------------------------------------------------
+The OpenLDAP Public License
+  Version 2.8, 17 August 2003
+
+Redistribution and use of this software and associated documentation
+("Software"), with or without modification, are permitted provided
+that the following conditions are met:
+
+1. Redistributions in source form must retain copyright statements
+   and notices,
+
+2. Redistributions in binary form must reproduce applicable copyright
+   statements and notices, this list of conditions, and the following
+   disclaimer in the documentation and/or other materials provided
+   with the distribution, and
+
+3. Redistributions must contain a verbatim copy of this document.
+
+The OpenLDAP Foundation may revise this license from time to time.
+Each revision is distinguished by a version number.  You may use
+this Software under terms of this license revision or under the
+terms of any subsequent revision of the license.
+
+THIS SOFTWARE IS PROVIDED BY THE OPENLDAP FOUNDATION AND ITS
+CONTRIBUTORS ``AS IS'' AND ANY EXPRESSED OR IMPLIED WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT
+SHALL THE OPENLDAP FOUNDATION, ITS CONTRIBUTORS, OR THE AUTHOR(S)
+OR OWNER(S) OF THE SOFTWARE BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+The names of the authors and copyright holders must not be used in
+advertising or otherwise to promote the sale, use or other dealing
+in this Software without specific, written prior permission.  Title
+to copyright in this Software shall at all times remain with copyright
+holders.
+
+OpenLDAP is a registered trademark of the OpenLDAP Foundation.
+
+Copyright 1999-2003 The OpenLDAP Foundation, Redwood City,
+California, USA.  All Rights Reserved.  Permission to copy and
+distribute verbatim copies of this document is granted.
+-------------------------------------------------------------------------------
+
+===============================================================================
+3. Boost, as adapted in NCBI BLAST+ 2.17.0 (c++/src/algo/blast/core/boost_erf.c)
+===============================================================================
+
+What: the complementary error function (ErfC) of the Spouge finite-size correction of
+E-values, and its x87 extended-precision step.
+Files: src/stats/spouge.rs, src/utils/x87.rs.
+License: Boost Software License 1.0. Notice (boost_erf.c):
+
+-------------------------------------------------------------------------------
+(C) Copyright John Maddock 2006.
+Use, modification and distribution are subject to the Boost Software
+License, Version 1.0. (See below or copy at
+http://www.boost.org/LICENSE_1_0.txt)
+-------------------------------------------------------------------------------
+
+The Boost Software License 1.0 (https://www.boost.org/LICENSE_1_0.txt):
+
+-------------------------------------------------------------------------------
+Boost Software License - Version 1.0 - August 17th, 2003
+
+Permission is hereby granted, free of charge, to any person or organization
+obtaining a copy of the software and accompanying documentation covered by
+this license (the "Software") to use, reproduce, display, distribute,
+execute, and transmit the Software, and to prepare derivative works of the
+Software, and to permit third-parties to whom the Software is furnished to
+do so, all subject to the following:
+
+The copyright notices in the Software and this entire statement, including
+the above license grant, this restriction and the following disclaimer,
+must be included in all copies of the Software, in whole or in part, and
+all derivative works of the Software, unless such copies or derivative
+works are solely in the form of machine-executable object code generated by
+a source language processor.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT
+SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE
+FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+-------------------------------------------------------------------------------
+
+===============================================================================
+4. Arm Optimized Routines (commit 11253b0b9d6b)
+===============================================================================
+
+What: the code and tables of exp, log and pow (math/exp.c, exp_data.c, log.c, log_data.c,
+pow.c, pow_log_data.c, math_config.h, math_err.c), built to give the bits of glibc 2.35 on
+x86-64 with FMA. glibc 2.35 and musl carry the same code and tables.
+Files: src/utils/glibc_fma_libm.rs, src/utils/glibc_fma_libm/tables.rs.
+License: MIT. Notice of those files:
+
+-------------------------------------------------------------------------------
+Copyright (c) 2018, Arm Limited.
+SPDX-License-Identifier: MIT
+-------------------------------------------------------------------------------
+
+LICENSE of Arm Optimized Routines at that commit:
+
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 1999-2018, Arm Limited.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------
+
+===============================================================================
+5. Sun's fdlibm
+===============================================================================
+
+What: log10, as in sysdeps/ieee754/dbl-64/e_log10.c of glibc 2.35, which is fdlibm's code
+and carries only Sun's notice.
+Files: src/utils/glibc_fma_libm.rs.
+Notice:
+
+-------------------------------------------------------------------------------
+Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+
+Developed at SunPro, a Sun Microsystems, Inc. business.
+Permission to use, copy, modify, and distribute this
+software is freely granted, provided that this notice
+is preserved.
+-------------------------------------------------------------------------------
+
+===============================================================================
+6. Microsoft's C runtime (UCRT), Microsoft.Windows.SDK.CRTSource 10.0.22621.3
+===============================================================================
+
+What: the local time zone of makeblastdb on Windows (the date written into a database), as
+UCRT's _tzset and localtime compute it, ported from the UCRT sources that Microsoft
+publishes under the MIT License in the NuGet package Microsoft.Windows.SDK.CRTSource
+10.0.22621.3.
+Files: src/writedb/windows_zone.rs.
+License: MIT. The package's LICENSE:
+
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) Microsoft Corporation.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE
+-------------------------------------------------------------------------------
+
+===============================================================================
+7. The Rust crate bzip2 0.6.1 (https://crates.io/crates/bzip2)
+===============================================================================
+
+What: the loop that reads a file of several bzip2 streams (bufread::MultiBzDecoder).
+Files: src/blastinput/compressed.rs.
+License: MIT OR Apache-2.0; LOSAT uses it under the MIT License. Its LICENSE-MIT:
+
+-------------------------------------------------------------------------------
+Copyright (c) 2014-2025 Alex Crichton and Contributors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+-------------------------------------------------------------------------------
+
+===============================================================================
+8. The Rust crate ruzstd 0.9.1 (https://crates.io/crates/ruzstd)
+===============================================================================
+
+What: the reading of Zstandard frame and block headers.
+Files: src/blastinput/compressed.rs.
+License: MIT. Its LICENSE:
+
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2019 Moritz Borcherding
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------

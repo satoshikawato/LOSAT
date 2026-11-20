@@ -1085,18 +1085,6 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
 /// callers set the service from the options: `blastn` task `megablast` and `dc-megablast`
 /// give "megablast", every other task "plain").
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3811-3828
-// ```c++
-//     m_QueryOptsArgs->ExtractAlgorithmOptions(args, opts);
-//     m_StdCmdLineArgs->ExtractAlgorithmOptions(args, opts);
-//     m_RemoteArgs->ExtractAlgorithmOptions(args, opts);
-//     m_DebugArgs->ExtractAlgorithmOptions(args, opts);
-//     m_FormattingArgs->ExtractAlgorithmOptions(args, opts);
-//     m_MTArgs->ExtractAlgorithmOptions(args, opts);
-//     if (CBlastDatabaseArgs::HasBeenSet(args)) {
-//           m_BlastDbArgs->ExtractAlgorithmOptions(args, opts);
-//     }
-//     if (CMbIndexArgs::HasBeenSet(args)) {
-// ```
 /// The options of an imported strategy: the handle `CBlastOptionsFactory::Create` makes for the
 /// strategy's program (`list`), each setter of the file replayed over it in the file's order,
 /// then the classes `SetOptionsForSavedStrategy` extracts again: `CFormattingArgs` sets the

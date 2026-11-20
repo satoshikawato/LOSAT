@@ -719,6 +719,7 @@ mod tests {
                 line_length: Some(70),
                 sort_hits: Some(1),
                 sort_hsps: None,
+                hitlist_start: None,
             }
         );
         let resolved = args.resolve().unwrap();

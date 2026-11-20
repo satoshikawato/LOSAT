@@ -324,13 +324,6 @@ fn inflate_to_temporary_file(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:398-399,436-438
-// ```c++
-//     CRef<CTmpFile> tmpfile(new CTmpFile(CTmpFile::eNoRemove));
-// ...
-//     const string& fname = tmpfile->GetFileName();
-//     tmpfile.Reset(new CTmpFile(fname));
-//     cmdline_args->SetInputStream(tmpfile);
-// ```
 /// The bytes `text` as an input file, positioned at its start: an unnamed temporary file
 /// (`unnamed_temporary_file`) in the directory of temporary files (NCBI's `CTmpFile`, whose
 /// file the run reads as its query), or the current directory where there is none (WASI).

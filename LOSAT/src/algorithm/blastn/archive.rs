@@ -781,18 +781,6 @@ pub(crate) fn from_carried(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3810-3830
-// ```c++
-//     m_QueryOptsArgs->ExtractAlgorithmOptions(args, opts);
-//     m_StdCmdLineArgs->ExtractAlgorithmOptions(args, opts);
-//     m_RemoteArgs->ExtractAlgorithmOptions(args, opts);
-//     m_DebugArgs->ExtractAlgorithmOptions(args, opts);
-//     m_FormattingArgs->ExtractAlgorithmOptions(args, opts);
-//     m_MTArgs->ExtractAlgorithmOptions(args, opts);
-//     if (CBlastDatabaseArgs::HasBeenSet(args)) {
-//           m_BlastDbArgs->ExtractAlgorithmOptions(args, opts);
-//     }
-//     if (CMbIndexArgs::HasBeenSet(args)) {
-// ```
 /// `-import_search_strategy` of BLASTN (`RecoverSearchStrategy`, `SetOptionsForSavedStrategy`):
 /// the arguments of a command line that gives nothing (the strategy task's defaults) with the
 /// strategy's options set on them in the file's order, and from `args` only what NCBI's

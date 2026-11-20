@@ -4,37 +4,6 @@
 //! (`algo/blast/api/search_strategy.cpp:79-129`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:667-695
-//! ```c++
-//! CRef<CBlastOptionsHandle> CBlastOptionsBuilder::
-//! GetSearchOptions(const objects::CBlast4_parameters * aopts,
-//!                  const objects::CBlast4_parameters * popts,
-//!                  const objects::CBlast4_parameters* fopts,
-//!                  string *task_name)
-//! {
-//!     EProgram program = ComputeProgram(m_Program, m_Service);
-//!     objects::CBlast4_parameters all_params;
-//!     s_MergeCBlast4_parameters(aopts, popts, fopts, all_params);
-//!     program = AdjustProgram(&all_params.Get(), program, m_Program);
-//!
-//!     // Using eLocal allows more of the options to be returned to the user.
-//!
-//!     CRef<CBlastOptionsHandle>
-//!         cboh(CBlastOptionsFactory::Create(program, m_Locality));
-//!
-//!     if (task_name != NULL)
-//!         *task_name = EProgramToTaskName(program);
-//!
-//!     m_IgnoreQueryMasks = false;
-//!     x_ProcessOptions(*cboh, (aopts == NULL ? 0 : &aopts->Get()));
-//!
-//!     m_IgnoreQueryMasks = m_QueryMasks.Have();
-//!     x_ProcessOptions(*cboh, (popts == NULL ? 0 : &popts->Get()));
-//!
-//!     x_ApplyInteractions(*cboh);
-//!
-//!     return cboh;
-//! }
-//! ```
 //! [`build`] is that function: the program, its task, and the `Set*` calls that the builder makes
 //! on the program's factory options (`CBlastOptionsFactory::Create(program)`), in NCBI's order
 //! ([`Setter`]); with what the builder keeps for the database and the query
@@ -57,23 +26,6 @@ use super::request::{ParamSet, Request};
 /// (remote_blast.cpp:2024). No caller that LOSAT ports builds with `eLocal`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:299-312
-/// ```c++
-/// CBlastOptions::CBlastOptions(EAPILocality locality)
-///     : m_Local (0),
-///       m_Remote(0),
-///       m_DefaultsMode(false)
-/// {
-///     if (locality == eRemote)
-///         locality = eBoth;
-///
-///     if (locality != eRemote) {
-///         m_Local = new CBlastOptionsLocal();
-///     }
-///     if (locality != eLocal) {
-///         m_Remote = new CBlastOptionsRemote();
-///     }
-/// }
-/// ```
 /// Options made for `eRemote` are those of `eBoth` (`GetLocality()` too says `eBoth`): both keep
 /// the Blast4 parameter list that `-outfmt 11` and `-export_search_strategy` write.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,17 +57,6 @@ pub enum EProgram {
 
 impl EProgram {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-699
-    // ```c++
-    // string EProgramToTaskName(EProgram p)
-    // {
-    //     string retval;
-    //     switch (p) {
-    //     case eBlastn:           retval.assign("blastn"); break;
-    //     case eMegablast:        retval.assign("megablast"); break;
-    //     case eDiscMegablast:    retval.assign("dc-megablast"); break;
-    //     ...
-    //     case eMapper:           retval.assign("mapr2g"); break;
-    // ```
     /// `EProgramToTaskName`: the task of the options (the strategy's task).
     pub fn task_name(self) -> &'static str {
         match self {
@@ -139,10 +80,6 @@ impl EProgram {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:43-44
-    // ```c
-    // Boolean Blast_QueryIsNucleotide(EBlastProgramType p)
-    // { return SAFE_CAST_INT_TO_BOOLEAN(p & NUCLEOTIDE_QUERY_MASK); }
-    // ```
     /// `Blast_QueryIsNucleotide` of the options' program type (`EProgramToEBlastProgramType`,
     /// blast_aux.cpp:707-751): the nucleotide searches and the translated queries.
     pub fn query_is_nucleotide(self) -> bool {
@@ -198,12 +135,6 @@ fn blast4_value(value: &Value) -> (ValueType, &Value) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_value_.cpp:250-253
-// ```c++
-// void CBlast4_value_Base::ThrowInvalidSelection(E_Choice index) const
-// {
-//     throw NCBI_NS_NCBI::CInvalidChoiceSelection(DIAG_COMPILE_INFO, this, m_choice, index, sm_SelectionNames, sizeof(sm_SelectionNames)/sizeof(sm_SelectionNames[0]));
-// }
-// ```
 // The report has no function (NCBI BLAST+ 2.17.0 `E.blastn.cutoff_score`, line RG F2 probes:
 // `T0 "<build>/src/objects/blast/Blast4_value_.cpp", line 252: Error:
 // (CInvalidChoiceSelection::eFail) CBlast4_value::GetInteger(): Invalid choice selection:
@@ -216,15 +147,6 @@ const BLAST4_VALUE_SELECTION: ThrowSite = ThrowSite {
 };
 
 // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:134-141
-// ```c++
-//     if ( type ) {
-//         msg << "C" << SPrintIdentifier(type->GetAccessName())
-//             << "::Get" << SPrintIdentifier(req_name) << "()";
-//         msg << ": Invalid choice selection: "
-//             << type->GetAccessModuleName() <<"::"<< type->GetAccessName()
-//             << '.' << cur_name;
-//     }
-// ```
 /// `CBlast4_value::Get<requested>()` of a value of another alternative: NCBI's
 /// `CInvalidChoiceSelection` (`SPrintIdentifier` capitalizes the name and writes `-` as `_`:
 /// `GetBig_integer`).
@@ -517,30 +439,6 @@ const PROGRAM_NAME: ThrowSite = ThrowSite {
 };
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:63-138
-// ```c++
-// EProgram
-// CBlastOptionsBuilder::ComputeProgram(const string & program,
-//                                      const string & service)
-// {
-//     string p = program;
-//     string s = service;
-//
-//     NStr::ToLower(p);
-//     NStr::ToLower(s);
-//     ...
-//     if (!found && !(s=="plain" || s=="multi_blast")) {
-//         string msg = "Unsupported combination of program (";
-//         msg += program;
-//         msg += ") and service (";
-//         msg += service;
-//         msg += ").";
-//
-//         NCBI_THROW(CBlastException, eInvalidArgument, msg);
-//     }
-//
-//     return ProgramNameToEnum(p);
-// }
-// ```
 /// `ComputeProgram`: the program of a request's program and service.
 pub fn compute_program(program: &[u8], service: &[u8]) -> Result<EProgram, NcbiException> {
     // `NStr::ToLower` lowers the ASCII letters of the bytes (`tolower` of the "C" locale that
@@ -615,29 +513,6 @@ pub fn compute_program(program: &[u8], service: &[u8]) -> Result<EProgram, NcbiE
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:757-810
-// ```c++
-// EProgram ProgramNameToEnum(const std::string& program_name)
-// {
-//     _ASSERT( !program_name.empty() );
-//
-//     string lowercase_program_name(program_name);
-//     lowercase_program_name = NStr::ToLower(lowercase_program_name);
-//     ...
-//     if (NStr::StartsWith(lowercase_program_name, "blastn")) {
-//         return eBlastn;
-//     // -RMH- support new toolkit program
-//     } else if (NStr::StartsWith(lowercase_program_name, "rmblastn")) {
-//         return eBlastn;
-//     } else if (NStr::StartsWith(lowercase_program_name, "blastp")) {
-//         return eBlastp;
-//     } else if (lowercase_program_name == "blastx") {
-//     ...
-//     } else {
-//         NCBI_THROW(CBlastException, eNotSupported,
-//                    "Program type '" + program_name + "' not supported");
-//     }
-// }
-// ```
 /// `ProgramNameToEnum` of the name that `ComputeProgram` made (lower case already).
 fn program_name_to_enum(name: &[u8]) -> Result<EProgram, NcbiException> {
     let lower = name.to_ascii_lowercase();
@@ -672,59 +547,6 @@ fn program_name_to_enum(name: &[u8]) -> Result<EProgram, NcbiException> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:585-645
-// ```c++
-//     // PHI-BLAST pattern trumps all other options
-//     if (find_if(L->begin(), L->end(),
-//                 SBlast4ParamFinder(eBlastOpt_PHIPattern)) != L->end()) {
-//         switch(program) {
-//         case ePHIBlastn:
-//         case eBlastn:
-//             _TRACE("Adjusting program to phiblastn");
-//             return ePHIBlastn;
-//
-//         case ePHIBlastp:
-//         case eBlastp:
-//             _TRACE("Adjusting program to phiblastp");
-//             return ePHIBlastp;
-//
-//         default:
-//             {
-//                 string msg = "Incorrect combination of option (";
-//                 msg += CBlast4Field::GetName(eBlastOpt_PHIPattern);
-//                 msg += ") and program (";
-//                 msg += program_string;
-//                 msg += ")";
-//
-//                 NCBI_THROW(CRemoteBlastException,
-//                            eServiceNotAvailable,
-//                            msg);
-//             }
-//             break;
-//         }
-//     }
-//
-//     ITERATE(TValueList, iter, *L) {
-//         CBlast4_parameter & p = const_cast<CBlast4_parameter&>(**iter);
-//         const CBlast4_value & v = p.GetValue();
-//
-//         if (CBlast4Field::Get(eBlastOpt_MBTemplateLength).Match(p)) {
-//             if (v.GetInteger() != 0) {
-//                 _TRACE("Adjusting program to discontiguous Megablast");
-//                 return eDiscMegablast;
-//             }
-//         } else if (CBlast4Field::Get(eBlastOpt_Web_StepNumber).Match(p) ||
-//                    CBlast4Field::Get(eBlastOpt_Web_RunPsiBlast).Match(p) ||
-//                    CBlast4Field::Get(eBlastOpt_PseudoCount).Match(p) ||
-//                    CBlast4Field::Get(eBlastOpt_IgnoreMsaMaster).Match(p)
-//                    ) {
-//             // FIXME: should we handle DELTA-BLAST here too?
-//             _TRACE("Adjusting program to psiblast");
-//             return ePSIBlast;
-//         }
-//     }
-//
-//     return program;
-// ```
 /// `AdjustProgram` over the merged lists (algorithm, program, format options in this order,
 /// `s_MergeCBlast4_parameters`, blast_options_builder.cpp:649-665): a `PHIPattern` makes a
 /// BLASTN or BLASTP program PHI-BLAST's, and refuses any other; then the first parameter that
@@ -816,27 +638,6 @@ impl Builder {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:140-169
-    // ```c++
-    // void CBlastOptionsBuilder::
-    // x_ProcessOneOption(CBlastOptionsHandle        & opts,
-    //                    objects::CBlast4_parameter & p)
-    // {
-    //     const CBlast4_value & v = p.GetValue();
-    //     ...
-    //     if (! p.CanGetName() || p.GetName().empty()) {
-    //         NCBI_THROW(CBlastException,
-    //                    eInvalidArgument,
-    //                    "Option has no name.");
-    //     }
-    //
-    //     string nm = p.GetName();
-    //
-    //     bool found = true;
-    //     ...
-    //     CBlastOptions & bo = opts.SetOptions();
-    //
-    //     switch(nm[0]) {
-    // ```
     /// `x_ProcessOneOption`: the arm of the parameter's first letter, then the field that matches.
     /// Each arm cites its lines of blast_options_builder.cpp.
     fn process_one_option(&mut self, p: &RawParam<'_>) -> Result<(), NcbiException> {
@@ -901,18 +702,6 @@ impl Builder {
                 true
             }
             // 217-237: `EvalueThreshold` is taken by its name too, as a real or a cutoff e-value.
-            // ```c++
-            //     } else if (CBlast4Field::Get(eBlastOpt_EvalueThreshold).Match(p)
-            //                ||  p.GetName() == "EvalueThreshold") {
-            //         if (v.IsReal()) {
-            //             opts.SetEvalueThreshold(v.GetReal());
-            //         } else if (v.IsCutoff() && v.GetCutoff().IsE_value()) {
-            //             opts.SetEvalueThreshold(v.GetCutoff().GetE_value());
-            //         } else {
-            //             string msg = "EvalueThreshold has unsupported type.";
-            //             NCBI_THROW(CBlastException, eInvalidArgument, msg);
-            //         }
-            // ```
             b'E' => {
                 if p.is(fields::EFFECTIVE_SEARCH_SPACE) {
                     self.set(Setter::EffectiveSearchSpace(v.big_integer()?));
@@ -1175,22 +964,6 @@ impl Builder {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:531-544
-    // ```c++
-    //     if (! found) {
-    //         if (m_IgnoreUnsupportedOptions)
-    //             return;
-    //
-    //         string msg = "Internal: Error processing option [";
-    //         msg += nm;
-    //         msg += "] type [";
-    //         msg += NStr::IntToString((int) v.Which());
-    //         msg += "].";
-    //
-    //         NCBI_THROW(CRemoteBlastException,
-    //                    eServiceNotAvailable,
-    //                    msg);
-    //     }
-    // ```
     /// A parameter that no arm takes. Both NCBI callers build with `ignore_unsupported_options`
     /// false (search_strategy.hpp:105, remote_blast.cpp:2018-2027).
     fn not_found(&self, p: &RawParam<'_>) -> Result<(), NcbiException> {
@@ -1213,19 +986,6 @@ impl Builder {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:561-571
-    // ```c++
-    // void CBlastOptionsBuilder::x_ApplyInteractions(CBlastOptionsHandle & boh)
-    // {
-    //     CBlastOptions & bo = boh.SetOptions();
-    //
-    //     if (m_PerformCulling) {
-    //         bo.SetCullingLimit(m_HspRangeMax);
-    //     }
-    //     if (m_ForceMbIndex) {
-    //         bo.SetUseIndex(true, m_MbIndexName, m_ForceMbIndex);
-    //     }
-    // }
-    // ```
     fn apply_interactions(&mut self) {
         if self.perform_culling {
             self.set(Setter::CullingLimit(self.hsp_range_max));
@@ -1304,35 +1064,6 @@ pub struct ImportedOptions {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:98-128
-// ```c++
-//     if (req.CanGetFormat_options()) {
-//         format_opts = &req.GetFormat_options();
-//         	const CBlast4_queue_search_request::TFormat_options	& format_options = req.GetFormat_options();
-//         	CRef<CBlast4_parameter> p = format_options.GetParamByName(CBlast4Field::GetName(eBlastOpt_Web_StepNumber));
-//         if(p.NotEmpty() && p->CanGetValue()) {
-//             try {
-//         			m_Data->m_PsiNumOfIterations = p->GetValue().GetInteger();
-//             } catch (const CInvalidChoiceSelection&) {
-//                 // this is needed because the web PSI-BLAST encodes
-//                 // this value as a string
-//                 m_Data->m_PsiNumOfIterations =
-//                     NStr::StringToInt(p->GetValue().GetString(),
-//                                       NStr::fConvErr_NoThrow);
-//         	}
-//         }
-//     }
-//
-//     m_Data->m_OptionsHandle =
-//         m_OptionsBuilder->GetSearchOptions(algo_opts, prog_opts, format_opts,
-//                                            &m_Data->m_Task);
-//     m_Data->m_QueryRange = m_OptionsBuilder->GetRestrictedQueryRange();
-//     if(m_OptionsBuilder->HasDbFilteringAlgorithmId())
-//     	m_Data->m_FilteringID = m_OptionsBuilder->GetDbFilteringAlgorithmId();
-//     if(m_OptionsBuilder->HasDbFilteringAlgorithmKey())
-//     	m_Data->m_FilteringKey = m_OptionsBuilder->GetDbFilteringAlgorithmKey();
-//     if(m_OptionsBuilder->GetSubjectMaskingType())
-//     	m_Data->m_SubjectMaskingType = m_OptionsBuilder->GetSubjectMaskingType();
-// ```
 /// `CImportStrategy::FetchData`'s options (`-import_search_strategy`): the iteration count of the
 /// first parameter named `Web_StepNumber` in the format options (`GetParamByName`; an integer, or
 /// the number of a string, 0 when it is none: `NStr::StringToInt` with `fConvErr_NoThrow`; a value

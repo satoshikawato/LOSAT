@@ -9299,15 +9299,6 @@ mod tblastx_tests {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:418-424
-// ```c++
-// 	if (tag == "")
-// 		info.definition = string("User specified sequence set.");
-// 	else
-// 	{
-// 		info.definition = string("User specified sequence set ") +
-// 			string("(Input: ") + tag + string(").");
-// 	}
-// ```
 /// The definition of a subject set in the pairwise report (`FillScanModeBlastDbInfo`), without
 /// its period, which the writers add: an empty tag (an imported strategy's subjects) names no
 /// input.

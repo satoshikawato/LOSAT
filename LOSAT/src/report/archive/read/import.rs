@@ -14,31 +14,6 @@
 //! `seq-loc-list` queries and subjects, PSSM queries in the programs that take them, and GI lists.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:609-628
-//! ```c++
-//! bool
-//! RecoverSearchStrategy(const CArgs& args, blast::CBlastAppArgs* cmdline_args)
-//! {
-//!     CNcbiIstream* in = cmdline_args->GetImportSearchStrategyStream(args);
-//!     if ( !in ) {
-//!         return false;
-//!     }
-//!     const bool is_remote_search =
-//!         (args.Exist(kArgRemote) && args[kArgRemote].HasValue() && args[kArgRemote].AsBoolean());
-//!     const bool override_query = (args[kArgQuery].HasValue() &&
-//!                                  args[kArgQuery].AsString() != kDfltArgQuery);
-//!     const bool override_subject = CBlastDatabaseArgs::HasBeenSet(args);
-//!
-//!     if (CMbIndexArgs::HasBeenSet(args)) {
-//!     	if (args[kArgUseIndex].AsBoolean() != kDfltArgUseIndex)
-//!     		ERR_POST(Warning << "Overriding megablast BLAST DB indexed options in saved strategy");
-//!     }
-//!
-//!     s_ImportSearchStrategy(in, cmdline_args, is_remote_search, override_query,
-//!                            override_subject);
-//!
-//!     return true;
-//! }
-//! ```
 
 use std::io::{Read as IoRead, Seek};
 use std::path::Path;
@@ -169,37 +144,7 @@ fn no_posts(posts: &[crate::report::serial::asn_types::Post], program: &str) -> 
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2258-2273
-// ```c++
-//     // First try to read a Blast4-get-search-strategy-reply...
-//     CRef<CBlast4_get_search_strategy_reply> b4_ss_reply;
-//     bool succeeded = false;
-//     try {
-//         switch (CFormatGuess().Format(in)) {
-//         case CFormatGuess::eBinaryASN:
-//             b4_ss_reply.Reset(new CBlast4_get_search_strategy_reply);
-//             in >> MSerial_AsnBinary >> *b4_ss_reply;
-//             succeeded = true;
-//             break;
-//         case CFormatGuess::eTextASN:
-//             b4_ss_reply.Reset(new CBlast4_get_search_strategy_reply);
-//             in >> MSerial_AsnText >> *b4_ss_reply;
-//             succeeded = true;
-//             break;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2295-2309
-// ```c++
-//     b4_ss_reply.Reset();
-//     in.seekg(0);
-//     // Go for broke and try the Blast4-request...
-//     retval.Reset(new CBlast4_request);
-//     switch (CFormatGuess().Format(in)) {
-//     case CFormatGuess::eBinaryASN:
-//         in >> MSerial_AsnBinary >> *retval;
-//         break;
-//     case CFormatGuess::eTextASN:
-//         in >> MSerial_AsnText >> *retval;
-//         break;
-// ```
 /// `ExtractBlast4Request(in)`: the request of a strategy file, the reply type first.
 fn extract_request<R: IoRead + Seek>(input: R, program: &str) -> Result<Value> {
     let guessed = guess_encoding(input);
@@ -282,46 +227,7 @@ fn program_type_name(program: EProgram) -> &'static str {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:543-549
-// ```c++
-//     CRef<CBlast4_request> b4req;
-//     try {
-//         b4req = ExtractBlast4Request(*in);
-//     } catch (const CSerialException&) {
-//         NCBI_THROW(CInputException, eInvalidInput,
-//                    "Failed to read search strategy");
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:565-599
-// ```c++
-//     // Get the subject
-//     if (override_subject) {
-//         ERR_POST(Warning << "Overriding database/subject in saved strategy");
-//     } else {
-//         CRef<blast::CBlastDatabaseArgs> db_args;
-//         CRef<CBlast4_subject> subj = strategy.GetSubject();
-//         const bool subject_is_protein = Blast_SubjectIsProtein(prog) ? true : false;
-//
-//         if (subj->IsDatabase()) {
-//             db_args = s_ImportDatabase(*subj, strategy.GetOptionsBuilder(),
-//                                        subject_is_protein, is_remote_search);
-//         } else {
-//             db_args = s_ImportSubjects(*subj, subject_is_protein);
-//         }
-//         _ASSERT(db_args.NotEmpty());
-//         cmdline_args->SetBlastDatabaseArgs(db_args);
-//     }
-//
-//     // Get the query, queries, or pssm
-//     if (override_query) {
-//         ERR_POST(Warning << "Overriding query in saved strategy");
-//     } else {
-//         CRef<CBlast4_queries> queries = strategy.GetQueries();
-//         if (queries->IsPssm()) {
-//             s_ImportPssm(*queries, opts_hndl, cmdline_args);
-//         } else {
-//             s_ImportQueries(*queries, opts_hndl, cmdline_args);
-//         }
-// ```
 /// `RecoverSearchStrategy` up to `SetOptionsForSavedStrategy`: the strategy's options, queries
 /// and subject, and the warnings posted on the way. An error comes after the warnings posted
 /// before it, which the caller writes first ([`Imported::warnings`] of the error's
@@ -384,20 +290,6 @@ fn stop_error(stop: super::Stop, program: &str) -> anyhow::Error {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:452-465
-// ```c++
-//     const string dbname(subj.GetDatabase());
-//     CRef<CSearchDatabase> search_db(new CSearchDatabase(dbname, mol));
-//     if (opts_builder.HaveEntrezQuery()) {
-//         string limit(opts_builder.GetEntrezQuery());
-//         search_db->SetEntrezQueryLimitation(limit);
-//         if ( !is_remote_search ) {
-//             string msg("Entrez query '");
-//             msg += limit + string("' will not be processed locally.\n");
-//             msg += string("Please use the -remote option.");
-//             throw runtime_error(msg);
-//         }
-//     }
-// ```
 /// `s_ImportDatabase` and `s_ImportSubjects`: the strategy's subject.
 fn import_subject(
     subject: Subject,
@@ -429,14 +321,6 @@ fn import_subject(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:372-392
-// ```c++
-//     } else {
-//         EBlastProgramType p = opts_hndl->GetOptions().GetProgramType();
-//         string msg("PSSM found in saved strategy, but not supported ");
-//         msg += "for " + Blast_ProgramNameFromType(p);
-//         NCBI_THROW(CBlastException, eNotSupported, msg);
-//     }
-// ```
 /// `s_ImportPssm` and `s_ImportQueries`: the queries as the text of NCBI's temporary FASTA file
 /// (`ImportRun::queries_input` makes the file where a run reads one).
 fn import_queries(queries: &Queries, options: &ImportedOptions, program: &str) -> Result<Vec<u8>> {
@@ -494,37 +378,6 @@ impl NcbiArguments {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3698-3726
-// ```c++
-// void
-// CBlastAppArgs::x_IssueWarningsForIgnoredOptions(const CArgs& args)
-// {
-//     set<string> can_override;
-//     can_override.insert(kArgQuery);
-//     can_override.insert(kArgQueryLocation);
-//     can_override.insert(kArgSubject);
-//     can_override.insert(kArgSubjectLocation);
-//     can_override.insert(kArgUseLCaseMasking);
-//     can_override.insert(kArgDb);
-//     can_override.insert(kArgDbSize);
-//     can_override.insert(kArgEntrezQuery);
-//     can_override.insert(kArgDbSoftMask);
-//     can_override.insert(kArgDbHardMask);
-//     can_override.insert(kArgUseIndex);
-//     can_override.insert(kArgIndexName);
-//     can_override.insert(kArgStrand);
-//     can_override.insert(kArgParseDeflines);
-//     can_override.insert(kArgOutput);
-//     can_override.insert(kArgOutputFormat);
-//     can_override.insert(kArgNumDescriptions);
-//     can_override.insert(kArgNumAlignments);
-//     can_override.insert(kArgMaxTargetSequences);
-//     can_override.insert(kArgRemote);
-//     can_override.insert(kArgNumThreads);
-//     can_override.insert(kArgInputSearchStrategy);
-//     can_override.insert(kArgRemote);
-//     can_override.insert("remote_verbose");
-//     can_override.insert("verbose");
-// ```
 /// `can_override` of `x_IssueWarningsForIgnoredOptions`.
 const CAN_OVERRIDE: &[&str] = &[
     "query",
@@ -554,50 +407,6 @@ const CAN_OVERRIDE: &[&str] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3728-3773
-// ```c++
-//     // this stores the arguments (and their defaults) that cannot be overriden
-//     map<string, string> has_defaults;
-//     EBlastProgramType prog = m_OptsHandle->GetOptions().GetProgramType();
-//     has_defaults[kArgCompBasedStats] =
-//     		Blast_ProgramIsRpsBlast(prog) ? kDfltArgCompBasedStatsDelta:kDfltArgCompBasedStats;
-//     // FIX the line below for igblast, and add igblast options
-//     has_defaults[kArgEvalue] = NStr::DoubleToString(BLAST_EXPECT_VALUE);
-//     has_defaults[kTask] = m_Task;
-//     has_defaults[kArgOldStyleIndex] = kDfltArgOldStyleIndex;
-//
-//     if (Blast_QueryIsProtein(prog)) {
-//         if (NStr::Find(m_Task, "blastp") != NPOS ||
-//             NStr::Find(m_Task, "psiblast") != NPOS) {
-//             has_defaults[kArgSegFiltering] = kDfltArgNoFiltering;
-//         } else {
-//             has_defaults[kArgSegFiltering] = kDfltArgSegFiltering;
-//         }
-//         has_defaults[kArgLookupTableMaskingOnly] =
-//             kDfltArgLookupTableMaskingOnlyProt;
-//         has_defaults[kArgGapTrigger] =
-//             NStr::IntToString((int)BLAST_GAP_TRIGGER_PROT);
-//     } else {
-//         has_defaults[kArgDustFiltering] = kDfltArgDustFiltering;
-//         has_defaults[kArgLookupTableMaskingOnly] =
-//             kDfltArgLookupTableMaskingOnlyNucl;
-//         has_defaults[kArgGapTrigger] =
-//             NStr::IntToString((int)BLAST_GAP_TRIGGER_NUCL);
-//     }
-//     has_defaults[kArgOffDiagonalRange] =
-//         NStr::IntToString(kDfltOffDiagonalRange);
-//     has_defaults[kArgMaskLevel] = kDfltArgMaskLevel;
-//     has_defaults[kArgMaxIntronLength] =
-//         NStr::IntToString(kDfltArgMaxIntronLength);
-//     has_defaults[kArgQueryGeneticCode] = NStr::IntToString((int)BLAST_GENETIC_CODE);
-//     has_defaults[kArgDbGeneticCode] = NStr::IntToString((int)BLAST_GENETIC_CODE);
-//     // pssm engine/psiblast default options
-//     has_defaults[kArgPSIPseudocount] =
-//         NStr::IntToString(PSI_PSEUDO_COUNT_CONST);
-//     has_defaults[kArgPSIInclusionEThreshold] =
-//         NStr::DoubleToString(PSI_INCLUSION_ETHRESH);
-//     has_defaults[kArgPSINumIterations] =
-//         NStr::IntToString(kDfltArgPSINumIterations);
-// ```
 /// `has_defaults` of `x_IssueWarningsForIgnoredOptions` for the strategy's program and task
 /// (cmdline_flags.cpp: `kDfltArgCompBasedStats` `2`, `...Delta` `1`, `kDfltArgNoFiltering` `no`,
 /// `kDfltArgSegFiltering` `12 2.2 2.5`, `kDfltArgDustFiltering` `20 64 1`, the lookup-table
@@ -651,33 +460,6 @@ fn has_default(name: &str, program: EProgram, task: &str) -> Option<&'static str
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3775-3797
-// ```c++
-//     typedef vector< CRef<CArgValue> > TArgs;
-//     TArgs arguments = args.GetAll();
-//     ITERATE(TArgs, a, arguments) {
-//         const string& arg_name = (*a)->GetName();
-//         const string& arg_value = (*a)->AsString();
-//         // if it has a default value, ignore it if it's not different from the
-//         // default, otherwise, issue a warning
-//         if (has_defaults.find(arg_name) != has_defaults.end()) {
-//             if (has_defaults[arg_name] == arg_value) {
-//                 continue;
-//             } else {
-//                 if (arg_name == kTask && arg_value == "megablast") {
-//                     // No need to issue warning here, as it's OK to change this
-//                     continue;
-//                 }
-//                 ERR_POST(Warning << arg_name << " cannot be overridden when "
-//                          "using a search strategy");
-//             }
-//         }
-//         // if the argument cannot be overridden, issue a warning
-//         if (can_override.find(arg_name) == can_override.end()) {
-//             ERR_POST(Warning << arg_name << " cannot be overridden when "
-//                      "using a search strategy");
-//         }
-//     }
-// ```
 /// `x_IssueWarningsForIgnoredOptions`: the warnings (text after `Warning: [<program>] `) for the
 /// arguments of the command line that the strategy's options replace, given the strategy's
 /// program and task.
@@ -1045,20 +827,6 @@ pub(crate) enum DbMaskAlgorithm {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
-// ```c++
-//     int hitlist_size = opt.GetHitlistSize();
-//     ...
-//     if(hitlist_size > BLAST_HITLIST_SIZE )
-//     {
-//     	if((!args.Exist(kArgNumDescriptions) || !args[kArgNumDescriptions]) &&
-//            (!args.Exist(kArgNumAlignments) || !args[kArgNumAlignments]) &&
-//     	   (m_OutputFormat <= eFlatQueryAnchoredNoIdentities)) {
-//     		m_NumDescriptions = hitlist_size;
-//     		m_NumAlignments = hitlist_size/ 2;
-//     		return;
-//     	}
-//     }
-// ```
 /// The formatting handler's early return for an imported hit list size above 500 (no
 /// `-num_descriptions`, no `-num_alignments`, a pairwise format): it reads none of the options
 /// after it, so `-line_length`, `-sorthits` and `-sorthsps` keep their defaults (probe
@@ -1083,22 +851,6 @@ pub(crate) fn formatting_early_return(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:759-791,841-874
-// ```c++
-//    if (m_QueryOpts->filtering_options->dustOptions)  // free previous structure so we provide defaults.
-//         m_QueryOpts->filtering_options->dustOptions =
-//              SDustOptionsFree(m_QueryOpts->filtering_options->dustOptions);
-//    if (val == false)  // filtering should be turned off
-//        return;
-//    SDustOptionsNew(&(m_QueryOpts->filtering_options->dustOptions));
-// ...
-//     if (m_QueryOpts->filtering_options->dustOptions == NULL)
-//        SDustOptionsNew(&(m_QueryOpts->filtering_options->dustOptions));
-//     m_QueryOpts->filtering_options->dustOptions->level = level;
-// ...
-//     if (m_QueryOpts->filtering_options->segOptions == NULL)
-//        SSegOptionsNew(&(m_QueryOpts->filtering_options->segOptions));
-//     m_QueryOpts->filtering_options->segOptions->window = window;
-// ```
 /// The DUST or SEG options as a strategy's setters leave them, in the file's order:
 /// `SetDustFiltering`/`SetSegFiltering` drop the options and, when true, make them again with
 /// their defaults; a parameter's setter makes them with their defaults when absent and sets its

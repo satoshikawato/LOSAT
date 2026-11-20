@@ -674,6 +674,7 @@ mod tests {
                 line_length: Some(1),
                 sort_hits: Some(4),
                 sort_hsps: Some(0),
+                hitlist_start: None,
             }
         );
         let rps = args.rps.as_ref().unwrap();

@@ -3,15 +3,6 @@
 //! reader (`read::options`: what NCBI's `CBlastOptionsBuilder` applies) share.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/blast/names.cpp:367-373
-//! ```c++
-//! bool CBlast4Field::Match(const CBlast4_parameter & p) const
-//! {
-//!     return (p.CanGetName()        &&
-//!             p.CanGetValue()       &&
-//!             p.GetValue().Which() == m_Type  &&
-//!             p.GetName() == m_Name);
-//! }
-//! ```
 //! A field is a name with the `Blast4-value` alternative that NCBI's table gives it
 //! (names.cpp:53-337, `CBlast4Field::Get`); a parameter is the field's only when both agree
 //! ([`Field::matches`]). One name has two fields: `Culling` is the culling limit as an integer
@@ -23,23 +14,6 @@
 /// An alternative of `Blast4-value` (blast.asn:512-551), in the module's order.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512-526
-/// ```text
-/// Blast4-value ::= CHOICE {
-///
-///     -- scalar types
-///     big-integer             BigInt,
-///     bioseq                  Bioseq,
-///     boolean                 BOOLEAN,
-///     cutoff                  Blast4-cutoff,
-///     integer                 INTEGER,
-///     matrix                  PssmWithParameters,
-///     real                    REAL,
-///     seq-align               Seq-align,
-///     seq-id                  Seq-id,
-///     seq-loc                 Seq-loc,
-///     strand-type             Blast4-strand-type,
-///     string                  VisibleString,
-/// ```
 /// The discriminants are NCBI's `CBlast4_value::E_Choice` (`e_not_set` is 0, the first
 /// alternative 1), the number that `Which()` returns and NCBI's messages print.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -185,16 +159,6 @@ impl Field {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/blast/names.cpp:53-60
-// ```c++
-//         switch (opt) {
-//         //case eBlastOpt_Program:
-//         case eBlastOpt_WordThreshold:
-//             m_[opt] = CBlast4Field("WordThreshold",         CBlast4_value::e_Integer);
-//             break;
-//         //case eBlastOpt_LookupTableType:  // not found
-//         case eBlastOpt_WordSize:
-//             m_[opt] = CBlast4Field("WordSize",              CBlast4_value::e_Integer);
-// ```
 // The constants below are the cases of `CBlast4Field::Get` in names.cpp's order, each named after
 // its `EBlastOptIdx` (`eBlastOpt_WordThreshold` is `WORD_THRESHOLD`); the commented-out cases
 // (`Program`, `LookupTableType`, `XDropoff`, ...) have no field. The cases that neither LOSAT's

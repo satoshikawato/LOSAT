@@ -22,26 +22,6 @@ use crate::utils::format_guess::{Format, FormatGuess, Stop};
 /// The encoding of a serial stream, as the readers of NCBI's archives and strategies take
 /// `CFormatGuess`'s answer.
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
-// ```c++
-//       CFormatGuess::EFormat fmt_type = ncbi::CFormatGuess().Format(f);
-//       switch (fmt_type) {
-//         case CFormatGuess::eBinaryASN:
-//             m_ObjectStream.reset(new CObjectIStreamAsnBinary(f));
-//             break;
-//
-//         case CFormatGuess::eTextASN:
-//             m_ObjectStream.reset(new CObjectIStreamAsn(f));
-//             break;
-//
-//         case CFormatGuess::eXml:
-//             m_ObjectStream.reset(CObjectIStream::Open(eSerial_Xml, f));
-//             break;
-//
-//          default:
-//             NCBI_THROW(CBlastException, eInvalidArgument,
-//                        "BLAST archive must be one of text ASN.1, binary ASN.1 or XML.");
-//       }
-// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Encoding {
     /// `eTextASN`: read by [`ObjectStream`].
@@ -152,33 +132,7 @@ impl<R: IoRead> ObjectStream<R> {
     /// them (or an unclosed comment) is the end too. Anything else, garbage included, is the start
     /// of an object for the next read.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:98-109
-    // ```c++
-    // bool CObjectIStreamAsn::EndOfData(void)
-    // {
-    //     if (CObjectIStream::EndOfData()) {
-    //         return true;
-    //     }
-    //     try {
-    //         SkipWhiteSpace();
-    //     } catch (...) {
-    //         return true;
-    //     }
-    //     return false;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
-    // ```c++
-    // bool CObjectIStream::EndOfData(void)
-    // {
-    //     const TFailFlags failure =
-    //         fEOF | fReadError | fFormatError | fOverflow | fInvalidData |
-    //         fIllegalCall | fFail | fNotOpen | fNotImplemented;
-    //     if (GetFailFlags() & failure || m_Input.EndOfData()) {
-    //         return true;
-    //     }
-    //     return !m_Input.HasMore();
-    // }
-    // ```
     // (`m_Input.EndOfData()` and `HasMore()` of `CIStreamBuffer` ask whether a byte follows,
     // reading the stream for one: the end of the input here.)
     pub(crate) fn end_of_data(&mut self) -> bool {

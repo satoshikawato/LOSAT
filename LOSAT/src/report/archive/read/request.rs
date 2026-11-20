@@ -4,33 +4,6 @@
 //! (`asn_types::Value`), with typed access to what the readers ask of them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1717-1741
-//! ```c++
-//!     if (m_Archive->CanGetRequest())
-//!     {
-//!         CRef<objects::CBlast4_request> request(&m_Archive->SetRequest());
-//!         CImportStrategy strategy(request);
-//!         m_Program   = strategy.GetProgram();
-//!         m_Service   = strategy.GetService();
-//!         m_CreatedBy = strategy.GetCreatedBy();
-//!         m_Queries    = strategy.GetQueries();
-//!         m_AlgoOpts.Reset( strategy.GetAlgoOptions() );
-//!         m_ProgramOpts.Reset( strategy.GetProgramOptions() );
-//!
-//!         if (strategy.GetSubject()->IsDatabase())
-//!             x_SetDatabase(strategy.GetSubject()->GetDatabase());
-//!         else
-//!             m_SubjectSequences = strategy.GetSubject()->SetSequences();
-//!
-//!         if(m_Service == "psi")
-//!         {
-//!         	// Would have errored out in CImportStrategy if we can't get queue search
-//!         	m_FormatOpts.Reset( strategy.GetWebFormatOptions());
-//!         }
-//!         // Ignore return value, want side effect of setting fields.
-//!         GetSearchOptions();
-//!         return;
-//!     }
-//! ```
 
 use super::Stop;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
@@ -151,54 +124,9 @@ impl Request {
     /// a `queue-search` stops `CImportStrategy`, and then a request without `ident`
     /// `GetCreatedBy` (`x_GetRequestInfoFromFile` asks for the program and service, then for it).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2683-2693
-    // ```c++
-    // bool CRemoteBlast::IsErrMsgArchive(void)
-    // {
-    // 	if((m_Archive) != NULL && m_Archive->IsSetRequest() && m_Archive->GetRequest().CanGetBody() &&
-    // 	   m_Archive->GetRequest().GetBody().IsGet_request_info() &&
-    // 	   m_Archive->GetRequest().GetBody().GetGet_request_info().IsSetRequest_id() &&
-    // 	   (m_Archive->GetRequest().GetBody().GetGet_request_info().GetRequest_id()  == "Error")) {
-    // 		return true;
-    // 	}
-    // 	return false;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:62-75
-    // ```c++
-    //     CImportStrategy::CImportStrategy(CRef<objects::CBlast4_request> request,
-    //                                      bool ignore_unsupported_options)
-    //     : m_Request(request),
-    //       m_IgnoreUnsupportedOptions(ignore_unsupported_options)
-    // {
-    //
-    //     if (m_Request.Empty()) {
-    //          NCBI_THROW(CBlastException, eInvalidArgument, "CBlast4_request empty");
-    //     }
-    //     if (m_Request->CanGetBody() && !m_Request->GetBody().IsQueue_search() ) {
-    //         NCBI_THROW(CBlastException, eInvalidArgument, "No body in CBlast4_request");
-    //     }
-    //     m_Data.reset(new CImportStrategyData);
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:164-168
-    // ```c++
-    // string
-    // CImportStrategy::GetCreatedBy() const
-    // {
-    //     return m_Request->GetIdent();
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/include/objects/blast/Blast4_request_.hpp:191-198
-    // ```c++
-    // inline
-    // const CBlast4_request_Base::TIdent& CBlast4_request_Base::GetIdent(void) const
-    // {
-    //     if (!CanGetIdent()) {
-    //         ThrowUnassigned(0);
-    //     }
-    //     return m_Ident;
-    // }
-    // ```
     // (`GetProgram` and `GetService` read mandatory members of the `queue-search`.)
     pub(crate) fn from_value(request: Value) -> Result<Option<Request>, Stop> {
         Request::read(request, Reader::Archive)
@@ -301,21 +229,6 @@ impl Request {
 
     /// `GetParamByName(name)` of the list `set`: its first parameter named `name`.
     // NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_parameters.cpp:186-198
-    // ```c++
-    // CRef <CBlast4_parameter>
-    // CBlast4_parameters::GetParamByName(const string name) const
-    // {
-    // 	CRef <CBlast4_parameter> blast4ParamFound;
-    //
-    // 	ITERATE(Tdata,it,this->Get()) {
-    // 		if((*it)->GetName() == name) {
-    // 			blast4ParamFound = (*it);
-    // 			break;
-    // 		}
-    // 	}
-    // 	return blast4ParamFound;
-    // }
-    // ```
     pub(crate) fn param(&self, set: ParamSet, name: &[u8]) -> Option<&Param> {
         self.params
             .iter()
@@ -330,43 +243,8 @@ impl Request {
     /// (`read/options.rs`), which takes this over; until then, only this parameter's own error
     /// is NCBI's (any other parameter that NCBI's builder refuses is not checked here).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:298-306
-    // ```c++
-    //     case 'H':
-    //         if (CBlast4Field::Get(eBlastOpt_HitlistSize).Match(p)) {
-    //             opts.SetHitlistSize(v.GetInteger());
-    //         } else if (CBlast4Field::Get(eBlastOpt_HspRangeMax).Match(p)) {
-    //             m_HspRangeMax = v.GetInteger();
-    //         } else {
-    //             found = false;
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:531-545
-    // ```c++
-    //     if (! found) {
-    //         if (m_IgnoreUnsupportedOptions)
-    //             return;
-    //
-    //         string msg = "Internal: Error processing option [";
-    //         msg += nm;
-    //         msg += "] type [";
-    //         msg += NStr::IntToString((int) v.Which());
-    //         msg += "].";
-    //
-    //         NCBI_THROW(CRemoteBlastException,
-    //                    eServiceNotAvailable,
-    //                    msg);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objects/blast/names.cpp:367-373
-    // ```c++
-    // bool CBlast4Field::Match(const CBlast4_parameter & p) const
-    // {
-    //     return (p.CanGetName()        &&
-    //             p.CanGetValue()       &&
-    //             p.GetValue().Which() == m_Type  &&
-    //             p.GetName() == m_Name);
-    // }
-    // ```
     // (`HitlistSize` is an `e_Integer` field, names.cpp; `Which()` is the variant's position from
     // 1. The archive reader builds without `ignore_unsupported_options`.)
     pub(crate) fn hitlist_size(&self) -> Result<i32, Stop> {
@@ -402,18 +280,6 @@ impl Request {
 
     /// Whether the database of the request is protein (`x_SetDatabase`'s residue type).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1537-1546
-    // ```c++
-    //    EBlast4_residue_type rtype(eBlast4_residue_type_unknown);
-    //
-    //     if (m_Program == "blastp" ||
-    //         m_Program == "blastx" ||
-    //         (m_Program == "tblastn" && m_Service == "rpsblast")) {
-    //
-    //         rtype = eBlast4_residue_type_protein;
-    //     } else {
-    //         rtype = eBlast4_residue_type_nucleotide;
-    //     }
-    // ```
     pub(crate) fn db_is_protein(&self) -> bool {
         let program = self.program.as_slice();
         program == b"blastp"
@@ -426,27 +292,6 @@ impl Request {
     /// masks; NCBI aborts on the `rpsblast` service with a program other than `blastp`,
     /// `tblastn` and `blastx`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1933-1962
-    // ```c++
-    //     EBlastProgramType retval = eBlastTypeUndefined;
-    //     Int2 rv = BlastProgram2Number(program.c_str(), &retval);
-    //     ...
-    //     if (service == "rpsblast") {
-    //
-    //         if (program == "blastp") {
-    //             retval = eBlastTypeRpsBlast;
-    //         } else if (program == "tblastn" || program == "blastx") {
-    //             retval = eBlastTypeRpsTblastn;
-    //         } else {
-    //             abort();
-    //         }
-    //
-    //     }
-    //
-    //     if (service == "psi") {
-    //         _ASSERT(program == "blastp");
-    //         retval = eBlastTypePsiBlast;
-    //     }
-    // ```
     // (`BlastProgram2Number`, blast_util.c:278-310, compares the names without case; the
     // programs whose type has `TRANSLATED_QUERY_MASK` are blastx, tblastx and rpstblastn,
     // blast_program.h:72-89. An unknown name is `eBlastTypeUndefined`, 0.)
@@ -474,18 +319,6 @@ impl Queries {
     /// `CBlast4_queries::GetNumQueries()`: 1 for a PSSM, the locations, the entries at the top
     /// of the Bioseq-set.
     // NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_queries.cpp:57-77
-    // ```c++
-    //     switch (Which()) {
-    //     case e_Pssm:
-    //         retval = 1;
-    //         break;
-    //     case e_Seq_loc_list:
-    //         retval = GetSeq_loc_list().size();
-    //         break;
-    //     case e_Bioseq_set:
-    //         retval = GetBioseq_set().GetSeq_set().size();
-    //         break;
-    // ```
     pub(crate) fn num_queries(&self) -> usize {
         match self {
             Queries::Pssm(_) => 1,
@@ -534,40 +367,7 @@ impl Queries {
     /// `x_ExtractQueryIds`: the id of each query, in order (`None`: NCBI's null `CRef`, of a
     /// Bioseq whose ids are all ranked worst or a location without one id).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2089-2117
-    // ```c++
-    //     if (queries->IsPssm()) {
-    //         const CSeq_entry& seq_entry = queries->GetPssm().GetQuery();
-    //         if (seq_entry.IsSeq()) {
-    //             query_ids.push_back(FindBestChoice(seq_entry.GetSeq().GetId(),
-    //                                                CSeq_id::BestRank));
-    //         } else {
-    //             _ASSERT(seq_entry.IsSet());
-    //             s_ExtractQueryIdsFromBioseqSet(seq_entry.GetSet(), query_ids);
-    //         }
-    //     } else if (queries->IsSeq_loc_list()) {
-    //         query_ids.reserve(queries->GetSeq_loc_list().size());
-    //         ITERATE(CBlast4_queries::TSeq_loc_list, i, queries->GetSeq_loc_list()) {
-    //             CConstRef<CSeq_id> id((*i)->GetId());
-    //             query_ids.push_back(id);
-    //         }
-    //     } else {
-    //         _ASSERT(queries->IsBioseq_set());
-    //         s_ExtractQueryIdsFromBioseqSet(queries->GetBioseq_set(), query_ids);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2078-2087
-    // ```c++
-    // static void s_ExtractQueryIdsFromBioseqSet(const CBioseq_set& bss,
-    //                                            CSearchResultSet::TQueryIdVector&
-    //                                            query_ids)
-    // {
-    //     // sacrifice speed for protection against infinite loops
-    //     CTypeConstIterator<objects::CBioseq> itr(ConstBegin(bss, eDetectLoops));
-    //     for (; itr; ++itr) {
-    //         query_ids.push_back(FindBestChoice(itr->GetId(), CSeq_id::BestRank));
-    //     }
-    // }
-    // ```
     // (A PSSM without a query: `GetQuery()` of an unset member.)
     pub(crate) fn query_ids(&self) -> Result<Vec<Option<&ParsedSeqId>>, Stop> {
         if let Queries::Pssm(pssm) = self {

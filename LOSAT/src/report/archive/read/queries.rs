@@ -4,53 +4,8 @@
 //! NCBI's does (survey decision D3).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:425-438
-//! ```c++
-//!     } else {
-//!         _ASSERT(queries.IsBioseq_set());
-//!         const CBlast4_queries::TBioseq_set& bioseqs =
-//!             queries.GetBioseq_set();
-//!         CFastaOstream out(tmpfile->AsOutputFile(CTmpFile::eIfExists_Throw));
-//!         out.SetFlag(CFastaOstream::eAssembleParts);
-//!
-//!         ITERATE(CBioseq_set::TSeq_set, seq_entry, bioseqs.GetSeq_set()){
-//!             out.Write(**seq_entry);
-//!         }
-//!     }
-//!
-//!     const string& fname = tmpfile->GetFileName();
-//!     tmpfile.Reset(new CTmpFile(fname));
-//!     cmdline_args->SetInputStream(tmpfile);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3365-3371
-//! ```c++
-//! void CFastaOstream::Write(const CSeq_entry& entry, const CSeq_loc* location,
-//!                           bool no_scope)
-//! {
-//!     if (location || !no_scope) {
-//!         CScope scope(*CObjectManager::GetInstance());
-//!         Write(scope.AddTopLevelSeqEntry(entry), location);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2727-2754
-//! ```c++
-//! void CFastaOstream::Write(const CSeq_entry_Handle& handle,
-//!                           const CSeq_loc* location)
-//! {
-//!     for (CBioseq_CI it(handle);  it;  ++it) {
-//!         if ( !SkipBioseq(*it) ) {
-//!             ...
-//!             Write(*it, location);
-//!         }
-//!     }
-//! }
-//!
-//! void CFastaOstream::Write(const CBioseq_Handle& handle,
-//!                           const CSeq_loc* location,
-//!                           const string& custom_title)
-//! {
-//!     WriteTitle(handle, location, custom_title);
-//!     WriteSequence(handle, location);
-//! }
-//! ```
 //! The stream's flags are the constructor's, `fInstantiateGaps | fAssembleParts | fEnableGI`, with
 //! a width of 70 (sequence.cpp:2713-2720); `eAssembleParts` is a flag already set. Each entry is
 //! added to a scope of its own, and its Bioseqs are written in the order of `CBioseq_CI`: depth
@@ -101,23 +56,6 @@ pub fn render_queries(set: V<'_>) -> Result<Vec<u8>, RenderError> {
 const WIDTH: u32 = 70;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:354-367
-// ```c++
-// static TSeqLocVector
-// s_ConvertBioseqs2TSeqLocVector(const CBlast4_subject::TSequences& subjects)
-// {
-//     TSeqLocVector retval;
-//     CRef<CScope> subj_scope(new CScope(*CObjectManager::GetInstance()));
-//     ITERATE(CBlast4_subject::TSequences, bioseq, subjects) {
-//         subj_scope->AddBioseq(**bioseq);
-//         CRef<CSeq_id> seqid = FindBestChoice((*bioseq)->GetId(),
-//                                              CSeq_id::BestRank);
-//         const TSeqPos length = (*bioseq)->GetInst().GetLength();
-//         CRef<CSeq_loc> sl(new CSeq_loc(*seqid, 0, length-1));
-//         retval.push_back(SSeqLoc(sl, subj_scope));
-//     }
-//     return retval;
-// }
-// ```
 /// The subject Bioseqs of a strategy (`s_ImportSubjects`: each Bioseq searched whole under its
 /// own id and title) as the FASTA text from which the program's `-subject` reader makes the same
 /// records: the Bioseq `i` (from 0) must have the one local id `Subject_<i + 1>` that NCBI's
@@ -159,20 +97,6 @@ struct FastaOstream {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2933-2944
-// ```c++
-//     if ( !have_range  &&  (m_Flags & fNoDupCheck) == 0) {
-//         ITERATE (CBioseq::TId, id, bioseq.GetId()) {
-//             CSeq_id_Handle idh = CSeq_id_Handle::GetHandle(**id);
-//             pair<TSeq_id_HandleSet::iterator, bool> p
-//                 = m_PreviousWholeIds.insert(idh);
-//             if ( !p.second ) {
-//                 NCBI_THROW(CObjmgrUtilException, eBadLocation,
-//                            "Duplicate Seq-id " + (*id)->AsFastaString()
-//                            + " in FASTA output");
-//             }
-//         }
-//     }
-// ```
 /// The throw of a Seq-id written twice (`n_dup`: `Duplicate Seq-id lcl|Query_1 in FASTA output`).
 const DUPLICATE_SEQ_ID: ThrowSite = ThrowSite {
     file: "src/objmgr/util/sequence.cpp",
@@ -192,16 +116,6 @@ const UNASSIGNED_LENGTH: ThrowSite = ThrowSite {
 };
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:543-549
-// ```c++
-//         if ( cacheCoding != dataCoding || reverse ||
-//              m_CaseConversion != eCaseConversion_none ) {
-//             table = sx_GetConvertTable(dataCoding, cacheCoding,
-//                                        reverse, m_CaseConversion);
-//             if ( !table && cacheCoding != dataCoding ) {
-//                 NCBI_THROW_FMT(CSeqVectorException, eCodingError,
-//                                "Incompatible sequence codings: "<<
-//                                dataCoding<<" -> "<<cacheCoding);
-// ```
 /// The throw of a Seq-data that `CSeqVector` does not convert to the letters of FASTA (`n_8na`:
 /// `Incompatible sequence codings: 5 -> 1`).
 const INCOMPATIBLE_CODINGS: ThrowSite = ThrowSite {
@@ -212,12 +126,6 @@ const INCOMPATIBLE_CODINGS: ThrowSite = ThrowSite {
 };
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:58-61
-// ```c++
-// void ThrowOutOfRangeSeq_inst(size_t pos)
-// {
-//     NCBI_THROW_FMT(CSeqVectorException, eOutOfRange,
-//                    "reference out of range of Seq-inst data: "<<pos);
-// ```
 /// The throw of a read past the end of a Seq-data (`n_len_long`: `reference out of range of
 /// Seq-inst data: 6`).
 const OUT_OF_RANGE: ThrowSite = ThrowSite {
@@ -267,20 +175,6 @@ impl FastaOstream {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2946-2957
-    // ```c++
-    //     m_Out << '>';
-    //     if (!(m_Flags & fIgnoreOriginalID) &&
-    //             s_ShouldUseOriginalID(bioseq)) {
-    //         string origID = s_FastaGetOriginalID(bioseq);
-    //         if (! NStr::IsBlank(origID)) {
-    //             m_Out << "lcl|" << origID;
-    //         } else {
-    //             x_WriteAsFasta(bioseq);
-    //         }
-    //     } else {
-    //         x_WriteAsFasta(bioseq);
-    //     }
-    // ```
     /// `x_WriteSeqIds` without a location: the check for ids written before, `>`, then the
     /// original id of a Bioseq of local ids (`lcl|<id>`), else its ids as `x_WriteAsFasta` writes
     /// them with `fEnableGI` (`bioseq_fasta`: the GI, then the best id for FASTA, which is the
@@ -319,29 +213,6 @@ impl FastaOstream {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3000-3019
-    // ```c++
-    // void CFastaOstream::x_WriteSeqTitle(const CBioseq_Handle & bioseq_handle,
-    //                                     const string& custom_title)
-    // {
-    //     string safe_title = (!custom_title.empty()) ? custom_title
-    //         : m_Gen->GenerateDefline(bioseq_handle, x_GetTitleFlags());
-    //
-    //     if ( !safe_title.empty() ) {
-    //         if ( !(m_Flags & fKeepGTSigns) ) {
-    //             NStr::ReplaceInPlace(safe_title, ">", "_");
-    //         }
-    //         if (safe_title[0] != ' ') {
-    //             m_Out << ' ';
-    //         }
-    //
-    //         if ((m_Flags & fHTMLEncode) != 0) {
-    //             safe_title = NStr::HtmlEncode(safe_title);
-    //         }
-    //         m_Out << safe_title;
-    //     }
-    //     m_Out << '\n';
-    // }
-    // ```
     /// `x_WriteSeqTitle`: `GenerateDefline` with `fFastaFormat` of the first title (a title
     /// generated where there is none), each `>` written as `_`, after a space unless it starts
     /// with one; then the line end. `fFastaFormat` changes no title of the Bioseqs written here
@@ -426,37 +297,7 @@ fn entry_bioseqs(entry: V<'_>) -> Result<Vec<Bioseq<'_>>, RenderError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:891-904
-// ```c++
-// void CTSE_Info::x_SetBioseqIds(CBioseq_Info* info)
-// {
-//     _ASSERT(info);
-//     {{
-//         CFastMutexGuard guard(m_BioseqsMutex);
-//         ITERATE ( CBioseq_Info::TId, it, info->GetId() ) {
-//             pair<TBioseqs::iterator, bool> ins =
-//                 m_Bioseqs.insert(TBioseqs::value_type(*it, info));
-//             if ( !ins.second ) {
-//                 // No duplicate bioseqs in the same TSE
-//                 NCBI_THROW(CObjMgrException, eAddDataError,
-//                            "duplicate Bioseq id "+it->AsString()+" present in"+
-//                            "\n  seq1: " + ins.first->second->IdString()+
-//                            "\n  seq2: " + info->IdString());
-//             }
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:1221-1230
-// ```c++
-// string CBioseq_Info::IdString(void) const
-// {
-//     CNcbiOstrstream os;
-//     ITERATE ( TId, it, m_Id ) {
-//         if ( it != m_Id.begin() )
-//             os << " | ";
-//         os << it->AsString();
-//     }
-//     return CNcbiOstrstreamToString(os);
-// }
-// ```
 /// The throw of an id that two Bioseqs of one entry carry, or one twice (`n_dup_in_one`,
 /// `d_set_dup`).
 const DUPLICATE_BIOSEQ_ID: ThrowSite = ThrowSite {
@@ -524,62 +365,6 @@ fn id_string(ids: &[&ParsedSeqId]) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2757-2810
-// ```c++
-// static string s_FastaGetOriginalID (const CBioseq& seq)
-//
-// {
-//     FOR_EACH_SEQDESC_ON_BIOSEQ (it, seq) {
-//         const CSeqdesc& desc = **it;
-//         if (! desc.IsUser()) continue;
-//         if (! desc.GetUser().IsSetType()) continue;
-//         const CUser_object& usr = desc.GetUser();
-//         const CObject_id& oi = usr.GetType();
-//         if (! oi.IsStr()) continue;
-//         const string& type = oi.GetStr();
-//         if (! NStr::EqualNocase(type, "OrginalID") && ! NStr::EqualNocase(type, "OriginalID")) continue;
-//         FOR_EACH_USERFIELD_ON_USEROBJECT (uitr, usr) {
-//             const CUser_field& fld = **uitr;
-//             if (FIELD_IS_SET_AND_IS(fld, Label, Str)) {
-//                 const string &label_str = GET_FIELD(fld.GetLabel(), Str);
-//                 if (! NStr::EqualNocase(label_str, "LocalId")) continue;
-//                 if (fld.IsSetData() && fld.GetData().IsStr()) {
-//                     return fld.GetData().GetStr();
-//                 }
-//             }
-//         }
-//     }
-//
-//     return "";
-// }
-//
-// static bool s_ShouldUseOriginalID (const CBioseq& seq)
-// {
-//     FOR_EACH_SEQID_ON_BIOSEQ (id_itr, seq) {
-//         const CSeq_id& sid = **id_itr;
-//         switch (sid.Which()) {
-//             case CSeq_id::e_Local:
-//                 break;
-//             case CSeq_id::e_General:
-//                 {
-//                     const CDbtag& dbtag = sid.GetGeneral();
-//                     if (dbtag.IsSetDb()) {
-//                         const string& db = dbtag.GetDb();
-//                         if (! NStr::EqualNocase(db, "TMSMART") &&
-//                             ! NStr::EqualNocase(db, "BankIt") &&
-//                             ! NStr::EqualNocase(db, "NCBIFILE")) {
-//                             return false;
-//                         }
-//                     }
-//                 }
-//                 break;
-//             default:
-//                 return false;
-//         }
-//     }
-//
-//     return true;
-// }
-// ```
 /// The original id that `x_WriteSeqIds` writes as `lcl|<id>`: that of the first `OriginalID` (or
 /// `OrginalID`) user object with a `LocalId` string field, for a Bioseq whose ids are all local or
 /// of the general databases TMSMART, BankIt and NCBIFILE (probes `n_orig_*`); none when it is
@@ -674,15 +459,6 @@ impl Piece<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:708-714
-// ```c++
-//     if ( !m_Seg && pos == x_GetSize() ) {
-//         // it's ok to position to the very end
-//         return;
-//     }
-//     if ( !m_Seg || pos<m_Seg.GetPosition() || pos>=m_Seg.GetEndPosition() ) {
-//         NCBI_THROW_FMT(CSeqVectorException, eDataError,
-//                        "CSeqVector_CI: cannot locate segment at "<<pos);
-// ```
 /// The throw of a map whose segments end before the Bioseq's length (`dl_sum_long`: `cannot
 /// locate segment at 9`). NCBI's kind is `eSeqDataError`, the text of `eDataError`.
 const NO_SEGMENT: ThrowSite = ThrowSite {
@@ -733,81 +509,6 @@ fn letters(inst: V<'_>, length: u32, protein: bool) -> Result<Vec<u8>, RenderErr
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:219-291
-// ```c++
-//     if ( inst.IsSetSeq_data() ) {
-//         if ( !inst.GetSeq_data().IsGap() ) {
-//             x_Add(inst.GetSeq_data(), inst.GetLength());
-//         }
-//         else {
-//             // split Seq-data
-//             x_AddGap(inst.GetLength(), false, inst.GetSeq_data());
-//         }
-//     }
-//     else if ( inst.IsSetExt() ) {
-//         const CSeq_ext& ext = inst.GetExt();
-//         switch (ext.Which()) {
-//         case CSeq_ext::e_Seg:
-//             ITERATE ( CSeq_ext::TSeg::Tdata, iter, ext.GetSeg().Get() ) {
-//                 x_Add(**iter);
-//             }
-//             break;
-//         case CSeq_ext::e_Ref:
-//             x_Add(ext.GetRef());
-//             break;
-//         case CSeq_ext::e_Delta:
-//             ITERATE ( CSeq_ext::TDelta::Tdata, iter, ext.GetDelta().Get() ) {
-//                 x_Add(**iter);
-//             }
-//             break;
-//         case CSeq_ext::e_Map:
-//             if ( m_SeqLength == kInvalidSeqPos ) {
-//                 NCBI_THROW(CSeqMapException, eDataError,
-//                        "CSeq_inst.ext.map with unset CSeq_inst.length");
-//             }
-//             x_AddGap(m_SeqLength, false);
-//             break;
-//         default:
-//             //### Not implemented
-//             NCBI_THROW(CSeqMapException, eUnimplemented,
-//                        "CSeq_ext::??? -- not implemented");
-//         }
-//     }
-//     else if ( inst.GetRepr() == CSeq_inst::eRepr_virtual ) {
-//         // Virtual sequence -- no data, no segments
-//         // The total sequence is gap
-//         if ( m_SeqLength == kInvalidSeqPos ) {
-//             m_SeqLength = 0;
-//         }
-//         x_AddGap(m_SeqLength, false);
-//     }
-//     else if ( inst.GetRepr() == CSeq_inst::eRepr_map ) {
-//         // Virtual map sequence -- no data, no segments
-//         // The total sequence is gap
-//         if ( m_SeqLength == kInvalidSeqPos ) {
-//             NCBI_THROW(CSeqMapException, eDataError,
-//                        "CSeq_inst.repr map with unset CSeq_inst.length");
-//         }
-//         x_AddGap(m_SeqLength, false);
-//     }
-//     else if ( inst.GetRepr() != CSeq_inst::eRepr_not_set &&
-//               inst.IsSetLength() && inst.GetLength() != 0 ) {
-//         // split seq-data
-//         x_AddGap(inst.GetLength(), false);
-//     }
-//     else {
-//         if ( inst.GetRepr() != CSeq_inst::eRepr_not_set ) {
-//             NCBI_THROW(CSeqMapException, eDataError,
-//                        "CSeq_inst.repr of sequence without data "
-//                        "should be not_set");
-//         }
-//         if ( inst.IsSetLength() && inst.GetLength() != 0 ) {
-//             NCBI_THROW(CSeqMapException, eDataError,
-//                        "CSeq_inst.length of sequence without data "
-//                        "should be 0");
-//         }
-//         x_AddGap(0, false);
-//     }
-// ```
 /// The Bioseq's sequence map (`CSeqMap(const CSeq_inst&)`) for a Bioseq whose length is set: its
 /// Seq-data over the length, whatever its representation (`r_*`); else its extension (a delta's
 /// literals in order, a literal without Seq-data or with `gap` data being a gap; a map's gap over
@@ -930,17 +631,6 @@ const NA4_TO_IUPACNA: &[u8; 16] = b"NACMGRSVTWYHKDBN";
 const NA2_TO_IUPACNA: &[u8; 4] = b"ACGT";
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:484-494
-// ```c++
-// void CSeqVector_CI::x_UpdateCacheUp(TSeqPos pos)
-// {
-//     _ASSERT(pos < x_GetSize());
-//
-//     TSeqPos segEnd = m_Seg.GetEndPosition();
-//     _ASSERT(pos >= m_Seg.GetPosition() && pos < segEnd);
-//
-//     TSeqPos cache_size = min(kCacheSize, segEnd - pos);
-//     x_FillCache(pos, cache_size);
-// ```
 /// The letters of a segment of a Seq-data up to `length` letters (the segment's, cut at the
 /// Bioseq's length: `dl_cut_short` writes `ACGTA` where its second literal holds 2 of its 5
 /// letters), filled as `CSeqVector_CI` fills its cache: from the start of the segment, 1024

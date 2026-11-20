@@ -227,23 +227,6 @@ pub fn report_counts(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
-// ```c++
-//     // Default hitlist size 500, value can be changed if import search strategy is used
-//     int hitlist_size = opt.GetHitlistSize();
-//
-//     // To preserve hitlist size in import search strategy > 500,
-//     // we need to increase the  num_ descriptions and num_alignemtns
-//     if(hitlist_size > BLAST_HITLIST_SIZE )
-//     {
-//     	if((!args.Exist(kArgNumDescriptions) || !args[kArgNumDescriptions]) &&
-//            (!args.Exist(kArgNumAlignments) || !args[kArgNumAlignments]) &&
-//     	   (m_OutputFormat <= eFlatQueryAnchoredNoIdentities)) {
-//     		m_NumDescriptions = hitlist_size;
-//     		m_NumAlignments = hitlist_size/ 2;
-//     		return;
-//     	}
-//     }
-// ```
 /// [`report_counts`] from the hit list size `start` of the options (an imported search
 /// strategy's `HitlistSize`): above 500, with neither `-num_descriptions` nor `-num_alignments`
 /// and a pairwise format, the handler keeps it and returns early (`-max_target_seqs` is then not
@@ -574,6 +557,7 @@ mod tests {
             line_length: Some(80),
             sort_hits: Some(1),
             sort_hsps: Some(1),
+            hitlist_start: None,
         };
         let (counts, warnings) =
             run_report_counts_with("rpsblast", &[7], Some(2), Some(3), None, &all).unwrap();

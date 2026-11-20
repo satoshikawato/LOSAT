@@ -131,15 +131,6 @@ pub struct TblastnArgs {
     #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
-    // ```c++
-    //     arg_desc.AddOptionalKey(kArgInputSearchStrategy,
-    //                             "filename",
-    //                             "Search strategy to use",
-    //                             CArgDescriptions::eInputFile);
-    //     arg_desc.SetDependency(kArgInputSearchStrategy,
-    //                            CArgDescriptions::eExcludes,
-    //                            kArgOutputSearchStrategy);
-    // ```
     // The search strategy to import (`report::archive::read::import`), read by `run` before the
     // other options (`archive::apply_strategy`).
     #[arg(

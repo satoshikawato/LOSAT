@@ -532,29 +532,7 @@ mod tests {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:128-133
-// ```c++
-//         if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
-//         	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
-//         }
-//         else {
-//         	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptions(args));
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3813-3826
-// ```c++
-//     CBlastOptions& opts = m_OptsHandle->SetOptions();
-//     // invoke ExtractAlgorithmOptions on certain argument classes, i.e.: those
-//     // that should have their arguments overriden
-//     m_QueryOptsArgs->ExtractAlgorithmOptions(args, opts);
-//     m_StdCmdLineArgs->ExtractAlgorithmOptions(args, opts);
-//     m_RemoteArgs->ExtractAlgorithmOptions(args, opts);
-//     m_DebugArgs->ExtractAlgorithmOptions(args, opts);
-//     m_FormattingArgs->ExtractAlgorithmOptions(args, opts);
-//     m_MTArgs->ExtractAlgorithmOptions(args, opts);
-//     if (CBlastDatabaseArgs::HasBeenSet(args)) {
-//           m_BlastDbArgs->ExtractAlgorithmOptions(args, opts);
-//     }
-// ```
 /// `-import_search_strategy` of BLASTP (`RecoverSearchStrategy`, `SetOptionsForSavedStrategy`):
 /// the arguments of a command line that gives nothing (the strategy task's defaults) with the
 /// strategy's options set on them in the file's order, and from `args` only what NCBI's

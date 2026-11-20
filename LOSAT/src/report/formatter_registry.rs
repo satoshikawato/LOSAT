@@ -11,6 +11,8 @@
 //! `FMTCFG` names (default `.ncbirc`) in the current directory, else the one under `$NCBI`
 //! (line RG, item T4a).
 
+use std::io::Write;
+
 use crate::blastinput::ncbi_registry::RegistryRead;
 
 /// `./.ncbirc` as NCBI's formatter reads it: `Ok(None)` without the file, `Err(what)` for a file
@@ -161,6 +163,362 @@ pub(crate) fn tax_browser_template(registry: Option<&RegistryRead>) -> &[u8] {
     value(registry, "TAX_BROWSER", "BLASTFMTUTIL").unwrap_or(TAX_BROWSER_URL)
 }
 
+/// `CAlignFormatUtil::MapTemplate` on bytes: every `<@name@>` of `input` replaced by `value`,
+/// left to right; the text put in is not searched again by this call.
+///
+/// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3593-3599
+/// ```c++
+/// string CAlignFormatUtil::MapTemplate(string inpString,string tmplParamName,string templParamVal)
+/// {
+///     string outString;
+///     string tmplParam = "<@" + tmplParamName + "@>";
+///     NStr::Replace(inpString,tmplParam,templParamVal,outString);
+///     return outString;
+/// }
+/// ```
+// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
+// writes; the allowance goes with that wiring.
+#[allow(dead_code)]
+pub(crate) fn map_template(input: &[u8], name: &str, value: &[u8]) -> Vec<u8> {
+    let token = [b"<@", name.as_bytes(), b"@>"].concat();
+    let mut out = Vec::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(at) = rest
+        .windows(token.len())
+        .position(|w| w == token.as_slice())
+    {
+        out.extend_from_slice(&rest[..at]);
+        out.extend_from_slice(value);
+        rest = &rest[at + token.len()..];
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+/// `NStr::URLEncode(text)` (`eUrlEnc_SkipMarkChars`, table `s_Encode`): letters, digits and
+/// `!$'()*,-._` stay, a space becomes `+`, every other byte `%XX` (upper-case hex).
+///
+/// NCBI reference (2.17.0): c++/src/corelib/ncbistr.cpp:5614-5619, 6066-6067 (`s_Encode`, rows of 0x20-0x3F)
+/// ```c++
+///     "+",   "!",   "%22", "%23", "$",   "%25", "%26", "'",
+///     "(",   ")",   "*",   "%2B", ",",   "-",   ".",   "%2F",
+///     "0",   "1",   "2",   "3",   "4",   "5",   "6",   "7",
+///     "8",   "9",   "%3A", "%3B", "%3C", "%3D", "%3E", "%3F",
+/// ...
+///     case eUrlEnc_SkipMarkChars:
+///         encode_table = s_Encode;
+/// ```
+/// The other rows keep `A`-`Z`, `a`-`z` and `_` only (`%40`, `%5B`-`%5E`, `%60`, `%7B`-`%7F`).
+// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
+// writes; the allowance goes with that wiring.
+#[allow(dead_code)]
+pub(crate) fn url_encode(text: &[u8]) -> Vec<u8> {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = Vec::with_capacity(text.len());
+    for &byte in text {
+        match byte {
+            b' ' => out.push(b'+'),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => out.push(byte),
+            b'!' | b'$' | b'\'' | b'(' | b')' | b'*' | b',' | b'-' | b'.' | b'_' => out.push(byte),
+            _ => out.extend_from_slice(&[
+                b'%',
+                HEX[usize::from(byte >> 4)],
+                HEX[usize::from(byte & 15)],
+            ]),
+        }
+    }
+    out
+}
+
+/// The file of `CAlignFormatUtil::InitConfig`: `FMTCFG` (unset or empty: `.ncbirc`) where it
+/// is a file (`CFile::Exists`, links followed), else `$NCBI` (not empty) with `/` added where it
+/// does not end in one, then that name, where it is a file; `None`: no file.
+///
+/// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3383-3418
+/// ```c++
+/// void CAlignFormatUtil::InitConfig()
+/// {
+///     string l_cfg_file_name;
+///     bool   l_dbg = CAlignFormatUtil::m_geturl_debug_flag;
+///     if( getenv("GETURL_DEBUG") ) CAlignFormatUtil::m_geturl_debug_flag = l_dbg = true;
+///     if( !m_Reg ) {
+///         ...
+///         if( NULL !=  getenv("NCBI")   ) l_ncbi_env = getenv("NCBI");
+///         if( NULL !=  getenv("FMTCFG") ) l_fmtcfg_env = getenv("FMTCFG");
+///         // config file name: value of FMTCFG or  default ( .ncbirc )
+///         if( l_fmtcfg_env.empty()  )
+///             l_cfg_file_name = ".ncbirc";
+///         else
+///             l_cfg_file_name = l_fmtcfg_env;
+///         // checkinf existance of configuration file
+///         CFile  l_fchecker( l_cfg_file_name );
+///         cfgExists = l_fchecker.Exists();
+///         if( (!cfgExists) && (!l_ncbi_env.empty()) ) {
+///             if( l_ncbi_env.rfind("/") != (l_ncbi_env.length() -1 ))
+///             l_ncbi_env.append("/");
+///             l_cfg_file_name = l_ncbi_env + l_cfg_file_name;
+///             CFile  l_fchecker2( l_cfg_file_name );
+///             cfgExists = l_fchecker2.Exists();
+///         }
+///         if(cfgExists) {
+///             CNcbiIfstream l_ConfigFile(l_cfg_file_name.c_str() );
+///             m_Reg.reset(new CNcbiRegistry(l_ConfigFile));
+///             if( l_dbg ) fprintf(stderr,"REGISTRY: %s\n",l_cfg_file_name.c_str());
+///         }
+///     }
+/// ```
+// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
+// writes; the allowance goes with that wiring.
+#[allow(dead_code)]
+fn init_config_path(
+    fmtcfg: Option<&std::ffi::OsStr>,
+    ncbi: Option<&std::ffi::OsStr>,
+    is_file: &dyn Fn(&std::path::Path) -> bool,
+) -> Option<std::ffi::OsString> {
+    let name = fmtcfg
+        .filter(|name| !name.is_empty())
+        .unwrap_or(std::ffi::OsStr::new(".ncbirc"));
+    if is_file(name.as_ref()) {
+        return Some(name.to_owned());
+    }
+    let ncbi = ncbi.filter(|ncbi| !ncbi.is_empty())?;
+    let mut path = ncbi.to_owned();
+    if !ncbi.as_encoded_bytes().ends_with(b"/") {
+        path.push("/");
+    }
+    path.push(name);
+    is_file(path.as_ref()).then_some(path)
+}
+
+/// What `InitConfig` found (`CAlignFormatUtil::m_Reg`, static in NCBI: one per run).
+// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
+// writes; the allowance goes with that wiring.
+#[allow(dead_code)]
+#[derive(Debug)]
+enum ConfigFile {
+    /// No file: `m_Reg` stays null and NCBI looks again at each call (a run's files and
+    /// environment do not change, so each look finds none again).
+    Absent,
+    /// The file `path` and its read (`m_Reg`), with the posts of the read (`registry_posts`).
+    Read {
+        path: std::ffi::OsString,
+        registry: RegistryRead,
+        posts: Vec<u8>,
+    },
+    /// A file whose read throws (`CRegistryException`, `ncbireg.cpp` line 722): `m_Reg` stays
+    /// null, so each call reads it again, posts again and throws again.
+    Throws {
+        posts: Vec<u8>,
+        exception: crate::ncbi_exception::NcbiException,
+    },
+}
+
+/// The registry of NCBI's id links with `-html` (`CAlignFormatUtil::InitConfig`, `m_Reg`,
+/// `m_Protocol`, `m_geturl_debug_flag`): one per run, made only with `-html` (`InitConfig::read`,
+/// which reads the file at once so that LOSAT's refusals come before the first byte), and used
+/// where NCBI first calls `InitConfig`: at the first id URL of the report (`map_protocol`,
+/// `local_id_url`), never by the organism report. The effects of a read, the posts, the
+/// `GETURL_DEBUG` line and the exception of a malformed file, happen at that call, as in NCBI
+/// (line RG T4 probes `env_geturl`, `cfg.*`: a malformed file fails only with hits, rc 255).
+// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
+// writes; the allowance goes with that wiring.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) struct InitConfig {
+    file: ConfigFile,
+    /// `GETURL_DEBUG` is set (to any value, the empty one too).
+    debug: bool,
+    /// Whether the first call has written the posts and the `GETURL_DEBUG` line of a `Read`.
+    reported: std::sync::atomic::AtomicBool,
+}
+
+// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
+// writes; the allowance goes with that wiring.
+#[allow(dead_code)]
+impl InitConfig {
+    /// The registry of the run of `program` (in lower case, as NCBI's posts name it), from the
+    /// environment (`FMTCFG`, `NCBI`, `GETURL_DEBUG`) and the current directory. LOSAT refuses a
+    /// file that cannot be read and one with `[NCBI] .Inherits` (`CNcbiRegistry` reads the files
+    /// it names, which LOSAT's registry reads refuse elsewhere too); `what` completes "the
+    /// registry file <path> ...".
+    pub(crate) fn read(program: &str) -> Result<Self, String> {
+        let path = init_config_path(
+            std::env::var_os("FMTCFG").as_deref(),
+            std::env::var_os("NCBI").as_deref(),
+            &|path| path.is_file(),
+        );
+        let file = match path {
+            None => None,
+            Some(path) => {
+                let bytes = std::fs::read(&path).map_err(|error| {
+                    format!(
+                        "the registry file {} ({error}), which NCBI BLAST+'s -html links read, cannot be read; this is not supported by LOSAT",
+                        std::path::Path::new(&path).display()
+                    )
+                })?;
+                Some((path, bytes))
+            }
+        };
+        Self::of(program, file, std::env::var_os("GETURL_DEBUG").is_some())
+    }
+
+    /// `read` of the file `file` (its path as NCBI names it and its bytes; `None`: no file),
+    /// `debug`: `GETURL_DEBUG` is set.
+    fn of(
+        program: &str,
+        file: Option<(std::ffi::OsString, Vec<u8>)>,
+        debug: bool,
+    ) -> Result<Self, String> {
+        use crate::blastinput::ncbi_registry::{read_registry, Layer};
+        let refused = |path: &std::ffi::OsStr, what: &str| {
+            format!(
+                "the registry file {} {what}, which NCBI BLAST+'s -html links read (FMTCFG, NCBI); this is not supported by LOSAT",
+                std::path::Path::new(path).display()
+            )
+        };
+        let file = match file {
+            None => ConfigFile::Absent,
+            Some((path, bytes)) => {
+                let mut registry = read_registry(&bytes, Layer::SystemWide)
+                    .map_err(|reason| refused(&path, &reason))?;
+                if registry.last_value("NCBI", ".Inherits").is_some() {
+                    return Err(refused(&path, "sets [NCBI] .Inherits"));
+                }
+                let posts = registry_posts(&registry, program);
+                match registry.error.take() {
+                    Some(exception) => ConfigFile::Throws { posts, exception },
+                    None => ConfigFile::Read {
+                        path,
+                        registry,
+                        posts,
+                    },
+                }
+            }
+        };
+        Ok(InitConfig {
+            file,
+            debug,
+            reported: Default::default(),
+        })
+    }
+
+    /// `InitConfig()` where `m_Reg` is null, then `m_Reg`: the registry (`None`: no file). The
+    /// first call writes the posts of the read and, with `GETURL_DEBUG`, `REGISTRY: <path>` to
+    /// `diagnostics`; a file whose read throws posts and throws at every call (the exception as
+    /// the report's I/O error, `NcbiException::into_io_error`: NCBI's application then ends with
+    /// it, exit status 255).
+    fn registry(&self, diagnostics: &mut dyn Write) -> std::io::Result<Option<&RegistryRead>> {
+        match &self.file {
+            ConfigFile::Absent => Ok(None),
+            ConfigFile::Read {
+                path,
+                registry,
+                posts,
+            } => {
+                if !self
+                    .reported
+                    .swap(true, std::sync::atomic::Ordering::Relaxed)
+                {
+                    diagnostics.write_all(posts)?;
+                    if self.debug {
+                        diagnostics.write_all(b"REGISTRY: ")?;
+                        diagnostics.write_all(path.as_encoded_bytes())?;
+                        diagnostics.write_all(b"\n")?;
+                    }
+                    diagnostics.flush()?;
+                }
+                Ok(Some(registry))
+            }
+            ConfigFile::Throws { posts, exception } => {
+                diagnostics.write_all(posts)?;
+                diagnostics.flush()?;
+                Err(exception.clone().into_io_error())
+            }
+        }
+    }
+
+    /// `CAlignFormatUtil::MapProtocol(url)`: `<@protocol@>` replaced by `[BLASTFMTUTIL] PROTOCOL`
+    /// of the registry (also an empty value: `HasEntry`), else `https:`. NCBI applies it to the URL
+    /// of every id (`GetIDUrlGen`), so a malformed file fails at the first id of any kind (probes
+    /// `cfg.*.{L,A,D}.h`).
+    ///
+    /// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3661-3671
+    /// ```c++
+    /// string CAlignFormatUtil::MapProtocol(string url_link)
+    /// {
+    ///     if(m_Protocol.empty()){
+    ///         if(!m_Reg) {
+    ///             InitConfig();
+    ///         }
+    ///         m_Protocol = (m_Reg && m_Reg->HasEntry("BLASTFMTUTIL","PROTOCOL")) ? m_Protocol = m_Reg->Get("BLASTFMTUTIL","PROTOCOL") : "https:";
+    ///     }
+    ///     url_link = CAlignFormatUtil::MapTemplate(url_link,"protocol",m_Protocol);
+    ///     return url_link;
+    /// }
+    /// ```
+    pub(crate) fn map_protocol(
+        &self,
+        url: &[u8],
+        diagnostics: &mut dyn Write,
+    ) -> std::io::Result<Vec<u8>> {
+        let registry = self.registry(diagnostics)?;
+        Ok(map_template(url, "protocol", protocol(registry)))
+    }
+
+    /// The URL of a local id (`GetIDUrlGen`, `CSeq_id::e_Local`), after `MapProtocol`: the
+    /// registry's `[LOCAL_ID] TOOL_URL` (empty without it or without a file: the caller then has no
+    /// URL) with its tags filled in NCBI's order: `seq_id` (`NStr::URLEncode` of the id's
+    /// `eContent` label `label`, `Subject_1` for `-subject` records too), `db_name` (that of the
+    /// `-db` text `database`, empty for `-subject`), `taxid`, `cssInf` (empty), `title` (`label`),
+    /// `target` (empty), then `protocol`. `GetURLFromRegistry("LOCAL_ID")` comes first and reads
+    /// `[BLASTFMTUTIL] INCLUDE_BASE_DIR`, `LOCAL_ID_HOST_PORT` and `LOCAL_ID_FORMAT` (and a file
+    /// they name), whose result NCBI never uses: LOSAT reads none of them. `TOOL_URL_ALIGN` is read
+    /// only with `addCssInfo`, which no NCBI application sets.
+    ///
+    /// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3816-3838
+    /// ```c++
+    ///         } else if (wid->Which() == CSeq_id::e_Local){
+    ///
+    ///             string url_holder = CAlignFormatUtil::GetURLFromRegistry("LOCAL_ID");
+    ///
+    ///             string user_url;
+    ///             if (m_Reg) {
+    ///                 user_url = (seqUrlInfo->addCssInfo) ? m_Reg->Get("LOCAL_ID","TOOL_URL_ALIGN") : m_Reg->Get("LOCAL_ID","TOOL_URL");
+    ///             }
+    ///             string id_string;
+    ///             wid->GetLabel(&id_string, CSeq_id::eContent);
+    ///             url_link = CAlignFormatUtil::MapTemplate(user_url,"seq_id", NStr::URLEncode(id_string));
+    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"db_name", NStr::URLEncode(seqUrlInfo->database));
+    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"taxid", TAX_ID_TO(int, seqUrlInfo->taxid));
+    ///             temp_class_info = (!seqUrlInfo->defline.empty())? CAlignFormatUtil::MapTemplate(temp_class_info,"defline",seqUrlInfo->defline):temp_class_info;
+    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"cssInf",(seqUrlInfo->addCssInfo) ? temp_class_info.c_str() : "");
+    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"title", id_string);
+    ///             url_link = CAlignFormatUtil::MapTemplate(url_link,"target",seqUrlInfo->new_win ? "TARGET=\"EntrezView\"" : "");
+    ///         }
+    ///     }
+    ///     url_link = CAlignFormatUtil::MapProtocol(url_link);
+    /// ```
+    pub(crate) fn local_id_url(
+        &self,
+        label: &[u8],
+        database: &[u8],
+        taxid: i32,
+        diagnostics: &mut dyn Write,
+    ) -> std::io::Result<Vec<u8>> {
+        let registry = self.registry(diagnostics)?;
+        let tool_url = registry
+            .and_then(|read| read.last_value("LOCAL_ID", "TOOL_URL"))
+            .unwrap_or_default();
+        let url = map_template(tool_url, "seq_id", &url_encode(label));
+        let url = map_template(&url, "db_name", &url_encode(database));
+        let url = map_template(&url, "taxid", taxid.to_string().as_bytes());
+        let url = map_template(&url, "cssInf", b"");
+        let url = map_template(&url, "title", label);
+        let url = map_template(&url, "target", b"");
+        self.map_protocol(&url, diagnostics)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +547,141 @@ mod tests {
         // (`Get(...).empty()`).
         assert_eq!(protocol(Some(&read)), b"");
         assert_eq!(value(Some(&read), "TAX_BROWSER", "BLASTFMTUTIL"), None);
+    }
+
+    #[test]
+    fn map_template_and_url_encode_are_ncbis() {
+        assert_eq!(
+            map_template(b"<@a@>x<@a@><@b@>", "a", b"<@a@>"),
+            b"<@a@>x<@a@><@b@>"
+        );
+        assert_eq!(map_template(b"<@a@>x<@a@>", "a", b"1"), b"1x1");
+        // `-db ../../../t2/db/ps_ids` (probe `bp.di.f0.rc_localid.h`), then the other classes.
+        assert_eq!(
+            url_encode(b"../../../t2/db/ps_ids"),
+            b"..%2F..%2F..%2Ft2%2Fdb%2Fps_ids"
+        );
+        assert_eq!(url_encode(b"a b!$'()*,-._~"), b"a+b!$'()*,-._%7E");
+        assert_eq!(
+            url_encode(b"\"#%&+:;<=>?@[\\]^`{|}\x7f\x80\xff\x00"),
+            b"%22%23%25%26%2B%3A%3B%3C%3D%3E%3F%40%5B%5C%5D%5E%60%7B%7C%7D%7F%80%FF%00"
+        );
+    }
+
+    #[test]
+    fn init_config_finds_fmtcfg_then_ncbi() {
+        use std::ffi::{OsStr, OsString};
+        let files = ["/x/.ncbirc", "../ncbifmt/bad.rc", "bad.rc", "rel/.ncbirc"];
+        let is_file =
+            |path: &std::path::Path| files.iter().any(|file| path == std::path::Path::new(file));
+        let find = |fmtcfg: Option<&str>, ncbi: Option<&str>| {
+            init_config_path(fmtcfg.map(OsStr::new), ncbi.map(OsStr::new), &is_file)
+        };
+        let some = |path: &str| Some(OsString::from(path));
+        // No `.ncbirc` in the directory: `$NCBI`, with `/` added once (probes `env_ncbi`,
+        // `cfg.ncbibad`, `ncbibad_abs`).
+        assert_eq!(find(None, Some("/x")), some("/x/.ncbirc"));
+        assert_eq!(find(Some(""), Some("/x/")), some("/x/.ncbirc"));
+        assert_eq!(find(None, Some("rel")), some("rel/.ncbirc"));
+        assert_eq!(find(None, None), None);
+        assert_eq!(find(None, Some("")), None);
+        // `FMTCFG` in the directory first, else under `$NCBI` (probes `cfg.fmtbad`, `cfg.ncbifmt`).
+        assert_eq!(find(Some("bad.rc"), Some("/x")), some("bad.rc"));
+        assert_eq!(find(Some("other.rc"), Some("/x")), None);
+        let in_ncbi = ["../ncbifmt/bad.rc"];
+        let only_ncbi = |path: &std::path::Path| {
+            in_ncbi
+                .iter()
+                .any(|file| path == std::path::Path::new(file))
+        };
+        assert_eq!(
+            init_config_path(
+                Some(OsStr::new("bad.rc")),
+                Some(OsStr::new("../ncbifmt")),
+                &only_ncbi
+            ),
+            some("../ncbifmt/bad.rc")
+        );
+    }
+
+    #[test]
+    fn the_local_id_url_and_the_debug_line_are_ncbis() {
+        // NCBI BLAST+ 2.17.0 `-html` with `T/t4/rc/localid/.ncbirc` (probes `bp.di.f0.rc_localid.h`,
+        // `bp.s.f0.rc_localid.h`) and `GETURL_DEBUG=1` (`bp.di.f0.env_geturl.h`: one line).
+        let ncbirc = b"[LOCAL_ID]\nTOOL_URL=http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>\n";
+        let config =
+            InitConfig::of("blastp", Some((".ncbirc".into(), ncbirc.to_vec())), true).unwrap();
+        let mut err = Vec::new();
+        assert_eq!(
+            config.local_id_url(b"s3_local_identifier", b"../../../t2/db/ps_ids", 9606, &mut err).unwrap(),
+            b"http://local.example/s3_local_identifier?db=..%2F..%2F..%2Ft2%2Fdb%2Fps_ids&taxid=9606&p=https:&t=s3_local_identifier"
+        );
+        assert_eq!(
+            config.local_id_url(b"Subject_1", b"", 0, &mut err).unwrap(),
+            b"http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1"
+        );
+        assert_eq!(
+            config.map_protocol(b"<@protocol@>//x", &mut err).unwrap(),
+            b"https://x"
+        );
+        assert_eq!(err, b"REGISTRY: .ncbirc\n");
+        // Without a file: no URL, no line (`env_geturl_none`); `PROTOCOL` of the file, an empty one
+        // too, else `https:`.
+        let none = InitConfig::of("blastp", None, true).unwrap();
+        let mut err = Vec::new();
+        assert_eq!(
+            none.local_id_url(b"Subject_1", b"", 0, &mut err).unwrap(),
+            b""
+        );
+        assert_eq!(
+            none.map_protocol(b"<@protocol@>//x", &mut err).unwrap(),
+            b"https://x"
+        );
+        assert!(err.is_empty());
+        let empty = InitConfig::of(
+            "blastp",
+            Some(("f".into(), b"[blastfmtutil]\nprotocol=\n".to_vec())),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            empty.map_protocol(b"<@protocol@>//x", &mut err).unwrap(),
+            b"//x"
+        );
+        assert!(err.is_empty());
+        assert!(InitConfig::of(
+            "blastp",
+            Some(("f".into(), b"[NCBI]\n.Inherits=g\n".to_vec())),
+            false
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_malformed_init_config_file_throws_at_each_id() {
+        // NCBI BLAST+ 2.17.0 `FMTCFG=bad.rc` (probe `cfg.fmtbad.L.h`, `T/t4/out3`): exit status 255
+        // and this standard error, at the first id URL; with `-num_descriptions 0` each HSP throws
+        // again (`cfg.fmtbad.nd0.L.h`).
+        let config = InitConfig::of(
+            "blastp",
+            Some(("bad.rc".into(), b"this line has no equals sign\n".to_vec())),
+            true,
+        )
+        .unwrap();
+        let mut err = Vec::new();
+        for _ in 0..2 {
+            let error = config.map_protocol(b"<@protocol@>", &mut err).unwrap_err();
+            let exception = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();
+            assert_eq!(
+                format!("Error: {}\n", exception.what()),
+                format!(
+                    "Error: NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'this line has no equals sign' (m_Pos = 1)\n\n",
+                    crate::ncbi_exception::NCBI_BUILD_ROOT
+                )
+            );
+        }
+        assert!(config.local_id_url(b"Subject_1", b"", 0, &mut err).is_err());
+        assert!(err.is_empty());
     }
 
     #[test]

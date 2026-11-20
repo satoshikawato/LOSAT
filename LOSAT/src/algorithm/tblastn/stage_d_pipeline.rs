@@ -1315,8 +1315,18 @@ fn run_local_search_with_pool(
     // search, which has none either, blast_setup.c:517-527) a set of subjects whose average is
     // below one letter, in nucleotides, fails the setup of a batch that NCBI searches (one with
     // a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
-    // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`).
+    // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`). A count of 0
+    // (of a positive total) is the division by 0 where NCBI crashes, LOSAT's refusal there
+    // (`common::database::check_setup_count`, D1a-5 of line RG), which stops the run as LOSAT's
+    // refusals do (`tblastn_app::batch_failure`); a run whose batches have no valid context does
+    // not reach it and is reported as NCBI's.
     if valid_contexts.iter().any(|&valid| valid) {
+        crate::algorithm::common::database::check_setup_count(
+            total_nt,
+            num_subjects,
+            gumbel.is_some(),
+            "TBLASTN",
+        )?;
         match min_subject_length {
             None => return Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into()),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760

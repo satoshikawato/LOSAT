@@ -456,15 +456,40 @@ pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
 }
 
 /// What LOSAT refuses where the statistics read 0 sequences of a positive total length
-/// (`check_statistics_count`, and BLASTX's own check of its statistics).
+/// (`check_setup_count`).
 pub(crate) const STATISTICS_COUNT_ZERO: &str = "the statistics count 0 sequences of the database (an alias file's NSEQ 0, or its LENGTH or STATS_TOTLEN over volumes without sequences), by which NCBI BLAST+ divides its length";
 
-/// LOSAT's refusal of statistics that read 0 sequences of a positive total length
-/// (`SeqDb::statistics_count_is_zero`), for a search of `program` without the Gumbel block:
-/// NCBI BLAST+ 2.17.0 divides the total by 0 there and crashes (DECISIONS 14 of line RG; an
-/// alias file's `LENGTH` 100 alone over a volume of no OID, probe p4c_dn_nB of D1a-2: SIGFPE).
-pub(crate) fn check_statistics_count(db: &SeqDb, program: &str) -> Result<()> {
-    if db.statistics_count_is_zero() {
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:853-877
+/// Whether the setup of a search divides its total length `setup_total` by a count `setup_count`
+/// of 0 (`SeqDb::statistics_numbers`, `DbStatistics::setup_total` and `setup_count`: an alias
+/// file's `NSEQ 0` without `STATS_NSEQ`, its `LENGTH` or `STATS_TOTLEN` over volumes without
+/// sequences, a list that kept no sequence under a `STATS_TOTLEN`; an RPS unit's numbers): without
+/// the Gumbel block (`gumbel` false: BLASTN, TBLASTX, and the protein programs with `-searchsp`,
+/// `OLD_FSC`, BLASTX also with `-ungapped`) `BLAST_GapAlignSetUp`'s shortest subject length is the
+/// total over the count, and NCBI BLAST+ 2.17.0 crashes there (SIGFPE, DECISIONS 14 of line RG; an
+/// alias file's `LENGTH` 100 alone over a volume of no OID, probe p4c_dn_nB of D1a-2). NCBI makes
+/// that division only in the setup of a query batch with a valid context (`CLocalBlast::Run` stops
+/// a batch whose `CheckInternalData`, `BlastScoreBlkCheck`, finds none): a total that is not
+/// positive counts 1, so the count is 0 only of a positive total. The one test of every program
+/// (`check_setup_count`).
+pub(crate) fn setup_count_refused(setup_total: i64, setup_count: i32, gumbel: bool) -> bool {
+    !gumbel && setup_total > 0 && setup_count == 0
+}
+
+/// LOSAT's refusal of `setup_count_refused` for `program`, which each program makes where NCBI's
+/// setup meets the division: in the setup of the first query batch (or query chunk, or RPS unit)
+/// with a valid context, after what NCBI writes before that batch. A run whose queries are all
+/// invalid is reported as NCBI reports it (exit 0; D1a-5 of line RG, DECISIONS D1a4-12).
+pub(crate) fn check_setup_count(
+    setup_total: i64,
+    setup_count: i32,
+    gumbel: bool,
+    program: &str,
+) -> Result<()> {
+    if setup_count_refused(setup_total, setup_count, gumbel) {
         return Err(refusal(STATISTICS_COUNT_ZERO, program));
     }
     Ok(())

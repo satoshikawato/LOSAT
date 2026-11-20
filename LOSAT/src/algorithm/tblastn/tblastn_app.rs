@@ -1571,10 +1571,9 @@ fn search(
         old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
     };
     // Without the Gumbel block NCBI's shortest subject length is the statistics' average
-    // (blast_setup.c:975), which divides by their number of sequences.
-    if let Some(database) = database.filter(|_| subject_set.old_fsc) {
-        database.check_statistics_count()?;
-    }
+    // (blast_setup.c:975), which divides by their number of sequences: a count of 0 is LOSAT's
+    // refusal in the setup of the first batch with a valid context
+    // (`stage_d_pipeline::run_local_search_with_pool`).
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     let subject_path = match database {
         Some(_) => None,

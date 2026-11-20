@@ -105,6 +105,15 @@ jobs:
         run: python3 LOSAT/tests/check_tests_in_ci.py --root .
       - name: Tests-in-CI checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_tests_in_ci.py'
+      # No NCBI counterpart: the license texts of the code in LOSAT's binaries. THIRD_PARTY_LICENSES is
+      # generated from the three Cargo.lock files, the Rust standard library inputs and wasi-libc
+      # (scripts/third_party_licenses.py); a dependency change that leaves it stale fails here, and so
+      # does a copy of LICENSE or THIRD_PARTY_NOTICES (LOSAT/, python/) that differs from the root file.
+      # It runs `cargo fetch --locked` (network) for the crates' license files.
+      - name: Third-party licenses are up to date
+        run: python3 scripts/third_party_licenses.py --check
+      - name: Third-party licenses script tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_third_party_licenses.py'
       - name: Public API checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_public_api.py'
       - name: Release-candidate tooling tests

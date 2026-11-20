@@ -944,11 +944,12 @@ struct Searched {
     /// The formats that failed alone (`FormatRefusal::FailsAlone`): each one's stream and
     /// refusal, in the order of the formats. Their streams stay empty.
     refused: Vec<(u32, Failed)>,
-    /// The queries' warnings that the first format does not write (a structured format) and a
-    /// later format writes to the CLI's standard error (`ReportOutputs::later_warnings`): what
-    /// the later formats' standard error adds, for stream 3 where the run completes
-    /// (`search_all`).
-    later: Vec<u8>,
+    /// By format: what the CLI's standard error of a format after the first has of its queries'
+    /// reports where the first format, a structured one, does not write the queries' warnings
+    /// (`ReportOutputs::later_warnings`): each format's own text, up to where its report stopped
+    /// if it failed alone, for stream 3 where the run completes (`search_all`, which keeps each
+    /// line once).
+    later: Vec<Vec<u8>>,
 }
 
 impl Searched {
@@ -991,7 +992,7 @@ fn search(
         fault: None,
     };
     let mut collected: Option<std::sync::Arc<Vec<PairwiseHit>>> = None;
-    let mut later = Vec::new();
+    let mut later = vec![Vec::new(); formats.len()];
     // Outfmt 13 and 14: the master file goes to memory and the side files to a ZIP archive on the
     // format's stream, to which the master file is added after the run (`ArchivedFiles`).
     let mut archives: Vec<Option<(Vec<u8>, Arc<ArchivedFiles>)>> = formats
@@ -1564,13 +1565,17 @@ fn search_all(
     // standard error of the run's other formats adds to it goes to stream 3 after it, or nowhere
     // where the run's messages go nowhere (`CallerSink::add`), each text once (`Diagnostics`), for
     // the argv's own search and then the other: the lines of the other search's warnings that stream
-    // 3 does not hold yet, the formatting handler's warnings of the formats after the first of the
-    // search (which it does not write: `handler_warnings`), then the search's error (a search that
-    // failed alone: its formats are empty) or the refusals of its formats that failed alone (line
-    // WQA's sweep, D3 review r2, 2026-11-19). Each stream that failed, alone or with its search, is
-    // signalled with the place where the sink wrote its error (stream 9, also where no chunk of it
-    // was sent: the host tells which outputs a run could not write, and where their errors are, from
-    // these signals alone; line WQA's sweep, D7, 2026-11-19 and 2026-11-20).
+    // 3 does not hold yet, then, format by format in the search's order, what the CLI's run of
+    // that format adds: the formatting handler's warnings of a format after the first of the
+    // search (which the search does not write: `handler_warnings`), the queries' warnings that it
+    // writes where the search's first format, a structured one, writes none (`Searched::later`),
+    // and its refusal if it failed alone; a search that failed alone (its formats are empty) adds
+    // the handler's warnings and its error (line WQA's sweep, D3 review r2, 2026-11-19; the order by
+    // format: review r1 of the later formats' warnings, L1, 2026-11-20). Each stream that failed,
+    // alone or with its search, is signalled with the place where the sink wrote its error (stream
+    // 9, also where no chunk of it was sent: the host tells which outputs a run could not write,
+    // and where their errors are, from these signals alone; line WQA's sweep, D7, 2026-11-19 and
+    // 2026-11-20).
     if !streamed {
         let _ = diagnostics.write_all(&outcomes[own].1);
     }
@@ -1582,24 +1587,33 @@ fn search_all(
         if position != own {
             texts.warnings(warnings, diagnostics);
         }
-        for handler in &handlers[position][1..] {
-            texts.warnings(handler, diagnostics);
-        }
         match result {
             Err(failed) => {
+                for handler in &handlers[position][1..] {
+                    texts.warnings(handler, diagnostics);
+                }
                 let place = texts.error(failed, diagnostics);
                 for output in &groups[position] {
                     crate::emit::discard(output.stream, place);
                 }
             }
             Ok(done) => {
-                // The queries' warnings that a structured first format does not write and the
-                // later formats' runs write (line WQA's sweep, D3 review r3, 2026-11-19: they were
-                // lost).
-                texts.warnings(&done.later, diagnostics);
-                for (stream, refused) in &done.refused {
-                    let place = texts.error(refused, diagnostics);
-                    crate::emit::discard(*stream, place);
+                for (index, output) in groups[position].iter().enumerate() {
+                    if index > 0 {
+                        texts.warnings(&handlers[position][index], diagnostics);
+                    }
+                    // The queries' warnings that a structured first format does not write and
+                    // this format's run writes, as far as its report went (line WQA's sweep, D3
+                    // review r3, 2026-11-19: they were lost).
+                    texts.warnings(&done.later[index], diagnostics);
+                    let refused = done
+                        .refused
+                        .iter()
+                        .find(|(stream, _)| *stream == output.stream);
+                    if let Some((stream, refused)) = refused {
+                        let place = texts.error(refused, diagnostics);
+                        crate::emit::discard(*stream, place);
+                    }
                 }
             }
         }
@@ -5562,5 +5576,65 @@ mod tests {
                 );
             }
         }
+    }
+
+    // A format that the argv does not ask for and whose report stops after a query's warning gave
+    // that warning before it stopped, and the formats after it give their own: stream 3 keeps it
+    // once. BLASTX with HSPs of length 0 (`-ungapped -window_size 0`, the manifest's
+    // `x2g.blastx.c0054` inputs): NCBI's outfmt 6, 7 and 0 throw at the second query's alignments,
+    // after the first query's warning, and outfmt 5 completes (native LOSAT f80c94dd3). Stream 3 is
+    // the CLI's standard error for `-outfmt 5`, then the warning once and the three refusals
+    // (review r1 of the later formats' warnings, M2, 2026-11-20: one receiver took the warning of
+    // each format that stopped, and stream 3 showed it three times).
+    #[test]
+    fn formats_that_stop_after_a_query_warning_add_it_once() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../LOSAT/tests/fasta/outfmt0"
+        );
+        let sequence = |name: &str| -> Vec<u8> {
+            let text = std::fs::read_to_string(format!("{root}/{name}")).unwrap();
+            text.lines().skip(1).flat_map(str::bytes).collect()
+        };
+        let query = vec![
+            FastaRecord::new("Query_1", b"qempty no residues", b""),
+            FastaRecord::new("Query_2", b"q1", &sequence("x2g_c0054_q.fna")),
+        ];
+        let subject = vec![FastaRecord::new(
+            "Subject_1",
+            b"s1",
+            &sequence("x2g_c0054_s.faa"),
+        )];
+        let options = [
+            "-ungapped",
+            "-comp_based_stats",
+            "0",
+            "-window_size",
+            "0",
+            "-word_size",
+            "5",
+            "-threshold",
+            "1",
+            "-evalue",
+            "1e5",
+            "-seg",
+            "no",
+        ];
+        let words = [&["blastx", "-query", "q", "-subject", "s"][..], &options].concat();
+        let warning = "Warning: [blastx] Query_1 qempty no residues: Sequence contains no data \n";
+        let exception = "Error: NCBI C++ Exception:";
+        let written = streams(&[&words[..], &["-outfmt", "5"]].concat(), &query, &subject).unwrap();
+        assert_eq!(discarded(&written), [6, 7, 0]);
+        let shown = diagnostics_of(&written);
+        assert_eq!(shown.matches(warning).count(), 1, "{shown}");
+        // The refusals of outfmt 6 and 7 are one text; outfmt 0's is another.
+        assert_eq!(shown.matches(exception).count(), 2, "{shown}");
+        assert!(
+            shown.find(warning) < shown.find(exception),
+            "the warning comes before the refusal of the format that wrote it: {shown}"
+        );
+        // The argv's own outfmt 6 fails the run after the warning, as the CLI fails.
+        let error = run(&[&words[..], &["-outfmt", "6"]].concat(), &query, &subject).unwrap_err();
+        assert!(error.contains("NCBI C++ Exception"), "{error}");
     }
 }

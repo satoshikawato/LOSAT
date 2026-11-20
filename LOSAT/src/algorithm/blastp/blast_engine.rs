@@ -1103,12 +1103,11 @@ fn blastp_local_scaling_factor(mode: BlastpCompositionMode, matrix: ScoringMatri
 // ```
 fn build_redone_match_heaps(
     num_queries: usize,
-    hitlist_size: usize,
-    inclusion_ethresh: f64,
+    heap: impl Fn() -> BlastCompoHeap,
 ) -> Vec<BlastCompoHeap> {
-    (0..num_queries)
-        .map(|_| BlastCompoHeap::new(hitlist_size, inclusion_ethresh))
-        .collect()
+    // `heap`: one query's heap as BlastCompo_HeapInitialize leaves it
+    // (`ResolvedBlastpArgs::redone_match_heap`), built anew for each query.
+    (0..num_queries).map(|_| heap()).collect()
 }
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
 // ```c
@@ -2729,25 +2728,10 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.scoring.gap_extend
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:431-435
-    // ```c
-    //         if ((0 <= pvalueForThisPair) && (pvalueForThisPair <= 1)) {
-    //             s_AdjustEvaluesForComposition(hsp_list, pvalueForThisPair, seqSrc,
-    //                                           subject_length,
-    //                                           &queryInfo->contexts[context_index],
-    //                                           LambdaRatio, subject_id);
-    // ```
-    // NCBI 2.17.0's redo passes it the context of the next query (`context_index` has gone past
-    // the query's frames, blast_kappa.c:3590-3592,3680): each query's E-values take the next
-    // query's lengths and search space, and the last query's are read past the contexts, so one
-    // search gives different reports from run to run (DECISIONS 23 a of line NP; memory "No NCBI
-    // bug repro"). A search that IDENTITY resets to mode 0 has no unified P-values
-    // (`identity_cbs_reset`).
-    if args.comp_based_stats.unified_p {
-        bail!(
-            "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 adjusts each query's e-values with the lengths of the next query, and reads past its data for the last one)"
-        );
-    }
+    // Unified P-values (a `u` after the mode, BLASTP only) run in the composition-based redo
+    // (`kappa::evalue_adjust_contexts`: each query's E-values take the lengths and the search
+    // space that NCBI 2.17.0 reads, the next query's of the batch; item X5 of line RG). A search
+    // that IDENTITY resets to mode 0 has none (`identity_cbs_reset`).
     // Every composition mode runs (item SC5 of line NP). Mode 0 runs BLASTP's ordinary traceback
     // (`traceback.rs`), psiblast's first round of a FASTA query too (with psiblast's hit list
     // size, `traceback_hitlist_size`), and the PSSM's of psiblast `-in_pssm` and of its later
@@ -5790,7 +5774,7 @@ pub fn run(
     if (stream.failed || badbit) && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
-            message: "BLAST failed to write output\n".to_string(),
+            message: "BLAST failed to write output\n".into(),
         }
         .into());
     }
@@ -8192,26 +8176,40 @@ fn search(
             // batch's first query holds a redone match, a query chunk split again or without a
             // query in `search_split_query_batches`), as TBLASTX's and TBLASTN's
             // (`blastinput::app::ErrorAfterBatchReports`). LOSAT searches all batches together: the
-            // batches before are searched again alone.
-            let failure = match result {
-                Err(error) if error.is::<database::HeaderReadError>() => error
+            // batches before are searched again alone. A failure that the first search meets
+            // before its redo (unified P-values refused for a batch,
+            // `redo_run::evalue_adjust_contexts`) may come after a batch whose failure only the
+            // redo finds (`-use_sw_tback`): the search again then fails at that earlier batch,
+            // which NCBI reached first, and the batches before it are searched again in turn
+            // (review R3 of line RG item X5, M1).
+            let as_failure = |result: Result<()>| match result {
+                Err(error) if error.is::<database::HeaderReadError>() => Ok(error
                     .downcast::<database::HeaderReadError>()
-                    .expect("the error was checked to be a HeaderReadError"),
-                other => return other,
+                    .expect("the error was checked to be a HeaderReadError")),
+                other => Err(other),
             };
-            let (input_start, searched_start) = batches.start_of(failure.query);
-            // The failed batch's search strategy request, which NCBI writes before its search:
-            // after the requests of the batches before, which their search again releases with it
-            // (`NextRequest`), or alone, before any output.
-            let span = batches.searched_span(failure.query);
-            if searched_start > 0 {
+            let mut failure = match as_failure(result) {
+                Ok(failure) => failure,
+                Err(other) => return other,
+            };
+            let searched_start = loop {
+                let (input_start, searched_start) = batches.start_of(failure.query);
+                // The failed batch's search strategy request, which NCBI writes before its
+                // search: after the requests of the batches before, which their search again
+                // releases with it (`NextRequest`), or alone, before any output.
+                let span = batches.searched_span(failure.query);
+                if searched_start == 0 {
+                    write_alone(span)?;
+                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+                    break searched_start;
+                }
                 // The first search looked the taxonomy up for the batches before (their
                 // prefetch and reports): the search again writes those texts again, from the
                 // state of a run that has looked nothing up (review 1 of line DBID mixdb2, H1).
                 if let Some(database) = database {
                     database.restart_taxonomy();
                 }
-                search_batches(
+                match as_failure(search_batches(
                     args.clone(),
                     outputs,
                     pool,
@@ -8219,11 +8217,12 @@ fn search(
                     searched_start,
                     false,
                     Some(next_request(span)),
-                )?;
-            } else {
-                write_alone(span)?;
-                write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
-            }
+                )) {
+                    Ok(earlier) => failure = earlier,
+                    Err(Ok(())) => break searched_start,
+                    Err(other) => return other,
+                }
+            };
             outputs
                 .diagnostics
                 .write_all(&batches.warnings[searched_start])?;
@@ -8341,12 +8340,17 @@ fn x_query_block_plan(
     // `-use_sw_tback` search: a later batch's Smith-Waterman redo can fail NCBI's traceback
     // (`redo_run::sw_batch_failed`; NCBI's crash there is LOSAT's refusal) or meet the redo that
     // NCBI never ends (LOSAT's refusal, `redo_run::sw_endless`), which come after the reports of
-    // the batches before in the search of all queries (`search`).
+    // the batches before in the search of all queries (`search`). So is a search with unified
+    // P-values without a search space given (`-searchsp`): the redo's set-up may refuse a query
+    // batch (`redo_run::evalue_adjust_contexts`: a query before one without a search space, known
+    // only once the queries are set up), after the reports of the batches before
+    // (`database::HeaderReadError`).
     if args.query_range.is_some()
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
         || args.rps_search.is_some()
         || args.use_sw_tback
+        || (args.comp_based_stats.unified_p && args.searchsp.unwrap_or(0) == 0)
         || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
@@ -9065,7 +9069,7 @@ fn write_pairwise_prologs(
                 &mut writer,
                 crate::NCBI_BLAST_VERSION,
                 args.app.ncbi_name(),
-                &blastp_database_name(args, subject_label),
+                blastp_database_name(args, subject_label).as_bytes(),
                 num_sequences,
                 total_letters,
                 pairwise_database.as_ref(),
@@ -9181,7 +9185,7 @@ fn write_reports_without_queries(
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
                     version: crate::NCBI_BLAST_VERSION.to_string(),
-                    database_name: blastp_database_name(args, subject_label),
+                    database_name: blastp_database_name(args, subject_label).into(),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,
                     // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:194-229
@@ -11568,6 +11572,13 @@ fn run_call(
     // Each query's batch (`redo_run::kappa_query_batches`): the heaps that its redo's early
     // termination test reads.
     let kappa_query_batches = redo_run::kappa_query_batches(query_ids.len(), &query_batches);
+    let evalue_adjust_contexts = redo_run::evalue_adjust_contexts(
+        &args,
+        &contexts,
+        &search_spaces,
+        &kappa_query_batches,
+        &query_ids,
+    )?;
     // What the redo's plan and its paths read (`redo_run::RedoInputs`).
     let redo = redo_run::RedoInputs {
         args: &args,
@@ -11579,6 +11590,7 @@ fn run_call(
         gapped_params: &gapped_params,
         gapped_gumbel: &gapped_gumbel,
         kappa_query_batches: &kappa_query_batches,
+        evalue_adjust_contexts: &evalue_adjust_contexts,
         build_redo_align_params: &build_redo_align_params,
         x_win_expand,
         ordinary_traceback,
@@ -13817,12 +13829,14 @@ mod tests {
     //     (ECompoAdjustModes) extendParams->options->compositionBasedStats;
     // ```
     #[test]
-    fn test_validate_requested_blastp_support_rejects_unified_p_mode() {
-        let mut args = make_blastp_args();
-        args.comp_based_stats = "2u".to_string();
-        let resolved = args.resolve().expect("resolved blastp args");
-        let err = validate_requested_blastp_support(&resolved).expect_err("unsupported unified p");
-        assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
+    fn test_validate_requested_blastp_support_takes_unified_p_modes() {
+        for value in ["1u", "2u", "3U", "Du", "tu"] {
+            let mut args = make_blastp_args();
+            args.comp_based_stats = value.to_string();
+            let resolved = args.resolve().expect("resolved blastp args");
+            assert!(resolved.comp_based_stats.unified_p, "{value}");
+            validate_requested_blastp_support(&resolved).expect(value);
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-156 (IDENTITY is
@@ -14538,7 +14552,7 @@ mod tests {
     // ```
     #[test]
     fn test_redone_match_heaps_use_hitlist_size_not_prelim_hitlist_size() {
-        let heaps = build_redone_match_heaps(3, 7, PSI_INCLUSION_ETHRESH);
+        let heaps = build_redone_match_heaps(3, || BlastCompoHeap::new(7, PSI_INCLUSION_ETHRESH));
         assert_eq!(heaps.len(), 3);
         assert_eq!(heaps[0].heap_threshold, 7);
         assert!((heaps[0].ecutoff - PSI_INCLUSION_ETHRESH).abs() < f64::EPSILON);

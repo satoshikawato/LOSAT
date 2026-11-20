@@ -1461,10 +1461,13 @@ impl Resolver<'_> {
                 continue;
             }
 
-            return Err(SeqDbError::NotFound(format!(
-                "Could not find volume or alias file ({entry}) referenced in alias file \
+            return Err(SeqDbError::NotFound(
+                format!(
+                    "Could not find volume or alias file ({entry}) referenced in alias file \
                  ({this_name})."
-            )));
+                )
+                .into(),
+            ));
         }
         Ok(())
     }
@@ -1712,14 +1715,16 @@ pub(super) fn resolve_in(
 ) -> Result<AliasTree, SeqDbError> {
     if dbname.is_empty() {
         return Err(SeqDbError::NotFound(
-            "Database name is required.".to_string(),
+            "Database name is required.".to_string().into(),
         ));
     }
     let names = split_quoted(dbname.as_bytes(), false);
     // `x_ExpandAliases` on an empty list (quoted at `Resolver::expand`).
     if names.is_empty() {
         return Err(SeqDbError::NotFound(
-            "No database names were passed to CSeqDB::CSeqDB().".to_string(),
+            "No database names were passed to CSeqDB::CSeqDB()."
+                .to_string()
+                .into(),
         ));
     }
     let mut resolver = Resolver {
@@ -1743,12 +1748,15 @@ pub(super) fn resolve_in(
         let db_path = db_path.to_string_lossy();
         resolver.reject_group_alias(&db_path)?;
         let Some(resolved) = search.find(remove_extn(&db_path), Some(seqtype)) else {
-            return Err(SeqDbError::NotFound(format!(
-                "No alias or index file found for {} database [{name}] in search path [{}]. \
+            return Err(SeqDbError::NotFound(
+                format!(
+                    "No alias or index file found for {} database [{name}] in search path [{}]. \
                  Please verify the spelling of the BLAST database and its molecule type.",
-                seqtype.name(),
-                search.as_str()
-            )));
+                    seqtype.name(),
+                    search.as_str()
+                )
+                .into(),
+            ));
         };
         // `resolved_path` is the resolved name with the extension of an alias
         // file; its directory is normalised and its base name loses the extension.
@@ -1841,12 +1849,15 @@ pub(super) fn resolve_one_name(
     };
     let db_base = fix_delimiters(db_base);
     if !exists(&resolver.alias_path(&db_base)) && !exists(&resolver.index_path(&db_base)) {
-        return Err(SeqDbError::NotFound(format!(
-            "No alias or index file found for {} database [{db_base}] in search path [{}]. \
+        return Err(SeqDbError::NotFound(
+            format!(
+                "No alias or index file found for {} database [{db_base}] in search path [{}]. \
              Please verify the spelling of the BLAST database and its molecule type.",
-            seqtype.name(),
-            search.as_str()
-        )));
+                seqtype.name(),
+                search.as_str()
+            )
+            .into(),
+        ));
     }
     let mut root = AliasNode::default();
     // The top node is named "-" (seqdbalias.cpp:106, 127).

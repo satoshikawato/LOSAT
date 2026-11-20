@@ -628,6 +628,7 @@ fn check_ranges(
     }
 }
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 /// A protein, and a nucleotide sequence that translates to it.
 const PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 const NUCLEOTIDE: &str = "ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGCCAGCTG\
@@ -1419,7 +1420,7 @@ fn a_report_in_a_file_has_its_side_files_as_on_the_command_line() {
     // Without a file there is no place for the side files: the command line's message.
     let (query, subject) = (fixture(CASES[0].query), fixture(CASES[0].subject));
     let error = api_error(&CASES[0], &query, &subject, "14");
-    assert!(error.message().contains("provide a file name"), "{error}");
+    assert!(error.to_string().contains("provide a file name"), "{error}");
     // `-` is the command line's standard output, which the library does not write.
     let search = validate(Program::Blastp, &[]).unwrap();
     let error = run_to_file(
@@ -1559,7 +1560,10 @@ fn the_pssm_files_are_the_command_lines() {
     .unwrap();
     let error = run_collect(&search, inputs, &["0", "6"]).unwrap_err();
     assert!(
-        matches!(&error, Error::Argv(message) if message.starts_with("-out_pssm is not accepted by the library API with formats of two hit list sizes")),
+        matches!(&error, Error::Argv(_))
+            && error.to_string().starts_with(
+                "-out_pssm is not accepted by the library API with formats of two hit list sizes"
+            ),
         "{error}"
     );
     assert!(take_files(&directory).is_empty());
@@ -2277,7 +2281,7 @@ fn a_pssm_query_is_the_command_lines() {
             run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
         assert!(
             error
-                .message()
+                .to_string()
                 .contains("with -in_pssm is not supported by LOSAT's PSIBLAST"),
             "{formats:?}: {error}"
         );
@@ -2302,8 +2306,8 @@ fn a_pssm_query_is_the_command_lines() {
         .unwrap();
     assert!(!output.status.success());
     assert_eq!(
-        error.message().trim_end(),
-        String::from_utf8_lossy(&output.stderr).trim_end(),
+        error.message().trim_ascii_end(),
+        output.stderr.trim_ascii_end(),
         "{error}"
     );
     let ranged = validate(Program::Tblastn, &["-query_loc", "1-10"]).unwrap();
@@ -2325,7 +2329,7 @@ fn a_pssm_query_is_the_command_lines() {
         let error = run_collect(&search, Inputs::pssm(&pssm, &subjects), &["6"]).unwrap_err();
         assert!(
             error
-                .message()
+                .to_string()
                 .contains("a query and a subject record have the Seq-id gi|4504347"),
             "{program}: {error}"
         );
@@ -2553,7 +2557,7 @@ fn a_database_fails_as_on_the_command_line() {
         .output()
         .unwrap();
     assert_eq!(
-        error.message().as_bytes(),
+        error.message(),
         output.stderr,
         "the message of a database that does not open"
     );
@@ -2566,12 +2570,12 @@ fn a_database_fails_as_on_the_command_line() {
     let only_database = validate(Program::Blastn, &["-taxids", "9606"]).unwrap();
     let error = run_collect(&only_database, Inputs::new(&records, &records), &["6"]).unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
-    assert!(error.message().contains("-taxids"), "{error}");
+    assert!(error.to_string().contains("-taxids"), "{error}");
     let only_subject = validate(Program::Blastn, &["-subject_loc", "1-10"]).unwrap();
     let inputs = Inputs::database(&records, &missing);
     let error = run_collect(&only_subject, inputs, &["6"]).unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
-    assert!(error.message().contains("-subject_loc"), "{error}");
+    assert!(error.to_string().contains("-subject_loc"), "{error}");
     // Queries without a record are NCBI's warning, after the database opened.
     let db = engine_tests(case.db);
     let outcome = run_collect(&search, Inputs::database(&[], &db), &["6"]).unwrap();
@@ -2659,7 +2663,7 @@ fn a_masked_database_made_through_the_library_equals_the_command_lines() {
     )
     .unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
-    assert!(error.message().contains("mask_data"), "{error}");
+    assert!(error.to_string().contains("mask_data"), "{error}");
 }
 
 #[test]
@@ -2753,11 +2757,7 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
     assert!(!cli.status.success());
     assert_eq!(diagnostics, cli.stderr);
     assert!(matches!(error, Error::Search(_)), "{error}");
-    assert_eq!(
-        error.message().as_bytes(),
-        cli.stderr.trim_ascii_end(),
-        "{error}"
-    );
+    assert_eq!(error.message(), cli.stderr.trim_ascii_end(), "{error}");
     // An argv that the parser refuses is the parser's message.
     let error = run_makeblastdb(
         &["-dbtype", "neither"],
@@ -2768,6 +2768,54 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
     .unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
     std::fs::remove_dir_all(&directory).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:254-258
+// ```c++
+//         default:
+//             CNcbiOstrstream os;
+//             os << "Unrecognized format specification: '%" << m_ReplTypes[i] << "'";
+//             NCBI_THROW(CInvalidDataException, eInvalidInput,
+//                        CNcbiOstrstreamToString(os));
+// ```
+/// A tool's error is the bytes that the command line writes to standard error, also a byte that
+/// is not UTF-8: blastdbcmd reads `%é` as the specifier `%` and the first byte of `é` (C3), a
+/// `char` that NCBI's stream writes alone into its error.
+#[test]
+fn a_tool_error_holds_the_bytes_that_the_command_line_writes() {
+    let db = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/prot_v5");
+    let words = [
+        "-db",
+        db.to_str().unwrap(),
+        "-entry",
+        "all",
+        "-outfmt",
+        "%é",
+    ];
+    let mut diagnostics = Vec::new();
+    let error = run_blastdbcmd(
+        &words,
+        &mut std::io::empty(),
+        &mut std::io::sink(),
+        &mut diagnostics,
+    )
+    .unwrap_err();
+    let cli = command(env!("CARGO_BIN_EXE_losat"))
+        .arg("blastdbcmd")
+        .args(words)
+        .output()
+        .unwrap();
+    assert!(!cli.status.success());
+    assert_eq!(diagnostics, cli.stderr);
+    let written = cli.stderr.strip_suffix(b"\n").unwrap();
+    assert!(
+        written.ends_with(b"Unrecognized format specification: '%\xC3'"),
+        "{:?}",
+        String::from_utf8_lossy(written)
+    );
+    assert!(matches!(error, Error::Search(_)), "{error:?}");
+    assert_eq!(error.message(), written, "{error:?}");
+    assert_eq!(error.to_string(), String::from_utf8_lossy(written));
 }
 
 #[test]
@@ -2782,7 +2830,7 @@ fn the_api_owns_the_inputs_and_the_outputs() {
         };
         let error = validate(program, &[&flag, "x"]).unwrap_err();
         assert!(matches!(error, Error::Argv(_)), "{flag}: {error}");
-        assert!(error.message().starts_with(&flag), "{flag}: {error}");
+        assert!(error.to_string().starts_with(&flag), "{flag}: {error}");
         for program in Program::ALL {
             assert!(
                 describe(program)
@@ -2798,9 +2846,9 @@ fn the_api_owns_the_inputs_and_the_outputs() {
     let error = validate(Program::Tblastx, &["-evalue"]).unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
     let error = Program::parse("makeblastdb").unwrap_err();
-    assert!(error.message().contains("run_makeblastdb"), "{error}");
+    assert!(error.to_string().contains("run_makeblastdb"), "{error}");
     let error = Program::parse("dustmasker").unwrap_err();
-    assert!(error.message().contains("run_dustmasker"), "{error}");
+    assert!(error.to_string().contains("run_dustmasker"), "{error}");
 }
 
 /// The output of `command` run with `input` as its standard input.
@@ -2861,11 +2909,7 @@ fn dustmasker_masks_sequences_in_memory_as_the_command_line_does() {
     assert!(!cli.status.success());
     assert_eq!(diagnostics, cli.stderr);
     assert!(matches!(error, Error::Search(_)), "{error}");
-    assert_eq!(
-        error.message().as_bytes(),
-        cli.stderr.trim_ascii_end(),
-        "{error}"
-    );
+    assert_eq!(error.message(), cli.stderr.trim_ascii_end(), "{error}");
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the subjects'
@@ -2884,7 +2928,7 @@ fn read_inputs_without_a_first_defline_end_with_the_command_line_message() {
         let bad_subject = format!(";c\n{subject}\n>s2\n{subject}\n");
         let bad_query = format!(";c\n\n{query}\n");
         let message = |error: Error| match error {
-            Error::Input(message) => message,
+            Error::Input(message) => String::from_utf8(message).expect("a UTF-8 message"),
             other => panic!("{program:?}: not an input error: {other}"),
         };
         let error =

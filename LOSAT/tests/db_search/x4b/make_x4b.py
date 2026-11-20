@@ -3,7 +3,7 @@
 
 NCBI BLAST+ 2.17.0 makeblastdb is the comparison oracle only. The subjects are X4's crafted proteins back-translated
 with one codon per amino acid (`tests/fasta/x4b/ok1_fail_rc.fna`): sok1 in frame +1 and sfail in frame -1, which
-make tks_W's Smith-Waterman redo fail (`-use_sw_tback`, PD-LOSAT-NCBI-DEFECTS 1.54).
+make tks_W's Smith-Waterman redo fail (`-use_sw_tback`, PD-LOSAT-NCBI-DEFECTS 1.55).
 
 - `fail`: sok1_nt (OID 0) and sfail_rc (OID 1), each with an accession line (`dbj|AB30000N.1|`): the `-db` form of
   the `-subject` failure rows (`db.x4b.dbfail.*`).

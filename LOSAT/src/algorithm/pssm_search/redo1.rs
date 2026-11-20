@@ -915,15 +915,6 @@ impl RedoMatch<'_> {
                 subject,
                 self.matrix,
             );
-            if S::Instance::SUBJECT_IS_TRANSLATED {
-                // The Seq-align's counts (see `translation_buffer_counts`).
-                (hsp.num_ident, hsp.num_positives) = translation_buffer_counts(
-                    &hsp,
-                    run.query_nomask,
-                    subject,
-                    self.matrix,
-                );
-            }
             hsp.e_value = e_value;
             hsp.num = num;
             hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)
@@ -1257,6 +1248,11 @@ impl RedoMatch<'_> {
                 kind.frame_letters(subject, align.frame),
                 self.matrix,
             );
+            if S::Instance::SUBJECT_IS_TRANSLATED {
+                // The Seq-align's counts (see `translation_buffer_counts`).
+                (hsp.num_ident, hsp.num_positives) =
+                    translation_buffer_counts(&hsp, run.query_nomask, subject, self.matrix);
+            }
             hsp.e_value = e_value;
             hsp.num = num;
             hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)

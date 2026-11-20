@@ -1843,6 +1843,9 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
+    // `run_local` has not (blastn's `run_local` does the same).
+    crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
@@ -1930,7 +1933,10 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The file of an unknown `-matrix`, first, as the command line's `run` looks it up.
+    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
+    // `run_local` has not (blastn's `run_local` does the same).
+    crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
+    // The file of an unknown `-matrix`, then, as the command line's `run` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
     // NCBI parses -outfmt before its option handlers run, with LOSAT's refusals;
     // `check_ncbi_options` and `search` check the formats again, after `-out` is opened.

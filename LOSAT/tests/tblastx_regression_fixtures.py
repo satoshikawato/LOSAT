@@ -262,6 +262,18 @@ _CASES = [
                                           " -strand minus -outfmt 11", ""),
     ("strand.plus_parse_deflines_qloc_fmt11", f"-query {O}/x3_q20.fna -subject {O}/x3_s20.fna -parse_deflines"
                                               " -query_loc 2001-9000 -strand plus -outfmt 11", ""),
+    # A batch whose average query length is 0 (blast_parameters.c:1023-1026): one query of 1,200
+    # nt and 300 of 3 nt, one strand. NCBI's expected length is then 0 (the `long` of -inf, cut to
+    # Int4); with several subjects NCBI completes. (With one subject its big-gap cutoff is
+    # INT_MIN + 1 and NCBI crashes in the linking, so no such case here.)
+    ("strand.plus_avg0", f"-query {I}/avg0_query.fa -subject {I}/culling_multi_subject.fa -strand plus"
+                         " -outfmt 6", ""),
+    ("strand.minus_avg0", f"-query {I}/avg0_query.fa -subject {I}/culling_multi_subject.fa -strand minus"
+                          " -outfmt 6", ""),
+    # A first query of 2 nt (no frame +1) with -searchsp: the archive's EffectiveSearchSpace is the
+    # option's value for every strand (split_query_aux_priv.cpp:157-161).
+    ("strand.both_short2_first_searchsp_fmt11", f"-query {I}/short2_query.fa {SUBJECTS} -searchsp 1000000"
+                                                " -outfmt 11", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 # NCBI's arguments of the cases of an approved exception that is an argument.
@@ -291,6 +303,14 @@ def command_generate(_args) -> int:
     multi = (ENGINE / O / "tblastx_multi_query.fasta").read_text()
     records = multi.split(">")[1:]
     (INPUTS / "short3_query.fa").write_text(">s3 three\nACG\n" + ">" + ">".join(records))
+    (INPUTS / "short2_query.fa").write_text(">s2 two\nAC\n" + ">" + ">".join(records))
+    # One query of 1,200 nt (the start of the first culling_multi query, committed) and 300 of 3
+    # nt: with one strand the batch's average query length is 0 (line NP, O2b).
+    culling = (INPUTS / "culling_multi_query.fa").read_text().split(">")[1]
+    first = "".join(culling.split("\n", 1)[1].split())[:1200]
+    (INPUTS / "avg0_query.fa").write_text(
+        ">long 1200 nt\n" + "".join(first[i:i + 60] + "\n" for i in range(0, 1200, 60))
+        + "".join(f">t{n}\nATG\n" for n in range(1, 301)))
     (INPUTS / "short4_query.fa").write_text(">" + records[1] + ">s4 four\nACGT\n>" + records[2]
                                             + ">sN3 three N\nNNN\n>" + records[3])
     code4_query = (ENGINE / O / "tblastx_code4_query.fasta").read_text()

@@ -657,6 +657,17 @@ fn run_local_reads_the_query_strand() {
         );
         assert!(report.is_empty() && diagnostics.is_empty(), "{strand:?}");
     }
+    // Checked first, as at parsing: before the output format is read.
+    let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+    let mut outputs =
+        ReportOutputs::single("99", OutputSink::Writer(&mut report), &mut diagnostics);
+    let mut args = inputs.args(&[]);
+    args.strand = "x".to_string();
+    let error = run_local_tblastx(args, &queries, &subjects, &mut outputs)
+        .expect_err("an unknown strand is an error")
+        .to_string();
+    drop(outputs);
+    assert!(error.starts_with("Argument \"strand\""), "{error}");
     let plain = inputs.run(&["6 qseqid sseqid qframe"], &[], false);
     let both = inputs.run(&["6 qseqid sseqid qframe"], &["-strand", "both"], false);
     assert_eq!(both.outputs, plain.outputs);

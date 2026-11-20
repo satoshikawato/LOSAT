@@ -119,8 +119,11 @@ pub fn compute_avg_query_length_ncbi(query_nucl_lengths: &[usize], searched: (bo
     let (last_offset, last_length) = contexts.last().copied().unwrap();
     let num_contexts = contexts.len() as i32;
 
-    let avg = (last_offset + last_length - 1) / num_contexts;
-    avg.max(1)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1023-1026
+    // No floor: a batch whose contexts hold fewer letters than it has contexts averages 0 (C's
+    // division truncates toward zero, as Rust's), and `calculate_link_hsp_cutoffs` takes NCBI's
+    // expected length of such a query (0).
+    (last_offset + last_length - 1) / num_contexts
 }
 
 #[cfg(test)]
@@ -143,7 +146,14 @@ mod tests {
         assert_eq!(compute_avg_query_length_ncbi(&[300, 30], (true, true)), 55);
         assert_eq!(compute_avg_query_length_ncbi(&[300, 30], (true, false)), 27);
         assert_eq!(compute_avg_query_length_ncbi(&[300, 30], (false, true)), 27);
-        // No letters in any context: at least 1.
-        assert_eq!(compute_avg_query_length_ncbi(&[2], (false, true)), 1);
+        // No letters in any context: (0 + 0 - 1) / 6, 0 in C and in Rust.
+        assert_eq!(compute_avg_query_length_ncbi(&[2], (false, true)), 0);
+        // One query of 1,200 bases and 300 of 3 bases, one strand: 1,200 + 300 letters and the
+        // separators in 1,806 contexts, an average of 0 (both strands: 1).
+        let mut lengths = vec![1200];
+        lengths.extend([3; 300]);
+        assert_eq!(compute_avg_query_length_ncbi(&lengths, (true, false)), 0);
+        assert_eq!(compute_avg_query_length_ncbi(&lengths, (false, true)), 0);
+        assert_eq!(compute_avg_query_length_ncbi(&lengths, (true, true)), 1);
     }
 }

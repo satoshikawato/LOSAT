@@ -404,7 +404,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-outfmt` other than 0, 6, 7 and 10 | Refused: not yet supported. `-outfmt 17` gets NCBI's own error. |
+| `-outfmt` other than 0, 5, 6, 7, 10 and 11 | Refused: not yet supported. `-outfmt 17` gets NCBI's own error. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpsblast` option. |
@@ -434,7 +434,7 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number 
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-outfmt` other than 0 to 4, 6, 7 and 10 | Refused: not yet supported. `-outfmt 17`, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` other than 0 to 7, 10 and 11 | Refused: not yet supported. `-outfmt 17`, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-use_sw_tback` with composition-based statistics | Refused. |
 | `-ungapped` without composition-based statistics | Refused. NCBI's `rpstblastn` crashes after the search. With composition-based statistics it gets NCBI's own error. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
@@ -604,7 +604,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 - The programs `deltablast`, `makeprofiledb`, `blast_formatter` and `windowmasker`.
 - `psiblast -in_msa` (with `-msa_master_idx` and `-ignore_msa_master`) and `-phi_pattern`.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
-- The `rpsblast` output formats other than `0`, `6`, `7` and `10`, and the `rpstblastn` ones other than `0` to `4`, `6`, `7` and `10`. Until then, `rpsbproc` reads the `-outfmt 11` archives that NCBI's `rpsblast` and `rpstblastn` write.
+- The `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`.
 - `-html`.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases

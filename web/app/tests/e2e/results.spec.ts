@@ -2527,6 +2527,7 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await program(page, 'blastn');
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
+  // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
   const protein = '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n';
   const inputs = {
     blastn: [`>q1 first query\n${A}\n`, `>s1 first subject\n${S1}\n`],

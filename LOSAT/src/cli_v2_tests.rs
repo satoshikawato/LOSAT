@@ -625,20 +625,9 @@ fn composition_tokens_follow_ncbis_first_character_rule() {
         else {
             unreachable!("blastp")
         };
-        // LOSAT's BLASTP runs every mode (modes 1 and 3 since series SC, SC5) and rejects
-        // unified P-values (DECISIONS 23 a of line NP).
-        let checked = crate::algorithm::blastp::blast_engine::check_options(&args);
-        if !unified {
-            checked.unwrap();
-        } else {
-            assert!(
-                checked
-                    .unwrap_err()
-                    .to_string()
-                    .contains("not supported by LOSAT's BLASTP"),
-                "{token}"
-            );
-        }
+        // LOSAT's BLASTP runs every mode (modes 1 and 3 since series SC, SC5), with unified
+        // P-values too (item X5 of line RG).
+        crate::algorithm::blastp::blast_engine::check_options(&args).unwrap();
     }
     assert!(ncbi_cbs("2", true, true)
         .unwrap_err()
@@ -1458,7 +1447,7 @@ fn output_formats_follow_the_format_table() {
         formatting_handler_check, parse_formatting_string, report_format, xinclude_check,
     };
     let native = |error: anyhow::Error| match error.downcast::<crate::cli::NativeError>() {
-        Ok(native) => (native.exit, native.message),
+        Ok(native) => (native.exit, String::from_utf8(native.message).unwrap()),
         Err(other) => panic!("not NCBI's error: {other}"),
     };
     for &(programs, value, out, expected) in OUTFMT_ROWS {

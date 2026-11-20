@@ -798,17 +798,18 @@ mod tests {
     // db.x2g.bx.f0616.subj.6: `CATCH_ALL`'s report of the two exceptions.
     #[test]
     fn the_exceptions_are_ncbis_reports() {
+        // NCBI's reports in LOSAT's words (`crate::wording::losat_text`).
         assert_eq!(
             crate::cli::NativeError::exception(&row_is_empty()).message,
-            format!(
+            crate::wording::losat_text(&format!(
                 "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/seq/../seqalign/Seq_align.cpp\", line 227: Error: (CSeqalignException::eInvalidAlignment) CSeq_align::GetSeqRange(): Row is empty\n\n"
-            )
+            ))
         );
         assert_eq!(
             crate::cli::NativeError::exception(&std_seg_lengths_not_accurate()).message,
-            format!(
+            crate::wording::losat_text(&format!(
                 "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/seq/../seqalign/Seq_align.cpp\", line 801: Error: (CSeqalignException::eInvalidInputAlignment) CreateDensegFromStdseg(): Std-seg segment lengths not accurate!\n\n"
-            )
+            ))
         );
     }
 

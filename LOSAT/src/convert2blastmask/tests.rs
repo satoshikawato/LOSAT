@@ -69,11 +69,12 @@ fn the_full_versions_are_blast_s() {
 fn the_mandatory_keys_must_be_given() {
     let (status, out, err) = run_words(&["-masking_options", "o"], b"");
     assert_eq!((status, out), (1, String::new()));
-    assert!(err.ends_with(
+    // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+    assert!(err.ends_with(&*crate::wording::losat_text(
         "Error: Argument \"masking_algorithm\". Mandatory value is missing:  `String'\n\
          Error:  (CArgException::eNoArg) Argument \"masking_algorithm\". Mandatory value is \
          missing:  `String'\n"
-    ));
+    )));
 }
 
 // NCBI 2.17.0 on `>s1 desc / ACGTacgtACGTNNNNnnnnACGT / acgt / >s2 / ACGTACGT / >s3 /

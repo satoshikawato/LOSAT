@@ -1771,7 +1771,7 @@ mod tests {
         let error = resolve(&["-num_descriptions", "0", "-num_alignments", "0"]).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
         assert!(resolve(&["-outfmt", "7", "-num_alignments", "0"]).is_err());
         assert!(resolve(&["-num_descriptions", "0"]).is_ok());

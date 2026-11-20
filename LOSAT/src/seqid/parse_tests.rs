@@ -163,6 +163,12 @@ fn fasta_ids_of_every_type() {
     );
 }
 
+/// The message of NCBI's report of an exception (the tail of its place, from the file's name,
+/// and the rest of its line) in LOSAT's words (`crate::wording::losat_text`).
+fn ncbi(report: &str) -> String {
+    crate::wording::losat_text(&format!("NCBI C++ Exception:\n    T0 \"/src/{report}")).into_owned()
+}
+
 // Exceptions caught by fParse_PartialOK, as makeblastdb 2.17.0 posted them (probe runs of
 // makedb-v5 S3a and fixtures p16_unsupported_type, p15_bad_version).
 #[test]
@@ -176,8 +182,7 @@ fn partial_failures_post_the_exception_and_go_on() {
         .map(|w| (w.subcode, w.message.clone()))
         .collect();
     assert_eq!(texts.len(), 2);
-    assert!(texts[0].1.ends_with("\", line 2663: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::ParseIDs() - Unsupported ID type xyz\n"));
-    assert!(texts[0].1.starts_with("NCBI C++ Exception:\n    T0 \""));
+    assert_eq!(texts[0].1, ncbi("Seq_id.cpp\", line 2663: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::ParseIDs() - Unsupported ID type xyz\n"));
     assert!(texts[1].1.ends_with("Unsupported ID type ABC\n"));
     assert_eq!(texts[0].0, 7);
 
@@ -193,7 +198,7 @@ fn partial_failures_post_the_exception_and_go_on() {
         )))]
     );
     assert_eq!(posted.len(), 1);
-    assert!(posted[0].message.contains("seqloc/Textseq_id.cpp\", line 108: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Version embedded in accession NP_1.x is not a positive integer"));
+    assert!(posted[0].message.contains(&ncbi("seqloc/Textseq_id.cpp\", line 108: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Version embedded in accession NP_1.x is not a positive integer")));
 
     posted.clear();
     assert!(parse_ids(b"ref|NP_800001.x|", FIRST, &mut |w| posted.push(w)).is_err());
@@ -205,21 +210,21 @@ fn partial_failures_post_the_exception_and_go_on() {
         []
     );
     assert_eq!(posted.len(), 2);
-    assert!(posted[1].message.contains("line 2941: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Negative, excessively large, or non-numeric gi ID gi"));
+    assert!(posted[1].message.contains(&ncbi("Seq_id.cpp\", line 2941: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::Set() - Negative, excessively large, or non-numeric gi ID gi")));
 
     posted.clear();
     // The second x_Init reads "gi" as a PDB molecule again and throws with no piece left.
     assert!(parse_ids(b"pdb|12|gi|6|", FIRST, &mut |w| posted.push(w)).is_err());
     assert_eq!(posted.len(), 1);
-    assert!(posted[0].message.contains("line 2813: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Malformatted PDB ID 12"));
+    assert!(posted[0].message.contains(&ncbi("Seq_id.cpp\", line 2813: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Malformatted PDB ID 12")));
 
     posted.clear();
     assert!(parse_ids(b"pat|US|12|x|gi|7|", FIRST, &mut |w| posted.push(w)).is_err());
-    assert!(posted[0].message.contains("line 2799: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Bad sequence number x for US patent 12"));
+    assert!(posted[0].message.contains(&ncbi("Seq_id.cpp\", line 2799: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::x_Init() - Bad sequence number x for US patent 12")));
 
     posted.clear();
     let result = parse_ids(b"gb||gi|10|", FIRST, &mut |w| posted.push(w)).unwrap();
-    assert!(posted[0].message.contains("Textseq_id.cpp\", line 129: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Accession and name missing for Textseq-id (but got version 0, release )"));
+    assert!(posted[0].message.contains(&ncbi("Textseq_id.cpp\", line 129: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Accession and name missing for Textseq-id (but got version 0, release )")));
     assert_eq!(
         result,
         [Some(ParsedSeqId::Genbank(textseq(

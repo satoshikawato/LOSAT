@@ -495,6 +495,7 @@ struct XCarry {
 ///   matches since that may insert one: those with alignments, those continued, and those whose
 ///   deferred test the heap without its side effect does not answer FALSE (a FALSE stays FALSE,
 ///   `x_sw_heap_test`). A match ended before its window inserts none.
+///
 /// A match that the early termination test may end is not continued (its continuation could be
 /// computed in vain); nor is any match after a redo that would end the search.
 fn x_sw_continued(

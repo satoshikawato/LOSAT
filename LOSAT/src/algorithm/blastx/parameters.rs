@@ -785,9 +785,7 @@ fn word_cutoff(
         // NCBI blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
         // c++/include/algo/blast/core/blast_parameters.h:78:
         // #define CUTOFF_E_BLASTX 1.0
-        cutoff_score_sum_stats(length as i32, average, decay, &p.ungapped)
-            .max(1)
-            .min(trigger)
+        cutoff_score_sum_stats(length as i32, average, decay, &p.ungapped).min(trigger)
     }
     .min(p.hit_cutoff_max)
 }
@@ -911,7 +909,7 @@ fn context_cutoffs(
         if options.gapped && decay != 0.0 {
             p.hit_cutoff = p
                 .hit_cutoff
-                .min(cutoff_score_sum_stats(avg_q, n, decay, &ka).max(1));
+                .min(cutoff_score_sum_stats(avg_q, n, decay, &ka));
         }
         p.word_cutoff = word_cutoff(options, c.length, average, decay, p);
         p.word_xdrop_init = x_drop_raw_score(options.x_dropoff, &p.ungapped, 1.0);

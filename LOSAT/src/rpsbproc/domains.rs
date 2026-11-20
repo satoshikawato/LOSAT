@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use super::archive::{Align, DenseSeg, StdLoc, StdPair};
-use super::data::{dom_acc_type, CddData, TOTALSIGS};
+use super::data::{dom_acc_type, sort_ties_in_input_order, CddData, TOTALSIGS};
 use super::frames::{minus_pr_to_plus_na, plus_pr_to_plus_na, plus_rf_idx_to_minus, RF_SIZE};
 use super::segset::SegSet;
 use super::sites::ResiduePos;
@@ -719,11 +719,13 @@ struct Facility {
 // value modulo 2^32 where the XML input took it past `int` (`SubjectStarts`); `iNMissing` is
 // that value (PD-LOSAT-NCBI-DEFECTS exception 12); the ratios
 // divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does. The two
-// sorts by `TDomAlignOrderByEValue` are Rust's stable `sort_by` with that order made total
+// sorts by `TDomAlignOrderByEValue` are Rust's standard sort with that order made total
 // (`e_value_order`: a NaN E-value or bit score, which NCBI's comparison orders against no number,
-// sorts after every number): hits equal in E-value and bit score keep the order of `selected`, where
-// NCBI's `std::sort` may leave them in another, and so may become the representative or `Specific`
-// hit in NCBI's place (PD-LOSAT-NCBI-DEFECTS 1.56, the order of tied hits).)
+// sorts after every number) and the hit's index as the last key (`sort_ties_in_input_order`;
+// `selected` is in increasing order): hits equal in E-value and bit score keep the order of
+// `selected`, where NCBI's `std::sort` may leave them in another, and so may become the
+// representative or `Specific` hit in NCBI's place (PD-LOSAT-NCBI-DEFECTS 1.56, the order of tied
+// hits).)
 pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddData) -> AlignIndex {
     let mut index = AlignIndex::default();
     let mut gap_sets: Vec<SegSet> = Vec::new();
@@ -857,7 +859,11 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddD
     // 			dst.m_vecSortedIndice.emplace_back(iter->ulIdx);
     // 		}
     // ```
-    non_multi.sort_by(|a, b| e_value_order(&aligns[a.align], &aligns[b.align]));
+    sort_ties_in_input_order(
+        &mut non_multi,
+        |facility| facility.align,
+        |a, b| e_value_order(&aligns[a.align], &aligns[b.align]),
+    );
     let segs_of = |facility: &Facility, aligns: &[DomAlign], gap_sets: &[SegSet]| {
         let mut segs = SegSet::new();
         segs.add(aligns[facility.align].from, aligns[facility.align].to);
@@ -991,7 +997,11 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddD
     // (`m_uiLength - 1` is `unsigned int`, converted to `SeqPos_t` by `AddSeg`: a model of length
     // 0 gives -1, an empty range.)
     if !structural.is_empty() {
-        structural.sort_by(|a, b| e_value_order(&aligns[a.align], &aligns[b.align]));
+        sort_ties_in_input_order(
+            &mut structural,
+            |facility| facility.align,
+            |a, b| e_value_order(&aligns[a.align], &aligns[b.align]),
+        );
         let mut covered = SegSet::new();
         for facility in &structural {
             let mut sd_segs = SegSet::new();
@@ -1015,11 +1025,11 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddD
     index
 }
 
-/// `TDomAlignOrderByEValue` made a total order for Rust's stable `sort_by`: the E-value ascending,
-/// then the bit score descending, the numbers compared as C++'s `<` and `>` compare doubles (-0.0
-/// and 0.0 are equal); a NaN, which NCBI's comparison orders against no number, after every number,
-/// and two NaNs equal. Hits equal in both keep their order; NCBI's `std::sort` may leave them in
-/// another (PD-LOSAT-NCBI-DEFECTS 1.56, the order of tied hits).
+/// `TDomAlignOrderByEValue` made a total order: the E-value ascending, then the bit score
+/// descending, the numbers compared as C++'s `<` and `>` compare doubles (-0.0 and 0.0 are equal);
+/// a NaN, which NCBI's comparison orders against no number, after every number, and two NaNs
+/// equal. Hits equal in both keep their order (`sort_ties_in_input_order`); NCBI's `std::sort` may
+/// leave them in another (PD-LOSAT-NCBI-DEFECTS 1.56, the order of tied hits).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.hpp:62-70
 // ```c++
 // 	struct TDomAlignOrderByEValue

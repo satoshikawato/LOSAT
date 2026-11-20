@@ -204,7 +204,7 @@
   questions = Q-X5); the rule-2 rejection of a batch in which a query is followed by a query
   without a search space, Owner-delegated (standing instruction 2026-09-29, restated 2026-10-07)
   and part of the option A that the Owner chose; numbered after 1.53, line RG item X4)
-  1.56 2026-11-20 (the approved difference of `losat rpsbproc`'s sorts: Rust's stable sort, so hits
+  1.56 2026-11-20 (the approved difference of `losat rpsbproc`'s sorts: Rust's standard sort, so hits
   equal in E-value and bit score and data rows of one key keep their input order, and a NaN
   E-value or bit score sorts after every number; the explicit rejection of 1.17 of hits whose NaN
   values would make NCBI's sort read outside its vector removed; decided by the Owner on
@@ -969,7 +969,9 @@ A sixth map, the clusters by PSSM-ID (`m_pssmid2fam.Reset`, `common/basedata.cpp
 is sorted but never searched, so its order does not reach the output; LOSAT does not build it.
 The C++ standard does not keep the order of elements that compare equal in `std::sort`; NCBI's
 Linux builds leave them in the order that their C++ library's sort gives. LOSAT sorts with
-`slice::sort_by`, which is stable, and NCBI's comparisons made a total order:
+Rust's `slice::sort_unstable_by`, which sorts in place, by NCBI's comparisons made a total order
+and then by the element's place in the input, which gives the order of a stable sort
+(`rpsbproc::data::sort_ties_in_input_order`):
 
 - Hits equal in E-value and bit score (the numbers compared as C++ compares doubles: -0.0 and 0.0
   are equal) keep the order of the archive or XML. Data rows of one key keep the order of their
@@ -1002,8 +1004,8 @@ Fixtures: the rows of `use` `tied` in `LOSAT/tests/fixtures/rpsbproc/CASES.tsv` 
 error and exit status are equal, and the standard output differs only inside query blocks, either in
 runs of DOMAINS lines that share one query, E-value and bit score with the same hit types, or in a
 query with a NaN E-value or bit score, with the number of such blocks and lines that
-`tied/CLASSES.tsv` lists. Code: `rpsbproc::domains::e_value_order` and the sorts of
-`rpsbproc::data` (`CddData`'s lookups).
+`tied/CLASSES.tsv` lists. Code: `rpsbproc::domains::e_value_order`, the sorts of
+`rpsbproc::data` (`CddData`'s lookups) and `rpsbproc::data::sort_ties_in_input_order`.
 
 ## Reproduced as NCBI (rule 2)
 

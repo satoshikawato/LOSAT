@@ -378,7 +378,7 @@ fn a_key_orders_numbers_as_cpp_and_a_nan_last() {
 
 // `e_value_order` (`TDomAlignOrderByEValue` made total): the E-value first, then the bit score
 // descending; a NaN E-value after every E-value that is a number whatever the bit scores, a NaN bit
-// score last among the hits of one E-value; ties keep their order in the stable sort.
+// score last among the hits of one E-value; ties keep their order (`sort_ties_in_input_order`).
 #[test]
 fn hits_sort_by_e_value_then_bit_score_with_nan_last() {
     use std::cmp::Ordering::{Equal, Greater, Less};
@@ -412,6 +412,10 @@ fn hits_sort_by_e_value_then_bit_score_with_nan_last() {
         hit(1e-3, 30.0),
     ];
     let mut order: Vec<usize> = (0..aligns.len()).collect();
-    order.sort_by(|&a, &b| e_value_order(&aligns[a], &aligns[b]));
+    sort_ties_in_input_order(
+        &mut order,
+        |&i| i,
+        |&a, &b| e_value_order(&aligns[a], &aligns[b]),
+    );
     assert_eq!(order, [2, 3, 5, 7, 1, 4, 6, 0]);
 }

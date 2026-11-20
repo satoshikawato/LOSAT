@@ -310,7 +310,7 @@ bioconda's gave the same bytes in every case.
 
 ## Tied hits (line LIB, item S1, PD-LOSAT-NCBI-DEFECTS 1.56)
 
-The Owner's decision of 2026-11-20: `losat rpsbproc` sorts with Rust's standard stable sort. Hits of one query with
+The Owner's decision of 2026-11-20: `losat rpsbproc` sorts with Rust's standard sort. Hits of one query with
 equal E-value and bit score keep their input order, where NCBI's `std::sort` leaves them in an order of its own. A NaN
 E-value or bit score sorts after every number of its key (Owner-delegated, 2026-11-20). The rows whose output this
 changes are of `use` `tied`:

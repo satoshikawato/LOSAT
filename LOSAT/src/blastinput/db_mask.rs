@@ -820,8 +820,10 @@ impl HardMaskShape {
         if let HardScan::Translated { min_length } = scan {
             // A frame's shape changes with the length's remainder by 3 and with masks near
             // either end, so every length within the bounds is read (the sequence's is one of
-            // them), or the length itself.
-            if let Some((low, high)) = bounds {
+            // them; a mask that ends past the shortest makes no frame ranges), or the length
+            // itself.
+            let last_end = masks[masks.len() - 1].1 as usize;
+            if let Some((low, high)) = bounds.filter(|&(low, _)| last_end <= low) {
                 let shape = Self::of_frames(masks, low, min_length, &mut split);
                 if (low + 1..=high)
                     .all(|length| Self::of_frames(masks, length, min_length, &mut split) == shape)

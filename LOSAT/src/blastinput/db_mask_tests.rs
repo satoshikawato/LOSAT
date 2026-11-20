@@ -720,3 +720,75 @@ fn shape_of(
 ) -> Result<Option<HardMaskShape>, ()> {
     HardMaskShape::of_scan(masks, bounds, length, HardScan::Nucleotide { scanned_word })
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-830 (the frames' ranges
+// mapped from the bases' by x / 3, the minus frames reversed on frame -1's length) and :221-276
+// (the "no chunking" branch of a chunk from 0 whose next range starts at the frame's end).
+// A mask is refused where, after the mapping, a frame's chunk from its start runs to the frame's
+// end while it is shorter than the frame: a tail mask in frame +1, a head mask of 3 bases or more
+// in frame -1, a mask that ends 2 or 3 bases before the end in frame +2; a mask inside, a head
+// mask of 2 bases and a sequence shorter than the shortest searched one are searched. The bounds
+// of the length are read where they agree, the length otherwise.
+#[test]
+fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
+    use std::cell::Cell;
+    let scan = HardScan::Translated { min_length: 17 };
+    let shape = |masks: &[(u32, u32)], length: usize| {
+        HardMaskShape::of_scan(masks, None, &|| Some(length), scan).unwrap()
+    };
+    let frame = |frame, start, end| Some(HardMaskShape::FrameTailMask { frame, start, end });
+    assert_eq!(shape(&[(300, 390)], 1200), None);
+    assert_eq!(shape(&[(300, 390), (900, 960)], 1200), None);
+    assert_eq!(shape(&[(600, 700), (700, 800)], 1200), None);
+    assert_eq!(shape(&[(1000, 1200)], 1200), frame(1, 1000, 1200));
+    assert_eq!(shape(&[(0, 1200)], 1200), frame(1, 0, 1200));
+    assert_eq!(shape(&[(0, 100)], 1200), frame(-1, 0, 100));
+    assert_eq!(shape(&[(0, 3)], 1200), frame(-1, 0, 3));
+    assert_eq!(shape(&[(0, 2)], 1200), None);
+    assert_eq!(shape(&[(1000, 1198)], 1200), frame(2, 1000, 1198));
+    assert_eq!(shape(&[(1000, 1197)], 1200), frame(2, 1000, 1197));
+    assert_eq!(shape(&[(1000, 1196)], 1200), None);
+    // A mask that runs to the end, or a head mask, after other masks: the chunk from the start
+    // ends at the first mask (plus frames) or the last (minus frames).
+    assert_eq!(shape(&[(300, 390), (900, 960)], 960), None);
+    assert_eq!(shape(&[(0, 50), (600, 700)], 1200), None);
+    // Empty masks before it: the chunk after them starts at 0 as well (the refused mask is the
+    // one after which the frame has no letter, in the order stored).
+    assert_eq!(shape(&[(0, 0), (1000, 1200)], 1200), frame(1, 1000, 1200));
+    assert_eq!(shape(&[(0, 0), (0, 100)], 1200), frame(-1, 0, 100));
+    // A subject shorter than `min_length` bases is not searched.
+    assert_eq!(shape(&[(0, 16)], 16), None);
+    assert_eq!(shape(&[(0, 17)], 17), frame(1, 0, 17));
+    // Masks out of order come first, as for the other programs.
+    assert_eq!(
+        shape(&[(600, 700), (300, 390)], 1200),
+        Some(HardMaskShape::Unsorted {
+            before: (600, 700),
+            mask: (300, 390)
+        })
+    );
+    // Bounds that give one shape at every length are taken without the length.
+    let reads = Cell::new(0);
+    let read = || {
+        reads.set(reads.get() + 1);
+        Some(1200)
+    };
+    let of =
+        |masks: &[(u32, u32)], bounds| HardMaskShape::of_scan(masks, Some(bounds), &read, scan);
+    assert_eq!(of(&[(300, 390)], (1197, 1200)), Ok(None));
+    assert_eq!(reads.get(), 0);
+    // Bounds whose lengths differ in shape: at 1197 frame +2 (398 residues) has no letter after
+    // the mask, at 1200 every frame has; the length is read.
+    assert_eq!(of(&[(1000, 1196)], (1197, 1200)), Ok(None));
+    assert_eq!(reads.get(), 1);
+    // A mask that ends past the shortest length: the length is read.
+    assert_eq!(of(&[(1000, 1198)], (1197, 1200)), Ok(frame(2, 1000, 1198)));
+    assert_eq!(reads.get(), 2);
+    assert!(HardMaskShape::FrameTailMask {
+        frame: -1,
+        start: 0,
+        end: 100
+    }
+    .text(scan)
+    .contains("has a mask, [0, 100), after which frame -1 (positions / 3) has no letter"));
+}

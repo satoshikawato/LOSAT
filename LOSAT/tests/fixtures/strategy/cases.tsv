@@ -516,7 +516,7 @@ tblastn.db.in_pssm.d3.m01_members	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d
 blastn.sub.emptyq.stdout	blastn	-	-query tests/fasta/outfmt11/arch_bp_empty.faa -subject tests/fasta/outfmt11/arch_s.fna -outfmt 6 -export_search_strategy -	ncbi	0	-	-
 blastp.sub.emptyq.stdout	blastp	-	-query tests/fasta/outfmt11/arch_bp_empty.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy -	ncbi	0	-	-
 blastp.sub.emptyq.sameout	blastp	-	-query tests/fasta/outfmt11/arch_bp_empty.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -out {ss} -export_search_strategy {ss}	ncbi	0	-	-
-blastp.nodb.stdout	blastp	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/no_such_db -outfmt 6 -export_search_strategy -	ncbi	2	-	-
+blastp.db.nodb.stdout	blastp	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/no_such_db -outfmt 6 -export_search_strategy -	ncbi	2	-	-
 blastx.sub.emptyq.stdout	blastx	-	-query tests/fasta/outfmt11/arch_bp_empty.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy -	ncbi	0	-	-
 tblastn.sub.emptyq.stdout	tblastn	-	-query tests/fasta/outfmt11/arch_bp_empty.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 6 -export_search_strategy -	ncbi	0	-	-
 tblastx.sub.emptyq.stdout	tblastx	-	-query tests/fasta/outfmt11/arch_bp_empty.faa -subject tests/fasta/outfmt11/arch_tbx_s.fna -outfmt 6 -export_search_strategy -	ncbi	0	-	-
@@ -530,3 +530,30 @@ tblastn.sub.f99.out	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subjec
 tblastx.sub.f99.out	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -outfmt 99 -export_search_strategy - -out {ss}	ncbi	255	-	-
 psiblast.db.f99.out	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 99 -export_search_strategy - -out {ss}	ncbi	255	-	-
 rpsblast.q40.f99.out	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 99 -export_search_strategy - -out {ss}	ncbi	255	-	-
+blastn.sub.noq.f99	blastn	-	-query tests/fasta/strategy/no_such_query.fa -subject tests/fasta/outfmt11/arch_s.fna -outfmt 99 -export_search_strategy {ss}	ncbi	1	-	-
+blastp.sub.noq.f99	blastp	-	-query tests/fasta/strategy/no_such_query.fa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 99 -export_search_strategy {ss}	ncbi	1	-	-
+blastx.sub.noq.f99	blastx	-	-query tests/fasta/strategy/no_such_query.fa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 99 -export_search_strategy {ss}	ncbi	1	-	-
+tblastn.sub.noq.f99	tblastn	-	-query tests/fasta/strategy/no_such_query.fa -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 99 -export_search_strategy {ss}	ncbi	1	-	-
+tblastx.sub.noq.f99	tblastx	-	-query tests/fasta/strategy/no_such_query.fa -subject tests/fasta/outfmt11/arch_tbx_s.fna -outfmt 99 -export_search_strategy {ss}	ncbi	1	-	-
+psiblast.db.noq.f99	psiblast	-	-query tests/fasta/strategy/no_such_query.fa -db tests/db_search/paja -outfmt 99 -export_search_strategy {ss}	ncbi	1	-	-
+rpsblast.noq.f99	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/strategy/no_such_query.fa -db rps_mini -outfmt 99 -export_search_strategy {ss}	ncbi	1	-	-
+rpstblastn.noq.f99	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/strategy/no_such_query.fa -db rps_mini -comp_based_stats 0 -outfmt 99 -export_search_strategy {ss}	ncbi	1	-	-
+blastn.sub.noq.fneg	blastn	-	-query tests/fasta/strategy/no_such_query.fa -subject tests/fasta/outfmt11/arch_s.fna -outfmt %20-1 -export_search_strategy {ss}	ncbi	1	-	-
+blastn.sub.sloc.f99	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -subject_loc abc -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+blastn.sub.qloc.fabc	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc abc -outfmt abc -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.qloc.fabc	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc abc -outfmt abc -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.qloc.fabc	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc abc -outfmt abc -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.qloc.fabc	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc abc -outfmt abc -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.qloc.fabc	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc abc -outfmt abc -export_search_strategy {ss}	ncbi	3	-	-
+blastn.sub.qlocbig.stdout	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 100000-100100 -outfmt 0 -export_search_strategy -	ncbi	3	-	-
+blastp.sub.qlocbig.stdout	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 100000-100100 -outfmt 0 -export_search_strategy -	ncbi	3	-	-
+blastx.sub.qlocbig.stdout	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 100000-100100 -outfmt 0 -export_search_strategy -	ncbi	3	-	-
+tblastn.sub.qlocbig.stdout	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc 100000-100100 -outfmt 0 -export_search_strategy -	ncbi	3	-	-
+tblastx.sub.qlocbig.stdout	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc 100000-100100 -outfmt 0 -export_search_strategy -	ncbi	3	-	-
+blastn.sub.bsabc.stdout	blastn	BATCH_SIZE=abc	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 0 -export_search_strategy -	ncbi	255	-	-
+blastn.sub.qlocbig.sameout	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 100000-100100 -outfmt 0 -out {ss} -export_search_strategy {ss}	ncbi	3	-	-
+blastn.sub.badgi.stdout	blastn	-	-query tests/fasta/strategy/badgi_n.fna -subject tests/fasta/outfmt11/arch_s.fna -parse_deflines -outfmt 0 -export_search_strategy -	ncbi	1	-	-
+blastp.sub.badgi.stdout	blastp	-	-query tests/fasta/strategy/badgi_p.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -parse_deflines -outfmt 0 -export_search_strategy -	ncbi	1	-	-
+psiblast.pssm.sub.stdout	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -subject tests/fasta/outfmt11/arch_bp_s.faa -comp_based_stats 0 -outfmt 0 -export_search_strategy -	ncbi	1	-	-
+psiblast.pssm.sub.sameout	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -subject tests/fasta/outfmt11/arch_bp_s.faa -comp_based_stats 0 -outfmt 0 -out {ss} -export_search_strategy {ss}	ncbi	1	-	-
+tblastn.in_pssm.sub.stdout	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 0 -export_search_strategy -	ncbi	1	-	-

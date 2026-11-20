@@ -130,7 +130,10 @@ impl RunSetup {
         strategy_slot.clone_from(&strategy);
         // Preserve explicit product refusals; defer supported semantic failures
         // until subject and standard query/output streams have been extracted.
+        // A deferred `-outfmt` value is read again by the formatting handler (`at_formatting_handler`),
+        // which fails with NCBI's error after the errors of the arguments that come before it.
         let mut resolution = match args.resolve() {
+            Err(_) if choice.is_deferred() => Err(SemanticOptionsError::from(String::new()).into()),
             Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
                 return Err(error)
             }

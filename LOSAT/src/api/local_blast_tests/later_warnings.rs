@@ -34,9 +34,16 @@ struct Given {
 }
 
 impl Search {
-    /// Runs `formats` as LOSAT Web runs them: the first format fails the call and the others fail
-    /// alone. `receives`: the caller takes the later formats' warnings.
+    /// Runs `formats` as LOSAT Web runs the search of the argv's format: the first format fails
+    /// the call and the others fail alone. `receives`: the caller takes the later formats'
+    /// warnings.
     fn run(&self, formats: &[&str], receives: bool) -> Given {
+        self.run_as(formats, receives, FormatRefusal::FailsCall)
+    }
+
+    /// Runs `formats`, the first with `first` and the others failing alone (LOSAT Web's other
+    /// search of a run of two: every format fails alone).
+    fn run_as(&self, formats: &[&str], receives: bool, first: FormatRefusal) -> Given {
         let (query, subject) = (
             self.query.0.display().to_string(),
             self.subject.0.display().to_string(),
@@ -73,18 +80,15 @@ impl Search {
         let mut sinks = vec![Vec::new(); formats.len()];
         let mut diagnostics = Vec::new();
         let mut later = vec![Vec::new(); formats.len()];
+        let mut first = Some(first);
         let mut outputs = ReportOutputs {
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
-                .enumerate()
-                .map(|(index, (outfmt, sink))| FormatOutput {
+                .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
                     sink: OutputSink::Writer(sink),
-                    refusal: match index {
-                        0 => FormatRefusal::FailsCall,
-                        _ => FormatRefusal::FailsAlone,
-                    },
+                    refusal: first.take().unwrap_or(FormatRefusal::FailsAlone),
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
@@ -160,6 +164,18 @@ fn search(
     masked: bool,
     extra: &'static [&'static str],
 ) -> Search {
+    search_of(program, subject_id, masked, extra, false)
+}
+
+/// `search`, with a third query record, `qlast`, which has no residues either, where
+/// `last_empty`.
+fn search_of(
+    program: &'static str,
+    subject_id: &str,
+    masked: bool,
+    extra: &'static [&'static str],
+    last_empty: bool,
+) -> Search {
     let protein = fixture_sequence("SicyWSV.faa")[..100].to_vec();
     let nucleotide = fixture_sequence("LC738884.fasta")[..600].to_vec();
     let (mut query, mut subject) = match program {
@@ -175,8 +191,9 @@ fn search(
     Search {
         program,
         query: TempFasta::new(
-            &format!("later_{program}_query.fa"),
-            &[("qempty", &[][..]), ("q1", &query)],
+            &format!("later_{program}_query{}.fa", u8::from(last_empty)),
+            &[("qempty", &[][..]), ("q1", &query), ("qlast", &[][..])]
+                [..2 + usize::from(last_empty)],
         ),
         subject: TempFasta::new(
             &format!("later_{program}_subject.fa"),
@@ -213,6 +230,24 @@ fn each_later_format_gives_its_query_warnings_to_its_own_receiver() {
         let first = search.run(&["6", "5", "0"], true);
         assert_eq!(first.diagnostics, tabular.diagnostics, "{program}");
         assert_eq!(first.later, ["", "", ""], "{program}");
+    }
+}
+
+// A receiver holds its format's warnings in the queries' order, each once: those of the first and
+// of the last query, which have no residues, around the report of the second (review r2 of this
+// change, L3, 2026-11-20).
+#[test]
+fn a_receiver_holds_the_warnings_of_several_queries_in_their_order() {
+    for program in PROGRAMS {
+        let search = search_of(program, "s1", false, &[], true);
+        let warnings = format!(
+            "Warning: [{program}] Query_1 qempty: Sequence contains no data \n\
+             Warning: [{program}] Query_3 qlast: Sequence contains no data \n"
+        );
+        let tabular = search.run(&["6"], false);
+        assert!(tabular.diagnostics.ends_with(&warnings), "{program}");
+        let given = search.run(&["5", "0", "7"], true);
+        assert_eq!(given.later, ["", &warnings, &warnings], "{program}");
     }
 }
 
@@ -255,16 +290,46 @@ fn a_later_format_refused_before_its_reports_gives_no_query_warnings() {
 // outfmt 5 goes on (review r1 of this change, M2, 2026-11-20).
 #[test]
 fn a_later_format_whose_report_stops_gave_the_warnings_before_it_once() {
+    let search = stopping_blastx("later_stops");
+    let warning = "Warning: [blastx] Query_1 qempty: Sequence contains no data \n";
+    let given = search.run(&["5", "6", "7", "0"], true);
+    assert_eq!(given.refused, [false, true, true, true]);
+    assert!(!given.diagnostics.contains(warning));
+    assert_eq!(given.later, ["", warning, warning, warning]);
+}
+
+// Formats that share the diagnostics (a first format that writes the queries' warnings, or a
+// caller without receivers): the first format that is written writes the warnings there, and one
+// that stopped after a query's warning wrote it, so the formats after it do not write it again.
+// LOSAT Web's other search of a run of two is such a call (outfmt 6 and 7, each failing alone).
+// BLASTX's report writer makes the warnings itself and read the batch as not warned off the
+// refusal: the format after the one that stopped wrote the warning again (line WQA, 2026-11-20).
+#[test]
+fn formats_that_share_the_diagnostics_write_a_warning_once_where_one_stops_after_it() {
+    let search = stopping_blastx("shared_stops");
+    let warning = "Warning: [blastx] Query_1 qempty: Sequence contains no data \n";
+    for receives in [false, true] {
+        let given = search.run_as(&["6", "7", "0"], receives, FormatRefusal::FailsAlone);
+        assert_eq!(given.refused, [true, true, true]);
+        assert_eq!(given.diagnostics.matches(warning).count(), 1, "{given:?}");
+        assert_eq!(given.later, ["", "", ""]);
+    }
+}
+
+/// A BLASTX search whose first query record has no residues and whose second query gives an HSP
+/// of length 0 (`tests/fasta/outfmt0/x2g_c0054`, line RG's item X2g): outfmt 6, 7 and 0 stop at
+/// it, after the warning of the first query, and outfmt 5 goes on.
+fn stopping_blastx(name: &str) -> Search {
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/outfmt0");
     let query = super::support::read_records(&fixture.join("x2g_c0054_q.fna")).remove(0);
     let subject = super::support::read_records(&fixture.join("x2g_c0054_s.faa")).remove(0);
-    let search = Search {
+    Search {
         program: "blastx",
         query: TempFasta::new(
-            "later_stops_query.fna",
+            &format!("{name}_query.fna"),
             &[("qempty", &[][..]), ("q1", query.seq())],
         ),
-        subject: TempFasta::new("later_stops_subject.faa", &[("s1", subject.seq())]),
+        subject: TempFasta::new(&format!("{name}_subject.faa"), &[("s1", subject.seq())]),
         extra: &[
             "-ungapped",
             "-comp_based_stats",
@@ -280,10 +345,5 @@ fn a_later_format_whose_report_stops_gave_the_warnings_before_it_once() {
             "-seg",
             "no",
         ],
-    };
-    let warning = "Warning: [blastx] Query_1 qempty: Sequence contains no data \n";
-    let given = search.run(&["5", "6", "7", "0"], true);
-    assert_eq!(given.refused, [false, true, true, true]);
-    assert!(!given.diagnostics.contains(warning));
-    assert_eq!(given.later, ["", warning, warning, warning]);
+    }
 }

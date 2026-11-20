@@ -19,7 +19,11 @@ specification that `LOSAT/src/writedb/ofstream.rs` is tested against
 - Link to the NCBI binary: end-to-end runs of the official makeblastdb 2.17.0 and `losat makeblastdb` under the same shim, each
   output suffix failing at byte limits around the file sizes and the 8191-byte boundaries (and, for close, at `close(2)`):
   1,592 write-failure cases, 1,334 byte-identical (exit status, messages, calls, files); the other 258 are not stream behaviour
-  (see the O1a report). Run on ws (`kawato-ProLiant-DL360-Gen10-Plus`, 2026-11-20/21); the close cases: see the report.
+  and are the same before this rewrite (90 `.pjs`/`.njs` message wordings, 16 `.pal` message prefixes, 152 where NCBI re-opens
+  a truncated `.pin`/`.nin` and exits -11 or 2 while LOSAT goes on; followed up separately). 198 cases with `close(2)` failing
+  (EIO, ENOSPC, EDQUOT) on every output suffix of protein, nucleotide, masked and large databases: exit status, messages and
+  files identical to the run without the failure, so a failed close is not visible outside the stream. Run on ws
+  (`kawato-ProLiant-DL360-Gen10-Plus`, 2026-11-20/21).
 
 ## Files
 `rows_boundaries.txt` (held bytes b x write size n, 1274 sequences), `rows_failures.txt` (108), `rows_states.txt` (every state bit

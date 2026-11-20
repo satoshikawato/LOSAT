@@ -76,12 +76,13 @@ fn blastdbcmd(words: &[&str], out_dir: &Path) -> (Vec<u8>, Vec<u8>, i32) {
     (output.stdout, output.stderr, output.status.code().unwrap())
 }
 
-/// The frozen NCBI file `name` of `tests/blastdbcmd/expected`, with `{R}` and `{T}` placed.
+/// The frozen NCBI file `name` of `tests/blastdbcmd/expected`, with `{R}` and `{T}` placed, in
+/// LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
 fn expected(name: &str) -> Vec<u8> {
     let tests = tests_dir();
     let text = fs::read(tests.join("blastdbcmd/expected").join(name)).unwrap();
     let text = String::from_utf8(text).unwrap();
-    native_paths(text, &tests)
+    losat::wording::losat_output_bytes(&native_paths(text, &tests)).into_owned()
 }
 
 /// The frozen text with `{R}` and `{T}` placed, its paths written as on the platform of the run

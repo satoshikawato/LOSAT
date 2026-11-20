@@ -492,13 +492,20 @@ fn run(case: &Case) -> (i32, Vec<u8>, Vec<u8>) {
     (status.code().unwrap_or(-1), merged, files)
 }
 
+/// NCBI's merged stream of the row `name` in LOSAT's words (NCBI's bytes through
+/// `losat::wording`, AGENTS.md rule 8).
+fn expected_merged(fixtures: &Path, name: &str) -> Vec<u8> {
+    let frozen = std::fs::read(fixtures.join(format!("{name}.merged"))).unwrap();
+    losat::wording::losat_output_bytes(&frozen).into_owned()
+}
+
 #[test]
 fn the_xml_streams_post_where_ncbi_posts_in_a_merged_stream() {
     let fixtures = tests_dir().join("fixtures").join("xml_post_order");
     for case in CASES {
         let (name, .., to_file, rc) = *case;
         let (status, merged, files) = run(case);
-        let expected = std::fs::read(fixtures.join(format!("{name}.merged"))).unwrap();
+        let expected = expected_merged(&fixtures, name);
         assert!(
             status == rc && merged == expected,
             "{name}: exit {status} (NCBI {rc}):\n{}",
@@ -585,7 +592,7 @@ fn a_strategy_fifo_gets_the_requests_that_ncbi_writes() {
         String::from_utf8_lossy(&merged)
     );
     assert!(
-        merged == std::fs::read(fixtures.join(format!("{name}.merged"))).unwrap(),
+        merged == expected_merged(&fixtures, name),
         "{name}:\n{}",
         String::from_utf8_lossy(&merged)
     );

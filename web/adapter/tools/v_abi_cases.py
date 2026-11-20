@@ -37,9 +37,10 @@ joined with `,`).
   BLASTN X-drop / `-no_greedy` searches (DI-6).
 
 Both suites add a TBLASTX search over several subjects, which the threaded reactor
-reduces in the wasm-threads-only path, and the BLASTN `-window_masker_db` and `-window_masker_taxid`
-searches (`window_masker`), whose counts files the host registers by name (abi_v2.md §4 `file_begin`). `--group fasta_input` writes that group of the full
-suite alone.
+reduces in the wasm-threads-only path, the BLASTN `-window_masker_db` and `-window_masker_taxid`
+searches (`window_masker`), whose counts files the host registers by name (abi_v2.md §4 `file_begin`),
+and the runs whose outcome and standard error are those of the argv's own `-outfmt` (`own_search`).
+`--group fasta_input` writes that group of the full suite alone.
 
 Usage: v_abi_cases.py --suite quick|full [--group fasta_input] --out FILE.json
 """
@@ -282,7 +283,10 @@ def window_masker() -> list[dict]:
     (`.ncbirc`, `NCBI_CONFIG*`), no current directory for the taxid (its directory is always
     `windowmasker`), no file it cannot read (`taxid_unreadable`, `unreadable`), no directory as a
     counts file, and no `-db`. Two searches of its own (`winmask_web.taxid_unknown_*`): a taxid whose
-    file has no known format."""
+    file has no known format; the first again with `-num_descriptions 5`, a run of two searches
+    (abi_v2.md §7) that fails, whose stream 3 and error are the CLI's standard error for the argv's
+    own outfmt 0, without the tabular search's `-num_descriptions` warning (line WQA's sweep, D3
+    review, 2026-11-19)."""
     sys.path.insert(0, str(REPO / "LOSAT/tests"))
     sys.path.insert(0, str(REPO / "LOSAT/tests/winmask"))
     import blastn_regression_fixtures as regression  # noqa: E402  (the manifest reader)
@@ -360,7 +364,114 @@ def window_masker() -> list[dict]:
             ["blastn", "-query", "tests/fixtures/blastn_regression/inputs/wm_query.fa",
              "-subject", "tests/fixtures/blastn_regression/inputs/s60k.fa", "-task", "blastn",
              "-window_masker_taxid", taxid, "-outfmt", "6"], None, True, prolog=True, window_masker_path=unknown)
+    add("winmask_web.taxid_unknown_11.num_descriptions",
+        ["blastn", "-query", "tests/fixtures/blastn_regression/inputs/wm_query.fa",
+         "-subject", "tests/fixtures/blastn_regression/inputs/s60k.fa", "-task", "blastn",
+         "-window_masker_taxid", "11", "-num_descriptions", "5", "-outfmt", "6"], None, True, prolog=True,
+        window_masker_path=unknown)
     return list(searches.values())
+
+
+def own_search() -> list[dict]:
+    """Runs whose outcome and standard error are those of the argv's own `-outfmt`, as the CLI's
+    run of that argv (line WQA's sweep, D3 reviews, 2026-11-19).
+
+    Runs of two searches (`-num_descriptions`, `-num_alignments`; abi_v2.md §7) that fail:
+    `-num_alignments 0` with `-outfmt 6` in every program (NCBI's `No hits are being saved` after
+    the formatting handler's warning, where the CLI's outfmt 0 completes), also with `-evalue 0`,
+    whose error the CLI gives after the hit list's (`validate` too); BLASTN's `-num_descriptions
+    2147483647` without `-outfmt` (LOSAT's error for format 0, whose N + 50 overflows, where the
+    CLI's outfmt 6 and 7 complete); and two searches that both fail, with and without `-outfmt 6`,
+    whose error and stream 3 are those of the argv's own `-outfmt` (BLASTN's overflow with
+    `-num_alignments 0`, BLASTX's `-num_alignments 0 -evalue 0`). Runs of two searches that
+    complete where the other search fails, whose formats are empty and whose warnings and error
+    stream 3 adds after the argv's (review r2 L1): `-num_alignments 0` without `-outfmt` in every
+    program, BLASTN's overflow with `-outfmt 6`.
+
+    The formatting handler's warnings of the formats that the argv does not ask for (review r2
+    M1): runs that fail with `-line_length`, `-sorthits`, `-sorthsps` or equal `-num_descriptions`
+    and `-num_alignments` and an `-outfmt` of 0 (or none) to 4, whose standard error has none of the
+    tabular formats' lines (subjects without residues: NCBI's `The average subject length is too
+    short`; queries without residues: the first batch's `Sequence contains no data`), and runs that
+    complete, whose stream 3 adds those lines after the argv's standard error (after a subject's
+    warning where the argv asks for outfmt 0 or 1, before it for outfmt 6).
+
+    The application start's error without a line end (review r2 L2): `-conffile` of a file that is
+    not registered (NCBI's `Critical: (106.23) Registry file "x.ini" not found, aborting.`).
+
+    TBLASTX runs whose messages go nowhere (`-logfile /dev/null`, `-logfile ""`; review r3 M1):
+    stream 3 is empty, as the CLI's standard error for every format."""
+    inputs = {
+        "blastp": ["-query", "tests/fasta/outfmt0/e2e_many_query.faa",
+                   "-subject", "tests/fasta/outfmt0/e2e_many_subject.faa"],
+        "tblastn": ["-query", "tests/fasta/outfmt0/e2e_many_query.faa",
+                    "-subject", "tests/fasta/outfmt0/e2e_many_subject.fna"],
+        "blastn": ["-query", "tests/fasta/outfmt0/multi_query.fasta", "-subject", "tests/fasta/outfmt0/multi_subject.fasta",
+                   "-task", "blastn", "-word_size", "7", "-evalue", "1000"],
+        "tblastx": ["-query", "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+                    "-subject", "tests/fasta/outfmt0/tblastx_multi_subject.fasta"],
+        "blastx": ["-query", "tests/db_search/bslice_q.fna", "-subject", "tests/db_search/bslice.faa"],
+    }
+    empty = "tests/fixtures/fasta_input/rec_empty_all"
+    # Subjects without residues (BLASTN, TBLASTX) and queries without residues (the others).
+    without_residues = {
+        "blastn": ["-query", "tests/fasta/outfmt0/multi_query.fasta", "-subject", f"{empty}.s.nuc.fa"],
+        "tblastx": ["-query", "tests/fasta/outfmt0/tblastx_multi_query.fasta", "-subject", f"{empty}.s.nuc.fa"],
+        "blastp": ["-query", f"{empty}.q.prot.faa", "-subject", "tests/fasta/outfmt0/e2e_many_subject.faa"],
+        "tblastn": ["-query", f"{empty}.q.prot.faa", "-subject", "tests/fasta/outfmt0/e2e_many_subject.fna"],
+        "blastx": ["-query", f"{empty}.q.nuc.fa", "-subject", "tests/db_search/bslice.faa"],
+    }
+    # Subjects with a record without residues among others: NCBI's `Subject sequence contains no
+    # data` warning in a run that completes.
+    nucleotide, protein = "tests/fasta/outfmt11/arch_tbx_s_emptyrec.fna", "tests/fasta/outfmt11/arch_bp_emptysubj.faa"
+    warned = {program: [*argv[:argv.index("-subject") + 1], protein if program in ("blastp", "blastx") else nucleotide,
+                        *argv[argv.index("-subject") + 2:]]
+              for program, argv in inputs.items()}
+    searches = []
+
+    def add(case_id: str, program: str, options: list[str], outfmt: str | None = None, prolog: bool = True,
+            failure: bool = True, given: dict | None = None) -> None:
+        searches.append({"program": program, "argv": [program, *(given or inputs)[program], *options],
+                         "cwd": str(REPO / "LOSAT"), "cases": [case_id], "frozen": {},
+                         **({"expect": "failure"} if failure else {}),
+                         **({"outfmt": outfmt} if outfmt else {}), **({} if prolog else {"prolog": False})})
+
+    for program in FORMATS:
+        add(f"own_search.{program}.na0.outfmt6", program, ["-num_alignments", "0"], "6")
+        add(f"own_search.{program}.na0", program, ["-num_alignments", "0"], failure=False)
+    overflow = ["-num_descriptions", "2147483647"]
+    add("own_search.blastn.nd_overflow", "blastn", overflow, prolog=False)
+    add("own_search.blastn.nd_overflow.outfmt6", "blastn", overflow, "6", failure=False)
+    for outfmt, name in ((None, "outfmt0"), ("6", "outfmt6")):
+        add(f"own_search.blastn.nd_overflow.na0.{name}", "blastn", [*overflow, "-num_alignments", "0"], outfmt,
+            prolog=False)
+        for program in ("blastx", "blastp", "tblastn", "tblastx"):
+            add(f"own_search.{program}.na0.evalue0.{name}", program, ["-num_alignments", "0", "-evalue", "0"],
+                outfmt, prolog=False)
+    handler = {
+        "line_length": ["-line_length", "80"],
+        "sorthits": ["-sorthits", "1"],
+        "sorthsps": ["-sorthsps", "1"],
+        "nd5_na5": ["-num_descriptions", "5", "-num_alignments", "5"],
+    }
+    for program in FORMATS:
+        for name, options in handler.items():
+            add(f"handler.{program}.{name}.no_residues", program, options, given=without_residues)
+        add(f"handler.{program}.sorthsps.no_residues.outfmt1", program, handler["sorthsps"], "1",
+            given=without_residues)
+        add(f"handler.{program}.line_length.sorthsps", program, [*handler["line_length"], *handler["sorthsps"]],
+            failure=False)
+        add(f"handler.{program}.line_length.sorthsps.outfmt1", program,
+            [*handler["line_length"], *handler["sorthsps"]], "1", failure=False)
+        for outfmt in (None, "1", "6"):
+            add(f"handler.{program}.line_length.sorthsps.warned{'.outfmt' + outfmt if outfmt else ''}", program,
+                [*handler["line_length"], *handler["sorthsps"]], outfmt, failure=False, given=warned)
+    add("start.blastp.conffile_missing", "blastp", ["-conffile", "x.ini"], prolog=False)
+    for name, logfile in (("devnull", "/dev/null"), ("empty", "")):
+        add(f"logfile.tblastx.na0.{name}", "tblastx", ["-num_alignments", "0", "-logfile", logfile], failure=False)
+        add(f"logfile.tblastx.line_length.warned.{name}", "tblastx", [*handler["line_length"], "-logfile", logfile],
+            failure=False, given=warned)
+    return searches
 
 
 def quick() -> list[dict]:
@@ -438,6 +549,7 @@ def main() -> int:
     if not args.group:
         searches.append(direct_tblastx())
         searches += window_masker()
+        searches += own_search()
     args.out.write_text(json.dumps(searches, indent=2) + "\n")
     print(f"{len(searches)} searches -> {args.out}")
     return 0

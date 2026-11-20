@@ -2212,11 +2212,12 @@ mod tests {
                     ),
                 )),
                 255,
-                &*format!(
+                // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
+                &*crate::wording::losat_text(&format!(
                     "Error: NCBI C++ Exception:\n    T0 \"{}/src/f.cpp\", line 7: Error: \
                      (CException::eUnknown) m\n",
                     crate::ncbi_exception::NCBI_BUILD_ROOT
-                ),
+                )),
             ),
             (
                 MakedbError::Build(WriteDbError::Other("x".into())),

@@ -989,7 +989,7 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     named_refusal(scope.get_name(), name).unwrap_or_else(|| {
         clap::Error::raw(
             ErrorKind::UnknownArgument,
-            format!("unknown option or argument '{text}'; use -help for CLI v2 syntax"),
+            format!("unknown option or argument '{text}'; use -help to list the options"),
         )
     })
 }
@@ -1267,7 +1267,7 @@ pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
         LibraryPart::Absent => "the command line",
     };
     format!(
-        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: the Web engine's ABI v1 runs no NCBI application start, which reads it"
+        "the option -{name} runs on {places} of LOSAT's {shown} only: the Web engine's ABI v1 runs no NCBI application start, which reads it"
     )
 }
 
@@ -1328,7 +1328,7 @@ pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
         LibraryPart::Absent => ("the command line", "the Web engine does"),
     };
     format!(
-        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: {refusers} not write NCBI's version text"
+        "the option -{name} runs on {places} of LOSAT's {shown} only: {refusers} not write NCBI's version text"
     )
 }
 
@@ -1350,7 +1350,7 @@ fn refusal_program_name(program: &str) -> String {
 /// Web engine of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
 pub(crate) fn xml_help_refusal(shown: &str) -> String {
     format!(
-        "the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"
+        "the option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"
     )
 }
 
@@ -2624,7 +2624,10 @@ pub(crate) fn catch_all_text(message: &str) -> std::borrow::Cow<'_, str> {
         return std::borrow::Cow::Borrowed(message);
     }
     if message.starts_with("BLAST query/options error: ")
-        && message.ends_with("\nPlease refer to the BLAST+ user manual.\n")
+        && message
+            .strip_suffix('\n')
+            .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER))
+            .is_some_and(|s| s.ends_with('\n'))
     {
         std::borrow::Cow::Borrowed("\n\n")
     } else {

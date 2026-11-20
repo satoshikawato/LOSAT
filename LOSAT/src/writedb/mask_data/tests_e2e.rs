@@ -689,7 +689,12 @@ fn every_mask_parse_file_runs_end_to_end() {
             );
         };
         assert_eq!(run.status, ncbi.rc, "{file}: {stderr}");
-        assert_eq!(stderr, ncbi.stderr, "{file}: standard error");
+        // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
+        assert_eq!(
+            stderr,
+            crate::wording::losat_text(&ncbi.stderr),
+            "{file}: standard error"
+        );
         if class == Class::Read && run.status == 0 {
             compared += assert_database(&tmp.base("db"), protein, file, ncbi);
             listed += ncbi.masks.values().map(BTreeMap::len).sum::<usize>();
@@ -1167,9 +1172,10 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
         "line 3: \"masks\" expected",
     );
     let text = format!("Error: {}", thrown.what());
+    // NCBI's `Error: NCBI C++ Exception:` report in LOSAT's words (`crate::wording`): its message.
     assert_eq!(
         text.lines().next(),
-        Some("Error: NCBI C++ Exception:"),
+        Some("Error: line 3: \"masks\" expected"),
         "{text}"
     );
     assert_eq!(

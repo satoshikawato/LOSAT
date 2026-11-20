@@ -23,7 +23,10 @@ use super::{
 };
 #[cfg(feature = "parallel")]
 use super::{x_bx_par_rule, x_inner_serial, x_kappa_workers, x_speculate_match, XKappaWorker};
+use crate::algorithm::blastx::kappa::{sw_batch_failed, sw_endless, sw_heap_past};
 use crate::algorithm::blastx::x_timing::{self, End as XEnd};
+use crate::algorithm::common::database::FetchMarks;
+use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
 
 /// What the kappa branch of `batch_end` reads and writes of the batch: the batch with the
 /// parameters of its contexts, the Kappa state, the stream the matches are read from, and the
@@ -51,12 +54,24 @@ impl Runtime<'_> {
     /// result in the queries' hit lists; returns the clock of the finish interval of
     /// `LOSAT_TIMING` (`None` when it is off).
     ///
+    /// `SW`: `-use_sw_tback` (item X4b-2), the Smith-Waterman redo of each match, with or without
+    /// composition-based statistics (`KappaState`'s redo), chosen once per batch. Its batch
+    /// keeps NCBI's status of the last match the redo reached (core's `SwBatchStatus`, the rule's
+    /// one owner): a list whose subject the fetch excludes stays in the stream as a marker that
+    /// clears it (`FetchMarks`); a failed last match fails the batch (`sw_batch_failed`). In
+    /// e-value mode the redo of a window tests the heap that its query context indexes (NCBI's
+    /// heap of that query of the batch, or a read past the batch's heaps, `sw_heap_past`), so the
+    /// matches are redone one by one in stream order; in cutoff-score mode (sum statistics) a
+    /// match's redo reads no heap and no state of the match before it (every window adjusts its
+    /// own matrix), so the pool redoes them ahead as for the X-drop redo. The result is NCBI's
+    /// `-num_threads 1` at every thread count.
+    ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2980-2981
     /// ```c++
     /// Int2
     /// Blast_RedoAlignmentCore_MT(EBlastProgramType program_number,
     /// ```
-    pub(super) fn kappa_redo_batch(
+    pub(super) fn kappa_redo_batch<const SW: bool>(
         &mut self,
         args: KappaBatch<'_>,
     ) -> Result<Option<std::time::Instant>> {
@@ -111,6 +126,25 @@ impl Runtime<'_> {
             matches.push(list);
         }
         x_timing::end(XEnd::Read, x_t);
+        // `-use_sw_tback`: the lists that NCBI's fetch excludes (a `-negative_seqidlist` that keeps
+        // a subject without a line), by their place in the stream, the batch's status, and
+        // whether the redo reads the heaps (e-value mode).
+        let (marks, reads_heaps, do_link_hsps) = if SW {
+            let excluded = self
+                .subjects
+                .seqdb()
+                .and_then(crate::algorithm::common::database::FetchExcluded::of);
+            let marks = FetchMarks::of(excluded.as_ref(), &matches, |list| {
+                u32::try_from(list.oid).ok()
+            })
+            .map_err(|failed| {
+                crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
+            })?;
+            (marks, !state.do_link_hsps(), state.do_link_hsps())
+        } else {
+            (FetchMarks::default(), false, false)
+        };
+        let mut sw_status = SwBatchStatus::default();
         // Redo the matches of one batch on the search pool before walking them in stream order.
         // A match is a function of its own HSP list and of the matrix left by the match before
         // it; `x_speculate_match` returns a result only when the latter was never read, and
@@ -156,6 +190,7 @@ impl Runtime<'_> {
                 && rayon::current_thread_index().is_some()
                 && rayon::current_num_threads() > 1
                 && matches.len() > 1
+                && !reads_heaps
         }) {
             (0..x_kappa_workers(rayon::current_num_threads(), matches.len()))
                 .map(|_| {
@@ -190,10 +225,6 @@ impl Runtime<'_> {
         let mut x_reused = 0usize;
         let mut x_serial = 0usize;
         let x_t_loop = x_timing::lap();
-        #[cfg_attr(
-            not(feature = "parallel"),
-            expect(unused_variables, reason = "used only with parallel")
-        )]
         for (match_index, list) in matches.iter().enumerate() {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
             // ```c
@@ -210,10 +241,15 @@ impl Runtime<'_> {
             if !x_workers.is_empty() && match_index % x_batch == 0 {
                 use rayon::prelude::*;
                 let batch_lists = &matches[match_index..(match_index + x_batch).min(matches.len())];
-                // Early termination only becomes true as the heaps fill.
+                // Early termination only becomes true as the heaps fill. A list that the fetch
+                // excludes is never redone (`-use_sw_tback`'s markers).
                 let wanted: Vec<bool> = batch_lists
                     .iter()
-                    .map(|list| !CompoHeap::early(list.best_evalue, heaps))
+                    .enumerate()
+                    .map(|(position, list)| {
+                        !CompoHeap::early(list.best_evalue, heaps)
+                            && !marks.excluded(match_index + position)
+                    })
                     .collect();
                 let (options, subjects, db_length) = (self.options, self.subjects, self.db_length);
                 let full = &full;
@@ -275,7 +311,13 @@ impl Runtime<'_> {
             // ```
             let early = CompoHeap::early(list.best_evalue, heaps);
             self.observer.early(list.best_evalue, heaps.len(), early);
-            if early {
+            if SW {
+                // The early termination test, then the fetch, which may exclude the subject: a
+                // list that reaches the fetch sets the batch's status (`SwBatchStatus`).
+                if !sw_status.reaches_redo(early, marks.excluded(match_index)) {
+                    continue;
+                }
+            } else if early {
                 continue;
             }
             #[cfg(feature = "parallel")]
@@ -306,13 +348,38 @@ impl Runtime<'_> {
                 if let Some(matrix) = matrix {
                     state.x_set_matrix(Some(*matrix));
                 }
+                if SW {
+                    // A match redone ahead ended (a failed or endless redo is redone here).
+                    sw_status.redone(Ok(()), || sw_endless(do_link_hsps))?;
+                }
                 (output, best_score)
             } else {
                 x_serial += 1;
                 let x_t = x_timing::lap();
                 let encoded = self.subjects.read_encoded(list.oid)?;
                 let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
-                let redone = state.redo_list_observed(&input, batch, &encoded)?;
+                let redone = if SW {
+                    // NCBI's heap test in e-value mode: the heap of the batch's query that the
+                    // window's query context indexes, with the subject's OID
+                    // (`matchingSeq->index`); a context at or past the batch's query count reads
+                    // past NCBI's array of heaps (`sw_heap_past`).
+                    let (oid, queries_in_batch) = (list.oid, heaps.len());
+                    let result = state.redo_list_tested(
+                        &input,
+                        batch,
+                        &encoded,
+                        &mut |context, evalue, score| match heaps.get_mut(context) {
+                            Some(heap) => Ok(heap.would_insert(evalue, score, oid)),
+                            None => Err(sw_heap_past(context, queries_in_batch)),
+                        },
+                    );
+                    match sw_status.redone(result, || sw_endless(do_link_hsps))? {
+                        Some(redone) => redone,
+                        None => continue,
+                    }
+                } else {
+                    state.redo_list_observed(&input, batch, &encoded)?
+                };
                 let finalized = finalize_redone(
                     &redone,
                     batch,
@@ -434,6 +501,13 @@ impl Runtime<'_> {
         //     }
         //     if (COMPO_INTENSE_DEBUG) {
         // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
+        // The status of the last match the redo reached fails the batch.
+        if SW && sw_status.failed() {
+            return Err(sw_batch_failed(
+                heaps.first().is_some_and(|heap| !heap.entries.is_empty()),
+            ));
+        }
         x_timing::end(XEnd::Loop, x_t_loop);
         x_timing::end_add(XEnd::Matches, matches.len() as u64);
         x_timing::end_add(XEnd::Reused, x_reused as u64);

@@ -1534,7 +1534,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "best_hit_score_edge",
     "import_search_strategy",
     "remote",
-    "use_sw_tback",
 ];
 
 fn is_unported_blastx_arg(name: &str) -> bool {

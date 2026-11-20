@@ -1601,8 +1601,11 @@ impl PreliminarySink for Runtime<'_> {
         // stream before the redo or the traceback reads it. An ungapped search fetches no protein
         // subject; its such hits leave at the Seq-aligns (`ReportedSubjects::drop_unaligned`).
         // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
-        // (`FetchExcluded::refusal`).
-        if self.options.gapped {
+        // (`FetchExcluded::refusal`). The Smith-Waterman redo (`-use_sw_tback`, `sw_redo`) keeps
+        // such lists in the stream as markers, which clear its batch's status
+        // (`kappa_batch`).
+        let sw_redo = self.options.use_sw_tback && self.options.gapped;
+        if self.options.gapped && !sw_redo {
             if let Some(excluded) = self
                 .subjects
                 .seqdb()
@@ -1658,7 +1661,9 @@ impl PreliminarySink for Runtime<'_> {
         //         }
         //     }
         // ```
-        let mut inactive_heaps: Vec<_> = if self.options.composition != 0 {
+        // The redo runs with composition-based statistics or with the Smith-Waterman traceback.
+        let redo = self.options.composition != 0 || sw_redo;
+        let mut inactive_heaps: Vec<_> = if redo {
             (0..queries.len())
                 .map(|_| CompoHeap::new(self.options.hitlist_size as usize))
                 .collect()
@@ -1687,7 +1692,7 @@ impl PreliminarySink for Runtime<'_> {
         //             }
         //         }
         // ```
-        let mut heaps: Vec<_> = if self.options.composition != 0 {
+        let mut heaps: Vec<_> = if redo {
             (0..queries.len())
                 .map(|_| CompoHeap::new(self.options.hitlist_size as usize))
                 .collect()
@@ -1732,7 +1737,7 @@ impl PreliminarySink for Runtime<'_> {
         //     }
         // ```
 
-        let mut kappa = if self.options.composition != 0 {
+        let mut kappa = if redo {
             Some(KappaState::new(batch, &full, self.options)?)
         } else {
             None
@@ -1814,7 +1819,7 @@ impl PreliminarySink for Runtime<'_> {
         //     return kBlastHSPStream_Success;
         // ```
         let mut result_batches = Vec::new();
-        if !self.options.gapped || self.options.composition == 0 {
+        if !self.options.gapped || !redo {
             loop {
                 let lists = stream.batch_read_observed(self.observer);
                 if lists.is_empty() {
@@ -1836,7 +1841,7 @@ impl PreliminarySink for Runtime<'_> {
                 }
             }
         } else if let Some(state) = &mut kappa {
-            x_t_finish = self.kappa_redo_batch(KappaBatch {
+            let kappa_batch = KappaBatch {
                 batch,
                 full: &full,
                 state,
@@ -1844,7 +1849,12 @@ impl PreliminarySink for Runtime<'_> {
                 queries: &mut queries,
                 heaps: &mut heaps,
                 inactive_heaps: &mut inactive_heaps,
-            })?;
+            };
+            x_t_finish = if sw_redo {
+                self.kappa_redo_batch::<true>(kappa_batch)?
+            } else {
+                self.kappa_redo_batch::<false>(kappa_batch)?
+            };
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1640-1707
             // ```c++

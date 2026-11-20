@@ -347,6 +347,9 @@ pub struct Inputs<'a> {
     pub(crate) database: bool,
     /// The PSSM file whose sequence is the one query (`-in_pssm`), in place of query records.
     pub(crate) pssm: Option<&'a std::path::Path>,
+    /// The search strategy whose queries and subject (or database) these are
+    /// (`Inputs::strategy`).
+    pub(crate) strategy: Option<&'a super::strategy::Strategy>,
 }
 
 impl<'a> Inputs<'a> {
@@ -359,6 +362,7 @@ impl<'a> Inputs<'a> {
             subject_name: "subject",
             database: false,
             pssm: None,
+            strategy: None,
         }
     }
 
@@ -381,6 +385,7 @@ impl<'a> Inputs<'a> {
             subject_name: name,
             database: true,
             pssm: None,
+            strategy: None,
         }
     }
 
@@ -413,6 +418,25 @@ impl<'a> Inputs<'a> {
         Self {
             pssm: Some(path),
             ..Self::database(&[], name)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:565-599
+    /// The queries and the subjects (or the database) that the search strategy `strategy` carries
+    /// (`Search::read_strategy`): the command line's `-import_search_strategy FILE` without
+    /// `-query`, `-subject` or `-db`. The search is the one that read the strategy; its argv
+    /// supplies the options that the import takes from the command line, and the strategy the
+    /// others. The reports name the subject set as the command line names an imported one
+    /// (`User specified sequence set.`).
+    pub fn strategy(strategy: &'a super::strategy::Strategy) -> Self {
+        Self {
+            query: strategy.queries(),
+            subject: strategy.subjects(),
+            query_name: "query",
+            subject_name: strategy.database().unwrap_or("subject"),
+            database: strategy.database().is_some(),
+            pssm: None,
+            strategy: Some(strategy),
         }
     }
 

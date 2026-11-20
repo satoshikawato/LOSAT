@@ -193,6 +193,23 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Requested), Strin
 /// reading of `-outfmt`, which NCBI makes in `Run`, after the settings and a dry run's end
 /// (`started_command`).
 fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
+    parse_words_imported(words).map(|(program, command, _)| (program, command))
+}
+
+/// The queries and the subjects (FASTA bytes) that the argv's search strategy carries and the argv
+/// does not override with its own `-query` or `-subject`: empty for an input that the strategy
+/// does not give (`parse_words_imported`).
+pub struct Supplied {
+    pub queries: Vec<u8>,
+    pub subjects: Vec<u8>,
+}
+
+/// `parse_words`, and with an `-import_search_strategy NAME` the command line's import of the
+/// registered strategy file `NAME` (kind 3, `files::strategy`): the arguments are the import's
+/// (`losat::web_adapter::import_strategy`: the engine's `apply_strategy`, the path of the command
+/// line), and what the strategy carries as inputs comes with them. A file that is not registered
+/// is the command line's file that is not accessible.
+fn parse_words_imported(words: &[&str]) -> Result<(Program, Commands, Option<Supplied>), String> {
     for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
         if matches!(key, "-out" | "--out") {
@@ -208,7 +225,30 @@ fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
     let cli: Cli = losat::web_adapter::try_parse_cli(argv)
         .map_err(|error| losat::web_adapter::command_line_message(&error, false))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
-    Ok((program, cli.command))
+    let command = cli.command;
+    let Some(name) =
+        losat::web_adapter::strategy_file_name(&command).map(std::path::Path::to_path_buf)
+    else {
+        return Ok((program, command, None));
+    };
+    let bytes = crate::files::strategy(&name).ok_or_else(|| {
+        format!(
+            "Command line argument error: Argument \"import_search_strategy\". File is not accessible:  `{}'",
+            name.display()
+        )
+    })?;
+    let applied =
+        losat::web_adapter::import_strategy(command, &bytes).map_err(|error| error.to_string())?;
+    let supplied = Supplied {
+        queries: applied.queries,
+        subjects: applied.subjects,
+    };
+    Ok((program, applied.command, Some(supplied)))
+}
+
+/// `parse` with the inputs that the argv's search strategy supplies (`parse_words_imported`).
+pub fn parse_imported(words: &[&str]) -> Result<(Program, Commands, Option<Supplied>), String> {
+    parse_words_imported(words)
 }
 
 /// The second part of `parse_run`: the argv's `-outfmt`, read as the CLI reads it.
@@ -267,7 +307,8 @@ fn read_outfmt(
 
 /// Whether a run of `words` (program name first) takes its query and subject from
 /// `store::register_inputs`, which reads them together for its argv, and not from `register`: an
-/// argv with `-parse_deflines` (`parse_deflines_of`), whose reading of the inputs needs the argv
+/// argv with `-import_search_strategy`, whose inputs may come from the strategy, or with
+/// `-parse_deflines` (`parse_deflines_of`), whose reading of the inputs needs the argv
 /// (the ids of the deflines, read in one scope of ids for the query and the subjects), that is not
 /// a dry run, which reads no input. False for an argv that the CLI's parser rejects.
 pub fn inputs_together(words: &[&str]) -> bool {
@@ -275,9 +316,12 @@ pub fn inputs_together(words: &[&str]) -> bool {
         losat::web_adapter::preparse(words.get(1..).unwrap_or(&[])),
         losat::web_adapter::Preparsed::Words { dryrun: true, .. }
     );
+    // A strategy's queries and subjects are read here too, with the argv's options.
     !dry_run
-        && parse_words(words)
-            .is_ok_and(|(_, command)| losat::web_adapter::parse_deflines_of(&command))
+        && parse_words(words).is_ok_and(|(_, command)| {
+            losat::web_adapter::parse_deflines_of(&command)
+                || losat::web_adapter::strategy_file_name(&command).is_some()
+        })
 }
 
 /// Whether the run of `words` writes the BLAST archive (outfmt 11), whose Bioseqs show the whole
@@ -964,12 +1008,24 @@ impl Searched {
 /// failed (`emit::discard`), and the host drops what it received of it where a chunk reached it
 /// already (a report that failed after 1 MiB, BLASTX's later query batch).
 fn search(
-    command: Commands,
+    mut command: Commands,
     formats: &[Output],
     query: &[FastaRecord],
     subject: &[FastaRecord],
     diagnostics: &mut (dyn std::io::Write + Send),
 ) -> Result<Searched, Failed> {
+    // An imported strategy's warnings (`RecoverSearchStrategy`, `x_IssueWarningsForIgnoredOptions`)
+    // come first, before the program's own, as the CLI posts them at its start.
+    let warnings = losat::web_adapter::take_strategy_warnings(&mut command);
+    if let Err(error) = diagnostics.write_all(&warnings) {
+        let message = format!("the diagnostics could not be written: {error}");
+        return Err(Failed {
+            cli_stderr: message.clone().into_bytes(),
+            message,
+            native: None,
+            fault: true,
+        });
+    }
     let mut writers: Vec<StreamWriter> = formats
         .iter()
         .map(|format| StreamWriter::new(format.stream))
@@ -1776,6 +1832,10 @@ fn emit_hit_records(hits: &[PairwiseHit], recorder: &RangeRecorder, ordinals: Op
 #[cfg(test)]
 #[path = "run_start_tests.rs"]
 mod start_tests;
+
+#[cfg(test)]
+#[path = "run_strategy_tests.rs"]
+mod strategy_tests;
 
 #[cfg(test)]
 mod tests {

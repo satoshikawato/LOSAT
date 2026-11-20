@@ -32,9 +32,18 @@ use crate::cli::{Cli, Commands};
 // ```
 /// The options that the library API sets itself and does not take in an argv: the inputs
 /// (`Inputs` gives the records and their names, a database's name, and the PSSM file of a PSSM
-/// query, `-in_pssm` of psiblast and tblastn), the output file and the output format (arguments
-/// of `run_collect`, `run` and `run_to_file`).
-pub const API_OWNED: &[&str] = &["query", "subject", "db", "in_pssm", "out", "outfmt"];
+/// query, `-in_pssm` of psiblast and tblastn, and the search strategy file of
+/// `-import_search_strategy`, `Search::read_strategy` and `Inputs::strategy`), the output file and
+/// the output format (arguments of `run_collect`, `run` and `run_to_file`).
+pub const API_OWNED: &[&str] = &[
+    "query",
+    "subject",
+    "db",
+    "in_pssm",
+    "import_search_strategy",
+    "out",
+    "outfmt",
+];
 
 // No NCBI counterpart: the search strategy file (`-export_search_strategy`,
 // `report::archive::strategy`) is an output outside those the API owns too: a file the caller
@@ -98,14 +107,53 @@ impl Search {
             )
     }
 
+    /// The file of `run_to_file` (`writing_to`).
+    pub(crate) fn out_path(&self) -> Option<&std::path::Path> {
+        self.out.as_deref()
+    }
+
+    /// The parsed arguments of the search's argv with an `-import_search_strategy` (the file
+    /// itself is the engine's `apply_strategy`'s, `Search::read_strategy`) and neither `-query`
+    /// nor `-subject`: the command line's import without overrides.
+    pub(crate) fn strategy_command(
+        &self,
+        out: Option<&std::path::Path>,
+    ) -> Result<Commands, Error> {
+        let argv: Vec<String> = self
+            .argv
+            .iter()
+            .cloned()
+            .chain([
+                "-import_search_strategy".to_string(),
+                "strategy".to_string(),
+            ])
+            .collect();
+        let query = (QUERY, std::ffi::OsStr::new("-"));
+        parse_words(self.program, &argv, query, None, out)
+    }
+
     /// The parsed arguments, with either kind of subject: `validate` accepted one of them. The
     /// reader's options come from here before the search refuses what the API does not take
     /// (`parse`).
     pub(super) fn any_subject(&self) -> Commands {
         let query = (QUERY, std::ffi::OsStr::new("query"));
-        parse_words(self.program, &self.argv, query, [SUBJECT, "subject"], None)
-            .or_else(|_| parse_words(self.program, &self.argv, query, [DATABASE, "subject"], None))
-            .expect("validated argv")
+        parse_words(
+            self.program,
+            &self.argv,
+            query,
+            Some([SUBJECT, "subject"]),
+            None,
+        )
+        .or_else(|_| {
+            parse_words(
+                self.program,
+                &self.argv,
+                query,
+                Some([DATABASE, "subject"]),
+                None,
+            )
+        })
+        .expect("validated argv")
     }
 
     /// Whether the search's argv has `-parse_deflines` (`read_inputs`).
@@ -144,6 +192,15 @@ impl Search {
     /// `-in_pssm`), so this can fail with the parser's message where `validate`, which knows no
     /// inputs, could not. A PSSM query is psiblast's and tblastn's only, and a file (not `-`).
     pub(crate) fn command(&self, inputs: Inputs<'_>) -> Result<Commands, Error> {
+        // A strategy's arguments are the import's (`Search::read_strategy`), set on the program's
+        // defaults; the search's `-out` is the only word of its own that they take.
+        if let Some(strategy) = inputs.strategy {
+            if self.out.is_some() {
+                // The parser checks the name of `-out` as for any search.
+                self.strategy_command(self.out.as_deref())?;
+            }
+            return strategy.command(self);
+        }
         let subject_flag = if inputs.database { DATABASE } else { SUBJECT };
         let query = match inputs.pssm {
             Some(path) => {
@@ -210,7 +267,7 @@ fn parse(
             )));
         }
     }
-    parse_words(program, argv, query, subject, out)
+    parse_words(program, argv, query, Some(subject), out)
 }
 
 /// Parses the argv with the command line's parser, as `losat <program> <query_flag> <query>
@@ -223,7 +280,7 @@ fn parse_words(
     program: Program,
     argv: &[String],
     (query_flag, query): (&str, &std::ffi::OsStr),
-    [subject_flag, subject]: [&str; 2],
+    subject: Option<[&str; 2]>,
     out: Option<&std::path::Path>,
 ) -> Result<Commands, Error> {
     let words = [
@@ -231,9 +288,10 @@ fn parse_words(
         std::ffi::OsStr::new(program.name()),
         std::ffi::OsStr::new(query_flag),
         query,
-        std::ffi::OsStr::new(subject_flag),
-        std::ffi::OsStr::new(subject),
     ];
+    let subject = subject
+        .into_iter()
+        .flat_map(|[flag, name]| [std::ffi::OsStr::new(flag), std::ffi::OsStr::new(name)]);
     let out = out.map(|path| {
         let mut word = std::ffi::OsString::from("-out=");
         word.push(path);
@@ -242,6 +300,8 @@ fn parse_words(
     let cli: Cli = crate::cli::try_parse_with_own_start(
         words
             .iter()
+            .copied()
+            .chain(subject)
             .map(|word| word.to_os_string())
             .chain(out)
             .chain(argv.iter().map(std::ffi::OsString::from)),
@@ -277,6 +337,11 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
             }
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: a PSSM query is given as the inputs (Inputs::pssm)"
+            )));
+        }
+        if name == "import_search_strategy" {
+            return Err(Error::Argv(format!(
+                "{key} is not accepted by the library API: a search strategy is given as bytes (Search::read_strategy, Inputs::strategy)"
             )));
         }
         if API_OWNED.contains(&name) {

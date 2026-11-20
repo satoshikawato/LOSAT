@@ -389,7 +389,25 @@ pub fn register_inputs(
     query: &[u8],
     subject: &[u8],
 ) -> Result<(u32, u32, String), String> {
-    let (program, command) = crate::run::parse(words)?;
+    let (program, command, supplied) = crate::run::parse_imported(words)?;
+    // An argv with `-import_search_strategy` takes the inputs that the strategy carries and the
+    // argv does not override (`Supplied`), in place of the bytes that the host gives for them (it
+    // gives none: the argv has no `-query` or `-subject` of its own).
+    let (query, subject) = match &supplied {
+        Some(supplied) => (
+            if supplied.queries.is_empty() {
+                query
+            } else {
+                &supplied.queries
+            },
+            if supplied.subjects.is_empty() {
+                subject
+            } else {
+                &supplied.subjects
+            },
+        ),
+        None => (query, subject),
+    };
     let read = || {
         losat::web_adapter::read_search_inputs(
             program.api(),

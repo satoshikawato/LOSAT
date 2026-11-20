@@ -51,6 +51,8 @@ mod library_api;
 mod library_examples;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
+#[path = "../library_strategy.rs"]
+mod library_strategy;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]

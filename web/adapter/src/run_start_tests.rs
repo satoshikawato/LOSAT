@@ -399,11 +399,9 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
         start_json(&["tblastn", "-conffile", "c.ini", "-dryrun", "-h"]).unwrap(),
         r#"{"conffile":"c.ini","log_file":null,"dry_run":false,"register_inputs":false,"prints":"help"}"#
     );
-    // `-xmlhelp` prints nothing in LOSAT Web: the parser refuses it (line RG E2x-1), so no run of the
-    // argv reads inputs.
     assert_eq!(
         start_json(&["blastx", "-parse_deflines", "-xmlhelp"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":null}"#
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":"help"}"#
     );
     // The words before a help word are read first: an error there is the run's.
     assert_eq!(
@@ -630,11 +628,10 @@ fn printing_run(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) 
 }
 
 // Line WQA's D14 (2026-11-20): the help and version words print what the command line prints to
-// its standard output (the parser's help, NCBI's version texts with LOSAT's values: `help_text` and
-// `ncbi_version_request`, the command line's own producers), on stream 11, with no input and no
-// search; `validate` accepts them. `-xmlhelp` stays refused with the library's words (line RG E2x-1,
-// the Owner's choice of 2026-11-13). `web/adapter/tests/v_abi.js` compares the bytes with the
-// native command line.
+// its standard output (the parser's help, the XML of `-xmlhelp`, NCBI's version texts with LOSAT's
+// values: `printed_text` and `ncbi_version_request`, the command line's own producers), on stream
+// 11, with no input and no search; `validate` accepts them. `web/adapter/tests/v_abi.js` compares
+// the bytes with the native command line.
 #[test]
 fn help_and_version_words_print_the_command_lines_text() {
     for (program, _, _) in SEARCHES {
@@ -643,6 +640,7 @@ fn help_and_version_words_print_the_command_lines_text() {
             "-help",
             "-help-full",
             "--help",
+            "-xmlhelp",
             "-version",
             "-version-full",
             "-version-full-xml",
@@ -673,12 +671,13 @@ fn help_and_version_words_print_the_command_lines_text() {
                     );
                     text.clone()
                 }
+                "-xmlhelp" => assert_xml(&text),
                 _ => {
                     let error = losat::web_adapter::try_parse_cli(
                         std::iter::once("losat").chain(words.iter().copied()),
                     )
                     .unwrap_err();
-                    losat::web_adapter::help_text(&error, false).unwrap()
+                    losat::web_adapter::printed_text(&error, false).unwrap()
                 }
             };
             assert_eq!(text, expected, "{program} {word}");
@@ -687,17 +686,6 @@ fn help_and_version_words_print_the_command_lines_text() {
         let refused = argv(program, &["-evalue", "x", "-h"]);
         assert!(validate(&refused).is_err(), "{program}");
         assert!(printing_run(&refused).0.is_err(), "{program}");
-        let xml = argv(program, &["-evalue", "1", "-xmlhelp"]);
-        let refusal = format!(
-            "error: the option -xmlhelp runs on the command line of LOSAT's {} only: the library API and the Web engine do not write NCBI's XML description of the arguments",
-            program.to_ascii_uppercase()
-        );
-        assert_eq!(validate(&xml).unwrap_err().trim_end(), refusal, "{program}");
-        assert_eq!(
-            printing_run(&xml).0.unwrap_err().trim_end(),
-            refusal,
-            "{program}"
-        );
     }
 }
 

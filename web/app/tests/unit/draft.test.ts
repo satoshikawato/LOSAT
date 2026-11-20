@@ -1284,8 +1284,7 @@ describe('SearchDraft submit', () => {
   });
 
   // WA-FM-04: the CLI's messages for these name -subject and -num_threads, which the browser sets itself. The CLI's help
-  // words are not refused: the engine prints the command line's help (line WQA's D14, 2026-11-20); -xmlhelp is (line RG
-  // E2x-1, the Owner's choice of 2026-11-13).
+  // words are not refused: the engine prints the command line's help (line WQA's D14, 2026-11-20).
   it("refuses in Additional options the options that a search in the browser cannot have, in the browser's words", async () => {
     const { draft } = setup({ useCoordinator: true });
     draft.setPaste('query', '>q\nACGT\n');
@@ -1297,7 +1296,6 @@ describe('SearchDraft submit', () => {
       const validation = draft.state.get().validation;
       return validation.state === 'invalid' ? validation.message : validation.state;
     };
-    expect(await refusal('-ungapped -xmlhelp')).toBe('-xmlhelp is not available in the browser');
     expect(await refusal('-db nt')).toBe('-db (a database search) is not supported in the browser yet');
     expect(await refusal('-taxids 9606')).toBe('-taxids (a database search filter) is not supported in the browser yet');
     expect(await refusal('-mt_mode 1')).toBe('-mt_mode is managed by LOSAT');

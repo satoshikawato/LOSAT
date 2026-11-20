@@ -56,7 +56,6 @@
 // for every program and word with the host's -num_threads: *start* says what the run prints, `validate` accepts the argv,
 // and `run`, given no inputs (handles 0), writes the CLI's standard output on stream 11 and its standard error on stream
 // 3, and no output format; the words around them, the registry file and the file of -logfile as the CLI reads them.
-// `-xmlhelp`, whose XML the CLI prints, stays refused by name (line RG E2x-1, the Owner's choice of 2026-11-13).
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -751,8 +750,8 @@ function checkSurface(reactor, native) {
 
 // The words with which the command line prints its help or its version (line WQA's D14, 2026-11-20; abi_v2.md §5 stream
 // 11, §9 `prints`), for every program and word, and the words, registry file and file of -logfile around them, each
-// compared with the native CLI's run of the same argv from an empty directory. `-xmlhelp` is refused (line RG E2x-1).
-const HELP_WORDS = ["-h", "-help", "-help-full", "--help"];
+// compared with the native CLI's run of the same argv from an empty directory.
+const HELP_WORDS = ["-h", "-help", "-help-full", "--help", "-xmlhelp"];
 const VERSION_WORDS = ["-version", "-version-full", "-version-full-xml", "-version-full-json"];
 
 function checkPrints(reactor, native) {
@@ -816,25 +815,6 @@ function checkPrints(reactor, native) {
     assert.notEqual(expected.status, 0, `${label}: the CLI fails`);
     assert.equal(validated.status, -1, `${label}: validate fails`);
     assert.equal(validated.error.trimEnd(), expected.stderr.toString().trimEnd(), `${label}: the CLI's message`);
-    count++;
-  }
-  // `-xmlhelp`: the CLI prints NCBI's XML, and the Web engine refuses it by name, prints nothing and runs nothing (line RG
-  // E2x-1, the Owner's choice of 2026-11-13; E2x-2 keeps the XML out of the Wasm).
-  for (const program of Object.keys(FORMATS)) {
-    const argv = [program, ...inputs, "-evalue", "1", "-xmlhelp", "-num_threads", "1"];
-    const label = argv.join(" ");
-    assert.equal(start(argv).prints, null, `${label}: start prints nothing`);
-    const refusal = `error: the option -xmlhelp runs on the command line of LOSAT's ${program.toUpperCase()} only: ` +
-      "the library API and the Web engine do not write NCBI's XML description of the arguments";
-    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
-    assert.equal(validated.status, -1, `${label}: validate fails`);
-    assert.equal(validated.error.trimEnd(), refusal, `${label}: the refusal`);
-    const run = reactor.call("losat_web2_run", argv.join("\0"), 0, 0);
-    assert.equal(run.status, -1, `${label}: run fails`);
-    assert.ok(!(run.streams.get(11)?.length), `${label}: nothing on stream 11`);
-    const expected = cli(argv);
-    assert.equal(expected.status, 0, `${label}: the CLI's exit status`);
-    assert.ok(expected.stdout.toString().startsWith('<?xml version="1.0"?>\n'), `${label}: the CLI prints the XML`);
     count++;
   }
   fs.rmSync(dir, { recursive: true });

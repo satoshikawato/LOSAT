@@ -1,8 +1,7 @@
 // Line WQA's D14 (2026-11-20): the words with which the command line prints its help (`-h`, `-help`,
-// `-help-full`, `--help`) or its version (`-version` and its full forms), typed in "Additional options" or
-// as a value that the command line reads as one, run as the native CLI runs them: the run needs no input,
-// prints the command line's text and searches nothing. `-xmlhelp` stays refused (line RG E2x-1, the
-// Owner's choice of 2026-11-13; search.spec.ts). The results say so, the Outputs
+// `-help-full`, `--help`, `-xmlhelp`) or its version (`-version` and its full forms), typed in "Additional
+// options" or as a value that the command line reads as one, run as the native CLI runs them: the run
+// needs no input, prints the command line's text and searches nothing. The results say so, the Outputs
 // show the text under "Help" or "Version" and save it. With LOSAT_WEB_NATIVE, the saved text is the
 // bytes that the native CLI of the same commit writes on its standard output for the command shown
 // (web/adapter/tests/v_abi.js compares every program and word through the reactors).
@@ -44,7 +43,7 @@ function nativeText(command: string): Buffer | undefined {
 
 const CASES = [
   { id: 'blastn', extra: '-help', kind: 'help', label: 'Help', starts: 'USAGE\n' },
-  { id: 'blastp', extra: '-help-full', kind: 'help', label: 'Help', starts: 'USAGE\n' },
+  { id: 'blastp', extra: '-xmlhelp', kind: 'help', label: 'Help', starts: '<?xml version="1.0"?>' },
   { id: 'blastx', extra: '-version-full-json', kind: 'version', label: 'Version', starts: '{\n' },
   // A toolkit word as the value of a free-text field (the Low complexity regions filter's arguments): the
   // command line prints its version for `-version` anywhere in its words.

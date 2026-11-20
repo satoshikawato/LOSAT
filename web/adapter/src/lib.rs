@@ -71,7 +71,7 @@ fn words(argv: &str) -> Vec<&str> {
 }
 
 /// The version of ABI v2 (docs/web/abi_v2.md §10): 5 since a run prints the text that the command
-/// line prints in place of a run (its help, its versions; `-xmlhelp` stays refused) on stream 11, and
+/// line prints in place of a run (its help, the XML of `-xmlhelp`, its versions) on stream 11, and
 /// the *start* field `prints` (line WQA's D14, 2026-11-20); 4 since `losat_web2_register_inputs`, which
 /// reads the inputs of a run with `-parse_deflines`, and the signal of stream 9 for every output
 /// stream that failed (line WQA's sweep, D7, 2026-11-19); 3 since the signal of stream 9, which

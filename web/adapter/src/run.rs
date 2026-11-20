@@ -205,8 +205,8 @@ enum Parsed {
     /// The program's arguments (boxed: they are far larger than a text).
     Command(Program, Box<Commands>),
     /// The text that the command line prints to its standard output in place of a run, where the
-    /// reader stopped at a help word (`-h`, `-help`, `-help-full`, `--help`, the words before it
-    /// read: `losat::web_adapter::help_text`). `-xmlhelp` is refused (line RG E2x-1).
+    /// reader stopped at a help word (`-h`, `-help`, `-help-full`, `--help`, `-xmlhelp`, the words
+    /// before it read: `losat::web_adapter::printed_text`).
     Prints(String),
 }
 
@@ -228,7 +228,7 @@ fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
     let cli: Cli = match losat::web_adapter::try_parse_cli(argv) {
         Ok(cli) => cli,
         Err(error) => {
-            return match losat::web_adapter::help_text(&error, false) {
+            return match losat::web_adapter::printed_text(&error, false) {
                 Some(text) => Program::parse(words.first().copied().unwrap_or(""))
                     .map(|_| Parsed::Prints(text)),
                 None => Err(losat::web_adapter::command_line_message(&error, false)),
@@ -242,8 +242,8 @@ fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
 /// What a run of `words` (program name first) prints in place of a search (`STREAM_PRINTED`), as the
 /// command line does: `"version"` for a version word (`-version` or a full version), which NCBI's
 /// application reads before the arguments, `"help"` where the arguments' reader stops at a help
-/// word (`-h`, `-help`, `-help-full`, `--help`; `-xmlhelp` is refused); `None` for an argv that runs
-/// (or fails). Read without the configuration, which does not change it.
+/// word (`-xmlhelp` included); `None` for an argv that runs (or fails). Read without the
+/// configuration, which does not change it.
 pub fn prints(words: &[&str]) -> Option<&'static str> {
     use losat::web_adapter::Preparsed;
     match losat::web_adapter::preparse(words.get(1..).unwrap_or(&[])) {

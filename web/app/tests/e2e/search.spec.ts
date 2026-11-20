@@ -1504,11 +1504,8 @@ test("Additional options: the command line's other options after the form's, mar
   await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
-  // The CLI's options that a search in the browser cannot have (WA-FM-04), and -xmlhelp, whose XML only the command line
-  // prints (line RG E2x-1, the Owner's choice of 2026-11-13). The engine prints the CLI's help, as the CLI does (line
-  // WQA's D14, 2026-11-20: help-version.spec.ts), where WA-FM-05 refused it.
-  await extra.fill('-xmlhelp');
-  await expect(validation).toHaveText('-xmlhelp is not available in the browser');
+  // The CLI's options that a search in the browser cannot have (WA-FM-04). The engine prints the CLI's help, as the CLI
+  // does (line WQA's D14, 2026-11-20: help-version.spec.ts), where WA-FM-05 refused it.
   if (BUILD_HAS_ENGINE) {
     await extra.fill('-help');
     await expect(validation).toHaveAttribute('data-state', 'ok');

@@ -206,8 +206,9 @@ fn a_refused_name_takes_its_dependencies() {
     );
 }
 
-// The library API and the Web engine refuse `-xmlhelp` by name where the reader takes it as a flag
-// (the Web engine's ABI v2 runs an application start, but it does not write NCBI's XML); as a value it is a value, and after `-h` it is not read.
+// The library API and the Web engine's ABI v1 refuse `-xmlhelp` by name where the reader takes it as
+// a flag; as a value it is a value, and after `-h` it is not read. The Web engine's ABI v2 prints the
+// XML (`the_web_engine_prints_the_command_lines_help`).
 #[test]
 fn the_library_refuses_xmlhelp() {
     for program in CLAP_PROGRAMS {
@@ -299,40 +300,36 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
 }
 
 // Line WQA's D14 (2026-11-20): the reader of LOSAT Web's ABI v2 stops at the help words as the
-// command line's does, and the run prints the help that the command line's entry prints for them
-// (`help_text`, which `printed_text` and so `cli::main_entry` write). `-xmlhelp` stays refused there
-// with the library's words (line RG E2x-1, the Owner's choice of 2026-11-13), and its XML is not
-// the help (E2x-2: the Web engine does not carry it).
+// command line's does, `-xmlhelp` included, and the run prints the text that the command line's
+// entry prints for them (`printed_text`, which `cli::main_entry` writes): the parser's help, and
+// the XML of `-xmlhelp`. The words before them are read first.
 #[test]
 fn the_web_engine_prints_the_command_lines_help() {
-    use crate::cli::{help_text, printed_text, try_parse_with_own_start, WEB_V2_PROGRAMS};
+    use crate::cli::{printed_text, try_parse_with_printing_start, WEB_V2_PROGRAMS};
     for program in WEB_V2_PROGRAMS {
         let web = |words: &[&str]| {
             let argv = ["losat", program].into_iter().chain(words.iter().copied());
-            try_parse_with_own_start::<Cli, _, _>(argv).map(|_| ())
+            try_parse_with_printing_start::<Cli, _, _>(argv).map(|_| ())
         };
         let xml = web(&["-evalue", "1", "-xmlhelp", "-bogus"]).unwrap_err();
-        assert_eq!(help_text(&xml, false), None, "{program}");
         assert_eq!(
-            xml.to_string().trim_end(),
-            format!("error: {}", xml_help_refusal(&program.to_ascii_uppercase())),
+            printed_text(&xml, false),
+            Some(xml_help_text(program).unwrap()),
             "{program}"
         );
         for word in ["-h", "-help", "-help-full", "--help"] {
             let help = web(&["-dryrun", word]).unwrap_err();
             let command_line = try_parse_from::<Cli, _, _>(["losat", program, word]).unwrap_err();
             assert_eq!(
-                help_text(&help, false),
+                printed_text(&help, false),
                 Some(crate::cli::command_line_message(&command_line, false)),
                 "{program} {word}"
             );
-            assert_eq!(
-                printed_text(&command_line, false),
-                help_text(&command_line, false),
-                "{program} {word}"
-            );
         }
-        let refused = web(&["-evalue", "x", "-h"]).unwrap_err();
-        assert_eq!(help_text(&refused, false), None, "{program}");
+        let refused = web(&["-evalue", "x", "-xmlhelp"]).unwrap_err();
+        assert_eq!(printed_text(&refused, false), None, "{program}");
+        // The library refuses `-xmlhelp`, naming the places that print it.
+        assert!(xml_help_refusal(&program.to_ascii_uppercase())
+            .contains("runs on the command line and in the Web engine's ABI v2 of LOSAT's"));
     }
 }

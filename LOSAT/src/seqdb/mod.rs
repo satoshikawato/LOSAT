@@ -782,21 +782,6 @@ pub(crate) struct LocatedDatabase {
     pub alias_files: Vec<String>,
 }
 
-/// Why [`SeqDb::locate_one_name_metadata`] gives no database.
-#[derive(Debug)]
-pub(crate) enum LocateError {
-    /// NCBI's `CSeqDB` throws this.
-    Database(SeqDbError),
-    /// NCBI's reads of the index file at this path leave its mapping, and its process faults.
-    NcbiCrashes(PathBuf),
-}
-
-impl From<SeqDbError> for LocateError {
-    fn from(error: SeqDbError) -> Self {
-        LocateError::Database(error)
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:377-391
 // ```c++
 // static bool
@@ -1044,33 +1029,7 @@ fn fix_string(s: &[u8]) -> &[u8] {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:217-233
-// ```c++
-// 	bool version5 = true;
-// 	for(int i=0; i < volSet.GetNumVols(); i++) {
-// 		const CSeqDBVol * vol = volSet.GetVol(i);
-// 		string vol_lmdb_name = vol->GetLMDBFileName();
-// 		if(vol_lmdb_name == kEmptyStr) {
-// 			version5 = false;
-// 			if ((!m_LMDBEntrySet.empty())|| (!lmdb_vol_names.empty())) {
-// 				m_LMDBEntrySet.clear();
-// 				NCBI_THROW(CSeqDBException, eVersionErr, "DB list contains both Version 4 and Version 5 dbs");
-// 			}
-// 			continue;
-// 		}
-//
-// 		if(version5 == false) {
-// 			m_LMDBEntrySet.clear();
-// 			NCBI_THROW(CSeqDBException, eVersionErr, "DB list contains both Version 4 and Version 5 dbs");
-// 		}
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:85-89
-// ```c++
-//         CFile tf(fname);
-// 		Uint8 readMapSize = (tf.GetLength()/10000 + 1) *10000;
-//         if (!tf.Exists()) {
-//             NCBI_THROW( CSeqDBException, eFileErr, "File " + fname + " not found. If you renamed any BLAST database files, please use original file names, and makeblastdb to rename the database. If you deleted any BLAST database files, you need to recreate the database.");
-//         }
-// ```
 // NCBI opens the LMDB file of a version 5 database when it opens the
 // database (seqdblmdbset.cpp:235-262, 35-74) and compares the file's
 // volume list with the volumes: `lmdb_entries`.
@@ -1404,19 +1363,13 @@ impl SeqDb {
         name: &str,
         seqtype: SeqType,
         search: &SearchPath,
-    ) -> Result<LocatedDatabase, LocateError> {
+    ) -> Result<LocatedDatabase, SeqDbError> {
         let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir, search)?;
         let mut headers = Vec::with_capacity(tree.volumes.len());
         for volume_name in &tree.volumes {
             let index_path = volume::with_extension(Path::new(volume_name), seqtype, "in");
             let file = file::DbFile::open(&index_path)?;
-            match index::IndexFile::read_mapped_header(&file, seqtype) {
-                Ok(header) => headers.push(header),
-                Err(index::MappedHeaderError::Database(error)) => return Err(error.into()),
-                Err(index::MappedHeaderError::PastMapping) => {
-                    return Err(LocateError::NcbiCrashes(index_path))
-                }
-            }
+            headers.push(index::IndexFile::read_mapped_header(&file, seqtype)?);
         }
         let bases: Vec<(PathBuf, Option<&[u8]>)> = tree
             .volumes

@@ -5,23 +5,36 @@
 //! makeblastdb opens the database it built (`CSeqDB`) before it writes the metadata file, and
 //! NCBI's reader takes the index file as it finds it: a file that ends early reads as zeros to the
 //! end of its last page, so a file of 1 or 2 bytes is "Not a valid version 4 or 5 database.", one
-//! of 7 bytes holds the wrong sequence type, one of 8 or 9 bytes is a database with no title, no
-//! date and no sequences, and one of no bytes is a fault of NCBI's process (killed by SIGSEGV,
-//! which LOSAT refuses: "NCBI crashes on it"). An alias file that is cut short names no database
-//! ("No database names were found in alias file [...]", without the file's path).
+//! of 7 bytes holds the wrong sequence type (a protein database), one of 8 or 9 bytes is a database
+//! with no title, no date and no sequences, and one that ends inside the date is a date that does
+//! not read: makeblastdb ends with the exception of `CTime`, exit status 255, and writes no
+//! metadata file. An index file of no bytes is mapped as a null pointer and NCBI's process is
+//! killed by SIGSEGV (rc -11 in the fixture), which LOSAT refuses ("NCBI crashes on it"). A header
+//! field that reaches past the file's last page reads whatever memory follows, so what NCBI does
+//! depends on its memory (it need not crash): LOSAT refuses that too, in other words, which no row
+//! of the fixture covers (it needs a field of 4 KiB; `seqdb::damaged_files_tests` has it). An alias
+//! file that is cut short names no database ("No database names were found in alias file [...]",
+//! without the file's path).
+//!
+//! Version 5 databases are not in the fixture: under `prlimit --fsize` the LMDB file fails first
+//! (`mdb_env_open: File too large`) in both programs, before the index file is read. They were
+//! compared with a write limiter in front of the index file (the probes of line LIB-O, item O1e).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1296-1318,
 //! c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:134-236 (`CSeqDBIdxFile`).
 //!
 //! The limit is `prlimit --fsize` with SIGXFSZ ignored (the child of `sh` keeps the ignored signal);
 //! the test is skipped where `prlimit` is missing. The cases that cut the date string of the index
-//! (the outcome of which depends on the hour of the day) are in the date table of
-//! `seqdb::date`'s tests.
+//! inside the digits of the day or the time (the outcome of which depends on the day and the hour)
+//! are in the date table of `seqdb::date`'s tests.
 
 #![cfg(target_os = "linux")]
 
 use std::collections::BTreeMap;
 use std::process::Command;
+
+/// The input of the kind n4: 6 nucleotide sequences of 300 bases (the input of the frozen run).
+const NUC: &str = include_str!("fixtures/makeblastdb_failure/n4_input.fa");
 
 const ROWS: &str = include_str!("fixtures/makeblastdb_failure/fsize_rows.txt");
 
@@ -123,6 +136,22 @@ fn masked(text: &str, d: &str) -> String {
     out
 }
 
+/// The date string that did not parse, in the message of `CTime` ("Time string '...' is too
+/// short"), masked: it holds the month's name of the day the fixture was frozen.
+fn mask_date(text: &str) -> String {
+    let start = "Time string '";
+    match text.find(start) {
+        Some(i) => {
+            let from = i + start.len();
+            match text[from..].find('\'') {
+                Some(j) => format!("{}<DATE>{}", &text[..from], &text[from + j..]),
+                None => text.to_string(),
+            }
+        }
+        None => text.to_string(),
+    }
+}
+
 fn dated(name: &str) -> bool {
     [".pin", ".nin", ".pjs", ".njs", ".pal", ".nal"]
         .iter()
@@ -176,13 +205,24 @@ fn a_full_disk_leaves_the_index_as_ncbi_reads_it() {
         let _ = std::fs::remove_dir_all(&tmp);
         let out_dir = tmp.join("o");
         std::fs::create_dir_all(&out_dir).unwrap();
-        let (input, args): (String, Vec<&str>) = match row.kind.as_str() {
+        let (input, dbtype, index, args): (String, &str, &str, Vec<&str>) = match row.kind.as_str()
+        {
             "p4" => (
                 RICH_P.to_string(),
+                "prot",
+                "pin",
                 vec!["-hash_index", "-blastdb_version", "4"],
+            ),
+            "n4" => (
+                NUC.to_string(),
+                "nucl",
+                "nin",
+                vec!["-blastdb_version", "4"],
             ),
             "m6" => (
                 many(),
+                "prot",
+                "pin",
                 vec!["-max_file_sz", "2000B", "-blastdb_version", "4"],
             ),
             other => panic!("unknown kind {other}"),
@@ -205,7 +245,7 @@ fn a_full_disk_leaves_the_index_as_ncbi_reads_it() {
                 "-in",
                 "in.fa",
                 "-dbtype",
-                "prot",
+                dbtype,
                 "-parse_seqids",
             ])
             .args(&args)
@@ -218,11 +258,11 @@ fn a_full_disk_leaves_the_index_as_ncbi_reads_it() {
         let files = listing(&out_dir);
         let name = format!("{} limit {}", row.kind, row.limit);
         if row.rc == -11 {
-            // NCBI's process is killed by SIGSEGV where it reads past its mapping: LOSAT refuses
-            // (explicit rejection, exit status 1) and leaves the files NCBI leaves.
+            // NCBI's process is killed by SIGSEGV where it maps the index file of no bytes: LOSAT
+            // refuses (explicit rejection, exit status 1) and leaves the files NCBI leaves.
             assert_eq!(status, 1, "{name}");
             assert!(
-                stderr.starts_with("losat makeblastdb: <D>/o/db.pin: ")
+                stderr.starts_with(&format!("losat makeblastdb: <D>/o/db.{index}: "))
                     && stderr.ends_with("(NCBI crashes on it)\n"),
                 "{name}: {stderr}"
             );
@@ -231,7 +271,7 @@ fn a_full_disk_leaves_the_index_as_ncbi_reads_it() {
             let expected_err =
                 String::from_utf8(losat::wording::losat_bytes(row.err.as_bytes()).into_owned())
                     .unwrap();
-            assert_eq!(stderr, expected_err, "{name}");
+            assert_eq!(mask_date(&stderr), mask_date(&expected_err), "{name}");
         }
         assert_eq!(stdout, row.out, "{name}");
         let pjs: String = ["db.pjs", "db.njs"]
@@ -243,5 +283,5 @@ fn a_full_disk_leaves_the_index_as_ncbi_reads_it() {
         let _ = std::fs::remove_dir_all(&tmp);
         compared += 1;
     }
-    assert_eq!(compared, 13);
+    assert_eq!(compared, 18);
 }

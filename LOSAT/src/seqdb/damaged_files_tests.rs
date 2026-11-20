@@ -539,10 +539,11 @@ fn index_bytes() -> Vec<u8> {
 
 /// The header of an index file as NCBI's constructor of `CSeqDBIdxFile` reads it through the
 /// mapping (`IndexFile::read_mapped_header`): a file that ends early reads as zeros up to the end
-/// of its last page, and a read past the page, or in a file of no bytes, leaves the mapping.
+/// of its last page, a file of no bytes is mapped as a null pointer (NCBI crashes), and a read past the page leaves
+/// the mapping (what NCBI reads there depends on its memory).
 #[test]
 fn a_mapped_index_header_reads_zeros_to_the_end_of_the_page() {
-    use super::index::{IndexFile, MappedHeaderError};
+    use super::index::IndexFile;
     let dir = TempDir::new("mappedheader");
     let read = |bytes: &[u8]| {
         let path = dir.0.join("db.pin");
@@ -584,7 +585,7 @@ fn a_mapped_index_header_reads_zeros_to_the_end_of_the_page() {
     for cut in [1, 2, 3] {
         assert!(matches!(
             read(&whole[..cut]),
-            Err(MappedHeaderError::Database(SeqDbError::Format { message, .. }))
+            Err(SeqDbError::Format { message, .. })
                 if message == "Error: Not a valid version 4 or 5 database."
         ));
     }
@@ -592,12 +593,13 @@ fn a_mapped_index_header_reads_zeros_to_the_end_of_the_page() {
     // index file is type 1: its last byte is the one that is missing).
     assert!(matches!(
         read(&whole[..7]),
-        Err(MappedHeaderError::Database(SeqDbError::Format { message, .. }))
+        Err(SeqDbError::Format { message, .. })
             if message == "Error: requested sequence type does not match DB."
     ));
-    // No bytes: no mapping. A title that is longer than the page leaves it.
-    assert!(matches!(read(&[]), Err(MappedHeaderError::PastMapping)));
+    // No bytes: no mapping, NCBI maps a null pointer and crashes. A title that is longer than
+    // the page leaves the mapping: what NCBI reads there depends on its memory.
+    assert!(matches!(read(&[]), Err(SeqDbError::NcbiCrashes { .. })));
     let mut long = whole.clone();
     long[8..12].copy_from_slice(&5000u32.to_be_bytes());
-    assert!(matches!(read(&long), Err(MappedHeaderError::PastMapping)));
+    assert!(matches!(read(&long), Err(SeqDbError::Unsupported { .. })));
 }

@@ -1,4 +1,4 @@
-# NCBI BLAST+ 2.17.0 official Linux build (ncbi-blast-2.17.0+-x64-linux), `blastdbcmd -db db -metadata`, on a version 5 protein
+# NCBI BLAST+ 2.17.0 official Linux build (ncbi-blast-2.17.0+-x64-linux; sha256 of its bin/blastdbcmd 7b7985134ac696b2f28428baf8a210554c4e2d6c38cc1dfdd46d207dc4cc762f), `blastdbcmd -db db -metadata`, on a version 5 protein
 # database whose index file's date string was replaced by the string in column 1 (what a failed write of the index leaves:
 # a prefix of the date, the rest reads as zeros). Host: the Owner's WSL2 machine (Ubuntu), run under the oracle lock, 2026-11-21.
 # Column 2: `ok` and the `last-updated` NCBI writes, or `err`, the line of ncbitime.cpp / ncbistr.cpp that throws, the exception

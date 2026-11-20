@@ -22,7 +22,7 @@ use crate::blastinput::ncbi_environment::{
 };
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::date::iso8601_date_time_exception;
-use crate::seqdb::{LocateError, SearchPath, SeqDb, SeqDbError, SeqType, NCBI_CRASHES_ON_IT};
+use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:224-244
 // ```c++
@@ -303,8 +303,10 @@ impl MakedbError {
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
             MakedbError::Output(_) => 6,
-            MakedbError::Database(_) | MakedbError::Build(WriteDbError::Database(_)) => 2,
-            MakedbError::Build(
+            MakedbError::Database(error) if !is_refusal(error) => 2,
+            MakedbError::Build(WriteDbError::Database(_)) => 2,
+            MakedbError::Database(_)
+            | MakedbError::Build(
                 WriteDbError::Creation(_)
                 | WriteDbError::CreationBytes(_)
                 | WriteDbError::Options(_)
@@ -323,6 +325,9 @@ impl std::fmt::Display for MakedbError {
             // NCBI prints `e.GetMsg()` of the `CSeqDBException`; the text of an error that is
             // NCBI's own is what `SeqDbError::ncbi_message` gives (the file's path is not part
             // of it), and any other is LOSAT's refusal in its own words.
+            MakedbError::Database(error) if is_refusal(error) => {
+                write!(f, "losat makeblastdb: {error}")
+            }
             MakedbError::Database(error) => match error.ncbi_message() {
                 Some(text) => write!(
                     f,
@@ -336,6 +341,16 @@ impl std::fmt::Display for MakedbError {
             MakedbError::Argument(message) => write!(f, "Command line argument error: {message}"),
         }
     }
+}
+
+/// Whether `error` is LOSAT's refusal of a database where NCBI crashes or gives a result that
+/// depends on its memory ([`SeqDbError::NcbiCrashes`], [`SeqDbError::Unsupported`]), which is
+/// printed as the other refusals of makeblastdb are, with exit status 1.
+fn is_refusal(error: &SeqDbError) -> bool {
+    matches!(
+        error,
+        SeqDbError::NcbiCrashes { .. } | SeqDbError::Unsupported { .. }
+    )
 }
 
 impl From<WriteDbError> for MakedbError {
@@ -1185,7 +1200,8 @@ fn destructor_messages(db: &BuildDatabase<'_>, error: Option<&MakedbError>) -> V
     if matches!(
         error,
         Some(MakedbError::Unsupported(_) | MakedbError::Build(WriteDbError::Unsupported(_)))
-    ) {
+    ) || matches!(error, Some(MakedbError::Database(error)) if is_refusal(error))
+    {
         return Vec::new();
     }
     let mut messages = Vec::new();
@@ -1379,9 +1395,11 @@ fn add_input_and_close(
 // takes a file that ends early to be zeros up to the end of its last page
 // (a missing string is empty, a missing count is 0, a missing version is not 4
 // or 5 and ends the build with "Not a valid version 4 or 5 database."), and a
-// file of no bytes, or a read past its last page, is a fault of NCBI's
-// process (killed by SIGSEGV, no metadata file): LOSAT refuses those ("NCBI
-// crashes on it"; the files of the build stay as NCBI leaves them).
+// file of no bytes is mapped as a null pointer, and NCBI's process is killed
+// by SIGSEGV (no metadata file). LOSAT refuses it ("NCBI crashes on it"; the
+// files of the build stay as NCBI leaves them). A read past the last page
+// reads memory that is not the file's: what NCBI does there depends on its
+// memory (it may go on, or fault), so LOSAT refuses that too, in other words.
 //
 // The path is one database name (`SeqDb::locate_one_name_metadata`), which
 // departs from NCBI on purpose: `CSeqDB` splits the name at spaces and double
@@ -1411,13 +1429,7 @@ fn open_new_database(
     let search = SearchPath::from_environment(registry_blastdb).map_err(MakedbError::Database)?;
     let located = match SeqDb::locate_one_name_metadata(new_db, seqtype, &search) {
         Ok(located) => located,
-        Err(LocateError::Database(error)) => return Err(MakedbError::Database(error)),
-        Err(LocateError::NcbiCrashes(path)) => {
-            return Err(MakedbError::Unsupported(format!(
-                "{}: the index file ends where NCBI's reader reads past its mapping {NCBI_CRASHES_ON_IT}",
-                path.display()
-            )))
-        }
+        Err(error) => return Err(MakedbError::Database(error)),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1649-1656
     // ```c++
@@ -1498,11 +1510,6 @@ fn open_new_database(
     };
     let version5 = located.version5;
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1730-1732
-    // ```c++
-    // 	CTimeFormat timeFmt = CTimeFormat::GetPredefined(CTimeFormat::eISO8601_DateTimeSec);
-    // 	CTime date(GetDate(), kBlastDbDateFormat);
-    // 	m->SetLast_updated(date.AsString(timeFmt));
-    // ```
     // The date is the one the volumes' indexes hold; `CTime` throws where a date that a failed
     // write cut short does not read, and makeblastdb ends with the exception (exit status
     // 255), after the files of the build were written.
@@ -1828,6 +1835,36 @@ fn finish(result: Result<(), MakedbError>, end_messages: &[String], err: &mut dy
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The refusals of an index file that NCBI cannot read as a database are LOSAT's own, printed
+    /// with makeblastdb's prefix and ended with exit status 1, and their text is the one of
+    /// `SeqDbError` (one producer: `NCBI_CRASHES_ON_IT` ends the one where NCBI crashes).
+    #[test]
+    fn a_refused_index_file_is_printed_as_a_refusal() {
+        let path = std::path::PathBuf::from("o/db.pin");
+        let crashes = MakedbError::Database(SeqDbError::NcbiCrashes {
+            path: path.clone(),
+            message: "the index file has no bytes".to_string(),
+        });
+        assert_eq!(crashes.exit_code(), 1);
+        let text = crashes.to_string();
+        assert!(text.starts_with("losat makeblastdb: o/db.pin: "), "{text}");
+        assert!(text.ends_with(crate::seqdb::NCBI_CRASHES_ON_IT), "{text}");
+        let depends = MakedbError::Database(SeqDbError::Unsupported {
+            path,
+            message: "a field past the mapping".to_string(),
+        });
+        assert_eq!(depends.exit_code(), 1);
+        assert!(depends
+            .to_string()
+            .starts_with("losat makeblastdb: o/db.pin: "));
+        // NCBI's own error stays NCBI's: exit status 2, "BLAST Database error: ".
+        let ncbi = MakedbError::Database(SeqDbError::Format {
+            path: std::path::PathBuf::from("o/db.pin"),
+            message: "Error: Not a valid version 4 or 5 database.".to_string(),
+        });
+        assert_eq!(ncbi.exit_code(), 2);
+    }
 
     // makedb-v5 DECISIONS 12: `[BLAST] MAX_SEQID_LENGTH` is refused with `-parse_seqids`
     // (build_db.cpp:739-747, quoted at `check_registry_settings`), the library's argument

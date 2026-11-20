@@ -5,7 +5,7 @@
 //! the whole file is read and the arrays are held (`IndexFile::parse`). Both forms check the
 //! arrays when the volume is opened and give the same values and the same errors.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::file::DbFile;
 use super::{SeqDbError, SeqType};
@@ -81,8 +81,45 @@ impl HeldOffsets {
     }
 }
 
-/// The start of the message of a read that passes the end of the bytes.
-const ENDS_INSIDE_A_FIELD: &str = "index file ends inside a field";
+/// Why a read of the index file's fixed part fails.
+#[derive(Debug)]
+enum ReadFault {
+    /// The read passes the end of the bytes: `wanted` bytes at offset `at`, of `len`.
+    PastEnd {
+        path: PathBuf,
+        wanted: usize,
+        at: u64,
+        len: u64,
+    },
+    /// Any other error.
+    Error(SeqDbError),
+}
+
+impl From<SeqDbError> for ReadFault {
+    fn from(error: SeqDbError) -> Self {
+        Self::Error(error)
+    }
+}
+
+impl From<ReadFault> for SeqDbError {
+    fn from(fault: ReadFault) -> Self {
+        match fault {
+            ReadFault::PastEnd {
+                path,
+                wanted,
+                at,
+                len,
+            } => SeqDbError::Format {
+                path,
+                message: format!(
+                    "index file ends inside a field ({wanted} bytes wanted at offset {at}, \
+                     file has {len})"
+                ),
+            },
+            ReadFault::Error(error) => error,
+        }
+    }
+}
 
 /// Where the bytes of an index file come from while its fixed part is parsed.
 trait Source {
@@ -121,20 +158,17 @@ struct Cursor<'a, S: Source + ?Sized> {
 
 impl<'a, S: Source + ?Sized> Cursor<'a, S> {
     /// The offset of the `len` bytes at the cursor, which it moves past them.
-    fn skip(&mut self, len: usize) -> Result<u64, SeqDbError> {
+    fn skip(&mut self, len: usize) -> Result<u64, ReadFault> {
         let end = self
             .pos
             .checked_add(len as u64)
             .filter(|&end| end <= self.source.len());
         let Some(end) = end else {
-            return Err(SeqDbError::Format {
+            return Err(ReadFault::PastEnd {
                 path: self.path.to_path_buf(),
-                message: format!(
-                    "{ENDS_INSIDE_A_FIELD} ({} bytes wanted at offset {}, file has {})",
-                    len,
-                    self.pos,
-                    self.source.len()
-                ),
+                wanted: len,
+                at: self.pos,
+                len: self.source.len(),
             });
         };
         let start = self.pos;
@@ -142,9 +176,9 @@ impl<'a, S: Source + ?Sized> Cursor<'a, S> {
         Ok(start)
     }
 
-    fn fill(&mut self, buf: &mut [u8]) -> Result<(), SeqDbError> {
+    fn fill(&mut self, buf: &mut [u8]) -> Result<(), ReadFault> {
         let at = self.skip(buf.len())?;
-        self.source.read_at(buf, at)
+        Ok(self.source.read_at(buf, at)?)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:71-79
@@ -159,7 +193,7 @@ impl<'a, S: Source + ?Sized> Cursor<'a, S> {
     //     return offset + sizeof(*value);
     // }
     // ```
-    fn be_u32(&mut self) -> Result<u32, SeqDbError> {
+    fn be_u32(&mut self) -> Result<u32, ReadFault> {
         let mut bytes = [0u8; 4];
         self.fill(&mut bytes)?;
         Ok(u32::from_be_bytes(bytes))
@@ -178,7 +212,7 @@ impl<'a, S: Source + ?Sized> Cursor<'a, S> {
     // }
     // ```
     // `SeqDB_GetBroken` reads the one little-endian field of the format.
-    fn broken_u64(&mut self) -> Result<u64, SeqDbError> {
+    fn broken_u64(&mut self) -> Result<u64, ReadFault> {
         let mut raw = [0u8; 8];
         self.fill(&mut raw)?;
         Ok(u64::from_le_bytes(raw))
@@ -201,7 +235,7 @@ impl<'a, S: Source + ?Sized> Cursor<'a, S> {
     //     return offset + len;
     // }
     // ```
-    fn string(&mut self) -> Result<Vec<u8>, SeqDbError> {
+    fn string(&mut self) -> Result<Vec<u8>, ReadFault> {
         let len = self.be_u32()? as usize;
         // The length is checked before the buffer is allocated.
         let at = self.skip(len)?;
@@ -211,10 +245,12 @@ impl<'a, S: Source + ?Sized> Cursor<'a, S> {
     }
 
     /// The offset of an array of `count` offsets at the cursor, which it moves past them.
-    fn offsets(&mut self, count: usize) -> Result<u64, SeqDbError> {
-        self.skip(count.checked_mul(4).ok_or_else(|| SeqDbError::Format {
-            path: self.path.to_path_buf(),
-            message: "index file offset array size overflows".to_string(),
+    fn offsets(&mut self, count: usize) -> Result<u64, ReadFault> {
+        self.skip(count.checked_mul(4).ok_or_else(|| {
+            ReadFault::Error(SeqDbError::Format {
+                path: self.path.to_path_buf(),
+                message: "index file offset array size overflows".to_string(),
+            })
         })?)
     }
 }
@@ -236,13 +272,16 @@ struct Fixed {
     amb_at: u64,
 }
 
-/// The size of the pages that a mapped file is read in (Linux on x86-64 and aarch64 with 4 KiB
-/// pages, which is what NCBI's official build and the machines of LOSAT's probes use).
+/// The size of the pages that a mapped file is read in: 4 KiB, the page of Linux on x86-64 and
+/// aarch64, which is what NCBI's official build and the machines of LOSAT's probes use. NCBI's
+/// zeros to the end of the page follow the kernel's page, so on a system of larger pages (64 KiB
+/// on some aarch64 Linux, 16 KiB on macOS arm64) this is not NCBI's: it matters only for a
+/// header field that crosses 4 KiB.
 const MAPPING_PAGE: u64 = 4096;
 
 /// The index file as NCBI's reader sees it through its memory mapping: the bytes of the file,
 /// then zeros up to the end of the file's last page (POSIX: the rest of a partial page reads as
-/// zero). A read past the last page is a fault of NCBI's process, not data.
+/// zero). A read past the last page is outside the mapping: not data of the file.
 struct Mapped<'a>(&'a DbFile);
 
 impl Source for Mapped<'_> {
@@ -274,15 +313,6 @@ pub(crate) struct VolumeHeader {
     pub num_oids: u32,
     /// The total length of the sequences.
     pub volume_length: u64,
-}
-
-/// Why [`IndexFile::read_mapped_header`] gives no header.
-#[derive(Debug)]
-pub(crate) enum MappedHeaderError {
-    /// NCBI throws this (or LOSAT cannot read the file).
-    Database(SeqDbError),
-    /// NCBI's reads leave the file's mapping: its process faults (`SIGSEGV` or `SIGBUS`).
-    PastMapping,
 }
 
 /// The fields of an index file before its offset arrays.
@@ -375,24 +405,44 @@ impl IndexFile {
     // version and the type. A file that ends before its header does (a write that failed)
     // reads as zeros up to the end of the last page: the version of a file of fewer than 4 bytes
     // is not 4 or 5, a missing string is empty, a missing count is 0. A file of no bytes has
-    // no page, and a read beyond the last page is outside the mapping.
+    // no page: NCBI maps it as a null pointer and crashes. A read beyond the last page is outside
+    // the mapping: it reads whatever memory follows, which LOSAT cannot know.
     /// The header of the index file `file` of a database of `seqtype`, as NCBI's constructor
     /// reads it, whatever follows it (the arrays are not looked at).
+    ///
+    /// The error is NCBI's own where NCBI throws, and where NCBI does not give a result LOSAT can
+    /// reproduce, LOSAT's refusal: [`SeqDbError::NcbiCrashes`] for a file of no bytes and
+    /// [`SeqDbError::Unsupported`] for a read that leaves the mapping of the file, where what NCBI
+    /// reads, or whether it faults, depends on its memory.
     pub(crate) fn read_mapped_header(
         file: &DbFile,
         seqtype: SeqType,
-    ) -> Result<VolumeHeader, MappedHeaderError> {
+    ) -> Result<VolumeHeader, SeqDbError> {
         let path = file.path();
         let mut cursor = Cursor {
             source: &Mapped(file),
             pos: 0,
             path,
         };
-        let header = Self::read_header(&mut cursor, path).map_err(|error| match error {
-            SeqDbError::Format { ref message, .. } if message.starts_with(ENDS_INSIDE_A_FIELD) => {
-                MappedHeaderError::PastMapping
-            }
-            other => MappedHeaderError::Database(other),
+        let header = Self::read_header(&mut cursor, path).map_err(|fault| match fault {
+            ReadFault::PastEnd { .. } if file.is_empty() => SeqDbError::NcbiCrashes {
+                path: path.to_path_buf(),
+                message: "the index file has no bytes, which NCBI maps as a null pointer"
+                    .to_string(),
+            },
+            ReadFault::PastEnd {
+                wanted, at, len, ..
+            } => SeqDbError::Unsupported {
+                path: path.to_path_buf(),
+                message: format!(
+                    "the index file ends inside its header ({wanted} bytes wanted at offset \
+                     {at}, the file has {} bytes) and NCBI BLAST+'s mapping of it ends at \
+                     {len}: NCBI reads memory past its mapping there, whose bytes, or \
+                     whether NCBI faults, depend on its memory map",
+                    file.len()
+                ),
+            },
+            ReadFault::Error(error) => error,
         })?;
         let file_seqtype = if header.db_seqtype == 1 {
             SeqType::Protein
@@ -400,10 +450,10 @@ impl IndexFile {
             SeqType::Nucleotide
         };
         if file_seqtype != seqtype {
-            return Err(MappedHeaderError::Database(SeqDbError::Format {
+            return Err(SeqDbError::Format {
                 path: path.to_path_buf(),
                 message: "Error: requested sequence type does not match DB.".to_string(),
-            }));
+            });
         }
         Ok(VolumeHeader {
             title: header.title,
@@ -419,14 +469,14 @@ impl IndexFile {
     fn read_header<S: Source + ?Sized>(
         cursor: &mut Cursor<'_, S>,
         path: &Path,
-    ) -> Result<Header, SeqDbError> {
+    ) -> Result<Header, ReadFault> {
         let version = cursor.be_u32()?;
         let dbv5 = version == 5;
         if !dbv5 && version != 4 {
-            return Err(SeqDbError::Format {
+            return Err(ReadFault::Error(SeqDbError::Format {
                 path: path.to_path_buf(),
                 message: "Error: Not a valid version 4 or 5 database.".to_string(),
-            });
+            }));
         }
         let db_seqtype = cursor.be_u32()?;
         let volume_number = if dbv5 { Some(cursor.be_u32()?) } else { None };

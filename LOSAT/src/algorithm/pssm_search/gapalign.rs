@@ -12,6 +12,8 @@
 use super::rows::PssmRows;
 use crate::algorithm::blastp::gapalign::adjust_subject_range;
 use crate::common::GapEditOp;
+// The traceback's result, which the Smith-Waterman round loop reads (one owner of the loop).
+use crate::core::composition_adjustment::smith_waterman::SwXdropTraceback;
 
 /// NCBI's `MININT` (blast_gapalign.c:58).
 const MININT: i32 = i32::MIN / 2;
@@ -1330,17 +1332,6 @@ impl<R: PssmRows> PssmRows for RowsFrom<'_, R> {
     fn len(&self) -> usize {
         self.rows.len() + 1 - self.start
     }
-}
-
-/// The traceback of a Smith-Waterman alignment (`s_SWFindFinalEndsUsingXdrop`): its extents from
-/// the start in the query and the subject (`*queryAlignmentExtent`, `*matchAlignmentExtent`), the
-/// X-drop alignment's score and its edit script.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SwXdropTraceback {
-    pub(crate) query_extent: i32,
-    pub(crate) match_extent: i32,
-    pub(crate) score: i32,
-    pub(crate) edit_script: Vec<GapEditOp>,
 }
 
 /// `s_SWFindFinalEndsUsingXdrop` with a PSSM, as `s_NewAlignmentUsingXdrop` calls it: the forward

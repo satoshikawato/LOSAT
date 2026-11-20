@@ -801,23 +801,24 @@ pub(crate) fn fill_seqid(ids: &[crate::seqid::ParsedSeqId], show_gis: bool, out:
     }
 }
 
-/// Appends the searched letters `from..=to` (positions in the records, upper case) of the query
-/// `record`, whose searched letters start at the record position `shift` (the `-query_loc`
-/// interval's start; `Placements::offset`): the letters that the sections of BLASTN's and
-/// TBLASTN's reports read (`ReportSequences::query_letters`), as far as the record has them.
+/// Appends the searched letters `from..=to` (positions in the records) of a query whose letters
+/// are `letters` (a record's in upper case, a PSSM query's Bioseq letters as they are:
+/// `row_letters::QueryLetters::get`) and whose searched letters start at the record position
+/// `shift` (the `-query_loc` interval's start; `Placements::offset`): the letters that the
+/// sections of BLASTN's, TBLASTN's and TBLASTX's reports read (`ReportSequences::query_letters`),
+/// as far as the record has them.
 pub(crate) fn query_record_letters(
-    record: &crate::blastinput::fasta_reader::FastaRecord,
+    letters: crate::report::row_letters::QueryLetters<'_>,
     shift: usize,
     from: u32,
     to: u32,
     out: &mut Vec<u8>,
 ) {
-    let letters = record.seq();
     for position in from as usize - shift..=to as usize - shift {
-        let Some(&letter) = letters.get(position) else {
+        let Some(letter) = letters.get(position) else {
             break;
         };
-        out.push(letter.to_ascii_uppercase());
+        out.push(letter);
     }
 }
 

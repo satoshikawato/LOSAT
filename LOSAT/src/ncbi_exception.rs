@@ -239,6 +239,42 @@ impl NcbiException {
         self.chain().iter().all(|e| !e.site.file.is_empty())
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:47-61
+    // ```c++
+    // void CSerialException::AddFrameInfo(string frame_info)
+    // {
+    //     if (!frame_info.empty() && !m_FrameStack.empty()) {
+    //         m_FrameStack.insert(0,1,'.');
+    //     }
+    //     m_FrameStack = frame_info + m_FrameStack;
+    // }
+    //
+    // void CSerialException::ReportExtra(ostream& out) const
+    // {
+    //     if ( !m_FrameStack.empty() ) {
+    //         out << " at " << m_FrameStack;
+    //     }
+    // }
+    // ```
+    /// `CSerialException::AddFrameInfo(frame_info)`, which the object stack's `END_OBJECT_FRAME`
+    /// calls with `GetFrameName()` of each frame a `CSerialException` leaves: the frame stack is
+    /// the extra text of the exception's report (`ReportExtra`, ` at <stack>`; a
+    /// `CSerialException` has no other). `NCBI_RETHROW_SAME` (`rethrow_same`) keeps the stack in
+    /// the new exception and freezes a copy in its predecessor, as `AddBacklog` clones it.
+    pub(crate) fn add_frame_info(&mut self, frame_info: &str) {
+        if frame_info.is_empty() {
+            return;
+        }
+        let stack = match self.extra.take() {
+            Some(extra) => {
+                let stack = extra.strip_prefix(" at ").unwrap_or(&extra);
+                format!(" at {frame_info}.{stack}")
+            }
+            None => format!(" at {frame_info}"),
+        };
+        self.extra = Some(stack);
+    }
+
     /// `GetMsg()`: the message, without the place or the extra text.
     pub fn get_msg(&self) -> &str {
         &self.message
@@ -282,7 +318,7 @@ impl NcbiException {
 
     /// [`NcbiException::what`] of the build whose tree is `root` ([`build_root`]), in LOSAT's
     /// words: the messages of the chain, without NCBI's header and places
-    /// (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
+    /// (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
     pub fn what_in(&self, root: &str) -> String {
         crate::wording::losat_text(&self.ncbi_what_in(root)).into_owned()
     }
@@ -463,7 +499,7 @@ impl NcbiException {
     /// flags posts it: `Error: (<class>::<code>) <message>` for each exception of the chain,
     /// oldest first, then `Error: (<err_code>.<err_subcode>) <title> (<class>::<code>)
     /// <message>` of the newest, each line ending with a line feed; in LOSAT's words
-    /// (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
+    /// (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
     pub fn report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> String {
         crate::wording::losat_text(&self.ncbi_report_default_ex(err_code, err_subcode, title))
             .into_owned()
@@ -700,7 +736,7 @@ pub(crate) fn post_line_in(
     }
     line.push(b'\n');
     // LOSAT's words: an exception's class and code (`id`) and NCBI's exception reports are left
-    // out (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
+    // out (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
     crate::wording::losat_bytes(&line).into_owned()
 }
 

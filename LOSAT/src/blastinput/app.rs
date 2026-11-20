@@ -21,7 +21,7 @@ use crate::wording::USER_MANUAL_FOOTER;
 ///         exit_code = BLAST_INPUT_ERROR;                                      \
 ///     }                                                                       \
 /// ```
-/// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 11): directs users to
+/// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12): directs users to
 /// `USER_MANUAL_FOOTER` ("Please refer to the LOSAT user manual.").
 pub fn options_error(message: &str) -> anyhow::Error {
     NativeError {

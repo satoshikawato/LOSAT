@@ -229,7 +229,7 @@ pub fn worker_log_if_unset(command: &mut Command, label: &str) -> Option<TempFil
 
 /// LOSAT's bytes of NCBI's frozen output or message: the one mapping of
 /// `losat::wording::losat_output_bytes` (AGENTS.md rule 8; `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-/// exception 11).
+/// exception 12).
 pub fn expected_losat_bytes(frozen: Vec<u8>) -> Vec<u8> {
     match losat::wording::losat_output_bytes(&frozen) {
         std::borrow::Cow::Borrowed(_) => frozen,

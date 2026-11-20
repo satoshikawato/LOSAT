@@ -238,7 +238,7 @@ fn check_scoring_options_with(
     } else {
         return Ok(());
     };
-    // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 11.
+    // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
     let footer = crate::wording::USER_MANUAL_FOOTER;
     Err(NativeError {
         exit: 1,

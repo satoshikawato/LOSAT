@@ -244,7 +244,7 @@ impl Diag<'_> {
             self.post(&format!("Error: {message}"));
         }
         // NCBI's `Error:  (CArgException::<code>) <message>`, in LOSAT's words (`crate::wording`:
-        // without the class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
+        // without the class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
         self.post(&format!("Error:  {}", error.message()));
         1
     }

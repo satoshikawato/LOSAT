@@ -123,7 +123,7 @@ pub(crate) mod ncbi_app;
 // NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;
 // LOSAT's own words in place of NCBI's names and toolkit internals in messages, and the one
-// mapping of NCBI's frozen messages to LOSAT's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 11):
+// mapping of NCBI's frozen messages to LOSAT's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12):
 // hidden, outside the public API, for the tests and LOSAT Web's adapter.
 #[doc(hidden)]
 pub mod wording;

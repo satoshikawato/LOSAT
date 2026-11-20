@@ -127,7 +127,13 @@ These cases are about what the program prints around the search, not the search 
 ### Threads with `-subject`
 
 - **What you see.** With `-subject`, NCBI BLAST+ ignores `-num_threads` and writes `'num_threads' is currently ignored when 'subject' is specified.` on the standard error. LOSAT uses the threads you ask for and does not print the line. Above the CPU count NCBI also writes `Number of threads was reduced to N to match the number of available CPUs`; LOSAT does not.
-- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's.
+- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from `blastn`'s progress bar on a terminal (next section).
+
+### `blastn`'s progress bar on a terminal
+
+- **What you see.** While `blastn` searches with `-num_threads` 2 or more against two subjects or more (the records of `-subject` or the sequences of `-db`), it draws a progress bar on the standard error: the elapsed time, a bar and the number of subjects done (`19/33`). When the search of each batch of queries ends, the bar is erased, so nothing of it stays on the screen: the report and the shell's prompt appear where they would without it. NCBI BLAST+ writes nothing there during a search.
+- **When.** Only when the standard error is a terminal and, outside Windows, `TERM` is set and is not `dumb`. A standard error sent to a file or a pipe (`2> log.txt`, `2>&1 | less`) gets no byte of it. The library, pylosat and LOSAT Web never draw it.
+- **What does not change.** The bytes of the standard output, the `-out` file and the exit status.
 
 ### Argument errors and help
 
@@ -138,6 +144,7 @@ These cases are about what the program prints around the search, not the search 
 
 - **What you see.** Messages refer to LOSAT, not to NCBI's product: the last line of a query or options error reads `Please refer to the LOSAT user manual.`, and an error that NCBI reports as a C++ exception shows its message only, without NCBI's `NCBI C++ Exception:` header, source file, line, class name and function (`Error: Cannot convert string 'abc' to Int8 (position 0)`).
 - **What does not change.** The error prefixes, the message texts, NCBI's diagnostic codes such as `(106.15)`, the exit statuses and every search result.
+- **Record.** [The decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md), exception 12.
 
 ### Version text
 
@@ -146,7 +153,7 @@ These cases are about what the program prints around the search, not the search 
 ### SAM output: the `CL:` tag
 
 - **What you see.** In `blastn -outfmt 17`, the `CL:` tag of the `@PG` line holds LOSAT's own command line, as it was run. The rest of the document is NCBI's, byte for byte. A search run through the library has no command line, so its `@PG` line has no `CL:` tag.
-- **Record.** [The decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md), exception 12. See also [Output formats](output-formats.md).
+- **Record.** [The decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md), exception 13. See also [Output formats](output-formats.md).
 
 ### A write that fails, a closed pipe, memory
 

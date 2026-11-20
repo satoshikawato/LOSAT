@@ -1,7 +1,7 @@
 """LOSAT's text of NCBI's frozen bytes: the one mapping of `LOSAT/src/wording.rs` (AGENTS.md rule 8).
 
 LOSAT's messages say "Please refer to the LOSAT user manual." and leave out the internals of NCBI's
-exception reports (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11). A freeze keeps NCBI's bytes;
+exception reports (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12). A freeze keeps NCBI's bytes;
 a harness that compares LOSAT's standard error (or an archive's messages) with a freeze compares
 it with `losat_bytes(freeze)`. The constants are read from `wording.rs`, and the rules below are
 that file's, step for step; `LOSAT/tests/fixtures/wording/samples.tsv` holds the samples that both

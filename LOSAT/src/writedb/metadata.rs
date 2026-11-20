@@ -1258,7 +1258,7 @@ impl ObjectOStream<'_> {
 const SERIAL_IO_ERROR: &str = "CSerialException::eIoError";
 
 /// Writes the diagnostic line `line` in LOSAT's words (`crate::wording::losat_text`: without the
-/// exception's class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
+/// exception's class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
 fn post(err: &mut dyn Write, line: &str) {
     let _ = writeln!(err, "{}", crate::wording::losat_text(line));
 }

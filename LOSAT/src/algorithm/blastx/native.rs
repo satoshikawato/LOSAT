@@ -1819,7 +1819,7 @@ pub(super) fn database_search_error(
 //         exit_code = BLAST_INPUT_ERROR;                                      \
 // ```
 /// NCBI's error of the options that `BlastxArgs::resolve` defers (`SemanticOptionsError`).
-/// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 11): uses `USER_MANUAL_FOOTER`.
+/// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12): uses `USER_MANUAL_FOOTER`.
 pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
     NativeError {
         exit: 1,

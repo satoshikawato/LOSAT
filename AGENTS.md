@@ -71,13 +71,16 @@ authoritative, current guidance for agent behavior in LOSAT.
      stops LOSAT with a message and exit 4, and a failed write to its standard error
      (NCBI: SIGPIPE) with exit 4 and no message (exception 9); a closed pipe in
      `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, and version/help/argument
-     errors stops with exit 0 or ignores the closed pipe (exception 10); messages use
+     errors stops with exit 0 or ignores the closed pipe (exception 10); on a terminal, the command line's
+     `blastn` draws a progress bar on the standard error while it searches with `-num_threads` 2
+     or more against two subjects or more and clears it when each batch's search ends; a standard
+     error sent to a file or a pipe gets none of it (exception 11); messages use
      LOSAT's words, not NCBI's product or toolkit: `Please refer to the LOSAT user manual.`
      in place of `Please refer to the BLAST+ user manual.`, and NCBI's exception reports
      reduced to their messages (no `NCBI C++ Exception:`, thread, NCBI source path and line,
      `(<class>::<code>)` or C++ function; `(m_Pos = N)` reads `(position N)`), in standard
      error and in an archive's messages, while the `BLAST ... error:` prefixes, NCBI's
-     diagnostic codes such as `(106.15)` and the message bodies stay NCBI's (exception 11;
+     diagnostic codes such as `(106.15)` and the message bodies stay NCBI's (exception 12;
      one producer and one mapping, `LOSAT/src/wording.rs`). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
@@ -164,7 +167,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      and stderr is replaced by that prefix before hashing
      (`LOSAT/tests/frozen_paths.py`). That is the one replacement of a
      checkout-path prefix. LOSAT's words in messages (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-     exception 11) are compared through one mapping of the freeze, the function that makes
+     exception 12) are compared through one mapping of the freeze, the function that makes
      them: `losat_output_bytes` / `losat_bytes` of `LOSAT/src/wording.rs` (Rust tests:
      `losat::wording`, `temp_support::expected_losat_bytes`; Python harnesses:
      `LOSAT/tests/losat_wording.py`, which reads that file's constants and checks its

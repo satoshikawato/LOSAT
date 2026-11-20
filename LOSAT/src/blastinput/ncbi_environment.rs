@@ -1054,7 +1054,7 @@ fn conf_file_path(
             let message = format!("Registry file \"{text}\" cannot be opened");
             // NCBI's `Error: (CAppException::eNoRegistry) <message>` and `... initialization failed
             // (CAppException::eNoRegistry) <message>`, in LOSAT's words (`crate::wording`: without
-            // the class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11).
+            // the class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
             return Err(ConfFile::CannotOpen(format!(
                 "Error: {message}\nError: (106.15) Application's initialization failed: {message}\n"
             )));

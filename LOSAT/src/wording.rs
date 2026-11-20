@@ -1,5 +1,5 @@
 //! LOSAT's own words where NCBI's messages name NCBI's product or show the internals of NCBI's
-//! C++ Toolkit (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 11; the Owner, 2026-11-20).
+//! C++ Toolkit (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12; the Owner, 2026-11-20).
 //!
 //! This module is the one producer of those words: the user-manual footer of the
 //! `BLAST ... error:` messages ([`USER_MANUAL_FOOTER`]) and the text of an NCBI exception report
@@ -468,7 +468,7 @@ pub(crate) mod tests {
         assert!(
             offenders.is_empty(),
             "write LOSAT's words with crate::wording (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES \
-             exception 11):\n{}",
+             exception 12):\n{}",
             offenders.join("\n")
         );
     }

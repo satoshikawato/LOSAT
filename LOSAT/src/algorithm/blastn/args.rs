@@ -957,7 +957,7 @@ impl BlastnArgs {
             self.dust = DustSpec::No;
         }
         if let Some(value) = self.dust_filtering.take() {
-            // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 11.
+            // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
             let footer = crate::wording::USER_MANUAL_FOOTER;
             self.dust =
                 parse_dust_filtering(&value).map_err(|message| crate::cli::NativeError {
@@ -1022,7 +1022,7 @@ impl BlastnArgs {
             None => None,
         };
         if self.window_masker_taxid.is_some() && database.is_some() {
-            // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 11.
+            // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
             return Err(crate::cli::NativeError {
                 exit: 1,
                 message: format!(

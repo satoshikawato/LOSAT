@@ -138,7 +138,7 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
             ));
         }
         Ok(_) | Err(_) => {
-            // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 11.
+            // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
             return Err(NativeError {
                 exit: 1,
                 message: format!(

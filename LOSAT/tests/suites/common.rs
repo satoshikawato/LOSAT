@@ -77,6 +77,8 @@ mod ncbi_toolkit_version;
 mod ncbi_windows_paths;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
+#[path = "../non_utf8_names.rs"]
+mod non_utf8_names;
 #[path = "../outfmt11_blastn.rs"]
 mod outfmt11_blastn;
 #[path = "../outfmt11_blastp.rs"]

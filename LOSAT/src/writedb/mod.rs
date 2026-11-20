@@ -52,6 +52,7 @@ pub mod platform;
 pub mod taxid_set;
 pub mod time;
 pub mod volume;
+mod windows_zone;
 pub mod writer;
 
 #[cfg(test)]

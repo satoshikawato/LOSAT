@@ -343,8 +343,10 @@ fn parse_ids_partial(text: &[u8]) -> Result<Vec<ParsedSeqId>, Stop> {
     });
     if let Some(message) = warned {
         return Err(Stop::Refused(format!(
-            "a Seq-id in a title that NCBI reads with a warning ({message}) is not supported \
+            "a Seq-id in a title that NCBI reads with a warning ({}) is not supported \
              by LOSAT's {}",
+            // LOSAT's own refusal text.
+            String::from_utf8_lossy(&message),
             super::PROGRAM
         )));
     }

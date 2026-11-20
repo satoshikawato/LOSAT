@@ -380,6 +380,8 @@ pub struct OptionInputs {
     /// An imported strategy's parameters as its setters record them, in the file's order
     /// (`CBlastOptionsBuilder::GetSearchOptions`): they replace the command line's classes.
     pub imported: Option<Vec<Param>>,
+    /// psiblast's `-ignore_msa_master` (`CPsiBlastArgs`, always recorded).
+    pub ignore_msa_master: bool,
 }
 
 impl OptionInputs {
@@ -430,6 +432,7 @@ impl OptionInputs {
             gap_trigger: 22.0,
             num_iterations: None,
             imported: None,
+            ignore_msa_master: false,
         }
     }
 }
@@ -511,6 +514,19 @@ fn task_calls(task: &str) -> Vec<Param> {
             p(fields::REPEAT_FILTERING, Boolean(false)),
             // `ClearFilterOptions` ends with `SetMaskAtHash(false)` (api/blast_options_cxx.cpp:1022-1031).
             p(fields::MASK_AT_HASH, Boolean(false)),
+        ],
+        // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:365-370
+        // ```c++
+        //         }else if ( !NStr::CompareNocase(task, "rmblastn") )
+        //         {
+        //             // -RMH- This blastn only supports full matrix scoring.
+        //             opts->SetMatchReward(0);
+        //             opts->SetMismatchPenalty(0);
+        //         }
+        // ```
+        "rmblastn" => vec![
+            p(fields::MATCH_REWARD, Integer(0)),
+            p(fields::MISMATCH_PENALTY, Integer(0)),
         ],
         "dc-megablast" => vec![
             p(fields::MB_TEMPLATE_TYPE, Integer(0)),
@@ -1055,8 +1071,9 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             //             opt.SetIgnoreMsaMaster(args[kArgIgnoreMsaMaster]);
             //         }
             // ```
-            // (`-ignore_msa_master` is refused by LOSAT's parser: always FALSE.)
-            Class::PsiBlast => list.set(fields::IGNORE_MSA_MASTER, Boolean(false)),
+            Class::PsiBlast => {
+                list.set(fields::IGNORE_MSA_MASTER, Boolean(inputs.ignore_msa_master))
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1113-1119
             // ```c++
             //     if (args[kArgPSIPseudocount]) {

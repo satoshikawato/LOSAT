@@ -1,0 +1,84 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= 
+Length=58
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          72.0    5e-20
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       17.7    7.5  
+
+
+>BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]
+Length=197
+
+ Score = 72.0 bits (175),  Expect = 5e-20, Method: Composition-based stats.
+ Identities = 19/59 (32%), Positives = 33/59 (56%), Gaps = 1/59 (2%)
+
+Query  1   MTATIHMILGPMFSGKSTTLMKLIKHYKISNAKCMLITHTLDKRYTNG-NQVSSHDGEK  58
+               IH+++GPMF+GKS+T++K+ +       +C+ I H  D RY     +  +H G+ 
+Sbjct  5   NIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQT  63
+
+
+>BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]
+Length=2526
+
+ Score = 17.7 bits (34),  Expect = 7.5, Method: Composition-based stats.
+ Identities = 4/16 (25%), Positives = 9/16 (56%), Gaps = 0/16 (0%)
+
+Query  18   TTLMKLIKHYKISNAK  33
+            ++L +L K+   +N  
+Sbjct  786  SSLKQLYKYEAENNKH  801
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.131    0.370    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0400    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1663636
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

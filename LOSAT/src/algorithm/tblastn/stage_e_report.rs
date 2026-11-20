@@ -684,6 +684,11 @@ pub(super) fn render(
     // format (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
     // diagnostics at every format.
     let mut warning_lines = Some(query_posts);
+    // The queries' result warnings that a structured first format does not write are each later
+    // format's that writes them, to the caller's receiver of that format's
+    // (`ReportOutputs::later_warnings`).
+    // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+    let keeps_later = outputs.keeps_later_query_warnings();
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // ```c++
@@ -742,7 +747,10 @@ pub(super) fn render(
         // So do the warnings of the formatters of a tabular field list that shows a taxonomy
         // name (`x_CheckTaxDB`, `tabular`), and the Seq-annots' posts of the bytes that NCBI's
         // stream replaces (`seqalign::write_query_to`).
+        // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+        let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (warning_lines.is_some()
+            || later.is_some()
             || crate::report::query_warnings::report_posts(format.report_format())
             || custom_tabular
                 .as_ref()
@@ -753,7 +761,8 @@ pub(super) fn render(
                 first.unwrap_or(&[]),
                 archive.map(|render| render.handle),
                 &mut *outputs.diagnostics,
-            );
+            )
+            .with_later(query_posts, later);
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`query_reads`).
             match first {
@@ -1623,7 +1632,7 @@ fn write_pairwise(
     }
     let report = BlastpPairwiseReport {
         version: crate::NCBI_BLAST_VERSION.into(),
-        database_name: shown.pairwise_name(),
+        database_name: shown.pairwise_name().into(),
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
         // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
@@ -2211,6 +2220,7 @@ mod tests {
                     })
                     .collect(),
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };

@@ -40,7 +40,10 @@ fn native(result: Result<impl std::fmt::Debug>) -> (i32, String) {
     let native = error
         .downcast_ref::<NativeError>()
         .unwrap_or_else(|| panic!("not NCBI's error: {error:#}"));
-    (native.exit, native.message.clone())
+    (
+        native.exit,
+        String::from_utf8(native.message.clone()).unwrap(),
+    )
 }
 
 /// `resolve` with its warnings collected.

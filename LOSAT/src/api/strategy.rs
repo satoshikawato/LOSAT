@@ -91,8 +91,10 @@ pub fn apply(mut command: Commands, bytes: &[u8]) -> Result<Applied, Error> {
     // The warnings that the command line posts before a failure (to its standard error) come
     // first in the error's text, as the two come on a terminal.
     let mut posted = Vec::new();
-    let command = apply_one(command, &mut posted)
-        .map_err(|error| Error::Input(format!("{}{error:#}", String::from_utf8_lossy(&posted))))?;
+    let command = apply_one(command, &mut posted).map_err(|error| {
+        posted.extend_from_slice(format!("{error:#}").as_bytes());
+        Error::Input(posted)
+    })?;
     let text =
         |held: Option<&std::sync::Arc<Vec<u8>>>| held.map(|text| text.to_vec()).unwrap_or_default();
     let run = import_run(&command);
@@ -243,7 +245,7 @@ impl Strategy {
         if search.program() != self.program || search.argv() != self.argv {
             return Err(Error::Argv(
                 "the search strategy was read for another search: read it with the search that runs it"
-                    .to_string(),
+                    .into(),
             ));
         }
         // The engine's `apply_strategy` over the file again: `Commands` has no copy, and the

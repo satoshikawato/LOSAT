@@ -888,12 +888,12 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // refuses `-outfmt 11`).
     // (An exception report, `Error: ` and NCBI's `what()` in LOSAT's words, has exit status 255:
     // `catch_all` below, `cli::NativeError::exception`.)
-    const PREFIXES: [&str; 5] = [
-        "BLAST query error:",
-        "BLAST Database error:",
-        "BLAST engine error:",
-        "BLAST options error:",
-        "BLAST query/options error:",
+    const PREFIXES: [&[u8]; 5] = [
+        b"BLAST query error:",
+        b"BLAST Database error:",
+        b"BLAST engine error:",
+        b"BLAST options error:",
+        b"BLAST query/options error:",
     ];
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
     // ```c++
@@ -909,12 +909,12 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // failed the main thread's diagnostic stream, that report is its line feed alone
     // (`cli::catch_all_text`).
     let catch_all = native.exit == 255
-        && (native.message.starts_with("Error: ") || crate::ncbi_exception::main_diag_failbit());
+        && (native.message.starts_with(b"Error: ") || crate::ncbi_exception::main_diag_failbit());
     let known = catch_all
         || PREFIXES
             .iter()
             .any(|prefix| native.message.starts_with(prefix))
-        || (subject_file && native.message.starts_with("Command line argument error:"));
+        || (subject_file && native.message.starts_with(b"Command line argument error:"));
     if !known {
         return None;
     }
@@ -926,28 +926,37 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // D3-1 `k02_failed_then_choice_exc`: `message ""`).
     if crate::ncbi_exception::main_diag_failbit() {
         let written = crate::cli::catch_all_text(&native.message);
-        return Some(
+        // One post per line feed (`split_terminator('\n')`: a final empty piece is not one).
+        let pieces = if written.is_empty() {
+            0
+        } else {
             written
-                .split_terminator('\n')
-                .map(|_| (ERROR, Vec::new()))
-                .collect(),
-        );
+                .strip_suffix(b"\n")
+                .unwrap_or(written)
+                .split(|&byte| byte == b'\n')
+                .count()
+        };
+        return Some((0..pieces).map(|_| (ERROR, Vec::new())).collect());
     }
     // One diagnostic per `ERR_POST`: the text of an error is one message even when it has
     // several lines (an exception's chain), and the macro of an invalid input posts the user
     // manual footer (`USER_MANUAL_FOOTER`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) as a
     // second one.
-    let refer_line = crate::wording::USER_MANUAL_FOOTER;
-    let text = native.message.trim_end_matches('\n');
+    let refer_line = crate::wording::USER_MANUAL_FOOTER.as_bytes();
+    let text = &native.message[..native
+        .message
+        .iter()
+        .rposition(|&byte| byte != b'\n')
+        .map_or(0, |last| last + 1)];
     let (first, refer) = match text.strip_suffix(refer_line) {
-        Some(head) if head.ends_with('\n') => (head, Some(refer_line)),
+        Some(head) if head.ends_with(b"\n") => (head, Some(refer_line)),
         _ => (text, None),
     };
     Some(
         std::iter::once(first)
             .chain(refer)
             .filter_map(|part| {
-                let text = crate::report::diag_log::sanitize(part.as_bytes());
+                let text = crate::report::diag_log::sanitize(part);
                 (!text.is_empty()).then_some((ERROR, text))
             })
             .collect(),
@@ -1404,5 +1413,59 @@ mod tests {
         assert!(!spec.error_archive_enabled());
         write_error_archive(&spec, &lines, &mut sink).unwrap();
         assert!(sink.is_empty());
+    }
+
+    /// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of
+    /// line RG D1a-4, SF1): an archive
+    /// whose request holds a big integer of -2^63 (`-dbsize -9223372036854775808`), which NCBI's
+    /// ASN.1 text and XML archives write as `-0` (probes q6, q10b of review C), is written with its
+    /// digits, not refused.
+    #[test]
+    fn an_archive_of_a_dbsize_of_minus_two_to_the_63_writes_its_digits() {
+        struct NoAligns;
+        impl AlignSource for NoAligns {
+            fn write<E: crate::report::serial::encoder::Encoder>(
+                &mut self,
+                _out: &mut ArchiveOut<'_, E>,
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+        let mut inputs = options::OptionInputs::new(Program::Blastp, "blastp");
+        inputs.dbsize = Some(i64::MIN);
+        for (encoding, written) in [
+            (
+                ArchiveEncoding::Text,
+                "name \"DbLength\",\n          value big-integer -9223372036854775808\n",
+            ),
+            (
+                ArchiveEncoding::Xml,
+                "<Blast4-value_big-integer>-9223372036854775808</Blast4-value_big-integer>",
+            ),
+        ] {
+            let handle = ArchiveHandle::new(
+                encoding,
+                ArchiveRequest::for_inputs(&inputs, Some("in/db/bp")),
+                OptionsHandle::default(),
+            );
+            let batch = BatchArchive {
+                request: writer::RequestInputs {
+                    queries: writer::RequestQueries::Bioseqs(&[]),
+                    subjects: &[],
+                    required: None,
+                    lcase_masks: &[],
+                },
+                masks: &[],
+                ka_blocks: [KaBlock::missing(false), KaBlock::missing(true)],
+                search_space: 0,
+                length_adjustment: 0,
+                searched_space: None,
+            };
+            let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+            write_archive(&handle, &batch, &mut NoAligns, &mut sink, &mut diagnostics).unwrap();
+            let text = String::from_utf8(sink).unwrap();
+            assert!(text.contains(written), "{encoding:?}: {text}");
+            assert!(!text.contains("-0\n") && !text.contains(">-0<"), "{text}");
+        }
     }
 }

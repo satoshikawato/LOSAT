@@ -104,14 +104,15 @@
    },
    {
     "flag": "-task",
-    "help": "Task to execute: megablast, blastn, dc-megablast or blastn-short",
+    "help": "Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn",
     "takes_value": true,
     "default": "megablast",
     "choices": [
      "megablast",
      "dc-megablast",
      "blastn",
-     "blastn-short"
+     "blastn-short",
+     "rmblastn"
     ]
    },
    {
@@ -181,12 +182,12 @@
    },
    {
     "flag": "-reward",
-    "help": "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast; LOSAT does not support 0)",
+    "help": "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast, 0 for rmblastn; 0 needs penalty 0)",
     "takes_value": true
    },
    {
     "flag": "-penalty",
-    "help": "Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for the other tasks)",
+    "help": "Penalty for a nucleotide mismatch (default: -2 for megablast, 0 for rmblastn, -3 for the other tasks)",
     "takes_value": true
    },
    {
@@ -387,6 +388,24 @@
      "-word_size": "28",
      "-xdrop_gap": "25",
      "-xdrop_gap_final": "100"
+    },
+    "rmblastn": {
+     "-culling_limit": "0",
+     "-dust": "20 64 1",
+     "-evalue": "10",
+     "-gapextend": "2",
+     "-gapopen": "5",
+     "-line_length": "60",
+     "-max_target_seqs": "500",
+     "-num_alignments": "250",
+     "-num_descriptions": "500",
+     "-penalty": "0",
+     "-reward": "0",
+     "-soft_masking": "true",
+     "-window_size": "0",
+     "-word_size": "11",
+     "-xdrop_gap": "30",
+     "-xdrop_gap_final": "100"
     }
    },
    "by": {},
@@ -407,19 +426,22 @@
      "blastn",
      "blastn-short",
      "dc-megablast",
-     "megablast"
+     "megablast",
+     "rmblastn"
     ],
     "-num_alignments": [
      "blastn",
      "blastn-short",
      "dc-megablast",
-     "megablast"
+     "megablast",
+     "rmblastn"
     ],
     "-num_descriptions": [
      "blastn",
      "blastn-short",
      "dc-megablast",
-     "megablast"
+     "megablast",
+     "rmblastn"
     ]
    }
   }
@@ -2241,6 +2263,11 @@
     "default": "1"
    },
    {
+    "flag": "-max_intron_length",
+    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]",
+    "takes_value": true
+   },
+   {
     "flag": "-max_target_seqs",
     "help": "Maximum number of aligned sequences to keep (default: 500)",
     "takes_value": true
@@ -2292,12 +2319,28 @@
     "takes_value": true
    },
    {
+    "flag": "-sum_stats",
+    "help": "Use sum statistics [default: true]",
+    "takes_value": true
+   },
+   {
     "flag": "-lcase_masking",
     "help": "",
     "takes_value": false,
     "choices": [
      "true",
      "false"
+    ]
+   },
+   {
+    "flag": "-strand",
+    "help": "",
+    "takes_value": true,
+    "default": "both",
+    "choices": [
+     "both",
+     "plus",
+     "minus"
     ]
    },
    {
@@ -2394,6 +2437,7 @@
      "-num_descriptions": "500",
      "-seg": "12 2.2 2.5",
      "-soft_masking": "false",
+     "-sum_stats": "true",
      "-threshold": "13",
      "-window_size": "40",
      "-word_size": "3",

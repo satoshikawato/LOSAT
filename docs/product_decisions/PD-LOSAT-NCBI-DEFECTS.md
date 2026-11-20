@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.53
+- Version: 1.58
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -196,7 +196,43 @@
   a redone match, on which NCBI crashes, rule 3; X4 fix round 4: a negative `CHUNK_SIZE` that
   leaves a chunk without a query also after the reports of the batches before; 2026-11-20, review
   3 of X4: so does the rejection that version 1.1 kept of the negative pair whose chunks leave
-  gaps)
+  gaps);
+  1.54 2026-11-20 (BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u`, line RG item X5:
+  the e-value adjustment with the values of the next query of the batch reproduced, rule 2;
+  exception 16 for the last query of a batch, whose values NCBI reads past its array of query
+  contexts: the Owner's decision of 2026-11-20 on question Q-X5 (「Q1=A」, Q1 of that day's batch of
+  questions = Q-X5); the rule-2 rejection of a batch in which a query is followed by a query
+  without a search space, Owner-delegated (standing instruction 2026-09-29, restated 2026-10-07)
+  and part of the option A that the Owner chose; numbered after 1.53, line RG item X4);
+  1.55 2026-11-20 (BLASTN, line RG item X6: reward 0 and penalty 0, NCBI's matrix-only scoring
+  of `-task rmblastn`, now runs; the explicit rejection of it with the greedy extension of
+  `-task megablast`, where NCBI divides by zero or does not finish, rule 3; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.54, line RG item X5);
+  1.56 2026-11-17 (RPSBLAST and RPSTBLASTN: a reported hit of a profile that an alias file's
+  `FIRST_OID` and `LAST_OID` leave out, which NCBI's report does not find, refused in every format,
+  within the classes of 1.10, rule 2, where NCBI writes `Unknown` and exits 0, and of 1.37, rule 3,
+  where it stops with a null pointer exception: reported sequences only; and the explicit
+  rejections, rule 3, of the concatenated length of an RPS search unit at which NCBI's interval tree
+  splits a node without end, its diagonal table never stops growing, it frees the profiles twice,
+  or an ungapped extension reads past the row after the profiles or that row past the `.rps`
+  file's last memory page, precedent 1.30; line RG item D1a-4, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; fix round 1 of D1a-4: the reported profiles only,
+  the refusals at the batch where NCBI's engine meets them, the row after the profiles read as
+  NCBI reads it, DECISIONS D1a4-9; fix round 2: following profiles of one Seq-id count as one
+  subject in the cut, and a reported profile out of the range is written as the included copy of
+  its record that NCBI's report finds by its Seq-id; fix round 3: that copy has the same letters
+  too, else it is refused; numbered after 1.46 at the merge of dev, then after 1.48 and
+  1.49 at fix round 4's two merges of dev, then after 1.50 at fix round 7's merge of dev, then
+  after 1.51 and after 1.52 at the two merges of dev before the pull request, then after 1.53, 1.54
+  and 1.55 at the last three merges of dev);
+  1.57 2026-11-17 (approved exception 17, the Owner's decision of 2026-11-17 on line RG's question
+  D1a-3 Q1, 「A 正しい数を書く (推奨)」: a database length or `-dbsize` of exactly -2^63, which NCBI's
+  serial writer prints as `-0`, written as `-9223372036854775808`; the rule-3 refusal of that one
+  value removed; numbered after the D1a-4 entry at each of its merges of dev; exception 16 until
+  dev's exception 16 of line RG item X5, version 1.54, came first;
+  1.58 2026-11-21 (approved exception 18, the Owner's decision of 2026-11-20 on line RG's question
+  F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
+  F2, `-import_search_strategy`)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -878,8 +914,83 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
     (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
 
+## Approved exception 16 (BLASTP unified P-values, the last query of a query batch, version 1.54)
+
+Version 1.54, line RG item X5 (line RG `DECISIONS.md` X5-1 to X5-4). The Owner decided on 2026-11-20
+(words 「Q1=A Q2=B Q3=A Q4=A Q5=A Q6=B Q7=A Q8=OK」, whose Q1 was this question) question Q-X5: option A,
+running unified P-values with NCBI's bytes for a query that has a next query in its batch (rule 2
+below), the query's own values for the last query of a batch (this exception) and the refusal of a
+batch whose next query has no search space (rule 2's rejections). Until this version LOSAT refused every request for
+unified P-values (NCBI parity line `DECISIONS.md` 23 a, 2026-10-25; `OWNER_DECISIONS.md` row 23).
+Not taken: keeping that refusal for every query (a search of one query is the commonest use, and
+all but the last query of a batch have NCBI's bytes, rule 2 below); the query's own values for
+every query (NCBI's bytes for a query with a next query are deterministic, rule 2).
+
+16. **Unified P-values: the last query of a query batch.** A `u` after the mode of
+    `-comp_based_stats` (`1u`, `2u`, `3u`; BLASTP only, `blast_args.cpp:880-884`) makes NCBI's
+    composition-based redo combine the P-value of each alignment with the P-value of the pair's
+    compositions (`s_AdjustEvaluesForComposition`, `blast_kappa.c:134-210`). The step scales the
+    e-value with the query's length, length adjustment and effective search space, which it reads
+    from `queryInfo->contexts[context_index]` (`:147-158`). `Blast_RedoAlignmentCore_MT` sets
+    `context_index = query_index * numFrames` (`blast_kappa.c:3543`), its loop over the query's
+    frames adds one per frame (`:3590-3592`; BLASTP has one frame), and the value after the loop
+    goes to `s_HitlistEvaluateAndPurge` (`:3675-3683`): the context of the next query of the batch.
+    For the last query of a batch, and so for every search of one query, that is the element after
+    the array's end (`calloc(last_context + 1, 32)`, `blast_query_info.c:77-79`): the three values
+    are heap bytes. In our runs of NCBI BLAST+ 2.17.0 (the evidence below) the report of one query
+    alone took 7 forms in 40 runs at 1 and 4 threads, and that of a query whose hit list fills 3
+    forms in 10 runs. LOSAT adjusts the last query of a batch with that
+    query's own three values, which the step's parameter is documented to hold ("info about this
+    query context", `blast_kappa.c:126-127`), and redoes every match of it. That result is
+    NCBI's: in NCBI's search of the batch's queries with a copy of the last query after it in the
+    same batch, the next context of the query holds the copy's values, which are the query's own,
+    and NCBI's report of the query is deterministic (the same bytes in every run, at 1, 4 and 8
+    threads, and with a third query after the copy). LOSAT's report of the last query of a batch
+    equals NCBI's report of that query in that search (outfmt 0, 5, 6 and 7 are frozen), where
+    the copy stays in the query's batch (a batch closes at `BATCH_SIZE` letters, 10,000 by
+    default, so the search with a copy may need a larger value) and NCBI searches that batch in
+    the same chunks (a batch above `CHUNK_SIZE` is split, the copy moves the split, and the split
+    can change the preliminary hits; the frozen rows search one chunk). With `-use_sw_tback` the
+    failure of a batch's traceback follows the batch's last redone match (version 1.53, X4): in
+    NCBI's search with a copy that match is the copy's, which NCBI may end early where the copy's
+    hit list fills; where it does not, LOSAT's batch fails where NCBI's search with the copy does.
+    The redo's early termination (`BlastCompo_EarlyTermination`, `redo_alignment.c:1560-1580`)
+    belongs to the same result. NCBI redoes the matches in the order of their queries
+    (`BlastHSPStreamRead`, `blast_hspstream.c:288-319`), and the test needs the heap of every
+    query of the batch to hold `-max_target_seqs` matches with an e-value of at most 0.002
+    (`inclusion_ethresh`, `blast_kappa.c:3074-3077`, `compo_heap.c:405-409`); the heaps of the
+    queries after the one in work are still empty, so the test can end only matches of the
+    batch's last query (those with a preliminary e-value above 0.01). In the search with a copy
+    the query is not the last one and NCBI redoes every match of it. So LOSAT ends no match early
+    in a search with unified P-values (`ResolvedBlastpArgs::redone_match_heap`); the queries
+    before the last one are never ended early in NCBI either.
+    Evidence: `docs/evidence/unified_p_last_query/` (NCBI's runs: the variation of the last
+    query, the stable reports with a copy, LOSAT's reports against them). Fixture rows
+    `db.x5u.*` of `LOSAT/tests/db_search_manifest/blastp.x5u.tsv`: the rows with `ncbi-copies:`
+    hold NCBI's whole output of the search with copies, and the check derives the expected bytes
+    from it by dropping the copies' reports (`LOSAT/tests/db_search_fixtures.py`). Unit tests
+    `evalue_adjust_contexts_are_the_next_querys_of_the_batch_or_the_querys_own` and
+    `test_adjust_evalues_for_composition_matches_ncbi_sequence_scaling`
+    (`LOSAT/src/algorithm/blastp/kappa.rs`), `a_heap_without_early_end_is_never_filled_to_its_cutoff`
+    (`LOSAT/src/algorithm/blastp/hsp.rs`).
+
 ## Reproduced as NCBI (rule 2)
 
+- BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u` (version 1.54, 2026-11-20, line RG
+  item X5, DECISIONS X5-1): for a query that has a next query in its query batch, NCBI adjusts the
+  e-values with the next query's length, length adjustment and effective search space
+  (`blast_kappa.c:3543`, `:3590-3592`, `:3675-3683`; exception 16 above describes the index). The
+  result is deterministic: NCBI's `-num_threads 1` writes the same bytes in every run, and they
+  follow the next query (a next query of another length changes the e-values and the rows that
+  pass `-evalue`). LOSAT reproduces them byte for byte from the batch's queries at every thread
+  count (NCBI with more threads may form its batches another way, `-mt_mode 1`)
+  (`kappa::evalue_adjust_contexts`); a next query that is not valid (no residue that can be scored)
+  gives a length adjustment of 0 and the search space of `-searchsp`, as NCBI's
+  `BLAST_CalcEffLengths` leaves them (`blast_setup.c:773-784`, `:846-847`). So the report of a
+  query depends on the query after it and on `BATCH_SIZE`; only the last query of a batch is an
+  exception (16). In PSIBLAST, BLASTX, TBLASTN, RPSBLAST and RPSTBLASTN NCBI reads the mode's
+  first character and ignores the `u` (`blast_args.cpp:880-884`), and LOSAT does the same; the
+  refusal list had named PSIBLAST by mistake.
 - TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.39, 2026-11-15, line RG item T3c,
   DECISIONS T3-6): NCBI adds TBLASTX's HSPs of each query frame with `CAlnMix::fForceTranslation`
   (`eTranslateNucToNucAlignment`, showalign.cpp:2058-2063), whose `CAlnMixMatches::Add` throws
@@ -1105,6 +1216,15 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   no hits, a deterministic result), stays an explicit rejection too.
 - Subjects of 2^31 letters or more in total: NCBI's 32-bit total wraps.
 - megablast gap costs above 32767: NCBI's 32-bit greedy distance arithmetic can wrap.
+- Reward 0 and penalty 0 (matrix-only scoring, the scores of `-task rmblastn`) with the greedy
+  extension of `-task megablast` (line RG X6, 2026-11-20, Owner-delegated): with gap costs 0
+  and 0 (megablast's own) NCBI divides by zero in the greedy set-up (`blast_gapalign.c:209`,
+  SIGFPE, exit status 136, also with `-ungapped`); with other gap costs the greedy alignment
+  converts an infinite quotient to `Int4` (`greedy_align.c:981`, undefined behaviour) and does
+  not finish on pairs of 60-100 kb. LOSAT refuses it where it checks the greedy gap costs (a
+  batch with a valid query), so a batch of invalid queries ends with NCBI's warning as in NCBI.
+  It differs from NCBI where NCBI finishes with other gap costs because no seed reaches the
+  greedy alignment (small inputs). `-no_greedy` and `-ungapped` with other gap costs run.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` that splits a query batch
   (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's `size_t` chunk ranges
   wrap; NCBI stops as in exception 1 where a chunk would be split again, and otherwise
@@ -1781,6 +1901,101 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   refuses with this item's message, at a later step than NCBI's. Both are open (line RG item
   X-short-tbx-link).
 
+- RPSBLAST and RPSTBLASTN over an alias file whose `FIRST_OID` and `LAST_OID` leave out profiles of
+  its volumes (2026-11-17, line RG item D1a-4, Owner-delegated): NCBI's RPS search
+  ignores the range (its lookup table holds every profile of a volume, `blast_aalookup.c:182-184`;
+  the volumes of several are searched bare), while its formatter opens the `-db` name with its keys,
+  whose `SeqidToOids` keeps only the OIDs of the range (`seqdbimpl.cpp:1414-1418`): a hit of a
+  profile outside it is not found. Outfmt 0 then writes `Unknown` and "Sequence with id CDD:N no
+  longer exists in database...alignment skipped", the tabular formats `Unknown`, `N/A` and a length
+  of 0 (the class of rule 2's version 1.10, exit status 0), and `sacc`, `saccver` and the default
+  fields of outfmt 6, 7 and 10 stop with a null pointer exception, exit status 255 (the class of
+  1.37; probes p6_1v_fo22 and p6b_fo22 of line RG D1a-4). LOSAT refuses (exit 1, "a hit of the
+  profile of OID N outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID ... is not
+  supported by LOSAT's RPSBLAST", one text for both programs) where a query's reported profiles
+  hold such a profile: the profiles of the first `-max_target_seqs` subjects of its hit list (the
+  hit list size, `PruneSeqalign` with `m_HitlistSize`, `blast_format.cpp:810-813`, which counts
+  following profiles of one Seq-id as one subject, as with a volume given twice under two paths:
+  fix round 2 of D1a-4; outfmt 0's descriptions and alignments lie within it). NCBI's report looks
+  a reported profile up by its Seq-id among the profiles the range includes: where an included copy
+  of its record holds it (a volume given twice under two paths, one past the range), NCBI shows that
+  copy and exits 0, and LOSAT writes the same (probe dup6 of D1a-4 fix round 2); an included profile
+  of another record or of other letters that holds it is refused too ("... whose Seq-id NCBI BLAST+
+  2.17.0's report finds in another record or other letters ...": NCBI shows that profile's letters
+  and length with the HSPs of the one out of the range; fix round 3, review C N4). RPSBLAST refuses before any output (its search of every query batch
+  comes before the reports); RPSTBLASTN after the reports of the query batches before. With several
+  volumes a profile outside the range past that cut of the merged lists, which no report of NCBI's
+  looks up, is NCBI's run: its HSPs count in outfmt 7's `# N hits found` (and in
+  `PRE_FETCH_SEQS_LIMIT`'s count), as NCBI counts the whole merged set (probes r1_3v_fo3 and
+  r1_3v_fo11 of review A of D1a-4). A run whose reported hits are all in the range is NCBI's
+  (fixture rows `db.rps.rej.fo22`, `db.rpstbn.rej.fo22`, `db.rpstbn.fo11.e5.6`, `db.rps.1v.fo3.*`,
+  `db.rps.3v.fo3.*`, `db.rpstbn.3v.fo11.*`).
+
+- RPSBLAST and RPSTBLASTN over one volume whose alias file's `LENGTH` and `NSEQ` make the
+  concatenated length `Lc = (Int4)(LENGTH + NSEQ)` shorter than the profiles (2026-11-17, line RG
+  item D1a-4 part B, Owner-delegated; precedent 1.30): NCBI's gapped stage roots
+  its interval tree at `[0, Lc + 1]` (`blast_gapalign.c:3830-3831`) while the HSPs of later profiles
+  lie past it. A region (the profile's offset plus the HSP's range) that starts past `R = Lc + 1`
+  goes right at every node `[l, R]` of the right spine, whose middles `(l + R) / 2` are at most `R`,
+  and becomes the leaf at its end; a second one in the same tree (one tree per query, per frame for
+  RPSTBLASTN) meets that leaf, and `BlastIntervalTreeAddHSP` (`blast_itree.c:603-793`) splits
+  `[R, R]` into `[R + 1, R]`, whose middle is `R` again, without end, doubling its node pool until
+  an allocation fails (`BLAST ran out of memory`, exit status 4 under an 8 GiB limit, after outfmt
+  0's prolog; the OOM killer without it). A region that crosses `R` straddles a middle of the spine
+  and ends in a subject tree; below `R = 0` every middle of the spine is below the regions' starts.
+  LOSAT refuses (exit 1, "... where two gapped alignments of a query start past position ... is not
+  supported by LOSAT's RPSBLAST") at the insertion that would make the node, after NCBI's end-point
+  checks (which may drop the HSP or the leaf it meets): `BlastIntervalTree::try_add_hsp`, the stop
+  of TBLASTN's endless split of 1.18; RPSBLAST before any output, RPSTBLASTN after the reports of the
+  query batches before (NCBI writes the batches before, then fails). With at most one such
+  region in each tree NCBI ends, and LOSAT gives its bytes: the truncated extensions to the right
+  and the diagonal table of `Lc` (fixture rows `db.rps.rej.l0`, `db.rpstbn.rej.l0`,
+  `db.rps.rej.nm300`, `db.rpstbn.rej.nm300`, and the one-volume rows that end).
+
+- RPSBLAST and RPSTBLASTN over one volume whose concatenated length `Lc` is longer than the profiles
+  (an alias file's `LENGTH` and `NSEQ`, or `-db "a x"` with an alias `a` of the volume `x`, which counts
+  it twice; 2026-11-17, line RG item D1a-4 part B, Owner-delegated): the ungapped
+  extension to the right runs to `MIN(subject->length - s_off, Lc - q_off)` (`aa_ungapped.c:948`),
+  past the rows. The last profile's sentinel row (`-BLAST_SCORE_MAX`, `makeprofiledb.cpp:1166-1167`)
+  stops it unless the X-drop is above that score; past it NCBI reads the row pointer after the last
+  row (`rps_pssm[rows]`, the last of the `rows + 1` pointers, `blast_aalookup.c:185-190`), which
+  points to the bytes after the rows in the `.rps` file's mapping, and then past its pointer array.
+  At `Lc = rows + 1` the extension reads that one row: the file ends there (makeprofiledb writes no
+  byte after the rows), so NCBI reads the zeros of the file's last memory page, the row scores 0
+  and the extension ends at its bound (`NSEQ 4` over the 563 rows of `rps_mini`, whose `.rps` of
+  63,080 bytes leaves 2,456 zero bytes in its last 4 KiB page: NCBI exit 0, 431 bytes, probe g9#0 of
+  review B of D1a-4); where the file ends on a page boundary that read faults (SIGBUS). LOSAT reads
+  that row as NCBI does (the file's bytes after the rows, then the page's zeros: DECISIONS D1a4-9,
+  rule 2, the precedent of DECISIONS X2f-4 for `.psq`) and refuses (exit 1, "... whose ungapped
+  extension of a query runs past the row after the last profile, or reads that row past the .rps
+  file's last memory page ... is not supported by LOSAT's RPSBLAST") an extension that reads its
+  bytes past the last page (rule 3) or goes on past it, where `Lc` is the rows plus 2 or more: with
+  `-xdrop_ungap 100000` and a query that matches the profiles to their end NCBI crashes (SIGSEGV,
+  exit status -11; probes p9_over of line RG D1a-4 and g9#1, `NSEQ 5`); RPSBLAST before any output,
+  RPSTBLASTN after the reports of the query batches before. Elsewhere `Lc` above the rows is NCBI's
+  search (its diagonal table of `Lc`; fixture rows `db.rps.rej.over`, `db.rps.rej.n5.over`,
+  `db.rps.1v.n4.over.6`).
+
+- RPSBLAST and RPSTBLASTN with a concatenated length `Lc` whose diagonal table never stops growing
+  (2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_BlastDiagTableNew`
+  (`blast_extend.c:52-57`) doubles an `Int4` from 1 while it is below `Lc` plus the word window; past
+  a sum of 2^30 it doubles to 2^31 (`INT_MIN`) and then to 0 and stays there (an alias file's
+  `LENGTH` 2^30 over one volume: no end, timeout); a sum above `INT4_MAX` (`LENGTH` 2^31 - 4 and
+  `NSEQ` 3) overflows NCBI's `Int4` addition. LOSAT refuses (exit 1) a unit whose `Lc` plus the
+  window is above 2^30, for every unit (also a bare volume of that many rows; the volume test of
+  earlier versions refused a sum of exactly 2^30, where NCBI's loop ends; fixture row
+  `db.rps.rej.l2p30`), where NCBI's engine meets it: in the unit's search of the first query batch
+  that NCBI searches, after the batch's query set-up (an empty query file ends with NCBI's `Query is
+  Empty!` and exit 0, a first batch without letters with NCBI's engine error and exit 3: rows
+  `db.rps.empty.l2p31`, `db.rps.nolet.l2p30`, `db.rpstbn.nolet.l2p30`; review B of D1a-4, MF1).
+
+- RPSBLAST and RPSTBLASTN over one volume whose `LENGTH` and `NSEQ` sum above `INT4_MAX`
+  (2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_RPSPreliminarySearchEngine`
+  returns -3 (`blast_engine.c:1131-1135`) after `RPSPsiMatrixAttach` gave the score block the
+  lookup table's profiles, and the score block's free frees them again (`double free or corruption`,
+  SIGABRT, exit status -6 after outfmt 0's prolog; `LENGTH` 2^31). LOSAT refuses (exit 1; fixture row
+  `db.rps.rej.l2p31`) where NCBI's engine meets it, as the diagonal table's refusal above.
+
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
 `CSeqDBTaxInfo::GetTaxNames` maps `taxdb.btd` and reads a record from its offset to the next
@@ -1824,6 +2039,68 @@ Numbered after exception 13 (version 1.35).
     (dev), and is now its behaviour in the searches as well. What the output writes from past the
     mapping stays refused (the rejections above).
 
+## Approved exception (a database length or `-dbsize` of exactly -2^63 in NCBI's serial output, line RG item D1a-4)
+
+The Owner decided on 2026-11-17 (line RG `DECISIONS.md` OQ-1117, D1a-3's Q1 = A,
+words 「A 正しい数を書く (推奨)」) the question of line RG items D1a-3 and D1a-4: LOSAT writes the
+value's digits, as it writes the `Int4` `INT_MIN` of an archive as `-2147483648` where NCBI writes
+`-8` (line DI4, decision 13), against the rule-3 refusal of that one value that LOSAT made until
+then. Numbered after exception 16 (version 1.54, line RG item X5; written as exception 15, then 16,
+and renumbered at the merges of dev). Its version is in the list at the top; elsewhere it is cited by its number and
+name, "approved exception 17 (Int8 -2^63 written as digits)", and D1a-4's other entry as "the
+D1a-4 entry of PD-LOSAT-NCBI-DEFECTS", so that a merge of dev that takes their version numbers
+moves only that list (line RG `DECISIONS.md` D1a4-13).
+
+17. **A database length or `-dbsize` of exactly -2^63 that NCBI's serial writer prints.** `COStreamBuffer::PutInt8`
+    (`util/strbuffer.cpp:1002-1010`) negates a negative value before it writes the digits; for
+    INT64_MIN that is a signed overflow, and NCBI BLAST+ 2.17.0's build prints `-0`. NCBI writes
+    such a value where an alias file's `LENGTH` (or `STATS_TOTLEN` over several RPS volumes) is
+    exactly 9223372036854775808, NCBI's Int8 -2^63: BLAST XML's `<Statistics_db-len>-0</Statistics_db-len>`
+    and XML2's `<db-len>-0</db-len>` (outfmt 5, 14 and 16; probes p5_neg_2p63 and p5b_neg_fmt of
+    line RG D1a-3), the `DbLength` of RPSBLAST's and RPSTBLASTN's search strategy requests after the
+    first (`big-integer -0`; probe r2_3v_l2p63 of D1a-4's review A), and with `-dbsize
+    -9223372036854775808` the `DbLength` of every program's strategy and of the BLAST archive of ASN.1
+    text or XML (probe x_dbsize_min of D1a-4's fix round 1). Its JSON writer prints
+    `-9223372036854775808`, the binary writer the value's bytes. LOSAT writes `-9223372036854775808`
+    in every one of them (`report::serial` `big_int`); every other byte of these runs is NCBI's
+    (probe minus0 of D1a-4's fix round 2: the nine commands that LOSAT refused, each NCBI's output
+    with that one value written as its digits). The writers' unit tests hold the value, as for
+    `INT_MIN` (no fixture row kind holds NCBI's bytes with one value written otherwise).
+
+## Approved exception 18 (an imported strategy's subjects at more than one thread, version 1.58)
+
+Version 1.58, line RG item F2 (DECISIONS F2-Q1). The Owner
+decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
+duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
+`-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies
+(option A, rule 2 as written: the copies come from a check that reads the wrong argument, so the same
+alignment printed N times is not a result of the search), and a refusal of the combination (option B:
+the search itself is valid and its `-num_threads 1` result is deterministic).
+
+18. **An imported strategy's subjects at more than one thread.** NCBI decides whether a search takes
+    `-num_threads` from the command line's `-subject` only (`CMTArgs::x_ExtractAlgorithmOptions`, NCBI
+    reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3203-3236): a strategy that carries its subjects
+    (`s_ImportSearchStrategy`, NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:532-628)
+    leaves the threads on, and each thread searches every subject. In our runs of NCBI BLAST+ 2.17.0
+    `blastp`, `blastx` and `tblastn` at 2 to 8 threads, and `blastn` at 2 and 3, print each alignment
+    once per thread (probes `I.<program>.sub.nt3.r1` to `.r3`, `I.<program>.sub.nt4`,
+    `I.blastp.sub.nt4f6`, `I.blastn.sub.nt2.*`); `blastn` at 4 and 8 threads and `tblastx` at 2, 3, 4
+    and 8 stop with `malloc(): invalid size (unsorted)` and a core dump (SIGABRT; `I.blastn.sub.nt4`,
+    `I.blastn.sub.nt8.*`, `I.tblastx.sub.nt2.*` to `I.tblastx.sub.nt8.*`). The copies are rule 2's deterministic NCBI output, which this exception
+    replaces by the Owner's decision; the aborts are rule 1. LOSAT searches a strategy's subjects
+    once, whatever `-num_threads` says: one place sets the search's thread count to 1 when the
+    strategy carries subjects (each program's `apply_strategy`), with no warning and no refusal, and
+    the output is NCBI's `-num_threads 1` output, frozen. `-mt_mode 1` gives the same bytes (its
+    output is that of one thread, as for every search). NCBI's warning `Number of threads was reduced
+    to N to match the number of available CPUs` is not printed, as for every search (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES). A strategy whose subject is a
+    database, and the command line's `-subject` or `-db` over a strategy, keep their usual threads.
+    Evidence: the probes of line RG item F2 named above (NCBI BLAST+ 2.17.0).
+    Fixture rows: `LOSAT/tests/fixtures/strategy/import/import_cases.tsv` holds the `-num_threads 1`
+    rows `I.<program>.sub.alone`; the test
+    `a_strategys_subjects_are_searched_once_at_any_thread_count`
+    (`LOSAT/tests/import_search_strategy.rs`) runs them at 2, 4 and 8 threads against those bytes for
+    the five programs.
+
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
 On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
@@ -1831,10 +2108,12 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port. The last two entries (version 1.45, line RG item D3-1) are not of these: they concern a
+would port. The last three entries are not of these. The last (version 1.54, line RG item X5) says
+so itself. The two before it (version 1.45, line RG item D3-1) are not either: they concern a
 PSSM query's annotations and Seq-ids, not a database; they are Owner-delegated (standing instruction
 2026-09-29, restated 2026-10-07), not under the acceptance of 2026-11-02; they have no row in
-PD-LOSAT-DATABASE-SEARCH; and the first is a refusal until a port lands, which the Owner decided on
+PD-LOSAT-DATABASE-SEARCH; and the first of the two is a refusal until a port lands, which the Owner
+decided on
 2026-11-16 (「推奨通り」, Q-BM):
 
 - A reported sequence whose id NCBI's formatters do not find, in the formats and field lists
@@ -1874,6 +2153,24 @@ PD-LOSAT-DATABASE-SEARCH; and the first is a refusal until a port lands, which t
   because its step runs when the PSSM is read, before the subjects, until it takes the subjects'
   Seq-ids. With `-db`, and for the Seq-ids whose message is the entry's own, LOSAT
   writes NCBI's message (above).
+- BLASTP unified P-values (version 1.54, 2026-11-20, line RG item X5, DECISIONS X5-2,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; not under the acceptance
+  of 2026-11-02 and without a row in PD-LOSAT-DATABASE-SEARCH): a query batch in which a query
+  with a residue to score is followed by a query without a search space, that is, a query that is
+  not valid (all `X`, empty, or masked whole) when `-searchsp` is not given or is 0. NCBI's next
+  context then holds an effective search space of 0 (`blast_setup.c:773-784`, `:846-847`), the
+  scale of the adjustment is infinite, and NCBI reports every e-value of the query before it as
+  0 (case F of `docs/evidence/unified_p_last_query/`: all 805 rows of the query, `-evalue 1000`);
+  an alignment whose e-value was 0 before the step gets a NaN, which NCBI's sorts and cut-offs
+  then compare. NCBI's bytes are deterministic, but the result has no use, and the order of a list with
+  NaNs follows the C library's sort. LOSAT refuses the batch (exit 1, "unified P-values ... are
+  not supported by LOSAT's BLASTP for query ..., which is followed in its query batch by a query
+  without a search space ...", naming both queries), whether or not the query has a match. It
+  finds the batch once the queries are set up, before the redo, and the error comes after the
+  reports of the query batches before (the form of 1.40) and before any byte of the batch (a
+  search that could meet it is left to the search of all queries, which writes those reports,
+  not to the search in blocks of queries). With a `-searchsp` above 0 the next context's search space is that value
+  and LOSAT writes NCBI's bytes (rule 2 above).
 
 ## Ported (rule 4)
 

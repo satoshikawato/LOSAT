@@ -1242,7 +1242,7 @@ pub fn run(
     if stream.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
-            message: "BLAST failed to write output\n".to_string(),
+            message: "BLAST failed to write output\n".into(),
         }
         .into());
     }
@@ -1422,7 +1422,7 @@ fn check_subjects_not_empty(subjects: &[FastaRecord]) -> Result<()> {
     if subjects.is_empty() {
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
         }
         .into());
     }
@@ -1475,6 +1475,11 @@ fn check_ncbi_options(
 ) -> Result<(Option<SequenceRange>, ReportCounts)> {
     use crate::blastinput::app::{formatting_handler_check, options_error, Program};
     args.seg_spec()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1975-1991 (the
+    // query options handler reads the strand before the range)
+    // The command line's parser has checked the value, a caller of `run_local` has not: a value
+    // other than `both`, `plus` and `minus` is the parser's argument error.
+    crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
     // ```c++
     //     // set the sequence range
@@ -1559,6 +1564,27 @@ fn check_ncbi_options(
     if args.evalue <= 0.0 {
         return Err(options_error(
             "expect value or cutoff score must be greater than zero",
+        ));
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1525-1534 (after the
+    // e-value's check, before the culling limit's)
+    // ```c
+    //    if (options->longest_intron != 0 &&
+    //        program_number != eBlastTypeTblastn &&
+    //        program_number != eBlastTypePsiTblastn &&
+    //        program_number != eBlastTypeBlastx &&
+    //        program_number != eBlastTypeMapping) {
+    //                 Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //          "Uneven gap linking of HSPs is allowed for blastx, "
+    //          "tblastn, and psitblastn only");
+    //                 return BLASTERR_OPTION_PROGRAM_INVALID;
+    //    }
+    // ```
+    // `-max_intron_length` (blast_args.cpp:949-958 sets it, 0 when omitted); the culling limit is
+    // at least 0 (`nonnegative_ncbi_integer`).
+    if args.max_intron_length.unwrap_or(0) != 0 {
+        return Err(options_error(
+            "Uneven gap linking of HSPs is allowed for blastx, tblastn, and psitblastn only",
         ));
     }
     Ok((query_range, counts))
@@ -1781,7 +1807,8 @@ fn search_cli(
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
-            .with_parse_deflines(args.parse_deflines),
+            .with_parse_deflines(args.parse_deflines)
+            .with_strand(&args.strand),
     );
     query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
@@ -1847,6 +1874,9 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
+    // `run_local` has not (blastn's `run_local` does the same).
+    crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
@@ -1934,7 +1964,10 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The file of an unknown `-matrix`, first, as the command line's `run` looks it up.
+    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
+    // `run_local` has not (blastn's `run_local` does the same).
+    crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
+    // The file of an unknown `-matrix`, then, as the command line's `run` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
     // NCBI parses -outfmt before its option handlers run, with LOSAT's refusals;
     // `check_ncbi_options` and `search` check the formats again, after `-out` is opened.
@@ -2340,10 +2373,8 @@ pub(crate) struct ReportDatabase<'a> {
 /// 		dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
 /// ```
 fn tblastx_database_name(args: &TblastxArgs) -> String {
-    format!(
-        "User specified sequence set (Input: {})",
-        args.subject_label()
-    )
+    // An imported strategy's subjects name no input (an empty label).
+    crate::report::pairwise::scan_mode_definition(&args.subject_label().to_string())
 }
 
 /// Whether the outfmt 0 prolog of `sink` is written before the search, as NCBI writes it
@@ -2386,9 +2417,7 @@ fn write_pairwise_prologs(
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
                         crate::NCBI_BLAST_VERSION,
-                        &crate::report::pairwise::scan_mode_definition(
-                            &args.subject_label().to_string(),
-                        ),
+                        tblastx_database_name(args).as_bytes(),
                         records.len() as i64,
                         // NCBI's `Int8` sum (seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
                         // (Int8) (*iter)->length`).
@@ -2405,7 +2434,7 @@ fn write_pairwise_prologs(
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
                         crate::NCBI_BLAST_VERSION,
-                        "",
+                        b"",
                         0,
                         0,
                         Some(pairwise),
@@ -2758,6 +2787,11 @@ fn write_tblastx_outputs(
     // (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
     // diagnostics at every format.
     let mut warning_lines = Some(run.warnings);
+    // The queries' result warnings that a structured first format does not write are each later
+    // format's that writes them, to the caller's receiver of that format's
+    // (`ReportOutputs::later_warnings`).
+    // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+    let keeps_later = outputs.keeps_later_query_warnings();
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // ```c++
@@ -2801,7 +2835,10 @@ fn write_tblastx_outputs(
         // name (`x_CheckTaxDB`, `tabular`), and NCBI's posts of the bytes that the archive's
         // and the Seq-annots' streams replace (`write_tblastx_archives`,
         // `seqalign::write_query_to`).
+        // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+        let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (warning_lines.is_some()
+            || later.is_some()
             || crate::report::query_warnings::report_posts(format.report_format())
             || matches!(
                 output_format,
@@ -2813,7 +2850,8 @@ fn write_tblastx_outputs(
                 first.unwrap_or(&[]),
                 run.args.archive.as_ref(),
                 &mut *outputs.diagnostics,
-            );
+            )
+            .with_later(run.warnings, later);
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`TblastxReportRun::query_reads`).
             match first {
@@ -2866,13 +2904,7 @@ fn write_tblastx_outputs(
                     );
                     let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
                         version: crate::NCBI_BLAST_VERSION.to_string(),
-                        database_name: match &run.database {
-                            Some(_) => database.clone(),
-                            // An imported strategy's subjects name no input (an empty tag).
-                            None => crate::report::pairwise::scan_mode_definition(
-                                &args.subject_label().to_string(),
-                            ),
-                        },
+                        database_name: database.clone().into(),
                         // `-db`: the `Database:` lines are the database's (`database` below).
                         // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
                         // held in memory.
@@ -2904,6 +2936,7 @@ fn write_tblastx_outputs(
                             Some(database) => database.reported.sources.clone(),
                             None => Vec::new(),
                         },
+                        sum_stats: args.sum_stats(),
                     };
                     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:166-168
                     // ```c++
@@ -3809,12 +3842,11 @@ fn run_batch_loop(
     // ```
     // A structured format (outfmt 5, 8, 9, 12) writes none of a query's own warnings
     // (`ReportFormat::writes_query_warnings`; outfmt 5 puts them in the Iteration's message,
-    // `blast_xml`); the warnings go with the first format.
-    let result_warnings = outputs
-        .formats
-        .first()
-        .and_then(crate::api::local_blast::FormatOutput::report_format)
-        .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
+    // `blast_xml`); the warnings go with the first format, or, where it is structured, they are
+    // kept for the later formats that write them, each to the caller's receiver of its own
+    // (`Posts::later`, `ReportOutputs::later_warnings`).
+    let result_warnings = outputs.first_writes_query_warnings();
+    let keeps_later = outputs.keeps_later_query_warnings();
     // Whether the batches' prefetch of a `-db` search writes the taxonomy database's messages
     // with the query warnings: the first format is outfmt 0, 5, 6 or 7, or with
     // `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12 (`TblastxOutputFormat::prefetches_subjects`;
@@ -3983,7 +4015,7 @@ fn run_batch_loop(
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+                message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
             }
             .into());
         }
@@ -4086,7 +4118,11 @@ fn run_batch_loop(
                 message.push(' ');
             }
             message.push('\n');
-            return Err(crate::cli::NativeError { exit: 3, message }.into());
+            return Err(crate::cli::NativeError {
+                exit: 3,
+                message: message.into(),
+            }
+            .into());
         }
         // NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:158-182 (the score block of
         // the batch: a name that the matrix loader does not know fails with -1,
@@ -4125,7 +4161,11 @@ fn run_batch_loop(
                 }
             }
             message.push('\n');
-            return Err(crate::cli::NativeError { exit: 3, message }.into());
+            return Err(crate::cli::NativeError {
+                exit: 3,
+                message: message.into(),
+            }
+            .into());
         }
         warnings[start].append(&batch_warnings);
         let mut batch = match take(start..end) {
@@ -4592,7 +4632,11 @@ fn run_batch_loop(
         // (above); a translated query has no Karlin-Altschul message of its own, and the
         // queries of a batch that is not searched (no valid context) all get the message of
         // the batch.
-        for (offset, query) in batch_queries.iter().enumerate().filter(|_| result_warnings) {
+        for (offset, query) in batch_queries
+            .iter()
+            .enumerate()
+            .filter(|_| result_warnings || keeps_later)
+        {
             let index = start + offset;
             let mut messages = Vec::new();
             if !batch.searched {
@@ -4604,12 +4648,16 @@ fn run_batch_loop(
             if reports.filtered_empty && batch.searched {
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
-            warnings[index].lines(&crate::report::query_warnings::query_warning(
+            let text = crate::report::query_warnings::query_warning(
                 "tblastx",
                 reports.args.first_query_ordinal + input.ordinal(index),
                 query,
                 &messages,
-            ));
+            );
+            match result_warnings {
+                true => warnings[index].lines(&text),
+                false => warnings[index].later(&text),
+            }
         }
         for (offset, messages) in query_fetches.into_iter().enumerate() {
             warnings[start + offset].lines(&messages);
@@ -5247,7 +5295,10 @@ fn search_query_batch<S: TbxScore>(
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:998-1082
     // NCBI uses average over ALL contexts including zero-length (frame restriction via strand)
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
-    let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
+    let avg_query_length = compute_avg_query_length_ncbi(
+        &query_nucl_lengths,
+        crate::algorithm::blastn::args::QueryStrand::from_option(&args.strand).searched(),
+    );
 
     let t_search_start = Instant::now();
     let scan_ns = AtomicU64::new(0);
@@ -5660,6 +5711,7 @@ fn search_query_batch<S: TbxScore>(
         // before scanning; both linking passes read the same state.
         let subject_len_nucl = s_len as i64;
         let linking_params = subject_link::subject_linking_params(
+            args.sum_stats(),
             avg_query_length,
             subject_len_nucl,
             link_db_length_nucl,
@@ -5807,7 +5859,7 @@ fn search_query_batch<S: TbxScore>(
         // (subject_link.rs).
         let link_args = subject_link::SubjectLinkArgs {
             linking_params_for_cutoff: &linking_params_for_cutoff,
-            linking_params: &linking_params,
+            linking_params: linking_params.as_ref(),
             contexts_ref,
             subject_frame_bases: &subject_frame_bases,
             length_adj_per_context: statistics.length_adj_per_context,
@@ -5842,22 +5894,18 @@ fn search_query_batch<S: TbxScore>(
         // reevaluates ambiguities and calls BLAST_LinkHsps again.
         //
         // A list of the one-hit word finder (`-window_size 0`) that holds an HSP of length 0 or
-        // less links with NCBI's `Int4` ends, and those HSPs are dropped after it
-        // (`subject_link::link_subject_hits_int4`).
+        // less links with NCBI's `Int4` ends, and those HSPs are dropped after it; without sum
+        // statistics the HSPs get their own E-values (`subject_link::first_link_subject_hits`).
         x_link_timer.arm(LinkCall::First);
-        let prelinked_ungapped_hits = if combined_ungapped_hits.is_empty() {
-            combined_ungapped_hits
-        } else if window == 0 && subject_link::holds_int4_inverted(&combined_ungapped_hits) {
-            subject_link::link_subject_hits_int4(&link_args, combined_ungapped_hits)
-        } else {
-            subject_link::link_subject_hits(&link_args, combined_ungapped_hits)
-        };
+        let prelinked_ungapped_hits =
+            subject_link::first_link_subject_hits(&link_args, combined_ungapped_hits, window);
         x_link_timer.disarm();
         x_lap.lap(XStage::Link1);
         // The sort after the first linking call and the reap by the preliminary E-value
         // (`subject_link::sort_and_reap_after_first_link`).
         let mut prelinked_ungapped_hits = subject_link::sort_and_reap_after_first_link(
             prelinked_ungapped_hits,
+            &link_args,
             &stage_args,
             &mut x_lap,
         );
@@ -5890,6 +5938,9 @@ fn search_query_batch<S: TbxScore>(
         } else {
             (&s_frames, s_frames_report)
         };
+        // Without sum statistics, the HSPs of length 0 or less, which NCBI's re-evaluation
+        // deletes without reading them (`subject_link::drop_unread_without_linking`).
+        subject_link::drop_unread_without_linking(&link_args, window, &mut prelinked_ungapped_hits);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2699-2705
         // ```c
         //       if (kTranslateSubject)

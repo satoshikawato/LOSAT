@@ -820,10 +820,11 @@ fn strtod_prefix(text: &[u8]) -> (f64, usize) {
     (value, pos)
 }
 
-/// The payload of glibc's `nan(n-char-sequence)` (`__strtod_nan`): the sequence read by
-/// `strtoull` in base 0 (`0x` hexadecimal, a leading `0` octal, else decimal; the largest value
-/// on overflow), its low 51 bits put below the quiet bit, when the whole sequence is that number;
-/// 0 otherwise.
+/// The payload of `nan(n-char-sequence)`: the sequence read as by `strtoull` with base 0 (C
+/// standard: `0x` hexadecimal, a leading `0` octal, else decimal; the largest value on
+/// overflow), its low 51 bits kept below the quiet bit, when the whole sequence is that number;
+/// 0 otherwise. These are the bits of NCBI 2.17.0's `NStr::StringToDouble` as measured
+/// (`LOSAT/tests/unit/string_to_double_posix_vectors.tsv`, which has every case above).
 fn nan_payload(sequence: &[u8]) -> u64 {
     let (digits, radix) = match sequence {
         [b'0', b'x' | b'X', rest @ ..] if !rest.is_empty() => (rest, 16),
@@ -1080,7 +1081,7 @@ mod tests {
             );
             rows += 1;
         }
-        assert_eq!(rows, 564);
+        assert_eq!(rows, 590);
         // Texts of their own: white space first (`StringToDoublePosix` skips it, `StringToDouble`
         // refuses it), the empty text, and long mantissas, whose x87 value passes the largest
         // 80-bit value from 4,933 digits on (the infinity; scaled by at least 10^-614 it stays

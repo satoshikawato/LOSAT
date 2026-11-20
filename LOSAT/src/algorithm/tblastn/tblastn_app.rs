@@ -488,7 +488,7 @@ impl TblastnArgs {
         if stream.failed && (pairwise || tax_report) {
             return Err(crate::cli::NativeError {
                 exit: 6,
-                message: "BLAST failed to write output\n".to_string(),
+                message: "BLAST failed to write output\n".into(),
             }
             .into());
         }
@@ -1420,9 +1420,7 @@ fn write_first_batch_prologs(
     // The program line of outfmt 0 (`TBLASTN`; `PSITBLASTN` with `-in_pssm`).
     program: &str,
 ) -> Result<()> {
-    let name = subject_path.map_or_else(String::new, |path| {
-        crate::report::pairwise::scan_mode_definition(&path.display().to_string())
-    });
+    let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_name);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
     // ```c++
     //     if(dbscan_mode)
@@ -1856,7 +1854,7 @@ fn search(
                     )
                     .is_none()
                 {
-                    Err(PreliminaryReadError("The average subject length is too short").into())
+                    Err(PreliminaryReadError(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into())
                 } else if let Some(failure) = pssm_failure {
                     Err(failure.error("TBLASTN"))
                 } else {
@@ -2397,12 +2395,12 @@ fn search(
         //     }
         // ```
         // A structured format (outfmt 8, 12) writes none of a query's own warnings
-        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
-        let result_warnings = outputs
-            .formats
-            .first()
-            .and_then(crate::api::local_blast::FormatOutput::report_format)
-            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
+        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format, or, where
+        // it is structured, they are kept by query for the later formats that write them
+        // (`later_lines`, `Posts::later`, `ReportOutputs::later_warnings`).
+        let result_warnings = outputs.first_writes_query_warnings();
+        let later = outputs.keeps_later_query_warnings();
+        let mut later_lines: Vec<Vec<u8>> = Vec::new();
         let filtered_empty = database.is_some_and(|database| database.filtered_empty());
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
         // off read one by one, by query, where the first format places them (`places_reads`).
@@ -2437,7 +2435,7 @@ fn search(
             .enumerate()
             .map(|(index, (query, valid))| {
                 let mut lines = batches.warnings[index].clone();
-                if !result_warnings {
+                if !result_warnings && !later {
                     return lines;
                 }
                 let messages = crate::report::query_warnings::query_messages(
@@ -2446,7 +2444,7 @@ fn search(
                     index < identity_warned,
                     filtered_empty && !query_batch_skipped[index],
                 );
-                lines.extend(match pssm.as_deref() {
+                let text = match pssm.as_deref() {
                     // A PSSM query's label is its Seq-id and the title of NCBI's query source of
                     // the PSSM's Bioseq (`PsiSearch::warning_title`), as psiblast's
                     // (`blastp::blast_engine::pssm_hooks::pssm_query_warning`).
@@ -2462,7 +2460,11 @@ fn search(
                         query,
                         &messages,
                     ),
-                });
+                };
+                match result_warnings {
+                    true => lines.extend(text),
+                    false => later_lines.push(text),
+                }
                 lines
             })
             .collect();
@@ -2834,6 +2836,8 @@ fn search(
             prefetch_posts,
             |query| batches.warnings[query].len(),
         );
+        // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+        let query_posts = crate::report::diag_log::Posts::with_later(query_posts, &later_lines);
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
         // written after all batches are searched. No NCBI counterpart.
         let t_output = crate::utils::xtiming::clock();
@@ -2957,7 +2961,7 @@ mod tests {
         assert_eq!(native.exit, 3);
         assert_eq!(
             native.message,
-            "BLAST engine error: Database memory map file error\n"
+            b"BLAST engine error: Database memory map file error\n"
         );
         let refusal = batch_failure(XReadError(anyhow::anyhow!("refused")).into()).unwrap_err();
         assert_eq!(refusal.to_string(), "refused");
@@ -2976,7 +2980,7 @@ mod tests {
         assert_eq!(native.exit, 3);
         assert_eq!(
             native.message,
-            "BLAST engine error: The average subject length is too short\n"
+            b"BLAST engine error: The average subject length is too short\n"
         );
     }
 }

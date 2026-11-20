@@ -48,6 +48,10 @@ pub use crate::utils::entry_names::{entry_argv, ENTRY_NAMES};
 // What the `losat` binary runs; the crate's root re-exports `main_entry` for it.
 pub(crate) mod main_entry;
 
+// NCBI's buffers of a report stream (`NcbiStdio`, `NcbiBuffer`).
+mod stdio_buffer;
+pub use stdio_buffer::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
+
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it (`render_message` writes long options with one dash).
 pub const INSTALL_SHIMS_WORDS: [&str; 2] = ["--install-shims", "-install-shims"];
@@ -975,19 +979,13 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 //                                 "File name to store ASCII version of PSSM",
 //                                 CArgDescriptions::eOutputFile);
 // ```
-/// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
-/// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine does
+/// psiblast's NCBI arguments that LOSAT does not run: PHI-BLAST (PS8; the ASCII and ASN.1 PSSM
+/// files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
+/// `algorithm::psiblast::in_pssm`, the MSA inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
 /// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
 /// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
 /// of line RG).
-const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
-    "ignore_msa_master",
-    "import_search_strategy",
-    "in_msa",
-    "msa_master_idx",
-    "phi_pattern",
-];
+const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &["import_search_strategy", "phi_pattern"];
 
 fn is_unported_psiblast_arg(name: &str) -> bool {
     UNPORTED_PSIBLAST_OWN_ARGS.contains(&name)
@@ -1544,12 +1542,9 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "entrez_query",
     "gilist",
     "html",
-    "max_intron_length",
     "negative_gilist",
     "remote",
-    "strand",
     "subject_besthit",
-    "sum_stats",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {
@@ -1624,7 +1619,10 @@ fn is_unported_blastx_arg(name: &str) -> bool {
 #[derive(Debug)]
 pub struct NativeError {
     pub exit: i32,
-    pub message: String,
+    /// The text NCBI's `CATCH_ALL` writes, as bytes: a name of the command line or of a file
+    /// keeps the bytes NCBI's `std::string` keeps (a name that is not UTF-8: probes R1, R3 and R8
+    /// of line LIB-B).
+    pub message: Vec<u8>,
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:178-180
 // ```c++
@@ -1632,9 +1630,10 @@ pub struct NativeError {
 //         exit_code = BLAST_INPUT_ERROR;                                      \
 //     }                                                                       \
 // ```
+/// The text of `message`; a byte that is not UTF-8 reads as U+FFFD (`message` keeps it).
 impl fmt::Display for NativeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&String::from_utf8_lossy(&self.message))
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
@@ -1675,7 +1674,7 @@ impl NativeError {
     pub(crate) fn silent_end() -> Self {
         Self {
             exit: 0,
-            message: String::new(),
+            message: Vec::new(),
         }
     }
 
@@ -1726,24 +1725,24 @@ impl NativeError {
             return if e.kind() == "CBlastException::eInvalidOptions" {
                 NativeError {
                     exit: 1,
-                    message: format!("BLAST options error: {}\n", e.get_msg()),
+                    message: format!("BLAST options error: {}\n", e.get_msg()).into(),
                 }
             } else {
                 NativeError {
                     exit: 3,
-                    message: format!("BLAST engine error: {}\n", e.get_msg()),
+                    message: format!("BLAST engine error: {}\n", e.get_msg()).into(),
                 }
             };
         }
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,
-                message: format!("BLAST Database error: {}\n", e.get_msg()),
+                message: format!("BLAST Database error: {}\n", e.get_msg()).into(),
             };
         }
         NativeError {
             exit: 255,
-            message: format!("Error: {}\n", e.what()),
+            message: format!("Error: {}\n", e.what()).into(),
         }
     }
 
@@ -1759,7 +1758,7 @@ impl NativeError {
     pub(crate) fn std_exception(what: &str) -> NativeError {
         NativeError {
             exit: 255,
-            message: format!("Error: {what}\n"),
+            message: format!("Error: {what}\n").into(),
         }
     }
 
@@ -1816,20 +1815,7 @@ impl std::io::Write for ReportStream {
     }
 }
 
-// NCBI reference (GCC 13 libstdc++): include/c++/13/bits/basic_ios.tcc:39-49
-// ```c++
-//   template<typename _CharT, typename _Traits>
-//     void
-//     basic_ios<_CharT, _Traits>::clear(iostate __state)
-//     {
-//       if (this->rdbuf())
-// 	_M_streambuf_state = __state;
-//       else
-// 	_M_streambuf_state = __state | badbit;
-//       if (this->exceptions() & this->rdstate())
-// 	__throw_ios_failure(__N("basic_ios::clear"));
-//     }
-// ```
+// libstdc++ (GCC 13): include/c++/13/bits/basic_ios.tcc:39-49
 /// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
 /// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
 /// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream with
@@ -1863,342 +1849,6 @@ impl std::fmt::Display for BadbitInsertion {
 }
 
 impl std::error::Error for BadbitInsertion {}
-
-// NCBI reference (glibc 2.17 to 2.39): libio/filedoalloc.c `_IO_file_doallocate`
-// ```c
-//   size = BUFSIZ;
-//   if (fp->_fileno >= 0 && __builtin_expect (_IO_SYSSTAT (fp, &st), 0) >= 0)
-//     {
-//       if (S_ISCHR (st.st_mode))
-// 	{
-// 	  /* Possibly a tty.  */
-// 	  if (
-// #ifdef DEV_TTY_P
-// 	      DEV_TTY_P (&st) ||
-// #endif
-// 	      local_isatty (fp->_fileno))
-// 	    fp->_flags |= _IO_LINE_BUF;
-// 	}
-// #if defined _STATBUF_ST_BLKSIZE
-//       if (st.st_blksize > 0 && st.st_blksize < BUFSIZ)
-// 	size = st.st_blksize;
-// #endif
-//     }
-// ```
-/// The size of glibc's buffer of standard output (`cout` writes into it, synchronized with C's
-/// `stdout`): `st_blksize` of the standard output where it is below `BUFSIZ`, else `BUFSIZ` (4096
-/// for a pipe and for most files, 1024 for a terminal); 4096 where LOSAT cannot ask.
-pub fn stdio_buffer_size() -> usize {
-    #[cfg(unix)]
-    let block = rustix::fs::fstat(std::io::stdout())
-        .ok()
-        .and_then(|stat| usize::try_from(stat.st_blksize).ok())
-        .filter(|&size| size > 0 && size < NCBI_BUFSIZ)
-        .unwrap_or(NCBI_BUFSIZ);
-    #[cfg(not(unix))]
-    let block = 4096;
-    block
-}
-
-/// glibc's and libstdc++'s `BUFSIZ`.
-pub const NCBI_BUFSIZ: usize = 8192;
-
-/// NCBI's buffer of a report stream, which decides when the bytes inserted into the stream reach
-/// the file or device (`NcbiBuffer`). The buffers are those of NCBI's builds of BLAST+ and
-/// rpsbproc, which are Linux builds (glibc, GCC 13's libstdc++); LOSAT keeps their counts on every
-/// platform.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NcbiStdio {
-    /// `cout`, synchronized with C's `stdout` (NCBI does not call `sync_with_stdio(false)`):
-    /// each insertion is an `fwrite` into glibc's buffer of `block` bytes (`stdio_buffer_size`),
-    /// which writes at each newline too where `lines` is set (a terminal: `_IO_LINE_BUF`).
-    Cout { block: usize, lines: bool },
-    /// An `ofstream` (`-out`, rpsbproc's `-o`): libstdc++'s `basic_filebuf` with a buffer of
-    /// `BUFSIZ` bytes, of which an insertion that does not fit in what is left is written
-    /// directly with it.
-    File,
-}
-
-impl NcbiStdio {
-    /// The stream of a report on standard output: glibc's buffer of it, line-buffered on a
-    /// terminal (`_IO_file_doallocate`, quoted at `stdio_buffer_size`: `local_isatty`, as
-    /// `is_terminal`).
-    pub fn cout() -> Self {
-        use std::io::IsTerminal;
-        NcbiStdio::Cout {
-            block: stdio_buffer_size(),
-            lines: std::io::stdout().is_terminal(),
-        }
-    }
-}
-
-/// What NCBI's buffer of a report stream (`NcbiStdio`) holds of the bytes inserted into it: the
-/// last `held` bytes; the others are written to the file or device. One model for the organism
-/// report's streams (`NcbiReportBuffer`) and rpsbproc's report (`rpsbproc::Report`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NcbiBuffer {
-    stream: NcbiStdio,
-    held: usize,
-    /// Whether glibc has made `stdout`'s buffer (at the first insertion of a byte).
-    allocated: bool,
-}
-
-impl NcbiBuffer {
-    /// The empty buffer of `stream`.
-    pub fn new(stream: NcbiStdio) -> Self {
-        NcbiBuffer {
-            stream,
-            held: 0,
-            allocated: false,
-        }
-    }
-
-    /// The buffer's stream.
-    pub fn stream(&self) -> NcbiStdio {
-        self.stream
-    }
-
-    /// How many of the bytes inserted the buffer holds (the last ones).
-    pub fn held(&self) -> usize {
-        self.held
-    }
-
-    /// An insertion of `n` bytes (`sputn`: a string or a number), the last `n` bytes of `stream`
-    /// (the stream's bytes up to the insertion's end; a line-buffered `cout` reads the insertion's
-    /// newlines).
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
-    // ```c
-    //   /* First figure out how much space is available in the buffer. */
-    //   ...
-    //   else if (f->_IO_write_end > f->_IO_write_ptr)
-    //     count = f->_IO_write_end - f->_IO_write_ptr; /* Space available. */
-    //   ...
-    //   if (to_do + must_flush > 0)
-    //     {
-    //       size_t block_size, do_write;
-    //       /* Next flush the (full) buffer. */
-    //       if (_IO_OVERFLOW (f, EOF) == EOF)
-    //     ...
-    //       block_size = f->_IO_buf_end - f->_IO_buf_base;
-    //       do_write = to_do - (block_size >= 128 ? to_do % block_size : 0);
-    // ```
-    // Before the first insertion `stdout` has no buffer (no space available): `_IO_OVERFLOW`
-    // makes it, and the first insertion keeps `n % block` (glibc 2.39, `T/t2/fix2/
-    // glibc_first_write.c` on a file of `st_blksize` 4096: an `fwrite` of 4,096 bytes is written at
-    // once, 4,095 and then 1 are held, and 10 more write 4,096).
-    // NCBI reference (GCC 13 libstdc++): include/c++/13/bits/fstream.tcc:766-778
-    // (`basic_filebuf::xsputn`)
-    // ```c++
-    // 	  streamsize __bufavail = this->epptr() - this->pptr();
-    //
-    // 	  // Don't mistake 'uncommitted' mode buffered with unbuffered.
-    // 	  if (!_M_writing && _M_buf_size > 1)
-    // 	    __bufavail = _M_buf_size - 1;
-    //
-    // 	  if (__n >= __bufavail)
-    // 	    {
-    // 	      const streamsize __buffill = this->pptr() - this->pbase();
-    // 	      const char* __buf = reinterpret_cast<const char*>(this->pbase());
-    // 	      __ret = _M_file.xsputn_2(__buf, __buffill,
-    // 				       reinterpret_cast<const char*>(__s),
-    // 				       __n);
-    // ```
-    // A line-buffered `stdout` (a terminal, `_IO_LINE_BUF` from `_IO_file_doallocate`): the same
-    // function's branch for it copies, of an insertion that fits, up to its last newline and then
-    // writes the buffer (`must_flush`); what follows is written with it where the buffer is under
-    // 128 bytes (`do_write` is all of it), else put byte by byte (`_IO_default_xsputn`), where
-    // `_IO_new_file_overflow` writes at each newline, as the rest of an insertion that does not
-    // fit; so the buffer keeps what follows the last newline of what it keeps (glibc 2.39,
-    // `T/t2/fix3/glibc_tty_lines.c` on a pty of `st_blksize` 1024: 100 then 50 ending in a newline
-    // write 150; 1000 then 30 with a newline at 27 write 1,028; 500 then 2,000 with newlines at 100
-    // and 1,900 write 2,401; line RG T2 review 5's `T/t2/review5/glibc/line_small.c`, three
-    // `fwrite`s of `xxxxx\nyyy` with a line buffer of 64 bytes write 9, 18 and 27 bytes, of 1,024
-    // bytes 6, 15 and 24).
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
-    // ```c
-    //   if ((f->_flags & _IO_LINE_BUF) && (f->_flags & _IO_CURRENTLY_PUTTING))
-    //     {
-    //       count = f->_IO_buf_end - f->_IO_write_ptr;
-    //       if (count >= n)
-    //         {
-    //           const char *p;
-    //           for (p = s + n; p > s; )
-    //             {
-    //               if (*--p == '\n')
-    //                 {
-    //                   count = p - s + 1;
-    //                   must_flush = 1;
-    //                   break;
-    //                 }
-    //             }
-    //         }
-    //     }
-    //   ...
-    //   /* Then fill the buffer. */
-    //   if (count > 0)
-    //     {
-    //       if (count > to_do)
-    // 	count = to_do;
-    //       f->_IO_write_ptr = __mempcpy (f->_IO_write_ptr, s, count);
-    //       s += count;
-    //       to_do -= count;
-    //     }
-    //   ...
-    //       /* Now write out the remainder.  Normally, this will fit in the
-    // 	 buffer, but it's somewhat messier for line-buffered files,
-    // 	 so we let _IO_default_xsputn handle the general case. */
-    //       if (to_do)
-    // 	to_do -= _IO_default_xsputn (f, s+do_write, to_do);
-    // ```
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_overflow`
-    // ```c
-    //   if ((f->_flags & _IO_UNBUFFERED)
-    //       || ((f->_flags & _IO_LINE_BUF) && ch == '\n'))
-    //     if (_IO_do_write (f, f->_IO_write_base,
-    // 		      f->_IO_write_ptr - f->_IO_write_base) == EOF)
-    // ```
-    pub fn sputn(&mut self, n: usize, stream: &[u8]) {
-        if n == 0 {
-            return;
-        }
-        self.held = match self.stream {
-            NcbiStdio::Cout { block, lines } => {
-                let insertion = &stream[stream.len() - n..];
-                // `count`: the bytes of the insertion copied into the buffer, up to its last
-                // newline where a line-buffered stream's insertion fits (`must_flush`).
-                let room = if self.allocated { block - self.held } else { 0 };
-                // glibc looks for the newline only in its line-buffered branch, when the
-                // insertion fits; a fully buffered stream never scans the bytes.
-                let last_newline = || insertion.iter().rposition(|&byte| byte == b'\n');
-                let (count, must_flush) = match (lines && n <= room).then(last_newline).flatten() {
-                    Some(at) => (at + 1, true),
-                    None => (n.min(room), false),
-                };
-                let to_do = n - count;
-                if to_do == 0 && !must_flush {
-                    self.held + n
-                } else {
-                    // The buffer is written (`_IO_OVERFLOW`, which makes it before the first
-                    // insertion), then `do_write` bytes of the rest; the buffer keeps the others,
-                    // a line-buffered one what follows their last newline.
-                    let do_write = if block >= 128 {
-                        to_do - to_do % block
-                    } else {
-                        to_do
-                    };
-                    let kept = &insertion[n - (to_do - do_write)..];
-                    match lines
-                        .then(|| kept.iter().rposition(|&byte| byte == b'\n'))
-                        .flatten()
-                    {
-                        Some(at) => kept.len() - at - 1,
-                        None => kept.len(),
-                    }
-                }
-            }
-            NcbiStdio::File => {
-                if n >= NCBI_BUFSIZ - 1 - self.held {
-                    0
-                } else {
-                    self.held + n
-                }
-            }
-        };
-        self.allocated = true;
-    }
-
-    /// An insertion of one `char` (`put`, `sputc`), the last byte of `stream` (as `sputn`'s): the
-    /// buffer takes it while it has room; a full buffer is written with it
-    /// (`basic_filebuf::overflow`). NCBI rpsbproc 0.5.1, both builds, with 8,190 bytes held
-    /// before a tab of the `SESSION` line (line RG E1c review 2, `s_same_mat8165`,
-    /// `s_same_ev8156`). On `cout` the `char` is glibc's `putc` (`stdio_sync_filebuf::overflow`),
-    /// which a full or unallocated buffer passes to `__overflow`: the buffer is made or written,
-    /// then it keeps the byte (an `fwrite` of one byte keeps none where the buffer is under 128
-    /// bytes, `sputn`), and a line-buffered `stdout` writes it with what it holds at a newline.
-    // NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:570-576 (a `char` is put, not
-    // written with `sputn`)
-    // ```c++
-    //   template<typename _Traits>
-    //     inline basic_ostream<char, _Traits>&
-    //     operator<<(basic_ostream<char, _Traits>& __out, char __c)
-    //     {
-    //       if (__out.width() != 0)
-    // 	return __ostream_insert(__out, &__c, 1);
-    //       __out.put(__c);
-    //       return __out;
-    //     }
-    // ```
-    // NCBI reference (GCC 13 libstdc++): include/ext/stdio_sync_filebuf.h `overflow`
-    // ```c++
-    //       virtual int_type
-    //       overflow(int_type __c = traits_type::eof())
-    //       {
-    // 	int_type __ret;
-    // 	if (traits_type::eq_int_type(__c, traits_type::eof()))
-    // 	  {
-    // 	    if (std::fflush(_M_file))
-    // 	      __ret = traits_type::eof();
-    // 	    else
-    // 	      __ret = traits_type::not_eof(__c);
-    // 	  }
-    // 	else
-    // 	  __ret = std::putc(__c, _M_file);
-    // 	return __ret;
-    //       }
-    // ```
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_overflow` (`putc` calls it
-    // when `_IO_write_ptr >= _IO_write_end`: a full or unallocated buffer, and every `char` of a
-    // line-buffered stream, whose `_IO_write_end` stays at `_IO_write_base`)
-    // ```c
-    //   if ((f->_flags & _IO_CURRENTLY_PUTTING) == 0 || f->_IO_write_base == NULL)
-    //     {
-    //       /* Allocate a buffer if needed. */
-    //       if (f->_IO_write_base == NULL)
-    // 	{
-    // 	  _IO_doallocbuf (f);
-    //     ...
-    //       if (f->_mode <= 0 && f->_flags & (_IO_LINE_BUF | _IO_UNBUFFERED))
-    // 	f->_IO_write_end = f->_IO_write_ptr;
-    //     }
-    //   ...
-    //   if (f->_IO_write_ptr == f->_IO_buf_end ) /* Buffer is really full */
-    //     if (_IO_do_flush (f) == EOF)
-    //       return EOF;
-    //   *f->_IO_write_ptr++ = ch;
-    //   if ((f->_flags & _IO_UNBUFFERED)
-    //       || ((f->_flags & _IO_LINE_BUF) && ch == '\n'))
-    //     if (_IO_do_write (f, f->_IO_write_base,
-    // 		      f->_IO_write_ptr - f->_IO_write_base) == EOF)
-    //       return EOF;
-    // ```
-    pub fn sputc(&mut self, stream: &[u8]) {
-        match self.stream {
-            NcbiStdio::Cout { block, lines } => {
-                self.held = if lines && stream.last() == Some(&b'\n') {
-                    0
-                } else if !self.allocated || self.held == block {
-                    1
-                } else {
-                    self.held + 1
-                };
-                self.allocated = true;
-            }
-            NcbiStdio::File => {
-                self.held = if self.held < NCBI_BUFSIZ - 1 {
-                    self.held + 1
-                } else {
-                    0
-                };
-            }
-        }
-    }
-
-    /// The stream flushed (`flush`, `endl`, a write to `cerr`, which is tied to `cout`): the
-    /// buffer writes what it holds.
-    pub fn flush(&mut self) {
-        self.held = 0;
-    }
-}
 
 /// The stream of the organism report (outfmt 18) as NCBI's buffer writes it: NCBI's formatter
 /// never flushes it, a write to the file or device comes only where the buffer writes
@@ -2578,18 +2228,19 @@ pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
 //             "File is not accessible",AsString()));
 // ```
 pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
-    let value = if path.as_os_str().is_empty() {
-        String::new()
-    } else {
-        format!(":  `{}'", path.display())
-    };
-    NativeError {
-        exit: 1,
-        message: format!(
-            "Command line argument error: Argument \"{name}\". File is not accessible{value}\n"
-        ),
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99 (`s_ArgExptMsg`, quoted in
+    // `utils::os_bytes`): the name's bytes (probe R1 of line LIB-B: BLASTX's `-query`,
+    // `-subject` and `-out` of a name that is not UTF-8).
+    let mut message =
+        format!("Command line argument error: Argument \"{name}\". File is not accessible")
+            .into_bytes();
+    if !path.as_os_str().is_empty() {
+        message.extend_from_slice(b":  `");
+        message.extend_from_slice(&crate::utils::os_bytes::path_bytes(path));
+        message.push(b'\'');
     }
-    .into()
+    message.push(b'\n');
+    NativeError { exit: 1, message }.into()
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
@@ -2647,7 +2298,12 @@ pub(crate) fn create_out_file(
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
         if !posted(&e.message) {
-            eprint!("{}", catch_all_text(&e.message));
+            // `eprint!` of the bytes: a failed write panics as `eprint!`'s does.
+            if let Err(error) =
+                std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&e.message))
+            {
+                panic!("failed printing to stderr: {error}");
+            }
         }
         if e.exit < 0 {
             std::process::abort();
@@ -2671,19 +2327,19 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
 /// `blastinput::app::options_error`, one for the others; NCBI BLAST+ 2.17.0, line RG D3-1 `om/`
 /// cases k02, k03, k06 and `om/mute/` e05, e11). A text without a post (the end of the PSSM file
 /// directly in its root object, exit status 0) stays empty.
-pub(crate) fn catch_all_text(message: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn catch_all_text(message: &[u8]) -> &[u8] {
     if message.is_empty() || !crate::ncbi_exception::main_diag_failbit() {
-        return std::borrow::Cow::Borrowed(message);
+        return message;
     }
-    if message.starts_with("BLAST query/options error: ")
+    if message.starts_with(b"BLAST query/options error: ")
         && message
-            .strip_suffix('\n')
-            .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER))
-            .is_some_and(|s| s.ends_with('\n'))
+            .strip_suffix(b"\n")
+            .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER.as_bytes()))
+            .is_some_and(|s| s.ends_with(b"\n"))
     {
-        std::borrow::Cow::Borrowed("\n\n")
+        b"\n\n"
     } else {
-        std::borrow::Cow::Borrowed("\n")
+        b"\n"
     }
 }
 
@@ -2696,10 +2352,10 @@ static POST_ERRORS_IN_RUN: std::sync::atomic::AtomicBool =
 
 /// The text that the run wrote (`post_native_error`), which `exit_on_native_error` does not write
 /// again.
-static POSTED_TEXT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static POSTED_TEXT: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
 
 /// Whether the run already wrote `text` (`post_native_error`).
-fn posted(text: &str) -> bool {
+fn posted(text: &[u8]) -> bool {
     POSTED_TEXT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2744,10 +2400,7 @@ pub fn post_native_error(error: &anyhow::Error) {
         return;
     }
     if let Some(native) = error.downcast_ref::<NativeError>() {
-        let _ = std::io::Write::write_all(
-            &mut std::io::stderr(),
-            catch_all_text(&native.message).as_bytes(),
-        );
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&native.message));
         *POSTED_TEXT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native.message.clone());
@@ -2783,13 +2436,13 @@ mod tests {
     #[test]
     fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
         use crate::ncbi_exception::{NcbiException, ThrowSite};
-        let site = crate::seqdb::lookup_throw_site("DB contains no accession info.").unwrap();
+        let site = crate::seqdb::lookup_throw_site(b"DB contains no accession info.").unwrap();
         let error =
             NativeError::exception(&NcbiException::new(site, "DB contains no accession info."));
         assert_eq!(error.exit, 2);
         assert_eq!(
             error.message,
-            "BLAST Database error: DB contains no accession info.\n"
+            b"BLAST Database error: DB contains no accession info.\n"
         );
         let other = NcbiException::new(
             ThrowSite {
@@ -2802,7 +2455,10 @@ mod tests {
         );
         let error = NativeError::exception(&other);
         assert_eq!(error.exit, 255);
-        assert_eq!(error.message, format!("Error: {}\n", other.what()));
+        assert_eq!(
+            error.message,
+            format!("Error: {}\n", other.what()).as_bytes()
+        );
     }
 
     #[test]
@@ -2938,71 +2594,6 @@ mod tests {
     }
 
     #[test]
-    fn a_char_on_standard_output_is_kept_as_glibcs_putc_keeps_it() {
-        // glibc 2.39 (`T/t2/fix4/glibc_putc.log`, and line RG T2 review 5's
-        // `T/t2/review5/glibc/line_small.log`): `stdout` with a buffer of `block` bytes (`setvbuf`,
-        // full or line buffering) on a file; `cN` is N `putc` of 'x', `n` a `putc` of a newline,
-        // `wN` an `fwrite` of N bytes (`wN:K`: with a newline at K), `W` an `fwrite` of a newline;
-        // the file's size after each step. `putc` keeps its byte after a full or unallocated
-        // buffer, where an `fwrite` of one byte into a buffer under 128 bytes keeps none; a line
-        // buffer under 128 bytes keeps none of an `fwrite` that fits with a newline either.
-        let run = |lines: bool, block: usize, steps: &str| -> Vec<usize> {
-            let mut buffer = NcbiBuffer::new(NcbiStdio::Cout { block, lines });
-            let mut stream = Vec::new();
-            steps
-                .split(' ')
-                .map(|step| {
-                    let mut numbers = step[1..].split(':').map(|n| n.parse::<usize>());
-                    let count = numbers.next().and_then(Result::ok).unwrap_or(1);
-                    match step.as_bytes()[0] {
-                        b'c' => (0..count).for_each(|_| {
-                            stream.push(b'x');
-                            buffer.sputc(&stream);
-                        }),
-                        b'n' => {
-                            stream.push(b'\n');
-                            buffer.sputc(&stream);
-                        }
-                        b'w' => {
-                            let start = stream.len();
-                            stream.resize(start + count, b'x');
-                            numbers.for_each(|at| stream[start + at.unwrap()] = b'\n');
-                            buffer.sputn(count, &stream);
-                        }
-                        _ => {
-                            stream.push(b'\n');
-                            buffer.sputn(1, &stream);
-                        }
-                    }
-                    stream.len() - buffer.held()
-                })
-                .collect()
-        };
-        assert_eq!(run(false, 64, "c1"), [0]);
-        assert_eq!(run(false, 64, "w1"), [1]);
-        assert_eq!(run(false, 64, "w63 c64 c1 w1"), [63, 63, 127, 127]);
-        assert_eq!(run(false, 64, "w63 c64 w1"), [63, 63, 128]);
-        assert_eq!(run(false, 64, "w64 c1"), [64, 64]);
-        assert_eq!(run(false, 64, "w64 w1"), [64, 64]);
-        assert_eq!(run(false, 4096, "w4096 c1"), [4096, 4096]);
-        assert_eq!(run(false, 4096, "w4096 w1"), [4096, 4096]);
-        assert_eq!(run(false, 4096, "w4095 c1 c1"), [0, 0, 4096]);
-        assert_eq!(run(false, 4096, "w4095 w1 w1"), [0, 0, 4096]);
-        assert_eq!(run(true, 64, "c1"), [0]);
-        assert_eq!(run(true, 64, "n"), [1]);
-        assert_eq!(run(true, 64, "W"), [1]);
-        assert_eq!(run(true, 64, "c10 n"), [0, 11]);
-        assert_eq!(run(true, 64, "w63 c1 c1"), [63, 63, 63]);
-        assert_eq!(run(true, 64, "w63 w1 w1"), [63, 63, 63]);
-        assert_eq!(run(true, 64, "c64 c1"), [0, 64]);
-        assert_eq!(run(true, 64, "c63 n"), [0, 64]);
-        assert_eq!(run(true, 64, "c64 n"), [0, 65]);
-        assert_eq!(run(true, 1024, "c100 n c5"), [0, 101, 101]);
-        assert_eq!(run(true, 64, "w9:5 w9:5 w9:5"), [9, 18, 27]);
-        assert_eq!(run(true, 1024, "w9:5 w9:5 w9:5"), [6, 15, 24]);
-    }
-
-    #[test]
     fn a_streamed_insertion_is_written_as_the_whole_insertion() {
         // `insert_streamed` writes pieces; every model of NCBI's buffers must write what it writes
         // for the whole insertion as one write, before it and after it. A row of 70,000 bytes
@@ -3102,11 +2693,11 @@ mod tests {
         let text = "BLAST query error: Could not construct seq-id from 'gi|abc'\n";
         let error: anyhow::Error = NativeError {
             exit: 1,
-            message: text.to_string(),
+            message: text.to_string().into(),
         }
         .into();
         post_native_error(&error);
-        assert!(!posted(text));
+        assert!(!posted(text.as_bytes()));
     }
 
     // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
@@ -3272,13 +2863,7 @@ mod tests {
 pub fn command_line_bytes() -> Vec<u8> {
     let mut line = Vec::new();
     for argument in std::env::args_os() {
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStrExt;
-            line.extend_from_slice(argument.as_bytes());
-        }
-        #[cfg(not(unix))]
-        line.extend_from_slice(argument.to_string_lossy().as_bytes());
+        line.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(&argument));
         line.push(b' ');
     }
     line

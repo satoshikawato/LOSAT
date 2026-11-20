@@ -49,7 +49,6 @@
 //! }
 //! ```
 
-use super::compo_scale::COMPO_SCORE_MIN;
 use crate::core::blast_util::BLASTAA_SIZE;
 use crate::utils::glibc_fma_libm::GlibcLibm;
 
@@ -71,10 +70,9 @@ struct SwGapInfo {
 #[derive(Debug, Default)]
 pub(crate) struct SwScratch {
     score_vector: Vec<SwGapInfo>,
-    /// For each subject position, whether a forbidden range of the row being scanned holds it
-    /// (`blocked_row`); false between rows.
-    blocked: Vec<bool>,
-    /// The subject's letters as the scans read them (`row_column`, `ScanRow`).
+    /// The subject's letters as the scans read them (`row_column`, `ScanRow`); while a row with
+    /// forbidden ranges is scanned, `FORBIDDEN_LETTER` at the positions they hold
+    /// (`forbid_cells`).
     letters: Vec<u8>,
 }
 
@@ -95,20 +93,31 @@ pub(crate) fn row_column(letter: u8) -> usize {
 /// The slots of a row as the scans read it (`ScanRow`): one for each value of a byte.
 const ROW_SLOTS: usize = 256;
 
+/// The letter of a forbidden cell (`forbid_cells`): its slot of `ScanRow` holds `i32::MIN`.
+const FORBIDDEN_LETTER: u8 = u8::MAX;
+
 /// The score row that a scan reads: the row's `BLASTAA_SIZE` scores, then zeros, one slot for each
 /// value of a byte, so that a letter of `SwScratch::scan` (below `BLASTAA_SIZE`, `row_column`)
 /// reads its own column with no bound check and no mask. One local array for each scan, whose
 /// first `BLASTAA_SIZE` slots each row overwrites (`load`): the cell loop reads it from the stack,
 /// which leaves the register of its address free.
+///
+/// The slot of `FORBIDDEN_LETTER` holds `i32::MIN`: a forbidden cell's diagonal is then
+/// `prev + i32::MIN` for the score `prev` of the column in the row before, which is never
+/// negative, so the diagonal is negative without overflow and `max(diagonal, 0)` is 0, as NCBI's
+/// `max(COMPO_SCORE_MIN, 0)` of a forbidden cell (quoted at `cell`). Every row of a scan, with
+/// forbidden ranges or without, runs the same cell with no test.
 struct ScanRow([i32; ROW_SLOTS]);
 
 impl ScanRow {
     #[inline(always)]
     fn new() -> Self {
-        Self([0; ROW_SLOTS])
+        let mut slots = [0; ROW_SLOTS];
+        slots[usize::from(FORBIDDEN_LETTER)] = i32::MIN;
+        Self(slots)
     }
 
-    /// The scores of `row` in the first slots; the other slots stay 0.
+    /// The scores of `row` in the first slots; the other slots keep theirs.
     #[inline(always)]
     fn load(&mut self, row: &[i32; BLASTAA_SIZE]) -> &[i32; ROW_SLOTS] {
         self.0[..BLASTAA_SIZE].copy_from_slice(row);
@@ -132,8 +141,7 @@ impl SwScratch {
     ///     }
     /// ```
     ///
-    /// With it the subject's letters as the scans read them (`ScanRow`) and the cleared marks
-    /// of the forbidden ranges (`blocked_row`).
+    /// With it the subject's letters as the scans read them (`ScanRow`).
     fn scan(&mut self, subject: &[u8], gap_open: i32) -> SwScan<'_> {
         let length = subject.len();
         self.score_vector.clear();
@@ -144,29 +152,38 @@ impl SwScratch {
                 gap_exists: -gap_open,
             },
         );
-        self.blocked.clear();
-        self.blocked.resize(length, false);
         self.letters.clear();
         // `row_column` is below `BLASTAA_SIZE`, so the cast keeps it.
         self.letters
             .extend(subject.iter().map(|&letter| row_column(letter) as u8));
-        (&self.letters, &mut self.score_vector, &mut self.blocked)
+        (&mut self.letters, &mut self.score_vector)
     }
 }
 
-/// The subject's letters, the columns and the marks of one scan (`SwScratch::scan`).
-type SwScan<'a> = (&'a [u8], &'a mut [SwGapInfo], &'a mut [bool]);
+/// The subject's letters and the columns of one scan (`SwScratch::scan`).
+type SwScan<'a> = (&'a mut [u8], &'a mut [SwGapInfo]);
 
-/// Marks (`value` true) or clears (false) the subject positions that the forbidden ranges `ranges`
-/// of one query position hold, so that the row's cells test one flag each where NCBI's test every
-/// range (`forbidden = TRUE` where `ranges[2f] <= matchSeqPos <= ranges[2f + 1]`, quoted at
-/// `cell`): the same cells are forbidden.
-fn blocked_row(blocked: &mut [bool], ranges: &[(i32, i32)], value: bool) {
-    let last = blocked.len() as i64 - 1;
+/// Writes `FORBIDDEN_LETTER` (`forbid` true) at the subject positions that the forbidden ranges
+/// `ranges` of one query position hold, or the subject's own letters back (false), so that the
+/// row's cells read `i32::MIN` there (`ScanRow`) where NCBI's test every range (`forbidden = TRUE`
+/// where `ranges[2f] <= matchSeqPos <= ranges[2f + 1]`, quoted at `cell`): the same cells are
+/// forbidden.
+fn forbid_cells(letters: &mut [u8], subject: &[u8], ranges: &[(i32, i32)], forbid: bool) {
+    let last = letters.len() as i64 - 1;
     for &(start, end) in ranges {
         let (start, end) = (i64::from(start).max(0), i64::from(end).min(last));
         if start <= end {
-            blocked[start as usize..=end as usize].fill(value);
+            let (start, end) = (start as usize, end as usize);
+            if forbid {
+                letters[start..=end].fill(FORBIDDEN_LETTER);
+            } else {
+                for (letter, &original) in
+                    letters[start..=end].iter_mut().zip(&subject[start..=end])
+                {
+                    // `row_column` is below `BLASTAA_SIZE`, so the cast keeps it.
+                    *letter = row_column(original) as u8;
+                }
+            }
         }
     }
 }
@@ -461,8 +478,8 @@ impl<V: CellValue> RowCarry<V> {
 }
 
 /// One cell of the scans: NCBI's cell with its values computed in another order. `substitution`
-/// is the row's score of the subject letter, or `None` for a forbidden cell; the result is the
-/// cell's score.
+/// is the row's score of the subject letter (`i32::MIN` for a forbidden cell, `ScanRow`); the
+/// result is the cell's score.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:291-331
 /// (the cells of the basic scans, :96-119 and :190-213, are those lines without the forbidden
@@ -487,11 +504,13 @@ impl<V: CellValue> RowCarry<V> {
 /// `open < 0` lies between `G(j-1) - extend` and `S(j-1) - (open + extend)`; at a row's start the
 /// sum is NCBI's `-(open + extend)` and `-max(open, 0)` is `-open` or 0. The negated costs are
 /// representable (each cost is above `i32::MIN`), and `x + (-c)` overflows where `x - c` does.
+/// A forbidden cell's diagonal is `prev + i32::MIN` (`ScanRow`), negative for every column score
+/// `prev >= 0`, so `max(diagonal, 0)` is NCBI's `max(COMPO_SCORE_MIN, 0)`, 0.
 #[inline(always)]
 fn cell<V: CellValue>(
     carry: &mut RowCarry<V>,
     column: &mut SwGapInfo,
-    substitution: Option<i32>,
+    substitution: i32,
     costs: CellCosts<V>,
 ) -> i32 {
     carry.gap_row = carry
@@ -502,10 +521,7 @@ fn cell<V: CellValue>(
     let continue_gap_score = V::of(column.gap_exists)
         .plus(costs.extend)
         .larger(no_gap.plus(costs.open_extend));
-    let diagonal = match substitution {
-        None => V::of(COMPO_SCORE_MIN),
-        Some(substitution) => carry.prev_no_gap.plus(V::of(substitution)),
-    };
+    let diagonal = carry.prev_no_gap.plus(V::of(substitution));
     let no_row_gap = diagonal.larger(V::of(0)).larger(continue_gap_score);
     let score = no_row_gap.larger(carry.gap_row).get();
     carry.no_row_gap = no_row_gap;
@@ -553,77 +569,39 @@ fn cmov_max(a: i32, b: i32) -> i32 {
     }
 }
 
-/// The row's score of subject letter `letter`, or `None` (`COMPO_SCORE_MIN` in the cell) where
-/// `CHECKED` and the position is `blocked` (`blocked_row`). A row without ranges runs without the
-/// test (NCBI's basic scans); `row` and `letter` are as `ScanRow` says.
-#[inline(always)]
-fn substitution<const CHECKED: bool>(
-    row: &[i32; ROW_SLOTS],
-    blocked: bool,
-    letter: u8,
-) -> Option<i32> {
-    if CHECKED && blocked {
-        None
-    } else {
-        Some(row[usize::from(letter)])
-    }
-}
-
 /// One row of the score-only scan (subject positions up) after the cells of the rows before it,
-/// whose best score is `best`: the row's first cell above it and its score, if any. Two cells for
-/// each pass of the loop: the loop's own count, test and jump, and the moves of the carried values
-/// between registers, come once for two cells (ws, X4-mt kernel benchmark: 6.25 G instructions
-/// and 1.42 G cycles against 7.17 G and 1.52 G for one cell a pass).
+/// whose best score is `best`: the row's first cell above it and its score, if any. `letters` and
+/// `row` are as `ScanRow` says. Two cells for each pass of the loop: the loop's own count, test and
+/// jump, and the moves of the carried values between registers, come once for two cells (ws,
+/// X4-mt kernel benchmark: 6.25 G instructions and 1.42 G cycles against 7.17 G and 1.52 G for one
+/// cell a pass).
 #[inline(always)]
-fn score_only_row<V: CellValue, const CHECKED: bool>(
-    subject: &[u8],
+fn score_only_row<V: CellValue>(
+    letters: &[u8],
     row: &[i32; ROW_SLOTS],
-    blocked: &[bool],
     score_vector: &mut [SwGapInfo],
     costs: CellCosts<V>,
     mut best: i32,
 ) -> Option<(i32, usize)> {
     let mut found = None;
     let mut carry = RowCarry::start(costs);
-    let length = subject.len();
-    let (letters, last_letter) = subject.as_chunks::<2>();
+    let length = letters.len();
+    let (pairs, last_letter) = letters.as_chunks::<2>();
     let (columns, last_column) = score_vector[..length].as_chunks_mut::<2>();
-    let (marks, last_mark) = blocked[..length].as_chunks::<2>();
-    for (pair, ((&[letter0, letter1], [column0, column1]), &[blocked0, blocked1])) in
-        letters.iter().zip(columns).zip(marks).enumerate()
-    {
-        let score = cell(
-            &mut carry,
-            column0,
-            substitution::<CHECKED>(row, blocked0, letter0),
-            costs,
-        );
+    for (pair, (&[letter0, letter1], [column0, column1])) in pairs.iter().zip(columns).enumerate() {
+        let score = cell(&mut carry, column0, row[usize::from(letter0)], costs);
         if score > best {
             best = score;
             found = Some((best, 2 * pair));
         }
-        let score = cell(
-            &mut carry,
-            column1,
-            substitution::<CHECKED>(row, blocked1, letter1),
-            costs,
-        );
+        let score = cell(&mut carry, column1, row[usize::from(letter1)], costs);
         if score > best {
             best = score;
             found = Some((best, 2 * pair + 1));
         }
     }
-    if let (Some(&letter), Some(column), Some(&blocked)) = (
-        last_letter.first(),
-        last_column.first_mut(),
-        last_mark.first(),
-    ) {
-        let score = cell(
-            &mut carry,
-            column,
-            substitution::<CHECKED>(row, blocked, letter),
-            costs,
-        );
+    if let (Some(&letter), Some(column)) = (last_letter.first(), last_column.first_mut()) {
+        let score = cell(&mut carry, column, row[usize::from(letter)], costs);
         if score > best {
             best = score;
             found = Some((best, length - 1));
@@ -637,11 +615,9 @@ fn score_only_row<V: CellValue, const CHECKED: bool>(
 /// the best score reached `score_in` (the scan stops there). Two cells for each pass of the loop,
 /// as `score_only_row`.
 #[inline(always)]
-#[allow(clippy::too_many_arguments)]
-fn find_start_row<V: CellValue, const CHECKED: bool>(
-    subject: &[u8],
+fn find_start_row<V: CellValue>(
+    letters: &[u8],
     row: &[i32; ROW_SLOTS],
-    blocked: &[bool],
     score_vector: &mut [SwGapInfo],
     match_end: usize,
     costs: CellCosts<V>,
@@ -652,19 +628,13 @@ fn find_start_row<V: CellValue, const CHECKED: bool>(
     let mut carry = RowCarry::start(costs);
     // The positions `0..=match_end` in pairs from the top; with an odd count, position 0 is the
     // last cell, alone.
-    let (first_letter, letters) = subject[..=match_end].as_rchunks::<2>();
+    let (first_letter, pairs) = letters[..=match_end].as_rchunks::<2>();
     let (first_column, columns) = score_vector[..=match_end].as_rchunks_mut::<2>();
-    let (first_mark, marks) = blocked[..=match_end].as_rchunks::<2>();
     let base = first_letter.len();
-    for (pair, ((&[letter0, letter1], [column0, column1]), &[blocked0, blocked1])) in
-        letters.iter().zip(columns).zip(marks).enumerate().rev()
+    for (pair, (&[letter0, letter1], [column0, column1])) in
+        pairs.iter().zip(columns).enumerate().rev()
     {
-        let score = cell(
-            &mut carry,
-            column1,
-            substitution::<CHECKED>(row, blocked1, letter1),
-            costs,
-        );
+        let score = cell(&mut carry, column1, row[usize::from(letter1)], costs);
         if score > best {
             best = score;
             found = Some((best, base + 2 * pair + 1));
@@ -672,12 +642,7 @@ fn find_start_row<V: CellValue, const CHECKED: bool>(
         if best >= score_in {
             return (found, true);
         }
-        let score = cell(
-            &mut carry,
-            column0,
-            substitution::<CHECKED>(row, blocked0, letter0),
-            costs,
-        );
+        let score = cell(&mut carry, column0, row[usize::from(letter0)], costs);
         if score > best {
             best = score;
             found = Some((best, base + 2 * pair));
@@ -686,17 +651,8 @@ fn find_start_row<V: CellValue, const CHECKED: bool>(
             return (found, true);
         }
     }
-    if let (Some(&letter), Some(column), Some(&blocked)) = (
-        first_letter.first(),
-        first_column.first_mut(),
-        first_mark.first(),
-    ) {
-        let score = cell(
-            &mut carry,
-            column,
-            substitution::<CHECKED>(row, blocked, letter),
-            costs,
-        );
+    if let (Some(&letter), Some(column)) = (first_letter.first(), first_column.first_mut()) {
+        let score = cell(&mut carry, column, row[usize::from(letter)], costs);
         if score > best {
             best = score;
             found = Some((best, 0));
@@ -826,7 +782,7 @@ fn score_only_scan<'r, V: CellValue, F>(
 where
     F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
 {
-    let (subject, score_vector, blocked) = scratch.scan(subject, gap_open);
+    let (letters, score_vector) = scratch.scan(subject, gap_open);
     let costs = CellCosts::<V>::new(gap_open, gap_extend);
     let mut scan_row = ScanRow::new();
     let mut best_score = 0;
@@ -835,15 +791,9 @@ where
     for query_pos in 0..query_length {
         let row = scan_row.load(rows(query_pos));
         let ranges = forbidden.at(query_pos);
-        let found = if ranges.is_empty() {
-            score_only_row::<V, false>(subject, row, blocked, score_vector, costs, best_score)
-        } else {
-            blocked_row(blocked, ranges, true);
-            let found =
-                score_only_row::<V, true>(subject, row, blocked, score_vector, costs, best_score);
-            blocked_row(blocked, ranges, false);
-            found
-        };
+        forbid_cells(letters, subject, ranges, true);
+        let found = score_only_row::<V>(letters, row, score_vector, costs, best_score);
+        forbid_cells(letters, subject, ranges, false);
         if let Some((score, match_seq_pos)) = found {
             best_score = score;
             best_query_pos = query_pos;
@@ -977,7 +927,7 @@ where
             query_start: 0,
         };
     }
-    let (subject, score_vector, blocked) = scratch.scan(subject, gap_open);
+    let (letters, score_vector) = scratch.scan(subject, gap_open);
     let costs = CellCosts::<V>::new(gap_open, gap_extend);
     let mut scan_row = ScanRow::new();
     let mut best_score = 0;
@@ -986,32 +936,17 @@ where
     for query_pos in (0..=query_end).rev() {
         let row = scan_row.load(rows(query_pos));
         let ranges = forbidden.at(query_pos);
-        let (found, reached) = if ranges.is_empty() {
-            find_start_row::<V, false>(
-                subject,
-                row,
-                blocked,
-                score_vector,
-                match_end,
-                costs,
-                best_score,
-                score_in,
-            )
-        } else {
-            blocked_row(blocked, ranges, true);
-            let outcome = find_start_row::<V, true>(
-                subject,
-                row,
-                blocked,
-                score_vector,
-                match_end,
-                costs,
-                best_score,
-                score_in,
-            );
-            blocked_row(blocked, ranges, false);
-            outcome
-        };
+        forbid_cells(letters, subject, ranges, true);
+        let (found, reached) = find_start_row::<V>(
+            letters,
+            row,
+            score_vector,
+            match_end,
+            costs,
+            best_score,
+            score_in,
+        );
+        forbid_cells(letters, subject, ranges, false);
         if let Some((score, match_seq_pos)) = found {
             best_score = score;
             best_query_pos = query_pos;

@@ -1,6 +1,7 @@
 //! Tests of the Smith-Waterman kernels on hand-made rows (the brute-force reference below fills
 //! NCBI's three-score recurrence on whole matrices instead of one rolling row).
 
+use super::super::compo_scale::COMPO_SCORE_MIN;
 use super::*;
 
 /// A PSSM row source: `rows[query_pos]`.
@@ -393,6 +394,31 @@ mod before_k1 {
 
     const ROW_SLOTS_BEFORE: usize = 32;
 
+    /// The scans' memory as it was: the subject's letters, the columns and the marks of the
+    /// forbidden ranges.
+    fn scan(subject: &[u8], gap_open: i32) -> (Vec<u8>, Vec<SwGapInfo>, Vec<bool>) {
+        let letters = subject.iter().map(|&l| row_column(l) as u8).collect();
+        let column = SwGapInfo {
+            no_gap: 0,
+            gap_exists: -gap_open,
+        };
+        (
+            letters,
+            vec![column; subject.len()],
+            vec![false; subject.len()],
+        )
+    }
+
+    fn blocked_row(blocked: &mut [bool], ranges: &[(i32, i32)], value: bool) {
+        let last = blocked.len() as i64 - 1;
+        for &(start, end) in ranges {
+            let (start, end) = (i64::from(start).max(0), i64::from(end).min(last));
+            if start <= end {
+                blocked[start as usize..=end as usize].fill(value);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn cell(
         new_score: &mut i32,
@@ -521,22 +547,21 @@ mod before_k1 {
     where
         F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
     {
-        let mut scratch = SwScratch::new();
-        let (subject, score_vector, blocked) = scratch.scan(subject, gap_open);
+        let (subject, mut score_vector, mut blocked) = scan(subject, gap_open);
         let (mut best_score, mut best_query_pos, mut best_match_seq_pos) = (0, 0, 0);
         for query_pos in 0..query_length {
             let row = &padded_row(rows(query_pos));
             let ranges = forbidden.at(query_pos);
-            blocked_row(blocked, ranges, true);
+            blocked_row(&mut blocked, ranges, true);
             let found = score_only_row(
-                subject,
+                &subject,
                 row,
-                blocked,
-                score_vector,
+                &blocked,
+                &mut score_vector,
                 (gap_open, gap_extend),
                 best_score,
             );
-            blocked_row(blocked, ranges, false);
+            blocked_row(&mut blocked, ranges, false);
             if let Some((score, match_seq_pos)) = found {
                 best_score = score;
                 best_query_pos = query_pos;
@@ -571,24 +596,23 @@ mod before_k1 {
                 query_start: 0,
             };
         }
-        let mut scratch = SwScratch::new();
-        let (subject, score_vector, blocked) = scratch.scan(subject, gap_open);
+        let (subject, mut score_vector, mut blocked) = scan(subject, gap_open);
         let (mut best_score, mut best_query_pos, mut best_match_seq_pos) = (0, 0, 0);
         for query_pos in (0..=query_end).rev() {
             let row = &padded_row(rows(query_pos));
             let ranges = forbidden.at(query_pos);
-            blocked_row(blocked, ranges, true);
+            blocked_row(&mut blocked, ranges, true);
             let (found, reached) = find_start_row(
-                subject,
+                &subject,
                 row,
-                blocked,
-                score_vector,
+                &blocked,
+                &mut score_vector,
                 match_end,
                 (gap_open, gap_extend),
                 best_score,
                 score_in,
             );
-            blocked_row(blocked, ranges, false);
+            blocked_row(&mut blocked, ranges, false);
             if let Some((score, match_seq_pos)) = found {
                 best_score = score;
                 best_query_pos = query_pos;
@@ -866,6 +890,44 @@ fn the_conditional_move_is_the_maximum() {
             assert_eq!(cmov_max(a, b), a.max(b), "{a} {b}");
         }
     }
+}
+
+// A forbidden cell reads `i32::MIN` (`FORBIDDEN_LETTER`'s slot), whose diagonal floors at 0 as
+// NCBI's `COMPO_SCORE_MIN` does for every column score, and a scan with forbidden ranges leaves
+// the scratch's letters as the subject's, for the next scan of the round loop.
+#[test]
+fn forbidden_cells_floor_at_zero_and_leave_the_letters() {
+    let slots = ScanRow::new();
+    assert_eq!(slots.0[usize::from(FORBIDDEN_LETTER)], i32::MIN);
+    assert!(usize::from(FORBIDDEN_LETTER) >= BLASTAA_SIZE);
+    for prev in [0, 1, 32767, 1 << 30, i32::MAX] {
+        assert_eq!((prev + i32::MIN).max(0), COMPO_SCORE_MIN.max(0), "{prev}");
+    }
+    let rows: Vec<[i32; BLASTAA_SIZE]> = [1u8, 2, 3, 4, 5, 6]
+        .iter()
+        .map(|&letter| row(&[letter], 5, -3))
+        .collect();
+    let subject = [1u8, 2, 3, 4, 5, 6, 7, 1, 2, 3];
+    let mut forbidden = ForbiddenRanges::new();
+    forbidden.initialize(rows.len());
+    forbidden.push(0, 3, 2, 4);
+    forbidden.push(2, 6, -5, 30);
+    let mut scratch = SwScratch::new();
+    let end = smith_waterman_score_only(&subject, 6, pssm(&rows), 11, 1, &forbidden, &mut scratch);
+    let expected: Vec<u8> = subject.iter().map(|&l| row_column(l) as u8).collect();
+    assert_eq!(scratch.letters, expected);
+    smith_waterman_find_start(
+        &subject,
+        pssm(&rows),
+        11,
+        1,
+        end.match_end,
+        end.query_end,
+        end.score,
+        &forbidden,
+        &mut scratch,
+    );
+    assert_eq!(scratch.letters, expected);
 }
 
 // `Lane0`'s operations are `i32`'s (an addition that wraps, the signed maximum), at the ends of the

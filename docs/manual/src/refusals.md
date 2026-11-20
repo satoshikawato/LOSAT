@@ -319,7 +319,7 @@ These refusals apply to every search program that reads databases.
 
 - `blastn` and `tblastx` refuse an alias file's `NSEQ 0`, and its `LENGTH` or `STATS_TOTLEN` without `NSEQ` or `STATS_NSEQ` over volumes without sequences. NCBI crashes on them where a query is searched.
 - `blastp`, `blastx`, `tblastn` and `psiblast` refuse the same cases with `-searchsp` or `OLD_FSC`. `blastx` also refuses them with `-ungapped`.
-- A run of such a database whose queries have no letters to search is reported as in NCBI by `blastp`, `blastx` and `psiblast`. `blastn`, `tblastn` and `tblastx` refuse it.
+- A run of such a database whose queries have no letters to search is reported as in NCBI by every program.
 - `rpsblast` and `rpstblastn`: an alias file's `LENGTH` and `NSEQ` over one volume also set the length that NCBI's search covers, their sum, which can be shorter or longer than the profiles. Refused: a sum above 2,147,483,647 (NCBI frees the profiles twice and aborts), or one so long that NCBI's diagonal table passes 2^30 entries (its loop never ends).
 - A sum shorter than the profiles is refused where two gapped alignments of a query (of a frame for `rpstblastn`) start past it plus one. NCBI's interval tree then splits without end. With one such alignment the search runs as in NCBI.
 - A sum longer than the profiles is refused where an ungapped extension runs past the row after the last profile. This needs an X-drop above the profiles' delimiter scores and a sum of the profiles plus 2 or more (NCBI reads past its score matrix). At plus 1 the search runs as in NCBI where that row lies within the `.rps` file's last memory page, and is refused where it lies past it (NCBI reads past the file's mapping).

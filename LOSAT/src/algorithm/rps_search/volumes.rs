@@ -403,13 +403,12 @@ impl RpsUnit {
     /// unit's, the one that can count 0 (`blastp::blast_engine::call_setup::setup_count_refused`;
     /// review C of D1a-4, MF1 and N2; review D, N2).
     pub(crate) fn check_setup_count(&self, gumbel: bool, program: &str) -> Result<()> {
-        if !gumbel && self.setup_total > 0 && self.setup_count == 0 {
-            return Err(crate::algorithm::common::database::refusal(
-                crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
-                program,
-            ));
-        }
-        Ok(())
+        crate::algorithm::common::database::check_setup_count(
+            self.setup_total,
+            self.setup_count,
+            gumbel,
+            program,
+        )
     }
 
     /// `BLAST_GapAlignSetUp`'s `min_subject_length` of the unit's setup

@@ -318,19 +318,19 @@ pub fn subject_parameters(
     // BLASTX's subject is not translated, so the shortest length is not divided by 3. Without the
     // Gumbel block (`ResolvedOptions::has_gumbel_block`: `-ungapped`, `-searchsp`, `OLD_FSC`) the
     // statistics' average divides by their number of sequences, which an alias file's `NSEQ 0`
-    // makes 0: NCBI crashes there (SIGFPE), LOSAT refuses (`common::database::check_statistics_count`,
+    // makes 0: NCBI crashes there (SIGFPE), LOSAT refuses (`common::database::check_setup_count`,
     // DECISIONS 14 of line RG). A set of subjects whose average is below one letter fails the
     // batch's setup: the engine error after the start of the outfmt 0 report, exit status 3, as
     // every other error of this setup (`native::database_search_error`; NCBI 2.17.0 blastx
     // `-subject` of three empty records, or of `M`, `` and ``, with `-searchsp`, `OLD_FSC` or
     // `-ungapped -comp_based_stats 0`, env parity probe f_probe of 2026-11-12).
     let gumbel_block_used = options.has_gumbel_block();
-    if !gumbel_block_used && db_count == 0 && db_length > 0 {
-        return Err(crate::algorithm::common::database::refusal(
-            crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
-            "BLASTX",
-        ));
-    }
+    crate::algorithm::common::database::check_setup_count(
+        db_length,
+        db_count,
+        gumbel_block_used,
+        "BLASTX",
+    )?;
     let Some(n) = crate::stats::setup::setup_subject_length(
         db_length,
         db_count,

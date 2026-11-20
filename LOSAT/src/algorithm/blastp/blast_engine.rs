@@ -6554,7 +6554,10 @@ fn x_query_block_plan(
         // SF1).
         BlastpSubjectSource::Database(database) => {
             if database.num_sequences() == 0
-                || call_setup::setup_count_refused(args, database.statistics_num_sequences())
+                || call_setup::setup_count_refused(args, {
+                    let statistics = database.statistics();
+                    (statistics.setup_total, statistics.setup_count)
+                })
             {
                 return None;
             }

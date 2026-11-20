@@ -38,6 +38,9 @@ pub struct QueryWarnings<'a> {
     /// The texts of the subjects that the reports read one by one (`with_subject_reads`), and
     /// how many of them are written.
     reads: Option<ReadCursor<'a>>,
+    /// The posts of each query whose later lines (`Posts::later`) this format's reports write,
+    /// and the format's receiver of them (`with_later`).
+    later: Option<(&'a [Posts], &'a mut Vec<u8>)>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
@@ -951,7 +954,25 @@ impl<'a> QueryWarnings<'a> {
             archive,
             sink,
             reads: None,
+            later: None,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+    // ```c++
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
+    /// These warnings for a format after the call's first that writes the queries' result
+    /// warnings where the first, a structured one, does not: before each query's report the
+    /// later lines of `posts[query]` (`Posts::later`) go to `receiver`, the caller's for this
+    /// format (`ReportOutputs::later_warnings`), as the command line's run of the format posts
+    /// them when the query's report starts. A report that stops has written those of the queries
+    /// it reached. Nothing changes without a receiver.
+    pub fn with_later(mut self, posts: &'a [Posts], receiver: Option<&'a mut Vec<u8>>) -> Self {
+        self.later = receiver.map(|receiver| (posts, receiver));
+        self
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:304-308 and 562
@@ -990,7 +1011,14 @@ impl<'a> QueryWarnings<'a> {
             // A search strategy request's mark alone shows nothing (`Posts::request`).
             Some(posts) => posts.write(&mut *self.sink, self.archive),
             None => Ok(()),
+        }?;
+        // The query's result warnings of a format after a structured first one (`with_later`).
+        if let Some((posts, receiver)) = self.later.as_mut() {
+            if let Some(posts) = posts.get(index) {
+                posts.write_later(receiver);
+            }
         }
+        Ok(())
     }
 }
 

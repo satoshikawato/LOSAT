@@ -2363,11 +2363,11 @@ fn search(
         // ```
         // A structured format (outfmt 8, 12) writes none of a query's own warnings
         // (`ReportFormat::writes_query_warnings`); the warnings go with the first format, or, where
-        // it is structured, to the caller's receiver of a later format's (`later`,
-        // `ReportOutputs::later_query_warnings`), in the order of the queries.
+        // it is structured, they are kept by query for the later formats that write them
+        // (`later_lines`, `Posts::later`, `ReportOutputs::later_warnings`).
         let result_warnings = outputs.first_writes_query_warnings();
-        let later = outputs.takes_later_query_warnings();
-        let mut later_text = Vec::new();
+        let later = outputs.keeps_later_query_warnings();
+        let mut later_lines: Vec<Vec<u8>> = Vec::new();
         let filtered_empty = database.is_some_and(|database| database.filtered_empty());
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
         // off read one by one, by query, where the first format places them (`places_reads`).
@@ -2430,12 +2430,11 @@ fn search(
                 };
                 match result_warnings {
                     true => lines.extend(text),
-                    false => later_text.extend(text),
+                    false => later_lines.push(text),
                 }
                 lines
             })
             .collect();
-        outputs.write_later_query_warnings(&later_text)?;
         // The query batches that were read and searched, by their searched queries (the batches
         // before a database failure or a reader stop): each is reported.
         let batch_spans: Vec<std::ops::Range<usize>> = query_input
@@ -2804,6 +2803,7 @@ fn search(
             prefetch_posts,
             |query| batches.warnings[query].len(),
         );
+        let query_posts = crate::report::diag_log::Posts::with_later(query_posts, &later_lines);
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
         // written after all batches are searched. No NCBI counterpart.
         let t_output = crate::utils::xtiming::clock();

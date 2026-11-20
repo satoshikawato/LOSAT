@@ -8028,9 +8028,7 @@ fn search(
                             })
                             .collect(),
                         diagnostics: &mut **diagnostics,
-                        later_warnings: later_warnings
-                            .as_mut()
-                            .map(|later| &mut **later as &mut (dyn std::io::Write + Send)),
+                        later_warnings: later_warnings.as_deref_mut(),
                         hits: x_want_records.then_some(
                             &mut x_collect as &mut crate::api::local_blast::HitsSink<'_>,
                         ),
@@ -11951,7 +11949,7 @@ fn run_call(
         pssm_made,
         pssm_reads: &pssm_reads,
     };
-    let (mut query_warning_lines, later_warnings) = report_prep::query_warning_lines(&prep);
+    let (mut query_warning_lines, later_lines) = report_prep::query_warning_lines(&prep);
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
@@ -11991,9 +11989,6 @@ fn run_call(
         )?;
     }
     unreportable?;
-    // The queries' warnings that a later format writes, where the first does not
-    // (`ReportOutputs::later_query_warnings`).
-    outputs.write_later_query_warnings(&later_warnings)?;
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks (`x_subject_meta`).
@@ -12173,6 +12168,9 @@ fn run_call(
     // Where the run's BLAST XML family formats fail for a matrix name that NCBI's XML does not
     // know (`blastp_xml_matrix_failure`; `None` for a name it knows).
     let xml_matrix_failure = blastp_xml_matrix_failure(&args, outputs, database.is_some());
+    // Whether the queries' result warnings are kept for the later formats (`Posts::with_later`
+    // below).
+    let keeps_later = outputs.keeps_later_query_warnings();
     let observer = &mut outputs.observer;
     if let Some(observer) = observer.as_deref_mut() {
         for (q_idx, stats) in query_stats().into_iter().enumerate() {
@@ -12253,6 +12251,11 @@ fn run_call(
             *after = posts;
         }
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452 (quoted at
+    // `QueryWarnings::with_later`): the queries' result warnings that a structured first format
+    // does not write are each later format's that writes them, posted before each query's report
+    // to the caller's receiver of that format's (`ReportOutputs::later_warnings`).
+    let query_posts = crate::report::diag_log::Posts::with_later(query_posts, &later_lines);
     let mut warning_lines: Option<&[crate::report::diag_log::Posts]> = Some(&query_posts);
     // Every structured format of the call is XML2 or JSON: none writes the report that a
     // `-subject` document holds back (`blast_xml::write_blastp_xml`).
@@ -12364,7 +12367,9 @@ fn run_call(
         // The first format's writer also writes the texts of the subjects that the reports
         // read one by one (`ReportedPrefetch::subject_reads`).
         let first_lines = warning_lines.take();
+        let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (first_lines.is_some()
+            || later.is_some()
             || crate::report::query_warnings::report_posts(format.report_format())
             || matches!(
                 outfmt,
@@ -12376,7 +12381,8 @@ fn run_call(
                 first_lines.unwrap_or(&[]),
                 args.archive.as_ref(),
                 &mut *outputs.diagnostics,
-            );
+            )
+            .with_later(&query_posts, later);
             match first_lines {
                 Some(_) => warnings.with_subject_reads(prefetched.subject_reads.queries()),
                 None => warnings,

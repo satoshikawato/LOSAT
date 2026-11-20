@@ -2725,6 +2725,10 @@ fn write_tblastx_outputs(
     // (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
     // diagnostics at every format.
     let mut warning_lines = Some(run.warnings);
+    // The queries' result warnings that a structured first format does not write are each later
+    // format's that writes them, to the caller's receiver of that format's
+    // (`ReportOutputs::later_warnings`).
+    let keeps_later = outputs.keeps_later_query_warnings();
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // ```c++
@@ -2768,7 +2772,9 @@ fn write_tblastx_outputs(
         // name (`x_CheckTaxDB`, `tabular`), and NCBI's posts of the bytes that the archive's
         // and the Seq-annots' streams replace (`write_tblastx_archives`,
         // `seqalign::write_query_to`).
+        let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (warning_lines.is_some()
+            || later.is_some()
             || crate::report::query_warnings::report_posts(format.report_format())
             || matches!(
                 output_format,
@@ -2780,7 +2786,8 @@ fn write_tblastx_outputs(
                 first.unwrap_or(&[]),
                 run.args.archive.as_ref(),
                 &mut *outputs.diagnostics,
-            );
+            )
+            .with_later(run.warnings, later);
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`TblastxReportRun::query_reads`).
             match first {
@@ -3770,9 +3777,11 @@ fn run_batch_loop(
     // ```
     // A structured format (outfmt 5, 8, 9, 12) writes none of a query's own warnings
     // (`ReportFormat::writes_query_warnings`; outfmt 5 puts them in the Iteration's message,
-    // `blast_xml`); the warnings go with the first format, or, where it is structured, to the
-    // caller's receiver of a later format's (`ReportOutputs::later_query_warnings`).
+    // `blast_xml`); the warnings go with the first format, or, where it is structured, they are
+    // kept for the later formats that write them, each to the caller's receiver of its own
+    // (`Posts::later`, `ReportOutputs::later_warnings`).
     let result_warnings = outputs.first_writes_query_warnings();
+    let keeps_later = outputs.keeps_later_query_warnings();
     // Whether the batches' prefetch of a `-db` search writes the taxonomy database's messages
     // with the query warnings: the first format is outfmt 0, 5, 6 or 7, or with
     // `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12 (`TblastxOutputFormat::prefetches_subjects`;
@@ -4550,11 +4559,10 @@ fn run_batch_loop(
         // (above); a translated query has no Karlin-Altschul message of its own, and the
         // queries of a batch that is not searched (no valid context) all get the message of
         // the batch.
-        let later = outputs.later_query_warnings().is_some();
         for (offset, query) in batch_queries
             .iter()
             .enumerate()
-            .filter(|_| result_warnings || later)
+            .filter(|_| result_warnings || keeps_later)
         {
             let index = start + offset;
             let mut messages = Vec::new();
@@ -4573,9 +4581,9 @@ fn run_batch_loop(
                 query,
                 &messages,
             );
-            match outputs.later_query_warnings() {
-                Some(later) => later.write_all(&text)?,
-                None => warnings[index].lines(&text),
+            match result_warnings {
+                true => warnings[index].lines(&text),
+                false => warnings[index].later(&text),
             }
         }
         for (offset, messages) in query_fetches.into_iter().enumerate() {

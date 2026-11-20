@@ -107,10 +107,10 @@ pub(super) struct ReportPrep<'a, 'o> {
 ///     }
 /// ```
 ///
-/// Also returned: the queries' own messages that a structured first format does not write and a
-/// later format does (`ReportOutputs::later_query_warnings`), in the order of the queries, for the
-/// caller's receiver of them (empty where it takes none).
-pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, Vec<u8>) {
+/// Also returned: by query, the queries' own messages that a structured first format does not
+/// write, kept for the later formats that do (`Posts::later`, `ReportOutputs::later_warnings`);
+/// empty where the caller takes none.
+pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     let ReportPrep {
         args,
         outputs,
@@ -124,11 +124,11 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, V
         ..
     } = *prep;
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
-    // the warnings go with the first format, or, where it is structured, to the caller's receiver
-    // of a later format's (`later`).
+    // the warnings go with the first format, or, where it is structured, they are kept for the
+    // later formats that write them (`later`).
     let result_warnings = outputs.first_writes_query_warnings();
-    let later = outputs.takes_later_query_warnings();
-    let mut later_text = Vec::new();
+    let later = outputs.keeps_later_query_warnings();
+    let mut later_lines = Vec::new();
     let lines = query_records
         .iter()
         .enumerate()
@@ -166,13 +166,13 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> (Vec<Vec<u8>>, V
                 };
                 match result_warnings {
                     true => lines.extend(text),
-                    false => later_text.extend(text),
+                    false => later_lines.push(text),
                 }
             }
             lines
         })
         .collect();
-    (lines, later_text)
+    (lines, later_lines)
 }
 
 /// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).

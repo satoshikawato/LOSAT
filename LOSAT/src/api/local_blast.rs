@@ -370,12 +370,44 @@ impl FormatOutput<'_> {
             .and_then(|choice| ReportFormat::from_number(choice.number))
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452
+    // ```c++
+    //     if (m_FormatType == CFormattingArgs::eAsnText
+    //     ...
+    //       || m_FormatType == CFormattingArgs::eSAM)
+    //     {
+    //         x_PrintStructuredReport(results, queries);
+    //         return;
+    //     }
+    //     ...
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
     /// Whether this output's report writes the queries' result warnings
     /// (`ReportFormat::writes_query_warnings`; a value that NCBI's reading refuses writes no report,
     /// and counts as one that does).
     pub(crate) fn writes_query_warnings(&self) -> bool {
         self.report_format()
             .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
+    }
+
+    /// This format's receiver, among the caller's (`later`, `ReportOutputs::later_warnings`; the
+    /// format is the call's `index`th), of the queries' result warnings that its reports write:
+    /// `None` where they are not kept for the later formats (`keeps`,
+    /// `ReportOutputs::keeps_later_query_warnings`) or this format's report writes none. The
+    /// format's writer writes them there before each query's report
+    /// (`QueryWarnings::with_later`).
+    pub(crate) fn later_warnings<'s>(
+        &self,
+        keeps: bool,
+        later: &'s mut Option<&mut [Vec<u8>]>,
+        index: usize,
+    ) -> Option<&'s mut Vec<u8>> {
+        match keeps && self.writes_query_warnings() {
+            true => later.as_deref_mut()?.get_mut(index),
+            false => None,
+        }
     }
 
     /// Whether this output is the BLAST archive (outfmt 11).
@@ -695,15 +727,21 @@ pub struct ReportOutputs<'a> {
     pub formats: Vec<FormatOutput<'a>>,
     /// Receives the warnings that the CLI writes to standard error, each once.
     pub diagnostics: &'a mut (dyn Write + Send),
-    /// Receives the queries' result warnings that the first format does not write and a format
-    /// after it does (`ReportOutputs::later_query_warnings`): a structured first format (outfmt 5,
-    /// 8, 9, 11 to 17) writes none (`ReportFormat::writes_query_warnings`), and the command line's
-    /// run of the later format writes them to its standard error (LOSAT Web writes outfmt 0, 6
-    /// and 7 besides the argv's `-outfmt`, and adds what their standard error adds; line WQA's
-    /// sweep, D3 review r3, 2026-11-19). A later format that failed alone gives none from then on
-    /// (`FormatRefusal::Refused`: the command line's run of it stopped there). `None` drops them,
-    /// as the command line, whose one format is the first.
-    pub later_warnings: Option<&'a mut (dyn Write + Send)>,
+    /// By format, as `formats`: receives what the command line's run of a format after the first
+    /// writes to its standard error with its queries' reports and the first format's run does
+    /// not. A structured first format (outfmt 5, 8, 9, 11 to 17) writes none of the queries'
+    /// result warnings (`ReportFormat::writes_query_warnings`), and the run of a later format
+    /// that writes them posts each when the query's report starts: such a format's writer writes
+    /// them to `later_warnings[i]` there, `i` being its place in `formats`, so a format whose
+    /// report stops (it failed alone, `FormatRefusal`) has given those of the queries that it
+    /// reached, and one refused before its report none. BLASTX gives each such format's whole
+    /// standard error of the reports, which may repeat lines of the diagnostics. The texts of
+    /// several formats repeat each other: the caller keeps each line once (LOSAT Web writes
+    /// outfmt 0, 6 and 7 besides the argv's `-outfmt`, and adds what their standard error adds;
+    /// line WQA's sweep, D3 review r3, 2026-11-19). Nothing is written where the first format
+    /// writes the warnings itself, nor to a place beyond the slice. `None` drops them, as the
+    /// command line, whose one format is the first.
+    pub later_warnings: Option<&'a mut [Vec<u8>]>,
     /// Receives the final, sorted hit list with rendered alignments, once per call. It may come
     /// before or after the reports are written (blastp's query blocks hand it over after the
     /// last block, `LOSAT_X_BPQBLOCK`). The list is shared, not copied: it holds an alignment's
@@ -716,6 +754,8 @@ pub struct ReportOutputs<'a> {
 }
 
 impl ReportOutputs<'_> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452 (quoted at
+    // `FormatOutput::writes_query_warnings`): a structured report returns before the warnings.
     /// Whether the first format writes the queries' result warnings with its reports (a call
     /// without formats too): a structured format does not (`ReportFormat::writes_query_warnings`).
     pub(crate) fn first_writes_query_warnings(&self) -> bool {
@@ -724,41 +764,12 @@ impl ReportOutputs<'_> {
             .is_none_or(FormatOutput::writes_query_warnings)
     }
 
-    /// Whether the queries' result warnings that the first format does not write go to
-    /// `later_warnings` (`later_query_warnings`): a format after the first writes them and is
-    /// still written (it has not failed alone, `FormatRefusal::refused`, as BLASTX's formats of a
-    /// batch, `blastx::local::write_run`), and the caller takes them.
-    pub(crate) fn takes_later_query_warnings(&self) -> bool {
-        self.later_warnings.is_some()
-            && !self.first_writes_query_warnings()
-            && self
-                .formats
-                .iter()
-                .skip(1)
-                .any(|format| !format.refusal.refused() && format.writes_query_warnings())
-    }
-
-    /// Where the queries' result warnings that the first format does not write go: to
-    /// `later_warnings` where a format after the first writes them, as that format's run writes
-    /// them; `None` where they go nowhere (the first format writes them with its reports, no later
-    /// format that is still written writes them, or the caller takes none).
-    pub(crate) fn later_query_warnings(&mut self) -> Option<&mut (dyn Write + Send)> {
-        match self.takes_later_query_warnings() {
-            true => self
-                .later_warnings
-                .as_mut()
-                .map(|later| &mut **later as &mut (dyn Write + Send)),
-            false => None,
-        }
-    }
-
-    /// Writes `text`, the queries' warnings that a later format writes, to the receiver of
-    /// `later_query_warnings`; nothing where there is none.
-    pub(crate) fn write_later_query_warnings(&mut self, text: &[u8]) -> std::io::Result<()> {
-        match self.later_query_warnings() {
-            Some(later) => later.write_all(text),
-            None => Ok(()),
-        }
+    /// Whether the queries' result warnings are kept for the formats after the first
+    /// (`Posts::later`), each of which writes them to its own receiver
+    /// (`FormatOutput::later_warnings`): the first format writes none and the caller takes the
+    /// later formats' (`later_warnings`).
+    pub(crate) fn keeps_later_query_warnings(&self) -> bool {
+        self.later_warnings.is_some() && !self.first_writes_query_warnings()
     }
 
     /// Makes the `-out` file of `run_to_file` (`OutputSink::Out`) where the command line opens its
@@ -878,9 +889,7 @@ impl ReportOutputs<'_> {
                 .collect(),
             diagnostics: &mut tee,
             // Not saved in the archive: the archive's run (outfmt 11 first) writes none of them.
-            later_warnings: later_warnings
-                .as_mut()
-                .map(|later| &mut **later as &mut (dyn Write + Send)),
+            later_warnings: later_warnings.as_deref_mut(),
             hits: hits.as_mut().map(|hits| &mut **hits as &mut HitsSink<'_>),
             observer: observer
                 .as_mut()

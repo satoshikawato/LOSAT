@@ -455,9 +455,16 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     } = run;
     // Whether every format is the archive, which NCBI writes without the prefetch (`render`).
     let only_archive = outputs.only_archive();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+    // ```c++
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
     // Whether the queries' warnings that a structured first format does not write go to the
-    // caller's receiver of a later format's (`ReportOutputs::later_query_warnings`).
-    let takes_later = outputs.takes_later_query_warnings();
+    // caller's receivers of the later formats that write them, each format's to its own
+    // (`ReportOutputs::later_warnings`).
+    let keeps_later = outputs.keeps_later_query_warnings();
     let ReportOutputs {
         formats,
         diagnostics,
@@ -465,10 +472,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         hits: hits_sink,
         observer,
     } = outputs;
-    let mut later = later_warnings
-        .as_mut()
-        .filter(|_| takes_later)
-        .map(|later| &mut **later as &mut (dyn Write + Send));
+    let mut later = later_warnings.as_deref_mut().filter(|_| keeps_later);
     // The caller's receivers of the side files of outfmt 13 and 14.
     let side_sinks: Vec<_> = formats
         .iter()
@@ -571,9 +575,9 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 /// refusal of each format's checks does (`FormatRefusal`): a format that fails alone writes
 /// nothing after it, and the first format that is still written writes the warnings that the
 /// formats share. `only_archive`: every format is the archive (`ReportOutputs::only_archive`).
-/// `later`: the receiver of the queries' warnings that the first format written does not write (a
-/// structured format), which the first later format that writes them writes there
-/// (`ReportOutputs::later_query_warnings`).
+/// `later`: by format, the receivers of the queries' warnings that the first format does not write
+/// (a structured format): each later format that writes them writes its own there, as the
+/// command line's run of it writes them to standard error (`ReportOutputs::later_warnings`).
 /// Returns the run's hit list (`wants_hits`) and the database sequences it names.
 #[allow(clippy::too_many_arguments)]
 fn write_run(
@@ -584,7 +588,7 @@ fn write_run(
     wants_hits: bool,
     only_archive: bool,
     diagnostics: &mut &mut (dyn Write + Send),
-    later: &mut Option<&mut (dyn Write + Send)>,
+    later: &mut Option<&mut [Vec<u8>]>,
     observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
 ) -> Result<(
     Vec<crate::report::pairwise::PairwiseHit>,
@@ -809,10 +813,6 @@ fn write_run(
         // ```
         // Whether a format of the batch wrote the warnings that the formats share.
         let mut warned = false;
-        // Whether a format of the batch wrote the queries' result warnings: the first written, or
-        // where it is structured (`ReportFormat::writes_query_warnings`), the first later one that
-        // writes them, to `later` (line WQA's sweep, D3 review r3, 2026-11-19).
-        let mut result_warned = false;
         for (index, ((writer, options), refusal)) in writers
             .iter_mut()
             .zip(resolved)
@@ -834,10 +834,18 @@ fn write_run(
                 .is_some();
             let writes = report_format.is_none_or(app::ReportFormat::writes_query_warnings);
             let warns = !warned;
-            let gathers = !warns && writes && !result_warned;
-            let warnings: &mut dyn Write = match (warns || seq_annot, later.as_deref_mut()) {
+            // A later format that writes the queries' warnings where the first, a structured
+            // one, does not, writes its standard error of the batch's reports to its own
+            // receiver (`later`): one whose report stops has given what it wrote until then, and
+            // the caller keeps each line of the formats' texts once (line WQA's sweep, D3 review
+            // r3, 2026-11-19).
+            let own_later = later
+                .as_deref_mut()
+                .and_then(|later| later.get_mut(index))
+                .filter(|_| writes);
+            let warnings: &mut dyn Write = match (warns || seq_annot, own_later) {
                 (true, _) => &mut *diagnostics,
-                (false, Some(later)) if gathers => later,
+                (false, Some(later)) => later,
                 _ => &mut quiet,
             };
             // The values of a custom tabular field list are each format's (`reported_batch`
@@ -924,7 +932,6 @@ fn write_run(
             // A format refused by its checks wrote no warning (they come before its warnings and
             // rows, `report::render_queries_with`).
             warned |= warns && !refusal.refused();
-            result_warned |= writes && (warns || gathers) && !refusal.refused();
         }
         first_hsp += match &hits {
             Some(hits) => hits.len(),

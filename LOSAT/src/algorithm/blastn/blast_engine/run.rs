@@ -92,10 +92,10 @@ use crate::blastinput::fasta_reader::{
 use crate::blastinput::input_files::{
     check_utf8_file_name, open_input, write_empty_subject_warnings_by_length,
 };
-use crate::blastinput::query_batch::{BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
+use crate::blastinput::query_batch::{BatchCount, BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
-    cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
-    QueryInput, RangeRole, SequenceRange,
+    cut_queries, cut_subjects, parse_optional_range, subjects_read, Placements, QueryInput,
+    RangeRole, SequenceRange,
 };
 use crate::report::diag_log::Posts;
 use crate::report::pairwise::{
@@ -10618,6 +10618,8 @@ fn run_in_pool(
     // Whether what ended the reading after the records (`reading`) has come.
     let mut reading_ended = false;
     let mut input_start = 0;
+    // NCBI's reader's count of the records into the batches (`BatchCount`).
+    let mut batch_count = BatchCount::of(query_scopes.as_ref());
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::QueryFetches`).
@@ -10638,7 +10640,9 @@ fn run_in_pool(
         &reading,
         reading_ended,
     ) {
-        let (input_end, reached_size) = next_ranged_batch(
+        let (input_end, reached_size) = BatchCount::next_batch(
+            batch_count.as_mut(),
+            &|record| queries.believed(record),
             &query_input.input_lengths,
             &query_input.skipped,
             input_start,
@@ -10833,7 +10837,7 @@ fn run_in_pool(
         // (Round 4 refused after the search, and wrote the batch's request.)
         let mut scope_refusal = None;
         if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(refusal) = scopes.add_batch(batch_records.input(), start, reached_size) {
+            if let Err(refusal) = scopes.add_batch(batch_records.input(), start) {
                 scope_refusal = Some(refusal);
             }
         }
@@ -13205,6 +13209,19 @@ fn search_query_batch<const UNGAPPED: bool>(
         setup_only: true, ..
     } = stage
     {
+        // The search's first read of the database after the set-up (`prelim_pass`): a sequence
+        // file that cannot be opened fails the batch there (line WQA D10 round 6, review 4 M2).
+        if let (true, SubjectSource::Database(database)) = (any_valid_context && !split, subjects) {
+            if let Some(error) = database.sequence_file_read_error() {
+                return Err(database_search_error(
+                    error,
+                    first_batch,
+                    reborrow_outputs(&mut outputs),
+                    megablast,
+                    &shown,
+                ));
+            }
+        }
         return Err(SetUpOnly.into());
     }
     // The preliminary stage's option spaces and its own spaces where they differ from the setup's

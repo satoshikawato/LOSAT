@@ -135,4 +135,32 @@ def rand_nt4(n):
 write('avgearly_bp.faa', [('q1', 'X' * 600), ('q2', rand_aa4(300)), ('q1', rand_aa4(200))])
 write('avgearly_bn.fna', [('q1', 'N' * 600), ('q2', rand_nt4(300)), ('q1', rand_nt4(200))])
 write('avgmid_bp.faa', [('q1', 'X' * 30), ('q1', rand_aa4(20)), ('q2', rand_aa4(40))])
+# NCBI's reader counts a repeated record by its first record's letters at every cut of the batches (line WQA D10 round 6,
+# review 4 of D10, M1; rows .g2a.*, .g2b.*, .avgmid.one.*): g2a, a q1 of 60 letters (180 nucleotides), a second q1 of 10
+# (30) and a line that NCBI's reader refuses, with BATCH_SIZE=100 (300): NCBI's first batch is the two q1 (60 + 60),
+# searched, then the reader's error, so LOSAT refuses that batch. g2b, the converse (10 then 60; BATCH_SIZE=50, 150): the
+# batch counts 10 + 10 and reads the refused line, so the reader's error comes first. avgmid in one batch (q1 of only X or
+# N, a second q1, q2; subjects too short for -searchsp 1000): NCBI's set-up of q1 and q2 fails for the subjects. And q1,
+# q2, q1 in one batch against a database without its sequence file (review 4 M2, rows .nosq.*: arch_sprot_nopsq,
+# arch_tbn_snucl_nonsq): NCBI's set-up passes and its first read of the database fails.
+rnd5 = random.Random(202611208)
+
+
+def rand_aa5(n):
+    return ''.join(rnd5.choice('ACDEFGHIKLMNPQRSTVWY') for _ in range(n))
+
+
+def rand_nt5(n):
+    return ''.join(rnd5.choice('ACGT') for _ in range(n))
+
+
+g2_aa, g2_nt = rand_aa5(200), rand_nt5(600)
+bad = ('q3', 'ACGTAC%%%%')
+write('g2_s.faa', [('s1', g2_aa)])
+write('g2_s.fna', [('s1', g2_nt)])
+write('g2a_bp.faa', [('q1', g2_aa[:60]), ('q1', g2_aa[60:70]), bad])
+write('g2b_bp.faa', [('q1', g2_aa[:10]), ('q1', g2_aa[10:70]), bad])
+write('g2a_bn.fna', [('q1', g2_nt[:180]), ('q1', g2_nt[180:210]), bad])
+write('g2b_bn.fna', [('q1', g2_nt[:30]), ('q1', g2_nt[30:210]), bad])
+write('avgmid_bn.fna', [('q1', 'N' * 90), ('q1', rand_nt5(60)), ('q2', rand_nt5(120))])
 print(sorted(os.listdir(out)))

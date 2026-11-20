@@ -226,7 +226,9 @@ impl ReaderBatchShape {
 /// error of the set-up of the subjects where a context of theirs is valid (a database whose
 /// sequences could not be read, `UnreadableSubjects`, as the search fails its first batch with a
 /// valid context; the average subject length, the hit-saving parameters: `subject_parameters`),
-/// for the caller's `search_error`; `None` where the set-up passes or no context is valid. NCBI
+/// then of the search's first read of the database (a sequence file that cannot be opened,
+/// `Subjects::sequence_file_read_error`; line WQA D10 round 6, review 4 M2), for the caller's
+/// `search_error`; `None` where the set-up passes or no context is valid. NCBI
 /// splits no batch of two queries or more (`split::calculate_num_chunks`), and a refused batch
 /// that is set up holds two (line WQA D10 round 5, 2026-11-20).
 pub(crate) fn set_up_error(
@@ -243,7 +245,9 @@ pub(crate) fn set_up_error(
         return Some(super::subjects::UnreadableSubjects.into());
     }
     let numbers = subjects.numbers().ok()?;
-    subject_parameters(&prepared, &mut params, options, numbers, None).err()
+    subject_parameters(&prepared, &mut params, options, numbers, None)
+        .err()
+        .or_else(|| subjects.sequence_file_read_error())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:416-416,990-990

@@ -1026,7 +1026,6 @@ fn scan_query_stream<R: std::io::Read>(
         options,
         holds_back,
         checks_titles,
-        batch_size,
         query_scopes,
         &mut |deliver| {
             super::input::read_fasta_stream_batches(
@@ -1063,13 +1062,12 @@ fn scan_query_stream<R: std::io::Read>(
 /// `QueryScan::query_scopes`. LOSAT's refusal of two queries of one scope with one id stops the run
 /// at its batch, after the reports of the batches before, as a batch that NCBI fails does: the read
 /// ends there, and the search gives the refusal where it adds that batch (`QueryScopes::read_ahead`;
-/// line WQA D10 round 4, 2026-11-20). A batch with fewer than `batch_size` letters of whole
-/// records ends the input (`native::reached_size`).
+/// line WQA D10 round 4, 2026-11-20). The batches are the reader's (`read`), as NCBI counts them
+/// (`query_batch::BatchCount`).
 pub(super) fn scan_queries(
     options: &ResolvedOptions,
     holds_back: bool,
     checks_titles: bool,
-    batch_size: usize,
     mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
 ) -> Result<QueryScan> {
@@ -1087,11 +1085,10 @@ pub(super) fn scan_queries(
         }
         if let Some(scopes) = query_scopes.as_mut() {
             let added = scopes.add_batch_ids(
-                batch
-                    .iter()
-                    .map(|record| (record.believed(), record.placement().length)),
+                super::input::scope_records(batch)
+                    .into_iter()
+                    .map(|(believed, length, _)| (believed, length)),
                 written,
-                super::native::reached_size(batch, batch_size),
             );
             if let Err(error) = added {
                 refusal = Some((batches, error));
@@ -1767,7 +1764,7 @@ mod scan_tests {
     /// error) or at the end of the queries.
     fn scan(batches: &[Vec<FastaRecord>], stops: bool, holds_back: bool) -> Result<QueryScan> {
         let options = super::super::stage_c_tests::options();
-        scan_queries(&options, holds_back, true, 1, None, &mut |deliver| {
+        scan_queries(&options, holds_back, true, None, &mut |deliver| {
             for batch in batches {
                 deliver(batch)?;
             }
@@ -1813,7 +1810,7 @@ mod scan_tests {
         // A run whose XML format fails for its matrix name writes no report and no title
         // (`xml_matrix_failure`, probe K4f of line RG): its batches are read, no title is checked.
         let options = super::super::stage_c_tests::options();
-        let found = scan_queries(&options, false, false, 1, None, &mut |deliver| {
+        let found = scan_queries(&options, false, false, None, &mut |deliver| {
             deliver(&[bad(), plain()])?;
             deliver(&[bad()])
         })
@@ -1861,7 +1858,6 @@ mod scan_tests {
             &options,
             false,
             true,
-            1,
             Some(QueryScopes::new(QueryScopeSpan::Run, "BLASTX")),
             &mut |deliver| {
                 deliver(&first)?;
@@ -1879,11 +1875,7 @@ mod scan_tests {
         };
         let add = |scopes: &mut QueryScopes, batch: &[FastaRecord], first: usize| {
             let ids = ids(batch);
-            scopes.add_batch_ids(
-                ids.iter().map(|(ids, len)| (ids.as_ref(), *len)),
-                first,
-                true,
-            )
+            scopes.add_batch_ids(ids.iter().map(|(ids, len)| (ids.as_ref(), *len)), first)
         };
         add(&mut scopes, &first, 0).unwrap();
         let refusal = add(&mut scopes, &second, 2).unwrap_err().to_string();
@@ -1897,7 +1889,6 @@ mod scan_tests {
             &options,
             false,
             true,
-            1,
             Some(QueryScopes::new(QueryScopeSpan::Run, "BLASTX")),
             &mut |deliver| {
                 deliver(&first)?;
@@ -1968,6 +1959,7 @@ mod scan_tests {
             id_scope: None,
             strand: crate::report::archive::bioseq::SeqLocStrand::Both,
             data_loaders: false,
+            batch_count: None,
         };
         let options = super::super::stage_c_tests::options();
         let open = |start: u64| {

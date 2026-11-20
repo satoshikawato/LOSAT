@@ -196,10 +196,144 @@ pub(crate) fn outfmts_have_xml<'a>(outfmts: impl IntoIterator<Item = &'a str>) -
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:157-163 (quoted at
+// `seq_range::next_ranged_batch_end`)
+// ```c++
+//         CConstRef<CSeq_loc> loc = q->GetQuerySeqLoc();
+//
+//         if (loc->IsInt()) {
+//             size_read += sequence::GetLength(loc->GetInt().GetId(),
+//                                              q->GetScope());
+// ```
+/// NCBI's reader's count of the query records into its batches under `-parse_deflines`
+/// (`CBlastInput::GetNextSeqBatch`): each record by the length of its id in the scope, where a
+/// repeated id (`Meets::Repeat`) finds its first record, so that the repeat counts the first
+/// record's letters. The scope is NCBI's (`QueryScopeSpan`): the formatter empties it after each
+/// batch (`ResetScopeHistory`) but with `-subject` and outfmt 5. Every cut of the query batches
+/// counts so (`next_batch`; BLASTX's readers by `count` and `end_batch`): the batch of the first
+/// repeat is NCBI's, with the records that its set-up reads and its reader's error, where its
+/// reader meets one (line WQA D10 round 6, 2026-11-20; review 4 of D10, M1). The batches before
+/// it hold no repeat, and none follows it.
+///
+/// NCBI BLAST+ 2.17.0 (`fix-reader-error/r6/probe` of line WQA, 2026-11-20): with `BATCH_SIZE=60`,
+/// a `q1` of 60 letters, a `q1` of 55 and a line that the reader refuses, blastp with `-subject`
+/// counts the second `q1` by 60, searches it in a batch of its own and then stops with the
+/// reader's error; with `-db` it counts it by its own 55 letters and its batch meets the error. A
+/// third `q1` after the scope was emptied counts the letters of the second (`chainB50`), not the
+/// first's (`chainB5`). A record whose ids meet the scope otherwise (`Meets::Other`) counts its
+/// own letters (`>gi|5|lcl|q1` after `>q1`, review 4's probe `oth1`). A record that a `-query_loc`
+/// range skips adds nothing but joins the scope, as the reader added it before the range's check:
+/// a later `q1` of 60 letters after a skipped `q1` of 10 counts by 10 (`r6/probe/skip2`; `skip2c`
+/// with another id counts 60).
+#[derive(Debug, Clone)]
+pub(crate) struct BatchCount {
+    span: QueryScopeSpan,
+    program: &'static str,
+    scope: QueryScope,
+}
+
+impl BatchCount {
+    /// The count of a search whose scopes are `scopes` (`None` without `-parse_deflines`, whose
+    /// records count their own letters).
+    pub(crate) fn of(scopes: Option<&QueryScopes>) -> Option<Self> {
+        scopes.map(|scopes| Self::new(scopes.span, scopes.program))
+    }
+
+    /// The count of a search as `QueryScopes::of_search` makes its scopes: `None` without
+    /// `-parse_deflines` (`believed`).
+    pub(crate) fn of_search(
+        believed: bool,
+        subject: bool,
+        xml: bool,
+        program: &'static str,
+    ) -> Option<Self> {
+        believed.then(|| Self::new(QueryScopeSpan::of(subject, xml), program))
+    }
+
+    /// The count of a search whose scopes span `span` (`QueryScopes::of_search`).
+    pub(crate) fn new(span: QueryScopeSpan, program: &'static str) -> Self {
+        Self {
+            span,
+            program,
+            scope: QueryScope::default(),
+        }
+    }
+
+    /// The letters by which NCBI's reader counts a record with the ids `believed` (`None`: an id
+    /// of the reader's own) and `length` letters into its batch, 0 where a `-query_loc` range
+    /// skips it (`skipped`); the record joins the scope either way.
+    pub(crate) fn count(
+        &mut self,
+        believed: Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+        length: usize,
+        skipped: bool,
+    ) -> usize {
+        let own = if skipped { 0 } else { length };
+        let Some(believed) = believed else {
+            return own;
+        };
+        let counted = match self.scope.meets(&believed.ids, self.program) {
+            Meets::Repeat { first: Some(first) } if !skipped => first,
+            _ => own,
+        };
+        let record = (self.scope.records, length);
+        self.scope.records += 1;
+        self.scope.add_after_refusal(&believed.ids, record);
+        counted
+    }
+
+    /// The end of a batch: the formatter empties the scope after the batch's reports, but with
+    /// `-subject` and outfmt 5 (`QueryScopeSpan::Batch`).
+    pub(crate) fn end_batch(&mut self) {
+        if self.span == QueryScopeSpan::Batch {
+            self.scope = QueryScope::default();
+        }
+    }
+
+    /// The query batch of the input that starts at input record `start`
+    /// (`seq_range::next_ranged_batch`), each record counted by `count` (with `believed`, the ids
+    /// of an input record), or by its own letters without one; whether it reached its size.
+    pub(crate) fn next_batch(
+        count: Option<&mut Self>,
+        believed: &dyn Fn(
+            usize,
+        ) -> Option<
+            std::sync::Arc<crate::blastinput::fasta_reader::believed::BelievedIds>,
+        >,
+        input_lengths: &[usize],
+        skipped: &[bool],
+        start: usize,
+        batch_size: u32,
+    ) -> (usize, bool) {
+        let Some(count) = count else {
+            return crate::blastinput::seq_range::next_ranged_batch(
+                input_lengths,
+                skipped,
+                start,
+                batch_size,
+            );
+        };
+        let batch = crate::blastinput::seq_range::next_counted_batch(
+            input_lengths.len(),
+            start,
+            batch_size,
+            &mut |record| {
+                count.count(
+                    believed(record).as_deref(),
+                    input_lengths[record],
+                    skipped[record],
+                )
+            },
+        );
+        count.end_batch();
+        batch
+    }
+}
+
 /// The ids of the query records of one scope (`QueryScopes`): the keys of each id
 /// (`seqid::defline_set::scope_keys`, and the own kind of `id_scope::version_keys` and
 /// `id_scope::name_keys`).
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct QueryScope {
     keys: std::collections::HashSet<u64>,
     /// The record (its number in the scope, `records`) that is first in the scope with each key
@@ -226,21 +360,20 @@ enum Meets {
     New,
     /// Every Seq-id of the record is one of an earlier record: NCBI's scope finds the earlier
     /// record by the id. Its reader counts the record into its batch by the earlier record's
-    /// length (`GetLength` of the id in the scope), and its set-up reads the earlier record's
-    /// letters for it. `first`: that length, where the ids find one earlier record; `None` where
-    /// they find two. NCBI BLAST+ 2.17.0
-    /// (`r5r/probe` of line WQA D10, 2026-11-20): with `BATCH_SIZE=210`, a `q1` of 300 `X` (or
-    /// `N`), then `q1` of 200 letters, `q4` of 200 `X`, `q2` of 400 letters and subjects too short
-    /// for `-searchsp 1000`, every program writes `q1`'s Karlin-Altschul warning twice and the
-    /// error of the subjects: the second `q1` fills a batch of its own, which is not searched, and
-    /// `q4`'s warning goes with the failed batch of `q4` and `q2`.
+    /// length (`GetLength` of the id in the scope, `BatchCount`), and its set-up reads the record's
+    /// interval in the earlier record's letters. `first`: that length, where the ids find one
+    /// earlier record; `None` where they find two, or ids that the scope holds without a record of
+    /// their own (`QueryScopes::with_whole_run`). NCBI BLAST+ 2.17.0 (`r5r/probe` of line WQA D10,
+    /// 2026-11-20): with `BATCH_SIZE=210`, a `q1` of 300 `X` (or `N`), then `q1` of 200 letters,
+    /// `q4` of 200 `X`, `q2` of 400 letters and subjects too short for `-searchsp 1000`, every
+    /// program writes `q1`'s Karlin-Altschul warning twice and the error of the subjects: the
+    /// second `q1` fills a batch of its own, which is not searched, and `q4`'s warning goes with
+    /// the failed batch of `q4` and `q2`.
     Repeat { first: Option<usize> },
     /// Any other meeting: some ids new and some not, a name with and without an accession, an
-    /// accession with and without a version (BLASTN), or in BLASTN a repeat of more letters than
-    /// the earlier record has, or of two records: NCBI's set-up of blastn reads
-    /// the record's interval past the earlier record's letters and stops there (`BLAST engine
-    /// error: ... CSeqVector_CI: cannot locate segment`, `r5/probe`). The other programs set
-    /// such a batch up as the others (the average subject length of `db.pd.q1c.bp.avglong.subj.6`).
+    /// accession with and without a version (BLASTN). NCBI's scope finds a record by its best
+    /// choice of the ids (`FindBestChoice`): its reader counted `>gi|5|lcl|q1` after `>q1` by its
+    /// own letters (review 4 of D10, probe `oth1`), as `BatchCount` counts such a record.
     Other,
 }
 
@@ -284,9 +417,9 @@ impl QueryScope {
         }
     }
 
-    /// How the ids `ids` of a record of `length` letters meet those of the scope (`Meets`), by the
-    /// kinds of `believed::duplicate_id`.
-    fn meets(&self, ids: &[crate::seqid::ParsedSeqId], length: usize, program: &str) -> Meets {
+    /// How the ids `ids` of a record meet those of the scope (`Meets`), by the kinds of
+    /// `believed::duplicate_id`.
+    fn meets(&self, ids: &[crate::seqid::ParsedSeqId], program: &str) -> Meets {
         let mut keys = Vec::new();
         let (mut known, mut new, mut other) = (false, false, false);
         // The earlier record of the scope that the ids find, while they find one only.
@@ -317,7 +450,6 @@ impl QueryScope {
                     .is_some_and(|(_, version)| self.keys.contains(&version));
         }
         let first = first.flatten().map(|(_, letters)| letters);
-        other |= known && program == "BLASTN" && first.is_none_or(|first| length > first);
         match (known, new, other) {
             (false, _, false) => Meets::New,
             (true, false, false) => Meets::Repeat { first },
@@ -579,9 +711,8 @@ pub(crate) struct QueryScopes {
 pub(crate) struct ScopeRefusal {
     message: String,
     /// By record of the batch, as `QueryScopes::add_batch_ids` took them: whether NCBI's set-up
-    /// of the batch reads it with its own letters, the records before the refused one, where
-    /// NCBI's batch holds the same records as LOSAT's (`QueryScopes::add_batch_ids`); `None`
-    /// otherwise.
+    /// of the batch reads it with its own letters (a record first in the scope with its ids),
+    /// where LOSAT can follow NCBI's set-up of every record of the batch; `None` otherwise.
     first_records: Option<Vec<bool>>,
 }
 
@@ -599,7 +730,7 @@ impl ScopeRefusal {
         error.downcast_ref::<ScopeRefusal>()
     }
 
-    /// The records of the batch that NCBI's set-up surely reads with their own letters
+    /// The records of the batch that NCBI's set-up reads with their own letters
     /// (`first_records`), where there is one; `None` otherwise.
     pub(crate) fn setup_records(&self) -> Option<&[bool]> {
         self.first_records
@@ -647,18 +778,20 @@ impl ScopeRefusal {
 ///   subject length against `-searchsp` or `OLD_FSC`, the hit-saving parameters, the first read of
 ///   a database. Those errors are the run's, the same for every batch with a valid context, and a
 ///   batch without one is not searched (`CheckInternalData`), its warnings written: where the
-///   records that NCBI's set-up of the batch surely reads with their own letters
-///   (`ScopeRefusal::setup_records`: those before the refused one, where NCBI's batch holds the
-///   same records) have a valid context, NCBI's set-up of the batch has one too and fails with
-///   that error, whatever the repeated records' letters, and the failed batch's warnings are not
-///   written. `setup` is the program's set-up of those records (by record of the batch): NCBI's
+///   records that NCBI's set-up of the batch reads with their own letters
+///   (`ScopeRefusal::setup_records`: those first in the scope with their ids, where LOSAT can
+///   follow NCBI's set-up of every record of the batch) have a valid context, NCBI's set-up of the
+///   batch has one too and fails with that error, whatever the repeated records' letters, and the
+///   failed batch's warnings are not written. `setup` is the program's set-up of those records (by record of the batch): NCBI's
 ///   error (`cli::NativeError`) where it fails, `None` where it passes or has no valid context.
 /// - Else the refusal, before the batch's search.
 ///
 /// NCBI BLAST+ 2.17.0 (`r5/probe` of line WQA D10): with a query of only X letters, a second query
 /// of only X, and the first's id again with letters of its own, NCBI reads the first's letters
 /// for the third, sets up no valid context and exits 0 with the Karlin-Altschul warnings, so a
-/// batch whose records before the refused one have no valid context is refused.
+/// batch whose records with their own letters have no valid context is refused (a repeat's letters
+/// are those of its earlier record, of the batch or of a batch before, whose letters LOSAT does
+/// not keep).
 pub(crate) fn refused_batch_error(
     refusal: anyhow::Error,
     export: bool,
@@ -739,54 +872,51 @@ impl QueryScopes {
     }
 
     /// The scopes of `records`, the input records of one call of a search whose queries
-    /// (searched from the first, `-query_loc` cuts included) they all are: one batch, which ends
-    /// with the input.
+    /// (searched from the first, `-query_loc` cuts included) they all are: one batch.
     pub(crate) fn of_records(
         span: QueryScopeSpan,
         program: &'static str,
         records: &[FastaRecord],
     ) -> anyhow::Result<Self> {
         let mut scopes = Self::new(span, program);
-        scopes.add_batch(records, 0, false)?;
+        scopes.add_batch(records, 0)?;
         Ok(scopes)
     }
 
     /// Adds the batch of the input records `records`, whose first searched query is
     /// `first_searched` (a new scope, or with `Run` the one scope), or LOSAT's refusal of a
-    /// record with the id of another of the scope (`ScopeRefusal`). `reached_size`: whether the
-    /// batch reached the batch size (`seq_range::next_ranged_batch`), and did not end with the
-    /// input.
+    /// record with the id of another of the scope (`ScopeRefusal`). The batch is NCBI's
+    /// (`BatchCount`).
     pub(crate) fn add_batch(
         &mut self,
         records: &[FastaRecord],
         first_searched: usize,
-        reached_size: bool,
     ) -> anyhow::Result<()> {
         self.add_batch_ids(
             records
                 .iter()
                 .map(|record| (record.believed(), record.seq().len())),
             first_searched,
-            reached_size,
         )
     }
 
     /// `add_batch` of the records of a batch by their ids (`BelievedIds`, `None` without ids of
-    /// their own) and the letters of each whole record, as NCBI's reader counts them into the
-    /// batch (BLASTX's reader has records of its own). A refused batch's other records are added
-    /// too, for what NCBI's set-up of the batch reads (`ScopeRefusal`).
+    /// their own) and the letters of each whole record (BLASTX's reader has records of its own).
+    /// A refused batch's other records are added too, for what NCBI's set-up of the batch reads
+    /// (`ScopeRefusal`).
     ///
-    /// NCBI's reader counts a repeated record by its earlier record's letters (`Meets::Repeat`),
-    /// so NCBI's batch of the refusal can end elsewhere than LOSAT's, which counts the record's
-    /// own: its set-up then reads other records, and writes their reader messages or meets a
-    /// reader's error, or the warnings of a batch of the earlier records alone. The refusal holds
-    /// the records before the refused one, which NCBI's set-up reads with their own letters
-    /// (`ScopeRefusal::setup_records`), only where NCBI's batch is LOSAT's: no record of the
-    /// batch meets the scope otherwise (`Meets::Other`), the refused record is the batch's last,
-    /// and NCBI's count of it does not end the batch later than LOSAT's (the earlier record, of
-    /// this batch or one before, is no shorter, or the batch ends with the input: `reached_size`
-    /// false). The batches before hold no repeat, so NCBI's batch starts where LOSAT's does. Else
-    /// the batch is refused before its set-up (line WQA D10 round 5r, 2026-11-20).
+    /// The batch is NCBI's: its reader counts a repeated record by its earlier record's letters
+    /// (`BatchCount`, which every cut of the batches takes). NCBI's set-up of the batch reads each
+    /// record that is first in the scope with its ids (`Meets::New`) with its own letters, and a
+    /// repeat (`Meets::Repeat`) as its interval in the earlier record's letters. The refusal holds
+    /// the first kind (`ScopeRefusal::setup_records`), where every repeat of the batch is one that
+    /// LOSAT can follow there: no record meets the scope otherwise (`Meets::Other`, whose record
+    /// NCBI finds by its best choice of the ids), every repeat finds one earlier record, and in
+    /// BLASTN no repeat is longer than its earlier record (NCBI's set-up of blastn reads the
+    /// repeat's interval past the earlier record's letters and stops there: `BLAST engine error:
+    /// ... CSeqVector_CI: cannot locate segment`, `r5/probe`; the other programs set such a batch
+    /// up as the others, `db.pd.q1c.bp.avglong.subj.6`). Else the batch is refused before its
+    /// set-up (line WQA D10 round 6, 2026-11-20; review 4 of D10, M1).
     pub(crate) fn add_batch_ids<'r>(
         &mut self,
         records: impl IntoIterator<
@@ -796,7 +926,6 @@ impl QueryScopes {
             ),
         >,
         first_searched: usize,
-        reached_size: bool,
     ) -> anyhow::Result<()> {
         let batch = self.added;
         self.added += 1;
@@ -817,39 +946,48 @@ impl QueryScopes {
         }
         let scope = self.scopes.last_mut().expect("pushed above");
         let before = scope.records;
-        // The refused record: its place in the batch, LOSAT's message, its meeting and letters.
-        let mut refusal: Option<(usize, String, Meets, usize)> = None;
+        let mut message: Option<String> = None;
+        // By record of the batch, whether NCBI's set-up reads it with its own letters, while
+        // every record is one that LOSAT can follow there.
+        let mut own_letters = Some(Vec::new());
         let mut records_read = 0;
-        let mut known = true;
         for (place, (believed, length)) in records.into_iter().enumerate() {
             records_read = place + 1;
             let Some(believed) = believed else {
+                if let Some(own) = own_letters.as_mut() {
+                    own.push(true);
+                }
                 continue;
             };
-            let meets = scope.meets(&believed.ids, length, self.program);
-            known &= meets != Meets::Other;
+            let follows = match scope.meets(&believed.ids, self.program) {
+                Meets::New => Some(true),
+                Meets::Repeat { first: Some(first) }
+                    if self.program != "BLASTN" || length <= first =>
+                {
+                    Some(false)
+                }
+                _ => None,
+            };
+            own_letters = own_letters.zip(follows).map(|(mut own, follows)| {
+                own.push(follows);
+                own
+            });
             let record = (before + place, length);
-            if refusal.is_some() {
+            if message.is_some() {
                 scope.add_after_refusal(&believed.ids, record);
             } else if let Err(error) = scope.add(&believed.ids, record, self.program) {
                 // `duplicate_id` stopped at the id it refuses: the record's other keys.
                 scope.add_after_refusal(&believed.ids, record);
-                refusal = Some((place, error.to_string(), meets, length));
+                message = Some(error.to_string());
             }
         }
         scope.records += records_read;
-        let Some((refused, message, meets, length)) = refusal else {
+        let Some(message) = message else {
             return Ok(());
         };
-        let ends_alike = match meets {
-            Meets::Repeat { first } => !reached_size || first.is_some_and(|first| first >= length),
-            _ => false,
-        };
-        let first_records = (known && refused + 1 == records_read && ends_alike)
-            .then(|| (0..records_read).map(|place| place < refused).collect());
         Err(ScopeRefusal {
             message,
-            first_records,
+            first_records: own_letters,
         }
         .into())
     }
@@ -1172,13 +1310,17 @@ fn read_batches(
     // Whether what ended the reading after the records (`reading`) has come.
     let mut reading_ended = false;
     let mut input_start = 0;
+    // NCBI's reader's count of the records into the batches (`BatchCount`).
+    let mut count = BatchCount::of(query_scopes.as_ref());
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
     // run out before the batch reaches its size, and otherwise in a batch of its own.
     while input_start < input.input_lengths.len()
         || (reading.reads_past_records() && !reading_ended)
     {
-        let (input_end, reached_size) = crate::blastinput::seq_range::next_ranged_batch(
+        let (input_end, reached_size) = BatchCount::next_batch(
+            count.as_mut(),
+            &|record| input_records[record].believed_shared(),
             &input.input_lengths,
             &input.skipped,
             input_start,
@@ -1237,9 +1379,7 @@ fn read_batches(
         // decision Q-X2c of 2026-11-16 for TBLASTX's refusals). An error of NCBI's in the search of
         // a batch before comes first (line WQA D10 round 4, 2026-11-20).
         if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(refusal) =
-                scopes.add_batch(&input_records[input_start..input_end], start, reached_size)
-            {
+            if let Err(refusal) = scopes.add_batch(&input_records[input_start..input_end], start) {
                 return QueryBatches {
                     warnings,
                     input_done: input_start,
@@ -1494,8 +1634,8 @@ mod tests {
         use super::{QueryScopeSpan, QueryScopes};
         let records = parsed_records(b">a x\nAC\n>b x\nAC\n>a y\nAC\n>c x\nAC\n");
         let mut scopes = QueryScopes::new(QueryScopeSpan::Batch, "BLASTP");
-        scopes.add_batch(&records[..2], 0, true).unwrap();
-        scopes.add_batch(&records[2..], 2, true).unwrap();
+        scopes.add_batch(&records[..2], 0).unwrap();
+        scopes.add_batch(&records[2..], 2).unwrap();
         assert!(scopes.of_query(0).has_key(&local_keys("b")));
         assert!(scopes.of_query(1).has_key(&local_keys("b")));
         assert!(!scopes.of_query(2).has_key(&local_keys("b")));
@@ -1506,11 +1646,8 @@ mod tests {
         assert!(!from.of_query(1).has_key(&local_keys("b")));
         // `-subject` and outfmt 5: one scope, in which the second `a` is refused.
         let mut run = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
-        run.add_batch(&records[..2], 0, true).unwrap();
-        let error = run
-            .add_batch(&records[2..], 2, true)
-            .unwrap_err()
-            .to_string();
+        run.add_batch(&records[..2], 0).unwrap();
+        let error = run.add_batch(&records[2..], 2).unwrap_err().to_string();
         assert!(
             error.contains("two query records have the Seq-id lcl|a"),
             "{error}"
@@ -1521,19 +1658,19 @@ mod tests {
         let mut ahead = QueryScopes::of_records(QueryScopeSpan::Run, "BLASTP", &records[1..])
             .unwrap()
             .read_ahead(None);
-        ahead.add_batch(&records[1..], 0, true).unwrap();
+        ahead.add_batch(&records[1..], 0).unwrap();
         // A refusal that the read met comes with the search's add of its batch (the second here).
         let mut ahead = QueryScopes::of_records(QueryScopeSpan::Run, "BLASTP", &records[..2])
             .unwrap()
             .read_ahead(Some((1, anyhow::anyhow!("refused"))));
-        ahead.add_batch(&records[..2], 0, true).unwrap();
-        let refused = ahead.add_batch(&records[2..3], 2, true).unwrap_err();
+        ahead.add_batch(&records[..2], 0).unwrap();
+        let refused = ahead.add_batch(&records[2..3], 2).unwrap_err();
         assert_eq!(refused.to_string(), "refused");
-        ahead.add_batch(&records[3..], 3, true).unwrap();
+        ahead.add_batch(&records[3..], 3).unwrap();
         // A batch's scope has no ids of the whole run.
         let mut batch =
             QueryScopes::new(QueryScopeSpan::Batch, "BLASTP").with_whole_run_of(&records);
-        batch.add_batch(&records[..2], 0, true).unwrap();
+        batch.add_batch(&records[..2], 0).unwrap();
         assert!(!batch.of_query(0).has_key(&local_keys("c")));
     }
 
@@ -1578,13 +1715,11 @@ mod tests {
             .contains("two query records have the Seq-id lcl|a"));
     }
 
-    /// The refusal of a batch with the id of an earlier record (line WQA D10 round 5, 2026-11-20):
-    /// what NCBI's set-up of the batch surely reads (`ScopeRefusal::setup_records`), where every
-    /// batch reached the batch size (`reached_size`) or not.
+    /// The refusal of a batch with the id of an earlier record (line WQA D10 round 5, 2026-11-20;
+    /// round 6): the batches `batches` added to one scope of the run.
     fn batch_refusal(
         program: &'static str,
         batches: &[&[u8]],
-        reached_size: bool,
     ) -> Option<crate::blastinput::query_batch::ScopeRefusal> {
         use super::{QueryScopeSpan, QueryScopes, ScopeRefusal};
         let mut scopes = QueryScopes::new(QueryScopeSpan::Run, program);
@@ -1592,7 +1727,7 @@ mod tests {
         let mut refusal = None;
         for fasta in batches {
             let records = parsed_records(fasta);
-            if let Err(error) = scopes.add_batch(&records, first, reached_size) {
+            if let Err(error) = scopes.add_batch(&records, first) {
                 refusal = ScopeRefusal::of(&error).cloned();
                 assert!(refusal.is_some(), "{error}");
                 break;
@@ -1602,64 +1737,116 @@ mod tests {
         refusal
     }
 
-    /// `batch_refusal`'s records that NCBI's set-up surely reads, where the batches reached the
-    /// batch size and where the last ended with the input.
-    fn setup_records(program: &'static str, batches: &[&[u8]]) -> [Option<Vec<bool>>; 2] {
-        [true, false].map(|reached_size| {
-            batch_refusal(program, batches, reached_size)
-                .expect("a refusal")
-                .setup_records()
-                .map(<[bool]>::to_vec)
-        })
+    /// `batch_refusal`'s records that NCBI's set-up reads with their own letters.
+    fn setup_records(program: &'static str, batches: &[&[u8]]) -> Option<Vec<bool>> {
+        batch_refusal(program, batches)
+            .expect("a refusal")
+            .setup_records()
+            .map(<[bool]>::to_vec)
     }
 
     #[test]
     fn a_refused_batch_knows_the_records_that_ncbis_set_up_reads_as_their_own() {
-        let before = |n: usize| Some((0..=n).map(|place| place < n).collect::<Vec<_>>());
-        // The repeat last in the batch of its first record, no longer than it: NCBI's batch is
-        // LOSAT's, and its set-up reads q1 and q2 with their own letters.
+        let own = |flags: &[u8]| Some(flags.iter().map(|&flag| flag == 1).collect::<Vec<_>>());
+        // NCBI's batch is LOSAT's (`BatchCount`): its set-up reads q1 and q2 with their own
+        // letters, the repeat in the letters of the first q1.
         let batch: &[u8] = b">q1\nMKV\n>q2\nMKV\n>q1\nMK\n";
-        assert_eq!(setup_records("BLASTP", &[batch]), [before(2), before(2)]);
-        let refusal = batch_refusal("BLASTP", &[batch], true).unwrap();
+        assert_eq!(setup_records("BLASTP", &[batch]), own(&[1, 1, 0]));
+        let refusal = batch_refusal("BLASTP", &[batch]).unwrap();
         assert!(refusal.to_string().contains("the Seq-id lcl|q1"));
         let batches: [&[u8]; 2] = [b">q0\nMKV\n", b">q3\nMK\n>q1\nMKV\n>q1\nMK\n"];
-        assert_eq!(setup_records("BLASTP", &batches), [before(2), before(2)]);
-        // NCBI's reader counts the repeat by its first record's letters, of this batch or one
-        // before: where these are fewer, NCBI's batch is LOSAT's only where it ends with the input
-        // (`db.pd.q1c.bp.avglong.subj.6`, `db.pd.q1c.{bp,tx,bn}.avgearly.subj.6`).
+        assert_eq!(setup_records("BLASTP", &batches), own(&[1, 1, 0]));
+        // A record after the repeat is set up with its own letters too
+        // (`db.pd.q1c.bp.avgmid.subj.6`, review 4's `g2a`).
+        let batch: &[u8] = b">q1\nMKV\n>q1\nMK\n>q2\nMKV\n";
+        assert_eq!(setup_records("BLASTP", &[batch]), own(&[1, 0, 1]));
+        // The repeat of a batch before, shorter or longer than its first record.
         let batches: [&[u8]; 2] = [b">q1\nMKV\n", b">q3\nMK\n>q1\nMKV\n"];
-        assert_eq!(setup_records("BLASTP", &batches), [before(1), before(1)]);
-        assert_eq!(setup_records("BLASTN", &batches), [before(1), before(1)]);
+        assert_eq!(setup_records("BLASTP", &batches), own(&[1, 0]));
+        assert_eq!(setup_records("BLASTN", &batches), own(&[1, 0]));
         let batches: [&[u8]; 2] = [b">q1\nMK\n", b">q3\nMK\n>q1\nMKV\n"];
-        assert_eq!(setup_records("BLASTP", &batches), [None, before(1)]);
-        assert_eq!(setup_records("TBLASTX", &batches), [None, before(1)]);
+        assert_eq!(setup_records("BLASTP", &batches), own(&[1, 0]));
+        assert_eq!(setup_records("TBLASTX", &batches), own(&[1, 0]));
         let batch: &[u8] = b">q1\nACGT\n>q2\nACGT\n>q1\nACGTACGT\n";
-        assert_eq!(setup_records("TBLASTX", &[batch]), [None, before(2)]);
+        assert_eq!(setup_records("TBLASTX", &[batch]), own(&[1, 1, 0]));
         // BLASTN's set-up reads the repeat's own interval in the first record's letters (NCBI
         // 2.17.0: past their end, `CSeqVector_CI: cannot locate segment`): refused where those
         // are fewer.
-        assert_eq!(setup_records("BLASTN", &[batch]), [None, None]);
-        assert_eq!(setup_records("BLASTN", &batches), [None, None]);
-        // Nothing before the repeat, or a record after it in the batch, which NCBI's batch may not
-        // hold (`db.pd.q1c.bp.avgdup2.subj.6`, `db.pd.q1c.bp.avgmid.subj.6`).
+        assert_eq!(setup_records("BLASTN", &[batch]), None);
+        assert_eq!(setup_records("BLASTN", &batches), None);
+        // Nothing with its own letters: no set-up (`db.pd.q1c.bp.avgdup2.subj.6`).
         assert_eq!(
             setup_records("BLASTP", &[b">q1\nMKV\n", b">q1\nMKV\n"]),
-            [None, None]
+            None
         );
-        let batch: &[u8] = b">q1\nMKV\n>q1\nMK\n>q2\nMKV\n";
-        assert_eq!(setup_records("BLASTP", &[batch]), [None, None]);
         // A record with a new id and an earlier one, or an earlier one's name with an accession.
         let batch: &[u8] = b">q1\nMKV\n>q2\nMKV\n>gi|5|lcl|q1\nMK\n";
-        assert_eq!(setup_records("BLASTP", &[batch]), [None, None]);
+        assert_eq!(setup_records("BLASTP", &[batch]), None);
         let batch: &[u8] = b">gb||NAMEA\nMKV\n>gb|AAA00007.1|NAMEA\nMK\n";
-        assert_eq!(setup_records("BLASTP", &[batch]), [None, None]);
+        assert_eq!(setup_records("BLASTP", &[batch]), None);
+    }
+
+    // NCBI BLAST+ 2.17.0 (`fix-reader-error/r6/probe` of line WQA, 2026-11-20): a repeat counts
+    // the letters of its first record in the scope, which the formatter empties after each batch
+    // but with `-subject` and outfmt 5; a record that `-query_loc` skips joins the scope and adds
+    // nothing.
+    #[test]
+    fn ncbis_reader_counts_a_repeat_by_its_first_records_letters() {
+        use super::{BatchCount, QueryScopeSpan};
+        let records = parsed_records(b">q1\nMKVLA\n>q1\nMK\n>q2\nMKV\n>q1\nMKVLAMKVLA\n");
+        let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
+        let none = vec![false; records.len()];
+        let batches = |span: QueryScopeSpan, size: u32, skipped: &[bool]| {
+            let mut count = Some(BatchCount::new(span, "BLASTP"));
+            let mut batches = Vec::new();
+            let mut start = 0;
+            while start < records.len() {
+                let batch = BatchCount::next_batch(
+                    count.as_mut(),
+                    &|record| records[record].believed_shared(),
+                    &lengths,
+                    skipped,
+                    start,
+                    size,
+                );
+                batches.push(batch);
+                start = batch.0;
+            }
+            batches
+        };
+        // 5, then the second q1 by 5 (not 2): a batch of 10 letters ends there. The third q1
+        // counts the first's 5 in the run's scope (3 + 5, the input ends first), its own 10 after
+        // the scope was emptied (3 + 10).
+        assert_eq!(
+            batches(QueryScopeSpan::Run, 10, &none),
+            [(2, true), (4, false)]
+        );
+        assert_eq!(
+            batches(QueryScopeSpan::Batch, 10, &none),
+            [(2, true), (4, true)]
+        );
+        assert_eq!(
+            batches(QueryScopeSpan::Run, 11, &none),
+            [(3, true), (4, false)]
+        );
+        assert_eq!(batches(QueryScopeSpan::Run, 14, &none), [(4, true)]);
+        // The first q1 skipped: the second counts by its 5 letters all the same, and the skipped
+        // record adds nothing.
+        let skipped = [true, false, false, false];
+        assert_eq!(
+            batches(QueryScopeSpan::Run, 8, &skipped),
+            [(3, true), (4, false)]
+        );
+        // Without -parse_deflines each record counts its own letters.
+        let batch = BatchCount::next_batch(None, &|_| None, &lengths, &none, 0, 10);
+        assert_eq!(batch, (3, true));
     }
 
     #[test]
     fn a_refused_batch_gives_ncbis_set_up_error_or_the_refusal() {
         use super::{refused_batch_error, ScopeRefusal};
         let refusal = || -> anyhow::Error {
-            batch_refusal("BLASTP", &[b">q1\nMKV\n>q2\nMKV\n>q1\nMK\n"], true)
+            batch_refusal("BLASTP", &[b">q1\nMKV\n>q2\nMKV\n>q1\nMK\n"])
                 .unwrap()
                 .into()
         };
@@ -1681,7 +1868,7 @@ mod tests {
         let error = refused_batch_error(refusal(), false, |_| Some(anyhow::anyhow!("LOSAT's")));
         assert!(is_refusal(&error));
         // No record of the batch to set up: the refusal without a set-up.
-        let alone: anyhow::Error = batch_refusal("BLASTP", &[b">q1\nMKV\n", b">q1\nMKV\n"], false)
+        let alone: anyhow::Error = batch_refusal("BLASTP", &[b">q1\nMKV\n", b">q1\nMKV\n"])
             .unwrap()
             .into();
         assert!(is_refusal(&refused_batch_error(alone, false, |_| panic!(
@@ -1692,14 +1879,14 @@ mod tests {
     #[test]
     fn a_call_gets_the_refusal_of_its_batch_where_it_adds_the_batch() {
         use super::{QueryScopeSpan, QueryScopes, ScopeRefusal};
-        let refusal = batch_refusal("BLASTP", &[b">q1\nMKV\n", b">q1\nMKV\n"], true).unwrap();
+        let refusal = batch_refusal("BLASTP", &[b">q1\nMKV\n", b">q1\nMKV\n"]).unwrap();
         let records = parsed_records(b">q1\nMKV\n");
         let mut scopes =
             QueryScopes::new(QueryScopeSpan::Run, "BLASTP").with_refusal(Some(refusal));
-        let error = scopes.add_batch(&records, 0, true).unwrap_err();
+        let error = scopes.add_batch(&records, 0).unwrap_err();
         assert!(ScopeRefusal::of(&error).is_some());
         let mut scopes = QueryScopes::new(QueryScopeSpan::Run, "BLASTP").with_refusal(None);
-        scopes.add_batch(&records, 0, true).unwrap();
+        scopes.add_batch(&records, 0).unwrap();
     }
 
     // psiblast_app.cpp:468 and psiblast_aux_priv.cpp:636-649: a batch of one letter takes one

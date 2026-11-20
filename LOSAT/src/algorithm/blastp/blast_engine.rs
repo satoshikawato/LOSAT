@@ -7166,9 +7166,11 @@ fn refused_batch_stop(
 /// lengths `batch_lengths` (`refused_batch_stop`): NCBI's error where a context of theirs is valid
 /// and the set-up fails for the subjects, as `run_call` fails the first searched batch (a database
 /// without sequences, `Database memory map file error`; the average subject length against
-/// `-searchsp` or `OLD_FSC`); `None` where it passes, where no context is valid, and for a batch
-/// that NCBI splits into chunks (each chunk is set up apart, `search_split_query_batches`), which
-/// is refused.
+/// `-searchsp` or `OLD_FSC`), or where the search's first read of the database then fails (a
+/// sequence file that cannot be opened, `BlastpDatabase::sequence_file_read_error`: `Database
+/// memory map file error`; line WQA D10 round 6, review 4 M2); `None` where it passes, where no
+/// context is valid, and for a batch that NCBI splits into chunks (each chunk is set up apart,
+/// `search_split_query_batches`), which is refused.
 fn refused_batch_setup_error(
     args: &ResolvedBlastpArgs,
     database: Option<&database::BlastpDatabase>,
@@ -7204,13 +7206,24 @@ fn refused_batch_setup_error(
             .collect(),
     };
     let extent = call_setup::db_extent(args, database, &encoded).ok()?;
-    crate::stats::setup::setup_subject_length(
+    if crate::stats::setup::setup_subject_length(
         extent.total_db_len,
         extent.num_subjects,
         (!args.old_fsc).then_some((extent.cutoff_subject_length, false)),
     )
     .is_none()
-    .then(|| crate::blastinput::app::engine_error("The average subject length is too short"))
+    {
+        return Some(crate::blastinput::app::engine_error(
+            "The average subject length is too short",
+        ));
+    }
+    let read_error = database?.sequence_file_read_error("BLASTP")?;
+    Some(
+        match read_error.downcast::<database::PreliminaryReadError>() {
+            Ok(read_error) => crate::blastinput::app::engine_error(read_error.0),
+            Err(error) => error,
+        },
+    )
 }
 
 /// psiblast: LOSAT's refusal of a subject set (`-subject`) none of whose sequences has letters

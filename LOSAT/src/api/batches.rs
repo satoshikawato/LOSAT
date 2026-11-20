@@ -43,8 +43,9 @@ use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::query_batch::BatchCount;
 use crate::blastinput::query_batch::ScopeRefusal;
-use crate::blastinput::seq_range::{next_ranged_batch, record_interval, RecordInterval};
+use crate::blastinput::seq_range::{record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
@@ -208,6 +209,9 @@ pub struct Batches<'a> {
     skipped: Vec<bool>,
     /// Under `-parse_deflines` with `-subject`, NCBI's scope of the run's queries (`run_scopes`).
     run_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
+    /// Under `-parse_deflines`, NCBI's count of the query records into the batches
+    /// (`query_batch::BatchCount`, `batch_count`).
+    count: Option<BatchCount>,
     next_query: usize,
     /// Whether the end of the query records (`Inputs::query_end`: blank lines or a reader error)
     /// is still to come: in the batch that reads past the last record, or in a batch of its own
@@ -264,6 +268,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
             sizes: BatchSizes::Fixed(0),
             skipped: vec![false; lengths.len()],
             run_scopes: None,
+            count: None,
             lengths,
             next_query: 0,
             end_pending: false,
@@ -295,6 +300,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         })
         .collect::<Vec<bool>>();
     let run_scopes = run_scopes(search, inputs);
+    let count = batch_count(search, inputs);
     Ok(Batches {
         search,
         inputs,
@@ -302,6 +308,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         lengths,
         skipped,
         run_scopes,
+        count,
         next_query: 0,
         end_pending: inputs.pssm.is_none() && !inputs.end().is_input(),
         hsps_before: 0,
@@ -317,9 +324,9 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
 
 /// NCBI's scope of the run's queries under `-parse_deflines` with `-subject`
 /// (`query_batch::QueryScopes`, one scope for the run), while each batch's call holds its own
-/// records alone: each batch joins it before its call (`Batches::search_batch`), with the records
-/// that the program's scope takes (BLASTX's: those it searches; the others': every record read,
-/// those that `-query_loc` skips too). Where a record of the batch has the id of a query of an
+/// records alone: each batch joins it before its call (`Batches::search_batch`), with every record
+/// read, those that `-query_loc` skips too (BLASTX's too since line WQA D10 round 6,
+/// `blastx::input::scope_records`). Where a record of the batch has the id of a query of an
 /// earlier batch, the call gets LOSAT's refusal (`query_batch::ScopeRefusal`, the program's
 /// `scope_refusal` argument), which the program's add of the call's batch gives where the command
 /// line's add of that batch gives it: the batch stops in the one form of every program, after its
@@ -331,20 +338,37 @@ fn run_scopes(
     search: &Search,
     inputs: Inputs<'_>,
 ) -> Option<crate::blastinput::query_batch::QueryScopes> {
-    use crate::api::Program;
     use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
     if !search.parse_deflines() || inputs.database || inputs.pssm.is_some() {
         return None;
     }
-    let program = match search.program() {
+    Some(QueryScopes::new(QueryScopeSpan::Run, program_name(search)))
+}
+
+/// NCBI's count of the query records into the batches under `-parse_deflines`
+/// (`query_batch::BatchCount`), whose scope spans the run with `-subject` and a batch with a
+/// database (the batches' reports are tabular); `None` without the option or with a PSSM query
+/// (one batch).
+fn batch_count(search: &Search, inputs: Inputs<'_>) -> Option<BatchCount> {
+    use crate::blastinput::query_batch::QueryScopeSpan;
+    if !search.parse_deflines() || inputs.pssm.is_some() {
+        return None;
+    }
+    let span = QueryScopeSpan::of(!inputs.database, false);
+    Some(BatchCount::new(span, program_name(search)))
+}
+
+/// The program's name in NCBI's scopes of query records (`query_batch::QueryScopes`).
+fn program_name(search: &Search) -> &'static str {
+    use crate::api::Program;
+    match search.program() {
         Program::Blastn => "BLASTN",
         Program::Blastp => "BLASTP",
         Program::Blastx => "BLASTX",
         Program::Tblastn => "TBLASTN",
         Program::Tblastx => "TBLASTX",
         Program::Psiblast => "PSIBLAST",
-    };
-    Some(QueryScopes::new(QueryScopeSpan::Run, program))
+    }
 }
 
 impl Batches<'_> {
@@ -357,10 +381,17 @@ impl Batches<'_> {
     /// The records of the next batch, and whether the batch reached its size. A batch size of 0
     /// reads no record: the rest goes to the program, which fails as the command line fails (no
     /// batch follows either way).
-    fn next_range(&self) -> (Range<usize>, bool) {
+    fn next_range(&mut self) -> (Range<usize>, bool) {
         let start = self.next_query;
-        let (end, reached) =
-            next_ranged_batch(&self.lengths, &self.skipped, start, self.sizes.current());
+        let query = self.inputs.query;
+        let (end, reached) = BatchCount::next_batch(
+            self.count.as_mut(),
+            &|record| query.get(record)?.believed_shared(),
+            &self.lengths,
+            &self.skipped,
+            start,
+            self.sizes.current(),
+        );
         if end > start {
             (start..end, reached)
         } else {
@@ -388,15 +419,11 @@ impl Batches<'_> {
         let query_range = query_range_of(&command);
         // The batch joins the run's scope of the queries before its call (`run_scopes`).
         let scope_refusal = match self.run_scopes.as_mut().map(|scopes| {
-            let searched_only = matches!(self.search.program(), crate::api::Program::Blastx);
             scopes.add_batch_ids(
                 self.inputs.query[range.clone()]
                     .iter()
-                    .zip(&self.skipped[range.clone()])
-                    .filter(|&(_, &skipped)| !(searched_only && skipped))
-                    .map(|(record, _)| (record.believed(), record.seq().len())),
+                    .map(|record| (record.believed(), record.seq().len())),
                 range.start,
-                !reads_on,
             )
         }) {
             Some(Err(error)) => match ScopeRefusal::of(&error) {

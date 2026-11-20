@@ -18,9 +18,10 @@ use crate::blastinput::fasta_reader::{
     read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords,
     ReaderConfig,
 };
+use crate::blastinput::query_batch::{BatchCount, QueryScopeSpan};
 use crate::blastinput::seq_range::{
-    cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
-    QueryInput, RangeRole, SequenceRange,
+    cut_queries, cut_subjects, parse_optional_range, subjects_read, Placements, QueryInput,
+    RangeRole, SequenceRange,
 };
 
 // EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the seed stage of a subject as units
@@ -3526,8 +3527,16 @@ fn run_in_pool(
     // before it (`x_pipe_plan`), when the pipe may run (`x_pipe_wanted`); `None` keeps the loop's
     // own searches.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let x_plan = x_pipe_wanted(parallel_pool)
-        .then(|| x_pipe_plan(input, &reading, batch_size, query_records));
+    let x_plan = x_pipe_wanted(parallel_pool).then(|| {
+        x_pipe_plan(
+            input,
+            &reading,
+            batch_size,
+            query_records,
+            query_runs.input_records,
+            batch_count(&args, subjects, outputs),
+        )
+    });
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:193-195
     // ```c
     //                 results = lcl_blast.Run();
@@ -3696,6 +3705,21 @@ fn writes_debug_output() -> bool {
         || stage_dump::enabled()
 }
 
+/// NCBI's reader's count of the query records into the batches of a run (`BatchCount`), with
+/// the scope of `run_batch_loop`'s `QueryScopes` (`None` without `-parse_deflines`).
+fn batch_count(
+    args: &TblastxArgs,
+    subjects: &RunSubjects<'_>,
+    outputs: &ReportOutputs<'_>,
+) -> Option<BatchCount> {
+    let subject_records = matches!(subjects.shown, ShownSubjects::Fasta { .. });
+    let xml = crate::blastinput::query_batch::outfmts_have_xml(
+        outputs.formats.iter().map(|format| format.outfmt),
+    );
+    args.parse_deflines
+        .then(|| BatchCount::new(QueryScopeSpan::of(subject_records, xml), "TBLASTX"))
+}
+
 // EXPERIMENT (LOSAT_X_TBXPIPE): the batches `run_batch_loop` will search unless a search fails, in
 // its order: its batch boundaries and the checks of a batch that need no search (the reader's
 // error where the reading ends, a batch without a query, a batch whose queries all lack a codon
@@ -3708,6 +3732,8 @@ fn x_pipe_plan(
     reading: &QueryReading,
     batch_size: u32,
     query_records: &[FastaRecord],
+    input_records: &[FastaRecord],
+    mut count: Option<BatchCount>,
 ) -> Vec<std::ops::Range<usize>> {
     let mut plan = Vec::new();
     let reads_past_records = reading.reads_past_records();
@@ -3715,7 +3741,9 @@ fn x_pipe_plan(
     let mut reading_ended = false;
     let mut input_start = 0;
     while input_start < input.input_lengths.len() || (reads_past_records && !reading_ended) {
-        let (input_end, reached_size) = next_ranged_batch(
+        let (input_end, reached_size) = BatchCount::next_batch(
+            count.as_mut(),
+            &|record| input_records[record].believed_shared(),
             &input.input_lengths,
             &input.skipped,
             input_start,
@@ -3912,13 +3940,17 @@ fn run_batch_loop(
     // Whether what ended the reading after the records (`reading`) has come.
     let mut reading_ended = false;
     let mut input_start = 0;
+    // NCBI's reader's count of the records into the batches (`BatchCount`).
+    let mut count = BatchCount::of(query_scopes.as_ref());
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
     // run out before the batch reaches its size, and otherwise in a batch of its own.
     while input_start < input.input_lengths.len()
         || (reading.reads_past_records() && !reading_ended)
     {
-        let (input_end, reached_size) = next_ranged_batch(
+        let (input_end, reached_size) = BatchCount::next_batch(
+            count.as_mut(),
+            &|record| query_runs.input_records[record].believed_shared(),
             &input.input_lengths,
             &input.skipped,
             input_start,
@@ -4004,11 +4036,9 @@ fn run_batch_loop(
         // batch's request.)
         let mut scope_refusal = None;
         if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(refusal) = scopes.add_batch(
-                &query_runs.input_records[input_start..input_end],
-                start,
-                reached_size,
-            ) {
+            if let Err(refusal) =
+                scopes.add_batch(&query_runs.input_records[input_start..input_end], start)
+            {
                 scope_refusal = Some(refusal);
             }
         }

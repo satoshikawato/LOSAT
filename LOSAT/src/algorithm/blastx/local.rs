@@ -360,6 +360,7 @@ fn scan_xml_titles(
         "BLASTX",
     )
     .map(|scopes| scopes.with_refusal(scope_refusal.cloned()));
+    let count = crate::blastinput::query_batch::BatchCount::of(query_scopes.as_ref());
     // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
     // any report is written (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`): no title is
     // checked, and the queries are read for their scopes alone.
@@ -373,7 +374,6 @@ fn scan_xml_titles(
         &resolved[0],
         holds_back,
         xml_matrix.is_none(),
-        batch_size,
         query_scopes,
         &mut |deliver| {
             reader_batches(
@@ -384,7 +384,8 @@ fn scan_xml_titles(
                 batch_size,
                 keep_whole,
                 0,
-                false,
+                parse_deflines,
+                count.clone(),
                 deliver,
                 &mut |_| Ok(()),
             )
@@ -418,7 +419,9 @@ fn batch_shown<'a>(
 /// starts more than one letter past its end is not searched and adds nothing, so the last batch
 /// can hold none (NCBI's `Empty CBlastQueryVector`). Only the batch being read is kept. The
 /// skipped records are kept for the batch's scope (`FastaRecord::skipped`) with `keep_skipped`
-/// (`input::FastaStream::keep_skipped`). After the records comes `end`, as BLASTX's reader meets
+/// (`input::FastaStream::keep_skipped`). Under `-parse_deflines` (`count`) each record counts as
+/// NCBI's reader counts it (`query_batch::BatchCount`: a repeated id by its first record's
+/// letters). After the records comes `end`, as BLASTX's reader meets
 /// it after the last record it read (`input::read_fasta_stream_batches`): a reader error stops the
 /// reading in the batch being read, after the messages of its records and of the record the reader
 /// failed on, so that batch is never delivered (line WQA's D10, 2026-11-19); blank lines alone, an
@@ -432,6 +435,7 @@ fn reader_batches(
     keep_whole: bool,
     around: usize,
     keep_skipped: bool,
+    mut count: Option<crate::blastinput::query_batch::BatchCount>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
@@ -447,7 +451,13 @@ fn reader_batches(
         }
         let length = query.sequence.len();
         records_read += 1;
-        match query_range.map(|range| record_interval(&range, length)) {
+        let interval = query_range.map(|range| record_interval(&range, length));
+        let skipped_now = matches!(interval, Some(RecordInterval::PastEnd));
+        let counted = match count.as_mut() {
+            Some(count) => count.count(record.believed(), length, skipped_now),
+            None => length,
+        };
+        match interval {
             None => {}
             Some(RecordInterval::Letters { from, to }) => {
                 // The whole letters of a record whose letter before the interval is lower
@@ -459,18 +469,21 @@ fn reader_batches(
             Some(RecordInterval::Empty) => query.cut_in_place(length, length, keep_whole),
             Some(RecordInterval::PastEnd) => {
                 if keep_skipped {
-                    skipped.push(super::input::SkippedRecord::of(&query));
+                    skipped.push(super::input::SkippedRecord::of(&query, batch.len()));
                 }
                 continue;
             }
         }
-        letters += length;
+        letters += counted;
         batch.push(query);
         if letters >= batch_size {
             super::input::attach_skipped(&mut batch, &mut skipped);
             deliver(&batch)?;
             batch.clear();
             (letters, records_read) = (0, 0);
+            if let Some(count) = count.as_mut() {
+                count.end_batch();
+            }
         }
     }
     if let QueryEnd::Error(error) = end {
@@ -710,11 +723,13 @@ fn write_run(
         None => super::empty_rows::query_letters_around(search_options, subjects),
     };
     // The records that `-query_loc` skips, for NCBI's scope of a batch's prefetch, where a
-    // prefetch of the run can stop (as the command line's reader, `native`).
+    // prefetch of the run can stop, and under `-parse_deflines` for the scopes of the queries
+    // (as the command line's reader, `native`).
     let keep_skipped = query_range.is_some()
-        && database
-            .as_ref()
-            .is_some_and(|run| run.database.prefetch_can_stop());
+        && (parse_deflines
+            || database
+                .as_ref()
+                .is_some_and(|run| run.database.prefetch_can_stop()));
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<()> {
@@ -727,6 +742,12 @@ fn write_run(
             keep_whole,
             around,
             keep_skipped,
+            crate::blastinput::query_batch::BatchCount::of_search(
+                parse_deflines,
+                database.is_none(),
+                xml,
+                "BLASTX",
+            ),
             deliver,
             warn,
         )
@@ -1002,7 +1023,6 @@ fn write_run(
                 &scope_taken,
                 queries,
                 queries_before,
-                batch_size,
                 false,
                 search_options,
                 search_subjects,

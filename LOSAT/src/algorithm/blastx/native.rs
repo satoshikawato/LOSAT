@@ -683,6 +683,12 @@ fn run_inner(
         id_scope: id_scope.clone(),
         strand: crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand),
         data_loaders: settings.data_loaders,
+        batch_count: crate::blastinput::query_batch::BatchCount::of_search(
+            args.parse_deflines,
+            database.is_none(),
+            choice.number == 5,
+            program.upper,
+        ),
     };
     // The letters of a reader batch (below, where NCBI reads `BATCH_SIZE`, after the check of
     // an empty query), which the reads before the search take too.
@@ -810,8 +816,10 @@ fn run_inner(
     // the reader added it to its scope)
     // The records that `-query_loc` skips are kept for NCBI's scope of a batch's prefetch, which
     // only a stop of the prefetch asks (`BatchScopes::of_batch`): where a prefetch of the run can
-    // stop (review 5 of line DBID loadord, L2; the gate opens the database's lookup files once).
-    query_stream.keep_skipped = query_range.is_some()
+    // stop (review 5 of line DBID loadord, L2; the gate opens the database's lookup files once);
+    // and under `-parse_deflines` for the scopes of the queries (`add_batch_scope`,
+    // `QueryStreamSettings::stream`).
+    query_stream.keep_skipped |= query_range.is_some()
         && database
             .as_ref()
             .is_some_and(|database| database.prefetch_can_stop());
@@ -1207,7 +1215,6 @@ fn run_inner(
             &scope_taken,
             queries,
             queries_before,
-            batch_size,
             strategy.is_some(),
             &options,
             search_subjects,
@@ -1894,18 +1901,17 @@ pub(crate) type BatchRender<'r> = dyn FnMut(
 /// refusal of two queries of one scope with one id stops the run there, in the one form of every
 /// program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
 /// `-export_search_strategy` (`export`) no request of the batch is written; else NCBI's error of
-/// the set-up of the batch's records that NCBI's set-up surely reads with their own letters
+/// the set-up of the batch's records that NCBI's set-up reads with their own letters
 /// (`reader_batch::set_up_error`, as `search_error` makes the search's), or the refusal.
 /// RPSTBLASTN's set-up reads its database's files first: refused. (Round 4 added the batch after
-/// its search, and wrote its request.) The reader delivers a batch once it holds `batch_size`
-/// letters of whole records, or at the end of the input (`reached_size`).
+/// its search, and wrote its request.) The reader's batches are NCBI's (`input::emit_fasta_batch`
+/// counts as `query_batch::BatchCount`; line WQA D10 round 6, 2026-11-20).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn add_batch_scope(
     query_scopes: &std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScopes>>,
     taken: &std::cell::Cell<Option<usize>>,
     queries: &[FastaRecord],
     queries_before: usize,
-    batch_size: usize,
     export: bool,
     options: &super::args::ResolvedOptions,
     subjects: Subjects<'_>,
@@ -1914,13 +1920,14 @@ pub(super) fn add_batch_scope(
     if taken.replace(Some(queries_before)) == Some(queries_before) {
         return Ok(());
     }
+    // Every record read, those that the range skipped among them (`input::scope_records`).
+    let ordered = super::input::scope_records(queries);
     let Some(scopes) = query_scopes.borrow_mut().as_mut().map(|scopes| {
         scopes.add_batch_ids(
-            queries
+            ordered
                 .iter()
-                .map(|record| (record.believed(), record.placement().length)),
+                .map(|&(believed, length, _)| (believed, length)),
             queries_before,
-            reached_size(queries, batch_size),
         )
     }) else {
         return Ok(());
@@ -1930,26 +1937,15 @@ pub(super) fn add_batch_scope(
             if options.rpstblastn.is_some() {
                 return None;
             }
-            let records: Vec<FastaRecord> = queries
+            let records: Vec<FastaRecord> = ordered
                 .iter()
                 .zip(first)
-                .filter(|&(_, &first)| first)
-                .map(|(record, _)| record.clone())
+                .filter_map(|(&(_, _, place), &first)| place.filter(|_| first))
+                .map(|place| queries[place].clone())
                 .collect();
             super::reader_batch::set_up_error(&records, options, subjects).map(search_error)
         })
     })
-}
-
-/// Whether BLASTX's reader batch `queries` reached `batch_size` (`input::emit_fasta_batch`,
-/// `local::reader_batches`): the whole letters of its records, those that a range skips adding
-/// none, as NCBI's `size_read`; a batch that did not ends with the input.
-pub(super) fn reached_size(queries: &[FastaRecord], batch_size: usize) -> bool {
-    queries
-        .iter()
-        .map(|record| record.placement().length)
-        .sum::<usize>()
-        >= batch_size
 }
 
 /// The query batches of a run: each reader batch from `read` is searched with `options` against

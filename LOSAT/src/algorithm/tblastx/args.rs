@@ -153,6 +153,25 @@ pub struct TblastxArgs {
     pub query_gencode: u8,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]
     pub db_gencode: u8,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:74-75
+    // ```c++
+    //     arg.Reset(new CLargestIntronSizeArgs);
+    //     m_Args.push_back(arg);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:937-944
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgMaxIntronLength, "length",
+    //                     "Length of the largest intron allowed in a translated "
+    //                     "nucleotide sequence when linking multiple distinct "
+    //                     "alignments",
+    //                     CArgDescriptions::eInteger,
+    //                     NStr::IntToString(kDfltArgMaxIntronLength));
+    //     arg_desc.SetConstraint(kArgMaxIntronLength,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
+    // ```
+    // A value other than 0 is NCBI's options error (`check_ncbi_options`); 0 changes nothing.
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]")]
+    pub max_intron_length: Option<i32>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927
     // ```c
     //     m_NumDescriptions = m_DfltNumDescriptions;

@@ -219,3 +219,54 @@ fn test_query_and_subject_paths() {
     assert_eq!(args.query, PathBuf::from("query.fasta"));
     assert_eq!(args.subject, Some(PathBuf::from("subject.fasta")));
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:937-944
+// ```c++
+//     arg_desc.AddDefaultKey(kArgMaxIntronLength, "length",
+// ...
+//                     CArgDescriptions::eInteger,
+//                     NStr::IntToString(kDfltArgMaxIntronLength));
+//     arg_desc.SetConstraint(kArgMaxIntronLength,
+//                            new CArgAllowValuesGreaterThanOrEqual(0));
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1525-1534 (quoted at
+// `check_ncbi_options`)
+// `-max_intron_length` is an integer of 0 or more (NCBI's argument errors for the others are the
+// parser's); 0 runs as without it, any other value is NCBI's options error for TBLASTX.
+#[test]
+fn test_max_intron_length() {
+    let parse = |extra: &[&str]| {
+        let mut argv = vec![
+            "losat", "tblastx", "-query", "q.fa", "-subject", "s.fa", "-outfmt", "6",
+        ];
+        argv.extend_from_slice(extra);
+        crate::cli::try_parse_from(argv).map(|cli: crate::cli::Cli| match cli.command {
+            crate::cli::Commands::Tblastx(args) => args,
+            _ => panic!("wrong program"),
+        })
+    };
+    let check = |args: &TblastxArgs| crate::algorithm::tblastx::blast_engine::check_options(args);
+    let omitted = parse(&[]).unwrap();
+    assert_eq!(omitted.max_intron_length, None);
+    assert!(check(&omitted).is_ok());
+    let zero = parse(&["-max_intron_length", "0"]).unwrap();
+    assert_eq!(zero.max_intron_length, Some(0));
+    assert!(check(&zero).is_ok());
+    let uneven = crate::blastinput::app::options_error(
+        "Uneven gap linking of HSPs is allowed for blastx, tblastn, and psitblastn only",
+    )
+    .to_string();
+    for value in ["1", "4", "100", "2147483647"] {
+        let args = parse(&["-max_intron_length", value]).unwrap();
+        assert_eq!(check(&args).unwrap_err().to_string(), uneven, "{value}");
+    }
+    // The e-value's check comes first (blast_options.c:1518-1523).
+    let both = parse(&["-max_intron_length", "100", "-evalue", "0"]).unwrap();
+    assert!(check(&both)
+        .unwrap_err()
+        .to_string()
+        .contains("expect value or cutoff score must be greater than zero"));
+    for value in ["-1", "1.5", "abc", "2147483648", ""] {
+        assert!(parse(&["-max_intron_length", value]).is_err(), "{value}");
+    }
+}

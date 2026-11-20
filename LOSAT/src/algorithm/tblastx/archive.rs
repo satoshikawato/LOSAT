@@ -92,6 +92,13 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     inputs.culling_limit = args.culling_limit;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:957
+    // ```c++
+    //     opt.SetLongestIntronLength(args[kArgMaxIntronLength].AsInteger());
+    // ```
+    // The argument has a default, so the list always holds it; a value other than 0 stops the run
+    // before any archive (`check_ncbi_options`).
+    inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)

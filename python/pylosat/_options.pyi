@@ -451,6 +451,9 @@ class TblastxOptions(TypedDict, total=False):
     num_threads: int
     query_gencode: int
     db_gencode: int
+    max_intron_length: int
+    """Length of the largest intron allowed in a translated nucleotide sequence when linking
+    multiple distinct alignments [default: 0]"""
     max_target_seqs: int
     """Maximum number of aligned sequences to keep (default: 500)"""
     num_descriptions: int

@@ -1530,6 +1530,27 @@ fn check_ncbi_options(
             "expect value or cutoff score must be greater than zero",
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1525-1534 (after the
+    // e-value's check, before the culling limit's)
+    // ```c
+    //    if (options->longest_intron != 0 &&
+    //        program_number != eBlastTypeTblastn &&
+    //        program_number != eBlastTypePsiTblastn &&
+    //        program_number != eBlastTypeBlastx &&
+    //        program_number != eBlastTypeMapping) {
+    //                 Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //          "Uneven gap linking of HSPs is allowed for blastx, "
+    //          "tblastn, and psitblastn only");
+    //                 return BLASTERR_OPTION_PROGRAM_INVALID;
+    //    }
+    // ```
+    // `-max_intron_length` (blast_args.cpp:949-958 sets it, 0 when omitted); the culling limit is
+    // at least 0 (`nonnegative_ncbi_integer`).
+    if args.max_intron_length.unwrap_or(0) != 0 {
+        return Err(options_error(
+            "Uneven gap linking of HSPs is allowed for blastx, tblastn, and psitblastn only",
+        ));
+    }
     Ok((query_range, counts))
 }
 

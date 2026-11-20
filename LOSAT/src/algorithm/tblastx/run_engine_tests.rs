@@ -47,6 +47,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         out: Some(out.clone()),
         query_gencode: 4,
         db_gencode: 4,
+        max_intron_length: None,
         max_target_seqs: None,
         num_descriptions: None,
         num_alignments: None,

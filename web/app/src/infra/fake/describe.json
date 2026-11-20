@@ -2241,6 +2241,11 @@
     "default": "1"
    },
    {
+    "flag": "-max_intron_length",
+    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]",
+    "takes_value": true
+   },
+   {
     "flag": "-max_target_seqs",
     "help": "Maximum number of aligned sequences to keep (default: 500)",
     "takes_value": true

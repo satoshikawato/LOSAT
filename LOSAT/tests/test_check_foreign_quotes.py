@@ -23,8 +23,9 @@ sys.modules[SPEC.name] = checker
 SPEC.loader.exec_module(checker)
 
 
-def findings(text: str) -> list[tuple[str, int, str]]:
-    return [(f.kind, f.line, f.source) for f in checker.check_text("x.rs", text.splitlines())]
+def findings(text: str, style: str = "slash") -> list[tuple[str, int, str]]:
+    lines = text.splitlines()
+    return [(f.kind, f.line, f.source) for f in checker.check_text("x", lines, style)]
 
 
 NCBI_QUOTE = """\
@@ -120,6 +121,59 @@ class CheckTextTest(unittest.TestCase):
         text = "// NCBI's `CArg_Double` reads glibc's hexadecimal numbers and a final `e`\n"
         self.assertEqual(findings(text), [])
 
+    def test_an_ncbi_label_by_path_of_another_project_fails(self) -> None:
+        text = (
+            "// NCBI c++/src/algo/blast/core/boost_erf.c:252-255:\n"
+            "// double ErfC(double z) { return ErfImpl(z, TRUE); }\n"
+        )
+        self.assertEqual(findings(text), [("LABEL", 1, "Boost"), ("QUOTE", 2, "Boost")])
+        bare = "    // NCBI boost_erf.c:71-110:\n    // else result = z * (Y + p / q);\n"
+        self.assertEqual(findings(bare), [("LABEL", 1, "Boost"), ("QUOTE", 2, "Boost")])
+
+    def test_a_code_line_under_another_projects_citation_is_a_quote(self) -> None:
+        text = "// glibc 2.39: libio/fileops.c:1310-1312\n// return EOF;\n// }\nfn f() {}\n"
+        self.assertEqual(findings(text), [("QUOTE", 2, "glibc"), ("QUOTE", 3, "glibc")])
+
+    def test_a_code_line_after_a_mention_of_another_project_is_not_a_quote(self) -> None:
+        diff = "+// glibc's qsort is a stable merge sort, as slice::sort_by is\n+    v.sort_by(cmp);\n"
+        self.assertEqual(findings(diff, "text"), [])
+
+    def test_prose_and_ncbis_code_lines_are_not_quotes(self) -> None:
+        prose = (
+            "// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:395,3969\n"
+            "// \"uncommitted\" (no put area) until the first output;\n"
+        )
+        self.assertEqual(findings(prose), [])
+        ncbi = (
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379\n"
+            "// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*), cmp);\n"
+        )
+        self.assertEqual(findings(ncbi), [])
+
+    def test_python_docstrings_and_hash_comments_are_read(self) -> None:
+        docstring = (
+            '"""Check the contract.\n\n'
+            "NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143\n"
+            "```c\n    x *= y;\n```\n"
+            '"""\n\nimport sys\n'
+        )
+        self.assertEqual(
+            findings(docstring, "python"), [("LABEL", 3, "Boost"), ("QUOTE", 4, "Boost")]
+        )
+        toml = "# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395\n# ```c\n# x\n# ```\n"
+        self.assertEqual(findings(toml, "hash"), [("LABEL", 1, "LMDB"), ("QUOTE", 2, "LMDB")])
+        self.assertEqual(findings("#!/bin/sh\n# ```\n# glibc 2.39: libio/a.c:1\n", "hash"), [])
+
+    def test_markdown_reads_only_the_paragraph_above_a_fence(self) -> None:
+        text = (
+            "The glibc 2.39 reference: libio/fileops.c:1310-1312.\n\n"
+            "Run it:\n\n```\nlosat blastn -query q.fa\n```\n\n"
+            "glibc 2.39: libio/fileops.c:1310-1312\n```c\nreturn EOF;\n```\n"
+        )
+        self.assertEqual(findings(text, "text"), [("QUOTE", 10, "glibc")])
+        long_paragraph = "glibc 2.39: libio/fileops.c:1\n" + "ACGT" * 50 + "\n" * 1 + "x\n" * 5000
+        self.assertEqual(findings(long_paragraph, "text"), [])
+
 
 class MainTest(unittest.TestCase):
     def run_main(self, files: dict[str, str]) -> tuple[int, str]:
@@ -145,6 +199,17 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("QUOTE\tLOSAT/src/b.rs:2\tSQLite", out)
         self.assertIn("findings=1", out)
+
+    def test_other_source_files_and_markdown_are_read(self) -> None:
+        bad = "# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395\n# ```c\n# x\n# ```\n"
+        code, out = self.run_main(
+            {"LOSAT/Cargo.toml": bad, "ci.yml": bad, "README.md": bad.replace("# ", "")}
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("QUOTE\tLOSAT/Cargo.toml:2\tLMDB", out)
+        self.assertIn("QUOTE\tci.yml:2\tLMDB", out)
+        self.assertIn("QUOTE\tREADME.md:2\tLMDB", out)
+        self.assertIn("findings=6", out)
 
     def test_build_output_is_skipped(self) -> None:
         bad = "// UCRT reference (10.0.26100.0): ucrt/time/tzset.cpp:1-2\n// ```c++\n// x\n// ```\n"

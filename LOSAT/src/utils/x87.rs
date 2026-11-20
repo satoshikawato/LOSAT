@@ -1,7 +1,7 @@
 //! The x87 80-bit extended-precision (`long double`) operations that NCBI's x86-64 build
 //! evaluates, in integer arithmetic: those of the serial real-number digit generator
-//! (`report::serial::real`) and of the line `result *= expl(-z * z) / z;` of ErfC
-//! (`stats::spouge`).
+//! (`report::serial::real`) and of ErfC's long-double product with `expl` (`stats::spouge`;
+//! Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2479-2481
 //! ```c++

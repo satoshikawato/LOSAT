@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.21
+- Version: 1.22 (2026-11-20, Owner: the text of exception 11 is approved)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -37,7 +37,12 @@
   NCBI's XML without the arguments that LOSAT refuses by name, exception 1; line RG item E2x,
   the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
-  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction)
+  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction); 1.22 2026-11-20 (exception
+  11, BLASTN's progress bar on a terminal, recorded for the v0.2.0 release on the Owner's choice of
+  2026-11-20; the Owner approved its text the same day, with no words: at 14:24 JST the Owner
+  pressed "Ready for review" on pull request #1355, which its description named as the Owner's
+  decision on the text; the bar is cleared at the end of each batch's search since this version,
+  Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -51,7 +56,8 @@ BLASTX, since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report
 place of a search result, since version 1.13 `losat blastdbcmd` and `losat dustmasker`, and
 since version 1.16 `losat segmasker` and since version 1.18 `losat convert2blastmask`, whose
 outputs do) that is not part of a search result: argument parsing, help text, thread
-warnings, output-write failures and memory exhaustion. Search results, their outfmt
+warnings, output-write failures, memory exhaustion and, since version 1.22, BLASTN's progress
+bar on a terminal. Search results, their outfmt
 0/6/7 bytes, warnings and errors raised after argument parsing, and exit codes of
 those errors remain under the root [`AGENTS.md`](../../AGENTS.md) bit-perfect rule.
 
@@ -76,7 +82,7 @@ BLAST+.
    `'num_threads' is currently ignored when 'subject' is specified.`, and above the CPU
    count `Number of threads was reduced to N to match the number of available CPUs`
    (`blast_args.cpp:3203-3236`). LOSAT prints neither warning. Every other byte of stdout
-   and stderr must equal NCBI's.
+   and stderr must equal NCBI's (BLASTN's progress bar on a terminal: exception 11).
 3. **Write failure in tabular output.** When writing outfmt 6 or 7 fails (for example
    `-out /dev/full` or a closed pipe), NCBI aborts; LOSAT reports the write error and
    exits with a non-zero code. For outfmt 0 LOSAT must follow NCBI
@@ -225,6 +231,40 @@ BLAST+.
    `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
    blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s or `losat convert2blastmask`'s output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).
+11. **BLASTN's progress bar on a terminal** (version 1.22, 2026-11-20, recorded for the v0.2.0
+   release on the Owner's choice of 2026-11-20; the Owner approved this text the same day, with no
+   words: at 14:24 JST the Owner pressed "Ready for review" on pull request #1355, which its
+   description named as the Owner's decision on the text). `losat blastn` on the command line draws
+   a progress bar on its standard error while it searches a query batch with `-num_threads` 2 or
+   more against two subjects or more (the records of `-subject`, or the sequences of `-db`); the
+   serial WASI command runs on one thread and draws none. The bar is one line, redrawn in place: a
+   spinner, the elapsed time, a bar of 40 columns and the number of subjects traced over the number
+   of subjects (`19/33`). When the traceback of the batch ends, or fails, the bar is cleared before
+   anything else is written (the batch's report, or an error): its line is blanked and the cursor
+   goes back to the start of that line, so nothing of the bar stays on the terminal and what
+   follows appears where it would appear without the bar. NCBI's blastn writes nothing to its
+   standard error while it searches its query batches (`blastn_app.cpp:277-279`). The bar is drawn
+   only when the standard error is a terminal (a pseudo-terminal too, such as the one of `script`)
+   and, outside Windows, `TERM` is set and is not `dumb` (the check of the `indicatif` crate:
+   `console::Term::is_term` and `console::is_dumb`); a standard error sent to a file or a pipe
+   receives no byte of it. A failed write of the bar is ignored. The bytes of the standard output,
+   the `-out` file and the exit status are the same with and without the bar. The library API (and
+   pylosat), the Web engine and the other programs draw no bar: only the command line's
+   `blastn::run` sets `BlastnArgs::progress_bar` (`LOSAT/src/algorithm/blastn/args.rs:798`,
+   `blast_engine/run.rs:8018`); the library and the Web engine search through `run_local` and
+   `run_local_database`, which leave it off, and ABI v1 sets it off (`LOSAT/src/web_api.rs:364`).
+   The bar is made by `batch_progress_bar` (`blast_engine/subject_env.rs:49-57`: the standard error
+   as its target, `ProgressFinish::AndClear` as its end, which also clears a bar dropped
+   unfinished), moves on by one for each subject traced
+   (`blast_engine/traceback_subject.rs:292-294` and `418-420`) and is finished at
+   `blast_engine/run.rs:13533-13535`. Tests: `the_end_of_a_batch_clears_the_bar` and
+   `a_search_that_stops_with_an_error_clears_the_bar` (`blast_engine/subject_env.rs`) draw the bar
+   on a terminal kept in memory and check that nothing of it stays; no test runs it on a real
+   terminal. Up to version 1.21 (LOSAT v0.1.0 and dev before this version) the finished bar stayed
+   on the terminal, one line per query batch. Release-notes sentence: On a terminal, `losat blastn`
+   with `-num_threads` 2 or more and two subjects or more shows a progress bar on the standard
+   error while it searches, where NCBI BLAST+ 2.17.0 shows none; the bar is cleared when the search
+   of each query batch ends, and a standard error sent to a file or a pipe gets none of it.
 
 ## Decided handling that is not an exception
 

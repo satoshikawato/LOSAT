@@ -45,7 +45,14 @@ pub(super) struct KappaHspPayload {
     // Report-time counts use sequence strings, after the core HSP counts above.
     pub report_num_ident: usize,
     pub report_num_positives: usize,
-    pub report_mismatches: usize,
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:543-547
+    // ```c++
+    //     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
+    // ```
+    // The columns less the identities and the gap letters: fewer than none where a PSSM query's
+    // gap residue faces a gap, a column that is an identity and a gap
+    // (`stage_e_report::recount_shown_counts`).
+    pub report_mismatches: i64,
     pub align_length: usize,
     pub mismatches: usize,
     pub gap_opens: usize,

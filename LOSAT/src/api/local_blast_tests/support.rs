@@ -233,7 +233,7 @@ pub(super) fn field(row: &[u8], index: usize) -> String {
     row.split('\t').nth(index).expect("field").to_string()
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 //     // Add tab in front of field, except for the first field.
@@ -243,7 +243,7 @@ pub(super) fn field(row: &[u8], index: usize) -> String {
 // }
 // m_Ostream << "\n";
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 // ```c++
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```
@@ -400,7 +400,7 @@ pub(super) fn assert_observer_ranges(run: &Run, [fmt0, fmt6, fmt7]: [usize; 3], 
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 // ```c++
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```

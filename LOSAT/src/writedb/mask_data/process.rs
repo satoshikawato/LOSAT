@@ -381,7 +381,7 @@ fn options_error(message: &str) -> MaskDataError {
 //     }
 // }
 // ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp (include/corelib/ncbifile.hpp:4039-4042)
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp (c++/include/corelib/ncbifile.hpp:4039-4042)
 // ```c++
 // inline
 // bool CFile::Exists(void) const

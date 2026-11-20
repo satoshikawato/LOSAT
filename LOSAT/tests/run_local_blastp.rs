@@ -95,12 +95,12 @@ impl Drop for Inputs {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:225-226
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-226
 // ```c
 // CBlastFormat formatter(opt, *db_adapter,
 //                        fmt_args->GetFormattedOutputChoice(),
 // ```
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
@@ -228,7 +228,7 @@ fn cli_run(
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
 // ```c
 //         } catch (const CException& e) {
 //             ...
@@ -238,7 +238,7 @@ fn cli_run(
 //             s_InvalidateQueryContexts(qinfo, index);
 //         }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
 // ```c
 //         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
 //         		seqblk_vec->push_back(subj);
@@ -291,7 +291,7 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:729-732
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
 // ```c
 //    if (db_length == 0 &&
 //        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
@@ -483,7 +483,7 @@ fn an_unsearched_first_batch_is_reported_before_the_next_batchs_engine_error() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
 // ```c
 //     // Validate that at least one query context is valid
 //     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
@@ -559,7 +559,7 @@ fn a_batch_of_queries_without_residues_stops() {
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:146-152
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
 // ```c
 //         try { q.Reset(m_Source->GetNextSequence(scope)); }
 //         catch (const CObjReaderParseException& e) {

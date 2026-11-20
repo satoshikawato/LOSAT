@@ -25,13 +25,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage report off)
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
 # ```c
 # const char* kDfltArgTabularOutputFmt =
 #     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
 #     "evalue bitscore";
 # ```
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 # ```c
 # ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 #     if (iter != m_FieldsToShow.begin())
@@ -80,7 +80,7 @@ class HspRow:
     def value_key(self) -> tuple[str, int, int, int, str, str]:
         return (self.pident, self.length, self.mismatch, self.gapopen, self.evalue, self.bitscore)
 
-    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
     # ```c
     # ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
     #     if (iter != m_FieldsToShow.begin())
@@ -161,7 +161,7 @@ def parse_outfmt(path: Path) -> list[HspRow]:
     return rows
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
 # ```c
 # m_Ostream << "\n";
 # // The tabular writer emits the selected fields and delimiters directly to
@@ -209,7 +209,7 @@ def rows_by_coord(rows: Iterable[HspRow]) -> dict[tuple[str, str, int, int, int,
     return by_key
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:811-832
+# NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-832
 # ```c
 # if (results.HasAlignments()) {
 #     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
@@ -228,7 +228,7 @@ def duplicate_coord_rows(rows: Iterable[HspRow]) -> dict[tuple[str, str, int, in
     return {key: count for key, count in counts.items() if count > 1}
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:828-832
+# NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832
 # ```c
 # ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
 #     const CSeq_align& s = **itr;
@@ -306,7 +306,7 @@ def total_alignment_length(rows: Iterable[HspRow]) -> int:
     return sum(row.length for row in rows)
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 # ```c
 # ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 #     if (iter != m_FieldsToShow.begin())
@@ -488,14 +488,14 @@ def require_manifest_condition(row: dict[str, str], condition: bool, message: st
         raise ValueError(f"{row['case_id']}: {message}")
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:365-368
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:365-368
 # ```c
 # arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
 #                 "Apply filtering locations as soft masks",
 #                 CArgDescriptions::eBoolean,
 #                 kDfltArgLookupTableMaskingOnlyNucl);
 # ```
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:475-480,505-511
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:475-480,505-511
 # ```c
 # arg_desc.AddOptionalKey(kArgWindowSize, "int_value",
 #                         "Multiple hits window size, use 0 to specify 1-hit algorithm",
@@ -540,7 +540,7 @@ def validate_manifest_row(row: dict[str, str]) -> None:
     require_manifest_condition(row, row["outfmt"] in {"6", "7"}, "only outfmt 6/7 are parseable")
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107,157-168,208
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107,157-168,208
 # ```c
 # const string kArgQuery("query");
 # const string kArgOutput("out");
@@ -558,7 +558,7 @@ def validate_manifest_row(row: dict[str, str]) -> None:
 # const string kArgLookupTableMaskingOnly("soft_masking");
 # const string kArgMaxHSPsPerSubject("max_hsps");
 # ```
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:317-319,2960-2968
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-319,2960-2968
 # ```c
 # if (args.Exist(kArgMaxHSPsPerSubject) && args[kArgMaxHSPsPerSubject]) {
 #     opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());
@@ -620,7 +620,7 @@ def build_losat_command(
     return command
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107,157-168,208
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107,157-168,208
 # ```c
 # const string kArgQuery("query");
 # const string kArgOutput("out");
@@ -686,7 +686,7 @@ def refresh_losat_output(root: Path, row: dict[str, str], losat_bin: Path, print
     subprocess.run(cmd, cwd=root, check=True)
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782,828-832
+# NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-782,828-832
 # ```c
 # if (m_FormatType == CFormattingArgs::eTabular ||
 #     m_FormatType == CFormattingArgs::eTabularWithComments) {
@@ -715,7 +715,7 @@ def prepare_paired_output_dir(root: Path, requested: Path | None) -> Path:
     return output_dir
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782,828-832
+# NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-782,828-832
 # ```c
 # if (m_FormatType == CFormattingArgs::eTabular ||
 #     m_FormatType == CFormattingArgs::eTabularWithComments) {
@@ -834,7 +834,7 @@ def main() -> int:
         action="store_true",
         help="Regenerate selected LOSAT output paths from the manifest before comparison.",
     )
-    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-51
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-51
     # ```c
     # const string kArgQuery("query");
     # const string kArgOutput("out");
@@ -962,7 +962,7 @@ def main() -> int:
         write_targets(args.write_targets, results)
         print(f"wrote trace targets: {args.write_targets}")
 
-    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
     # ```c
     # ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
     #     x_PrintField(*iter);

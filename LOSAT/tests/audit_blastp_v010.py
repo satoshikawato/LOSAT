@@ -122,14 +122,14 @@ def load_manifest(path: Path, repo_root: Path) -> list[Case]:
     return cases
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kArgQuery("query");
 # const string kArgSubject("subject");
 # const string kArgNumThreads("num_threads");
 # const string kArgMaxTargetSequences("max_target_seqs");
 # ```
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:190-210
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:190-210
 # ```c
 # const string kArgMaxHSPsPerSubject("max_hsps");
 # ```
@@ -176,7 +176,7 @@ def run_command(command: list[str], log_path: Path) -> CommandResult:
     return CommandResult(completed.returncode, completed.stdout, completed.stderr)
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-45
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:39-45
 # ```c++
 # const char* kDfltArgTabularOutputFmt =
 #     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "

@@ -247,7 +247,7 @@ pub enum Commands {
     /// Pairwise 6-frame translated nucleotide alignment (tblastx)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastx(tblastx::TblastxArgs),
-    // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
     // static const string kProgram("tblastn"); SetTask("tblastn");
     /// Protein query vs translated nucleotide subject (tblastn)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
@@ -301,7 +301,7 @@ pub enum Commands {
     Rpsbproc(crate::rpsbproc::RpsbprocArgs),
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,203-207,332-349
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-170,203-207,332-349
 // ```c++
 // arg_desc.AddOptionalKey(kArgWordSize, "int_value", description, CArgDescriptions::eInteger);
 // arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value", ...);
@@ -621,7 +621,7 @@ where
                     )
                 })?,
             };
-            // NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270
             // ```c++
             // inline CArg_String::CArg_String(const string& name, const string& value)
             //     : CArgValue(name)
@@ -723,7 +723,7 @@ fn is_ncbi_search_program(scope: &clap::Command) -> bool {
 
 /// The explicit rejection of an option's value that is not UTF-8 (`try_parse_from`).
 ///
-/// NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270
 /// ```c++
 /// inline CArg_String::CArg_String(const string& name, const string& value)
 ///     : CArgValue(name)
@@ -741,7 +741,7 @@ fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
     )
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
 // ```c++
 // const string kArgWordSize("word_size");
 // const string kArgCompBasedStats("comp_based_stats");
@@ -1048,7 +1048,7 @@ fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
             format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's {shown}"),
         ))
     };
-    // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
     // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
     // The named NCBI options below have no Stage B Rust behavior.
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
@@ -1721,7 +1721,7 @@ impl NativeError {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
 // ```c
 // {
 //     m_Outfile.exceptions(NcbiBadbit);
@@ -2189,7 +2189,7 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
     .into()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
 // ```c
 // else {
 //     m_OutputStream = &args[kArgOutput].AsOutputFile();
@@ -2641,7 +2641,7 @@ mod tests {
         assert!(!posted(text));
     }
 
-    // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
     // rejects a value that is not UTF-8 explicitly, in both spellings of an option.
     #[test]
     fn option_values_that_are_not_utf8_are_rejected_explicitly() {

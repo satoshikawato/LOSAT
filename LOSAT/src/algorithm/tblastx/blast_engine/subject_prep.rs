@@ -7,7 +7,7 @@
 //! of `BLAST_PreliminarySearchEngine` skips a subject shorter than `s_GetMinimumSubjSeqLen`,
 //! :1318-1330) and :772-775 (`s_BlastSearchEngineCore` translates the subject with
 //! `BLAST_GetAllTranslations`, c++/src/algo/blast/core/blast_util.c:1045). The unit path has no
-//! NCBI counterpart: it returns the HSP list of NCBI's frame loop, blast_engine.c:805-855
+//! NCBI counterpart: it returns the HSP list of NCBI's frame loop, c++/src/algo/blast/core/blast_engine.c:805-855
 //! (tblastx/x_pair_par.rs).
 //!
 //! This module is a child of `run_impl` for the modules it keeps private (`x_pair_par`,
@@ -54,7 +54,7 @@ pub(super) fn subject_frames(
     wordsize: i32,
 ) -> Result<Option<SubjectFrames>> {
     // NCBI reference (translate all frames for subject sequences):
-    // ncbi-blast/c++/src/algo/blast/core/blast_util.c:1296-1308
+    // c++/src/algo/blast/core/blast_util.c:1296-1308
     // ```c
     // for (context = 0; context < num_frames; ++context) {
     //    int frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
@@ -74,7 +74,7 @@ pub(super) fn subject_frames(
     // `-db`: the block of a short sequence with ambiguous bases, kept for the frames of its
     // letters (`Subjects::x_letter_frames`).
     let x_kept;
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
     // return word_length * 3 + 2;
     // if (subject->length < min_subj_seq_length) { ... continue; }
     // Statistics include all records, including ones too short to search: such a subject

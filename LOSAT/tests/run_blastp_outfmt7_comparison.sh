@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kArgQuery("query");
 # const string kArgOutput("out");
@@ -11,7 +11,7 @@ set -euo pipefail
 # const string kArgMaxTargetSequences("max_target_seqs");
 # ```
 #
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:37
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:37
 # ```c
 # const int kDfltArgOutputFormat = 0;
 # ```
@@ -21,7 +21,7 @@ REF_DIR="./blast_out/blastp_outfmt7"
 FASTA_DIR="./fasta"
 source ./blastp_parity_options.sh
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kArgOutput("out");
 # ```

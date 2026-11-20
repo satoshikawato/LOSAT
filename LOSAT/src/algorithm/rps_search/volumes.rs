@@ -22,7 +22,7 @@ use crate::seqdb::{DbStatistics, SeqDb, Volume};
 
 /// LOSAT's refusal of a profile database whose total length (`BlastSeqSrcGetTotLen`, NCBI's `Int8`)
 /// is 0 or negative: an alias file's `LENGTH 0` or a `LENGTH` of 2^63 or more (no list reaches it:
-/// NCBI's RPS programs take no list option, blast_args.cpp:2241-2251, and the alias keys of lists
+/// NCBI's RPS programs take no list option, c++/src/algo/blast/blastinput/blast_args.cpp:2241-2251, and the alias keys of lists
 /// are refused before). NCBI's RPS search has no loop over subjects (blast_engine.c:1384-1393) and
 /// opens each volume alone, whose statistics then read the volume's own length and count (probe of
 /// D1a-3 fix 6: a footer's "Effective search space used" and the next request's

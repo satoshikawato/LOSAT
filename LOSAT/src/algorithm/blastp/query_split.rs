@@ -16,7 +16,7 @@ pub(crate) struct BlastpChunkPart {
     pub query_length: usize,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:476-534
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:476-534
 // ```c
 //        for (j = 0; j < contexts_per_query; j++) {
 //            Int4 local_context = i * contexts_per_query + j;
@@ -114,7 +114,7 @@ pub(crate) fn rebase_hit_list<H: HitListHsp>(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2132-2217
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2132-2217
 // ```c
 //     if (hitlist1 == NULL)
 //         return 0;
@@ -217,7 +217,7 @@ fn hit_list_merge(
     *combined = Some(new_hitlist);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2921-3029
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2921-3029
 // ```c
 //       for (index1 = 0; index1 < combined_hsp_list->hspcnt; index1++) {
 //          hsp1 = combined_hsp_list->hsp_array[index1];
@@ -298,7 +298,7 @@ fn query_hsp_lists_merge(
                 if hsp1.query_context != hsp2.query_context {
                     continue;
                 }
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1463-1478
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1463-1478
                 // ```c
                 // s_HSPStartDiag(const BlastHSP *hsp)
                 // {
@@ -312,7 +312,7 @@ fn query_hsp_lists_merge(
                 // ```
                 let end_diag = hsp1.q_end as i64 - hsp1.s_end as i64;
                 let start_diag = (hsp2.q_start as i64 - 1) - (hsp2.s_start as i64 - 1);
-                // NCBI blast_hits.c:1537: #define OVERLAP_DIAG_CLOSE 10
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537: #define OVERLAP_DIAG_CLOSE 10
                 if (end_diag - start_diag).abs() < 10 && merge_two_hsps(hsp1, hsp2) {
                     *slot = None;
                 }
@@ -324,7 +324,7 @@ fn query_hsp_lists_merge(
     sort_by_score(combined);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1488-1530
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1530
 // ```c
 //    /* do not merge off-diagonal hsps for ungapped search */
 //    if (!allow_gap &&
@@ -398,7 +398,7 @@ fn merge_two_hsps(hsp1: &mut super::hsp::BlastpHsp, hsp2: &super::hsp::BlastpHsp
     true
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2758-2766,2819-2829,2849
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766,2819-2829,2849
 // ```c
 //    if (new_hspcnt >= hsp_list->hspcnt + combined_hsp_list->hspcnt) {
 //       /* All HSPs from both arrays are saved */
@@ -425,7 +425,7 @@ fn combine_by_score(new: BlastpHspList, combined: &mut BlastpHspList) {
     sort_by_score(combined);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1383
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1383
 // ```c
 // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
 // {

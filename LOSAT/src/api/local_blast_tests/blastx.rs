@@ -387,7 +387,7 @@ fn two_empty_inputs_end_with_ncbis_error_with_parse_deflines_too() {
 }
 
 /// Values that the command line's parser refuses and a caller of `run_local` can set itself get
-/// NCBI's errors of the options where NCBI's core checks them (blast_options.c:1312-1348 for the
+/// NCBI's errors of the options where NCBI's core checks them (c++/src/algo/blast/core/blast_options.c:1312-1348 for the
 /// word size, :1510-1516 for the hit list size; blast_aux.cpp:662-673 for a task NCBI does not
 /// know, read in lower case), else LOSAT's refusal of what it does not run, instead of a search.
 #[test]

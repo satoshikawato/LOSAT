@@ -6,7 +6,7 @@
 //! subsegment falls below the cutoff.
 //!
 //! Reference:
-//! - ncbi-blast/c++/src/algo/blast/core/blast_hits.c:675-733
+//! - c++/src/algo/blast/core/blast_hits.c:675-733
 
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 #[cfg(any(
@@ -134,7 +134,7 @@ unsafe fn gather_scores8_reevaluate_avx2(
 /// - `Blast_HSPReevaluateWithAmbiguitiesUngapped` (blast_hits.c:675-733), for the
 ///   **translated** case (`translated == TRUE`), where `kResidueMask = 0xff`.
 ///
-/// NCBI reference (verbatim, blast_hits.c:675-733):
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:675-733
 /// ```c
 /// Boolean
 /// Blast_HSPReevaluateWithAmbiguitiesUngapped(BlastHSP* hsp, const Uint1* query_start,
@@ -193,7 +193,7 @@ unsafe fn gather_scores8_reevaluate_avx2(
 /// - `q_off_raw` / `s_off_raw` are 0-based offsets from those starts
 /// - `hsp_len` is the ungapped alignment length in residues
 ///
-/// Reference: blast_util.c:112-116, blast_hits.c:675-733.
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:112-116, c++/src/algo/blast/core/blast_hits.c:675-733.
 ///
 /// Returns updated (q_off_raw, s_off_raw, hsp_len, score) if kept, else `None`.
 #[inline]
@@ -234,7 +234,7 @@ pub(crate) fn reevaluate_ungapped_hit_ncbi_translated(
             }
         }
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:692-701
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:692-701
     // ```c
     // for (index = 0; index < hsp_length; ++index) {
     //    sum += matrix[*query & kResidueMask][*subject];
@@ -338,7 +338,7 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar<S: TbxScore>(
     let mut best_end: usize = 0;
     let mut current_start: usize = 0;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:692-705
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:692-705
     // ```c
     // query = query_start + hsp->query.offset;
     // subject = subject_start + hsp->subject.offset;
@@ -402,7 +402,7 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar<S: TbxScore>(
 /// Uses v128 loads to fetch 16 residues at a time, then applies the
 /// **same scalar control flow** as NCBI for each position to preserve parity.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:692-701
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:692-701
 /// ```c
 /// for (index = 0; index < hsp_length; ++index) {
 ///    sum += matrix[*query & kResidueMask][*subject];
@@ -682,7 +682,7 @@ unsafe fn reevaluate_ungapped_hit_ncbi_translated_avx2(
 /// - `s_Blast_HSPGetNumIdentitiesAndPositives` (blast_hits.c:746-825), for the
 ///   **ungapped** case (no gap_info).
 ///
-/// NCBI reference (verbatim, blast_hits.c:746-792):
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-792
 /// ```c
 /// s_Blast_HSPGetNumIdentitiesAndPositives(const Uint1* query, const Uint1* subject,
 ///                            			const BlastHSP* hsp, Int4* num_ident_ptr,

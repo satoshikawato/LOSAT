@@ -1,7 +1,7 @@
 //! `Blast_OptimizeTargetFrequencies` for the relative-entropy-constrained
 //! problem, bit for bit.
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:602-713
+//! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:602-713
 //! (`Blast_OptimizeTargetFrequencies`) and nlm_linear_algebra.c:120-171
 //! (`Nlm_FactorLtriangPosDef`, `Nlm_SolveLtriangPosDef`).
 //!

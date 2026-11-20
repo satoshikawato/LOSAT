@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::gapalign::BlastpPreliminaryHsp;
 use super::hsp::{BlastpHitList, BlastpHspList, HitListHsp};
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:151-178
 // ```c
 // Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
 //               Int4 subject_end, Int4 query_gapped_start,

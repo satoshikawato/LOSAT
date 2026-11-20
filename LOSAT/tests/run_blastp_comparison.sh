@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kArgQuery("query");
 # const string kArgOutput("out");
@@ -12,7 +12,7 @@ set -euo pipefail
 # const string kArgMaxTargetSequences("max_target_seqs");
 # ```
 #
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
 # ```c
 # arg_desc.AddDefaultKey(kArgOutputFormat, "format",
 #                        kOutputFormatDescription,
@@ -25,7 +25,7 @@ REF_DIR="./blast_out/blastp"
 FASTA_DIR="./fasta"
 source ./blastp_parity_options.sh
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kArgOutput("out");
 # ```
@@ -48,7 +48,7 @@ run_case() {
         -out "${OUT_DIR}/${stem}.out" \
         > "${OUT_DIR}/${stem}.log" 2>&1
 
-    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1106-1108
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1106-1108
     # ```c
     #     x_PrintField(*iter);
     # }

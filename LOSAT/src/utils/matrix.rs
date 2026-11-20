@@ -15,7 +15,7 @@ pub const BLASTAA_SIZE: usize = 28;
 pub const PROTEIN_MATRIX_SIZE: usize = 25;
 pub const BLOSUM62_SIZE: usize = PROTEIN_MATRIX_SIZE;
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:121-122
 // ```c
 // #define BLAST_SCORE_MIN INT2_MIN
 // #define BLAST_SCORE_MAX INT2_MAX
@@ -24,7 +24,7 @@ pub const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
 
 /// NCBISTDAA encoding (0-27).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:115-121
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-121
 /// ```c
 /// const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
 /// '-','A','B','C','D','E','F','G','H','I','K','L','M',
@@ -94,7 +94,7 @@ pub mod blosum62_order {
 /// Convert NCBISTDAA index (0-27) to the packed 25x25 matrix index used by
 /// NCBI's standard protein score matrices.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1566-1592
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1566-1592
 /// ```c
 /// if (i == AMINOACID_TO_NCBISTDAA['U'] || i == AMINOACID_TO_NCBISTDAA['O'] ||
 ///     i == AMINOACID_TO_NCBISTDAA['-'] || ...)
@@ -123,7 +123,7 @@ pub fn ncbistdaa_to_blosum62(ncbi: u8) -> u8 {
 
 /// Convert ASCII amino acid character to NCBISTDAA index (0-27).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:110-121
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:110-121
 /// ```c
 /// ... AMINOACID_TO_NCBISTDAA ...
 /// const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
@@ -132,7 +132,7 @@ pub fn ncbistdaa_to_blosum62(ncbi: u8) -> u8 {
 /// ```
 #[inline(always)]
 pub const fn aa_char_to_ncbistdaa(aa: u8) -> u8 {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:110-121
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:110-121
     // ```c
     // ... AMINOACID_TO_NCBISTDAA ...
     // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
@@ -153,7 +153,7 @@ pub const fn aa_char_to_ncbistdaa(aa: u8) -> u8 {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:34-92
+// NCBI reference (598d8ae6): c++/src/util/tables/sm_blosum62.c:34-92
 // ```c
 // static const TNCBIScore s_Blosum62PSM[25 * 25] = {
 // ...
@@ -190,7 +190,7 @@ pub const BLOSUM62: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = [
     -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, 1,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:110-121
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:110-121
 // ```c
 // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
 // '-','A','B','C','D','E','F','G','H','I','K','L','M',
@@ -198,7 +198,7 @@ pub const BLOSUM62: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = [
 // 'O', 'J'};
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1592
 // ```c
 // matrix[i][j] = BLAST_SCORE_MIN;
 // ...
@@ -206,7 +206,7 @@ pub const BLOSUM62: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = [
 // matrix[o_index][i] = matrix[x_index][i];
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:34-92
+// NCBI reference (598d8ae6): c++/src/util/tables/sm_blosum62.c:34-92
 // ```c
 // static const TNCBIScore s_Blosum62PSM[25 * 25] = {
 //     /*       A,  R,  N,  D,  C,  Q,  E,  G,  H,  I,  L,  K,  M,
@@ -245,7 +245,7 @@ const NCBISTDAA_TO_BLOSUM62_DIRECT: [usize; BLASTAA_SIZE] = [
 
 const BLOSUM62_NCBISTDAA_DIRECT_SIZE: usize = BLASTAA_SIZE * BLASTAA_SIZE;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1592
 // ```c
 // matrix[i][j] = BLAST_SCORE_MIN;
 // ...
@@ -253,7 +253,7 @@ const BLOSUM62_NCBISTDAA_DIRECT_SIZE: usize = BLASTAA_SIZE * BLASTAA_SIZE;
 // matrix[o_index][i] = matrix[x_index][i];
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:38-92
+// NCBI reference (598d8ae6): c++/src/util/tables/sm_blosum62.c:38-92
 // ```c
 // static const TNCBIScore s_Blosum62PSM[25 * 25] = {
 // ...
@@ -306,13 +306,13 @@ pub const fn blosum62_score_ncbistdaa_direct(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 
 
 #[inline(always)]
 pub fn blosum62_ncbistdaa_score_row(row_ncbi: usize) -> &'static [i32] {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:562-563
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563
     // ```c
     // score -= info->row_max[query_word[current_pos]];
     // row = info->matrix[query_word[current_pos]];
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1592
     // ```c
     // matrix[i][j] = BLAST_SCORE_MIN;
     // ...
@@ -603,7 +603,7 @@ const PAM250_TEXT: &str = r#"
 /***/   -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8,  1
 "#;
 
-// NCBI reference: c++/src/util/tables/sm_identity.c:38-96
+// NCBI reference (598d8ae6): c++/src/util/tables/sm_identity.c:38-96
 // ```c
 // static const TNCBIScore s_IdentityPSM[25 * 25] = {
 //     /*       A,  R,  N,  D,  C,  Q,  E,  G,  H,  I,  L,  K,  M,
@@ -648,7 +648,7 @@ const IDENTITY_TEXT: &str = r#"
 /***/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9
 "#;
 
-// NCBI reference: ncbi-blast/c++/src/util/tables/raw_scoremat.c:81-109
+// NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:81-109
 // ```c
 // for (i = 0;  i < dim;  ++i) {
 //     aa1 = sym[i];
@@ -752,7 +752,7 @@ pub struct ProteinScoreMatrix {
     pub defscore: i32,
 }
 
-// NCBI reference: ncbi-blast/c++/src/util/tables/raw_scoremat.c:131-154
+// NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:131-154
 // ```c
 // const SNCBIPackedScoreMatrix* NCBISM_GetStandardMatrix(const char* name)
 // {
@@ -811,7 +811,7 @@ pub fn protein_defscore(matrix: ScoringMatrix) -> i32 {
 /// from its direct table: BLASTP's extensions and counts, and the positives of a PSSM search's
 /// alignments (`pssm_search::traceback0::final_hsp`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3409-3438
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3409-3438
 /// ```c
 /// score += sbp->matrix->data[*query_var][*subject_var];
 /// ```
@@ -826,7 +826,7 @@ pub fn standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue:
 
 #[inline(always)]
 pub fn protein_score(matrix: ScoringMatrix, aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1579
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1579
     // ```c
     // for (i = 0; i < sbp->alphabet_size; i++) {
     //     for (j = 0; j < sbp->alphabet_size; j++) {
@@ -951,7 +951,7 @@ mod tests {
         assert_eq!(blosum62_score(ncbistdaa::X, ncbistdaa::X), -1);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1592
     // ```c
     // matrix[i][j] = BLAST_SCORE_MIN;
     // ...
@@ -999,7 +999,7 @@ mod tests {
 
     #[test]
     fn test_blosum62_ncbistdaa_score_row_matches_direct_scores() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:562-563
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563
         // ```c
         // score -= info->row_max[query_word[current_pos]];
         // row = info->matrix[query_word[current_pos]];
@@ -1042,7 +1042,7 @@ mod tests {
         assert_eq!(protein_defscore(ScoringMatrix::Identity), -5);
     }
 
-    // NCBI reference: c++/src/util/tables/sm_identity.c:38-96 (9 on the diagonal, -5
+    // NCBI reference (598d8ae6): c++/src/util/tables/sm_identity.c:38-96 (9 on the diagonal, -5
     // elsewhere, the X row -5 throughout; defscore -5)
     #[test]
     fn identity_matrix_is_ncbis_packed_table() {

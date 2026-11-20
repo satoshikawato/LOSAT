@@ -1,6 +1,6 @@
 //! Subject Best Hit filtering for BLASTN
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2537-2606
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2537-2606
 //! Function: Blast_HSPListSubjectBestHit
 //!
 //! This filter removes HSPs in overlapping query ranges after the best scoring HSP.
@@ -9,7 +9,7 @@
 use super::super::hsp::BlastnHsp;
 
 /// Default range difference for subject best hit filtering
-/// NCBI reference: blast_options.h:1211-1212
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:1211-1212
 /// #define BLAST_SUBJECT_BESTHIT_DEFAULT_RANGE_DIFF 3
 const MAX_RANGE_DIFF: i64 = 3;
 
@@ -27,7 +27,7 @@ pub struct BestHitKey {
 
 /// Apply Subject Best Hit filtering to remove HSPs with overlapping query ranges.
 ///
-/// NCBI reference: blast_hits.c:2537-2606 Blast_HSPListSubjectBestHit
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2537-2606 Blast_HSPListSubjectBestHit
 ///
 /// ```c
 /// // NCBI algorithm:
@@ -42,7 +42,7 @@ pub struct BestHitKey {
 /// - `hits`: Vector of HSPs, already sorted by score descending
 /// - `query_len`: Length of the query sequence (for cross-strand coordinate flipping)
 pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2563-2566
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2563-2566
     // ```c
     // o = hsp_array[i]->query.offset - range_diff;
     // e = hsp_array[i]->query.end + range_diff;
@@ -67,7 +67,7 @@ pub fn subject_best_hit_by<T>(hits: &mut Vec<T>, key: impl Fn(&T) -> BestHitKey)
     }
     let keys: Vec<BestHitKey> = hits.iter().map(&key).collect();
     // Mark HSPs for removal
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2560-2566
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2560-2566
     // ```c
     // // The hsp list is sorted by score
     // for(i=0; i < hsp_list->hspcnt -1; i++) {
@@ -77,7 +77,7 @@ pub fn subject_best_hit_by<T>(hits: &mut Vec<T>, key: impl Fn(&T) -> BestHitKey)
     let mut to_remove = vec![false; hits.len()];
 
     // Pass 1: Same-strand filtering
-    // NCBI reference: blast_hits.c:2561-2577
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2561-2577
     // ```c
     // for(i=0; i < hsp_list->hspcnt -1; i++) {
     //     o = hsp_array[i]->query.offset - range_diff;
@@ -120,7 +120,7 @@ pub fn subject_best_hit_by<T>(hits: &mut Vec<T>, key: impl Fn(&T) -> BestHitKey)
     }
 
     // Pass 2: Cross-strand filtering (BLASTN-specific)
-    // NCBI reference: blast_hits.c:2582-2604
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2582-2604
     // ```c
     // if(isBlastn) {
     //     for(i=0; i < hsp_list->hspcnt -1; i++) {
@@ -202,7 +202,7 @@ mod tests {
         score: i32,
         query_frame: i32,
     ) -> BlastnHsp {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
         // ```c
         // typedef struct BlastHSP {
         //    Int4 score;
@@ -224,7 +224,7 @@ mod tests {
             e_value: 0.0,
             bit_score: score as f64,
             num_ident: q_end - q_start + 1,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1132
             // ```c
             // if (hsp->query.frame != hsp->subject.frame) {
             //    *q_end = query_length - hsp->query.offset;

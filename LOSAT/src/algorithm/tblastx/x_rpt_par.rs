@@ -164,7 +164,7 @@ pub(crate) fn write_tabular<W: Write>(
             }
         }
     }
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2233-2238
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238
     // ```c++
     //     if (m_FormatType == CFormattingArgs::eTabularWithComments) {
     //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec);

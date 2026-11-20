@@ -41,10 +41,10 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
 }
 
 impl TblastnArgs {
-    // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288-301:
     // results = lcl_blast.Run();
     // formatter.PrintOneResultSet(**result, query);
-    // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1458:
     // PrintOneResultSet dispatches the complete result to outfmt 0/6/7.
     /// `settings` are the NCBI application settings that LOSAT reproduces
     /// (`ncbi_environment::ApplicationSettings`): the readers of the subjects
@@ -109,7 +109,7 @@ impl TblastnArgs {
         use crate::blastinput::seq_range;
         let mut args = self;
         args.id_scope = args.parse_deflines.then(Default::default);
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
         // ```c
         //     if (GetExportSearchStrategyStream(args) ||
         //            m_FormattingArgs->ArchiveFormatRequested(args)) {
@@ -184,7 +184,7 @@ impl TblastnArgs {
             },
             None => None,
         };
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
         // ```c
         //         CRef<blast::CBlastQueryVector> subjects;
         //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
@@ -331,7 +331,7 @@ impl TblastnArgs {
                     }
                 }
             };
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
             // ```c
             // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
             //     : m_QueryVector(& queries)
@@ -357,7 +357,7 @@ impl TblastnArgs {
                 return Err(error);
             }
         };
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
         // ```c
         //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
         //         m_InputStream == NULL) {
@@ -455,7 +455,7 @@ impl TblastnArgs {
             }
         }
         let flushed = std::io::Write::flush(&mut stream);
-        // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
         // ```c
         //     catch (const std::ios::failure&) {                                      \
         //         LOG_POST(Error << "BLAST failed to write output");                  \
@@ -903,7 +903,7 @@ fn search_cli(
         return Ok(());
     }
     let batch_size = before_prolog(subjects, x_subject_stores, outputs.diagnostics)?;
-    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:267-270
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:267-270
     // ```c
     // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
     //         	formatter.SetBaseFile(args[kArgOutput].AsString());
@@ -1029,7 +1029,7 @@ fn search_pssm_query(
 /// with no letters and is never searched (`x_scan_plan` skips subjects
 /// shorter than a word). Returns the query batch size.
 ///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:217-221
+/// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:217-221
 /// ```c
 ///             fasta.Reset(new CBlastFastaInputSource(
 ///                                          m_CmdLineArgs->GetInputStream(),
@@ -1037,7 +1037,7 @@ fn search_pssm_query(
 ///             input.Reset(new CBlastInput(&*fasta,
 ///                                         m_CmdLineArgs->GetQueryBatchSize()));
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-136
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-136
 /// ```c
 ///     if(m_IsDbScan) {
 /// 	int num_seqs=0;
@@ -1048,7 +1048,7 @@ fn search_pssm_query(
 ///                 num_seqs=BlastSeqSrcGetNumSeqs(seqsrc);
 ///                 total_length=static_cast<int>(BlastSeqSrcGetTotLen(seqsrc));
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
 /// ```c
 ///         catch(CBlastException & e ) {
 ///         	// Skip bad subject sequence
@@ -1081,10 +1081,10 @@ fn before_prolog(
     Ok(batch_size)
 }
 
-// NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288-301:
 // results = lcl_blast.Run();
 // formatter.PrintOneResultSet(**result, query);
-// NCBI c++/src/app/blast/blast_formatter.cpp:429-467:
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467:
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
 // ...
@@ -1157,7 +1157,7 @@ fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) ->
     Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:267-270 (quoted at `search_cli`)
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:267-270 (quoted at `search_cli`)
 /// The XInclude formats written without a file fail after the formatter is made (after
 /// `Query is Empty!` and `before_prolog`), as the command line's `-outfmt` (`search_cli`).
 fn xinclude_checks(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
@@ -1729,7 +1729,7 @@ fn search(
                 query_input.placements.get(span.start),
             )?;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
         // ```c
         // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
         //     : m_QueryVector(& queries)
@@ -1892,19 +1892,19 @@ fn search(
             .collect();
         let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
         let seg = resolved.seg.params();
-        // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-188:
         // (*thread)->Run(); (*thread)->Join(&result);
-        // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1417:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1417:
         // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
         //                         CConstRef<blast::CBlastQueryVector> queries,
-        // NCBI c++/src/app/blast/tblastn_app.cpp:251-252,275-301:
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:251-252,275-301:
         // input.Reset(new CBlastInput(&*fasta, GetQueryBatchSize()));
         // for (; !input->End(); ...) {
         //     query = input->GetNextSeqBatch(*scope);
         //     CLocalBlast lcl_blast(query_factory, ..., db_adapter);
         //     results = lcl_blast.Run();
         // }
-        // NCBI c++/src/algo/blast/blastinput/blast_input_aux.cpp:70-127:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:70-127:
         // case eTblastn: retval = 20000;
         // Search each accumulated batch independently; preliminary linking
         // and sum-statistics depend on its concatenated query contexts.
@@ -2213,7 +2213,7 @@ fn search(
             }
             results.append(&mut batch_results);
             if let Some(all_lengths) = &mut lengths {
-                // NCBI tblastn_app.cpp:288-301 formats each batch's own
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288-301 formats each batch's own
                 // query-context lengths; retain those values in input order.
                 all_lengths.lengths.extend(batch_lengths.lengths);
                 all_lengths.cutoffs.extend(batch_lengths.cutoffs);
@@ -2221,7 +2221,7 @@ fn search(
                 lengths = Some(batch_lengths);
             }
             ungapped_karlin.extend(batch_karlin);
-            // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-224:
             // if (CheckInternalData() != 0) each result in this Run() batch
             // receives an unsearched ancillary state and null align set.
             let skipped = batch_validity.iter().all(|&valid| !valid);
@@ -2330,9 +2330,9 @@ fn search(
             }
             None => queries,
         };
-        // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1443-1451:
         // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
         // ```c
         //         } catch (const CException& e) {
         //             ...
@@ -2833,7 +2833,7 @@ fn search(
             &super::stage_e_report::ReportRanges {
                 queries: &query_input.placements,
                 subjects: subject_placements,
-                // NCBI reference: c++/src/app/blast/tblastn_app.cpp:342
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:342
                 // ```c++
                 //         formatter.PrintEpilog(opt);
                 // ```

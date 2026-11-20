@@ -312,7 +312,7 @@ impl Rows<'_> {
 
 // The rows of one HSP as NCBI shows them: the query on its plus strand.
 //
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:1852-1858
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1852-1858
 // ```c++
 //         if((ds->IsSetStrands()
 //             && ds->GetStrands().front()==eNa_strand_minus)
@@ -320,7 +320,7 @@ impl Rows<'_> {
 //             //show plus strand if master is minus for non-translated case
 //             finalDenseg->Reverse();
 // ```
-// NCBI reference: c++/include/algo/blast/core/gapinfo.h:43-61
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:43-61
 // ```c
 // typedef enum EGapAlignOpType {
 //    eGapAlignDel = 0, /**< Deletion: a gap in query */
@@ -459,7 +459,7 @@ fn context_rows_into(
     Ok(())
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:878-892
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:878-892
 // ```c++
 //         const TSeqRange kTarget((*query_interval)->GetFrom(),
 //                                 (*query_interval)->GetTo());
@@ -470,7 +470,7 @@ fn context_rows_into(
 //                 CRef<CSeqLocInfo> seqlocinfo
 //                     (new CSeqLocInfo(seqint, CSeqLocInfo::eFrameNotSet));
 // ```
-// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:825-842
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:825-842
 // ```c++
 // template <class Position>
 // CRange<Position> Map(const CRange<Position>& target,
@@ -510,7 +510,7 @@ pub(crate) fn shown_query_masks(
     )
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
 // ```c++
 //         // Union subject sequence ranges
 //         vector <TSeqRange> ranges;
@@ -526,7 +526,7 @@ pub(crate) fn shown_query_masks(
 //         TMaskedSubjRegions masks;
 //         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
 // ```
-// NCBI reference: c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:109-125
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:109-125
 // ```c++
 // static void
 // s_SeqIntervalToSeqLocInfo(CRef<CSeq_interval> interval,
@@ -607,7 +607,7 @@ fn merged(masks: &[MaskedInterval]) -> Vec<MaskedInterval> {
     merged
 }
 
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:2495-2521
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2495-2521
 // ```c++
 //         if(id.Which() != CSeq_id::e_not_set){
 //             /*only do this for sequence but not for others like middle line,
@@ -651,7 +651,7 @@ fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedIn
 /// The ungapped Karlin-Altschul block of a blastn query, from its composition; `None`
 /// when NCBI cannot compute it and marks the query invalid.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2778-2792
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2792
 /// ```c
 ///       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
 ///       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
@@ -661,7 +661,7 @@ fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedIn
 ///       if (loop_status) {
 ///           contexts[context].is_valid = FALSE;
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2004-2013
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2004-2013
 /// ```c
 ///    for (lp = str, lpmax = lp+length; lp < lpmax; lp++)
 ///    {
@@ -674,7 +674,7 @@ fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedIn
 ///       rcp->comp[sbp->ambiguous_res[index]] = 0;
 ///    }
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:346-350
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:346-350
 /// ```c
 ///     if (program_number == eBlastTypeBlastn ||
 ///         program_number == eBlastTypeMapping) {

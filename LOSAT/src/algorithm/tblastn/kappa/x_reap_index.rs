@@ -57,7 +57,7 @@ fn contains(outer: &GappedHsp, inner: &GappedHsp) -> bool {
         && inner.score <= outer.score
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:224-273
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:224-273
 // ```c
 // for (iread = 1;  iread < hsp_list->hspcnt;  iread++) {
 //     ...

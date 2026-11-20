@@ -1,7 +1,7 @@
 //! The library API: a search of FASTA records in memory, with the command line's options and
 //! the command line's output bytes.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/api/ (`CLocalBlast`, `CSearchResultSet`); the plan
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/ (`CLocalBlast`, `CSearchResultSet`); the plan
 //! is `docs/losat_library_surface_plan.md`.
 //!
 //! # Use

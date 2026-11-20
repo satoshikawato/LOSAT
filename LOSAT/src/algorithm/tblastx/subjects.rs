@@ -458,7 +458,7 @@ fn ncbi4na_of(letter: u8) -> u8 {
 /// with the subject's length (`resolve_ncbi4na_to_ncbi2na`). `None` for a subject of
 /// A, C, G and T only, whose compressed bases are its own.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
 /// ```c
 ///     virtual SBlastSequence GetCompressedPlusStrand() {
 ///         SBlastSequence retval(size());
@@ -467,7 +467,7 @@ fn ncbi4na_of(letter: u8) -> u8 {
 ///         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
 ///         return retval;
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:94-103
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:94-103
 /// ```c
 /// const Uint1 IUPACNA_TO_NCBI4NA[128]={
 ///  0, 1,14, 2,13, 0, 0, 4,11, 0, 0,12, 0, 3,15, 0,

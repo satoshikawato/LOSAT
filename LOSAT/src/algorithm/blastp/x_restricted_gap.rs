@@ -4,7 +4,7 @@
 //! a time in 128 bits on wasm32 simd128 and x86_64 without AVX2; elsewhere the reference function
 //! runs).
 //!
-//! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1107-1122,1143-1147,1171
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1107-1122,1143-1147,1171
 //! ```c
 //!         if (a_index % RESTRICT_SIZE != 0) {
 //! ...
@@ -143,7 +143,7 @@ use crate::config::ScoringMatrix;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1096-1097
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1096-1097
 // ```c
 //         score = MININT;
 //         score_gap_row = MININT;
@@ -258,7 +258,7 @@ impl XRestrictedScratch {
     }
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1078-1083,1115
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1078-1083,1115
 // ```c
 //         if (!(gap_align->positionBased)) {
 //             if(reverse_sequence)
@@ -279,7 +279,7 @@ struct XScoreTables {
     max: i32,
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1078-1083
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1078-1083
 // ```c
 //             if(reverse_sequence)
 //                 matrix_row = matrix[ A[ M - a_index ] ];
@@ -340,7 +340,7 @@ fn x_score_tables(score_matrix: BlastpScoreMatrix<'_>) -> Option<&'static XScore
         .as_deref()
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:4273-4278,4307-4316
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4273-4278,4307-4316
 // ```c
 //          if (restricted_alignment) {
 //             score_left = s_RestrictedGappedAlign(query, subject+subject_shift,
@@ -528,7 +528,7 @@ fn x_rows() -> Option<XRows> {
     })
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1096-1098,1250-1251
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1096-1098,1250-1251
 // ```c
 //         score = MININT;
 //         score_gap_row = MININT;
@@ -560,7 +560,7 @@ enum XStop {
     Decline,
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1028-1038,1053-1067,1076-1098
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1028-1038,1053-1067,1076-1098
 // ```c
 //     gap_open = score_params->gap_open;
 //     gap_extend = score_params->gap_extend;
@@ -637,7 +637,7 @@ unsafe fn restricted_fast(
     }
     let tables = x_score_tables(score_matrix)?;
 
-    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1040-1051
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1040-1051
     // ```c
     //     if (gap_extend > 0)
     //         num_extra_cells = x_dropoff / gap_extend + 3;
@@ -856,7 +856,7 @@ unsafe fn restricted_fast(
     }
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1076
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1076
 // ```c
 //     for (a_index = 1; a_index <= M; a_index++) {
 // ```
@@ -892,7 +892,7 @@ unsafe fn restricted_rows_avx2(
     )
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1053-1067,1076-1098
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1053-1067,1076-1098
 // ```c
 //     score = -gap_open_extend;
 //     score_array[0].best = 0;
@@ -1004,7 +1004,7 @@ fn restricted_rows<const AVX2: bool, const COL: u8>(
             e10,
         );
 
-        // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1250-1251,1271-1296
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1250-1251,1271-1296
         // ```c
         //         if (first_b_index == b_size)
         //             break;
@@ -1107,7 +1107,7 @@ fn band_col(col: &mut Vec<u8>, banded: bool, held: usize, ahead: usize, len2: us
     }
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1261-1269
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1261-1269
 // ```c
 //         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
 //
@@ -1145,7 +1145,7 @@ fn band_grow32(
     }
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1261-1269 (as `band_grow32`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1261-1269 (as `band_grow32`)
 // LOSAT_X_BPGAPBAND: `band_grow32` for the sixteen-bit arrays.
 #[cfg(any(
     target_arch = "x86_64",
@@ -1181,7 +1181,7 @@ const COL16: u8 = 1;
 ))]
 const COL16_W128: u8 = 2;
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1091-1094,1114-1115
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1091-1094,1114-1115
 // ```c
 //         if(reverse_sequence)
 //             b_ptr = &B[N - first_b_index];
@@ -1269,7 +1269,7 @@ fn fill_col<const ROWS: u8>(
     }
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1107,1173
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1107,1173
 // ```c
 //         if (a_index % RESTRICT_SIZE != 0) {
 // ...
@@ -1317,7 +1317,7 @@ fn run_row<const AVX2: bool>(
     }
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1112-1171
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1112-1171
 // ```c
 //             for (b_index = first_b_index; b_index < b_size; b_index++) {
 //
@@ -1437,7 +1437,7 @@ fn row_nogap_scalar(
     score
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1177-1247
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1177-1247
 // ```c
 //             for (b_index = first_b_index; b_index < b_size; b_index++) {
 //
@@ -1560,7 +1560,7 @@ fn row_gap_scalar(
     score_gap_row
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
 // ```c
 //             for (b_index = first_b_index; b_index < b_size; b_index++) {
 //
@@ -1863,7 +1863,7 @@ trait XRows16 {
     ) -> i32;
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1053-1067,1076-1098,1250-1287
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1053-1067,1076-1098,1250-1287
 // ```c
 //     for (i = 1; i <= N; i++) {
 //         if (score < -x_dropoff)
@@ -2029,7 +2029,7 @@ unsafe fn restricted_rows16<K: XRows16>(
     Ok((band.a_offset, band.b_offset, band.best))
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1076
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1076
 // ```c
 //     for (a_index = 1; a_index <= M; a_index++) {
 // ```
@@ -2067,7 +2067,7 @@ unsafe fn restricted_rows16_avx2(
     )
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1076
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1076
 // ```c
 //     for (a_index = 1; a_index <= M; a_index++) {
 // ```
@@ -2109,7 +2109,7 @@ unsafe fn restricted_rows16_w128(
     )
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
 // ```c
 //             for (b_index = first_b_index; b_index < b_size; b_index++) {
 //
@@ -2377,7 +2377,7 @@ mod x_avx2_16 {
     }
 }
 
-// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
 // ```c
 //             for (b_index = first_b_index; b_index < b_size; b_index++) {
 //
@@ -2826,7 +2826,7 @@ mod tests {
         }
     }
 
-    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1028-1038 (as
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1028-1038 (as
     // `super::restricted_fast`)
     /// `super::restricted_fast` for rows the CPU runs (asserted): the tests call it by this name.
     fn restricted_fast(

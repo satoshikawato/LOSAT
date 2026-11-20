@@ -13,7 +13,7 @@
 //!          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
 //!          mb_lt->hashtable[ecode] = index;
 //! ```
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
 //! ```c
 //! Int4 q_off = lookup->hashtable[index];
 //!

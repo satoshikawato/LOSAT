@@ -32,7 +32,7 @@ fn last_error() -> &'static Mutex<Vec<u8>> {
     LAST_ERROR.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
 // ```c
 // sequence = queries.GetBlastSequence(index, encoding,
 //                                     eNa_strand_unknown,
@@ -41,7 +41,7 @@ fn last_error() -> &'static Mutex<Vec<u8>> {
 // memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
 // ```
 //
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1427
 // ```c
 // db_length = BlastSeqSrcGetTotLen(seq_src);
 // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
@@ -96,7 +96,7 @@ impl FastaStore {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1427
     // ```c
     // db_length = BlastSeqSrcGetTotLen(seq_src);
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
@@ -107,7 +107,7 @@ impl FastaStore {
     }
 }
 
-// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
 // catch (const std::exception& e) { LOG_POST(Error << "Error: " << e.what()); }
 // Preserve the Rust engine context and its underlying cause across the ABI.
 fn engine_error(err: anyhow::Error) -> String {
@@ -154,7 +154,7 @@ unsafe fn read_bytes<'a>(ptr: *const u8, len: usize, name: &str) -> Result<&'a [
 /// with the reader of its program and role (`run_pair_handles`). The store does not know the
 /// molecule, so it reads with protein flags, which take every nucleotide letter.
 fn count_stored_records(bytes: &[u8]) -> Result<usize, String> {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
     // SetupQueries_OMF(IBlastQuerySource& queries,
     //                  BlastQueryInfo* qinfo,
@@ -174,13 +174,13 @@ fn parse_extra_args(raw: &str) -> Vec<&str> {
     raw.split('\0').filter(|value| !value.is_empty()).collect()
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 // ```c
 // const string kArgOutputFormat("outfmt");
 // const string kDfltArgOutputFormat("0");
 // ```
 //
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 //     if (iter != m_FieldsToShow.begin())
@@ -204,11 +204,11 @@ fn next_arg<'a>(args: &'a [&str], index: &mut usize, flag: &str) -> Result<&'a s
 }
 
 fn parse_num_threads_arg(value: &str, flag: &str) -> Result<usize, String> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
     // ```c
     // const string kArgNumThreads("num_threads");
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
     // ```c
     // int num_threads = args[kArgNumThreads].AsInteger();
     // if (num_threads > kMaxValue) {
@@ -274,7 +274,7 @@ fn parse_blastn_args(
     subject: PathBuf,
     out: PathBuf,
 ) -> Result<blastn::BlastnArgs, String> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
     // ```c
     // const string kArgQuery("query");
     // const string kArgOutput("out");
@@ -320,7 +320,7 @@ fn parse_blastn_args(
         penalty: None,
         gap_open: None,
         gap_extend: None,
-        // NCBI blast_options.c:46-48: kDustLevel=20, kDustWindow=64, kDustLinker=1.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:46-48: kDustLevel=20, kDustWindow=64, kDustLinker=1.
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
@@ -440,7 +440,7 @@ fn parse_tblastx_args(
     subject: PathBuf,
     out: PathBuf,
 ) -> Result<tblastx::TblastxArgs, String> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:66-118
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:66-118
     // ```c
     // arg.Reset(new CGenericSearchArgs( !kQueryIsProtein, false, false, true));
     // arg.Reset(new CGeneticCodeArgs(CGeneticCodeArgs::eQuery));
@@ -477,7 +477,7 @@ fn parse_tblastx_args(
         report_counts: Default::default(),
         max_hsps: None,
         qcov_hsp_perc: None,
-        // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
         soft_masking: None,
         sum_stats: None,
@@ -527,14 +527,14 @@ fn parse_tblastx_args(
                 parse_num_threads_arg(next_arg(extra_args, &mut index, flag)?, flag)?;
         } else if let Some(value) = flag.strip_prefix("-num_threads=") {
             args.num_threads = parse_num_threads_arg(value, flag)?;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
         // ```c
         // arg_desc.AddDefaultKey(kArgOutputFormat, "format",
         //                        kOutputFormatDescription,
         //                        CArgDescriptions::eString,
         //                        NStr::IntToString(dft_outfmt));
         // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
         // ```c
         // if (args[kArgOutputFormat]) {
         //     string fmt_choice =
@@ -566,7 +566,7 @@ fn parse_tblastx_args(
     Ok(args)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-886
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:825-886
 // ```c
 // switch (comp_stat_string[0]) {
 // case '0': case 'F': case 'f': compo_mode = eNoCompositionBasedStats; break;
@@ -583,7 +583,7 @@ fn parse_blastp_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, St
     crate::algorithm::blastp::args::parse_comp_based_stats(value)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:386-407
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:386-407
 // ```c
 // if (m_QueryIsProtein && args[kArgSegFiltering]) {
 //     const string& seg_opts = args[kArgSegFiltering].AsString();
@@ -600,7 +600,7 @@ fn parse_blastp_seg(value: &str) -> Result<BlastpSegSpec, String> {
     crate::blastinput::value_parsers::parse_seg_filtering(value)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blastp_args.cpp:71-115
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:71-115
 // ```c
 // arg.Reset(new CGenericSearchArgs(kQueryIsProtein, false, false, false, false, true));
 // arg.Reset(new CFilteringArgs(kQueryIsProtein, kFilterByDefault));
@@ -612,7 +612,7 @@ fn parse_blastp_seg(value: &str) -> Result<BlastpSegSpec, String> {
 // arg.Reset(new CCompositionBasedStatsArgs);
 // ```
 //
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_prot_options.cpp:85-148
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:85-148
 // ```c
 // SetWordSize(BLAST_WORDSIZE_PROT);
 // SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP);
@@ -788,7 +788,7 @@ fn parse_blastp_args(
             args.matrix = Some(next_arg(extra_args, &mut index, flag)?.to_string());
         } else if let Some(value) = flag.strip_prefix("-matrix=") {
             args.matrix = Some(value.to_string());
-        // NCBI blastinput/cmdline_flags.cpp:93-94:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:93-94:
         // kArgGapOpen("gapopen"); kArgGapExtend("gapextend");
         } else if flag == "-gapopen" {
             args.gap_open = Some(
@@ -857,7 +857,7 @@ fn run_pair(
     extra.push("-outfmt");
     extra.push(outfmt);
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
     // SetupQueries_OMF(IBlastQuerySource& queries,
     //                  BlastQueryInfo* qinfo,
@@ -880,7 +880,7 @@ fn run_pair(
         )
         .map_err(engine_error),
         "blastp" => {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blastp_args.cpp:71-115
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:71-115
             // ```c
             // arg.Reset(new CGenericSearchArgs(kQueryIsProtein, false, false,
             //                                  false, false, true));
@@ -958,7 +958,7 @@ fn run_pair_handles(
     extra.push("-outfmt");
     extra.push(outfmt);
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
     // ```c
     // sequence = queries.GetBlastSequence(index, encoding,
     //                                     eNa_strand_unknown,
@@ -967,7 +967,7 @@ fn run_pair_handles(
     // memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
     // ```
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1427
     // ```c
     // db_length = BlastSeqSrcGetTotLen(seq_src);
     // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
@@ -1084,7 +1084,7 @@ pub unsafe extern "C" fn losat_web_store_fasta(
     label_ptr: *const u8,
     label_len: usize,
 ) -> i32 {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
     // SetupQueries_OMF(IBlastQuerySource& queries,
     //                  BlastQueryInfo* qinfo,
@@ -1119,7 +1119,7 @@ pub unsafe extern "C" fn losat_web_store_fasta(
 
 #[no_mangle]
 pub extern "C" fn losat_web_release_fasta(handle: i32) -> i32 {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1427
     // ```c
     // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
     //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
@@ -1142,7 +1142,7 @@ pub extern "C" fn losat_web_release_fasta(handle: i32) -> i32 {
 
 #[no_mangle]
 pub extern "C" fn losat_web_clear_fasta_store() -> i32 {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1427
     // ```c
     // db_length = BlastSeqSrcGetTotLen(seq_src);
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
@@ -1271,7 +1271,7 @@ pub extern "C" fn losat_web_has_direct_api() -> i32 {
 mod tests {
     use super::*;
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
     // SetupQueries_OMF(IBlastQuerySource& queries,
     //                  BlastQueryInfo* qinfo,
@@ -1298,7 +1298,7 @@ mod tests {
         assert!(store.release(first).is_err());
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
     // ```c
     // if (args[kArgOutputFormat]) {
     //     string fmt_choice =
@@ -1596,7 +1596,7 @@ mod tests {
         .is_err());
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1427
     // ```c
     // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
     //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
@@ -1612,7 +1612,7 @@ mod tests {
         assert!(store.release(42).is_err());
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1427
     // ```c
     // db_length = BlastSeqSrcGetTotLen(seq_src);
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));

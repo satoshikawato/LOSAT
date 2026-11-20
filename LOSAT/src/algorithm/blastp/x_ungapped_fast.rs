@@ -77,7 +77,7 @@ pub(crate) type Table = [i8; TABLE_LEN];
 
 /// The table of the walks, `None` if a score does not fit a byte (`x_ungapped_sent.rs` scores
 /// with it too).
-// NCBI reference: aa_ungapped.c:804-883 `matrix[q[i]][s[i]]`; the scores are those of the
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 `matrix[q[i]][s[i]]`; the scores are those of the
 // function the reference walks call.
 pub(crate) fn build_table() -> Option<Box<Table>> {
     let mut t = Box::new([0i8; TABLE_LEN]);
@@ -115,7 +115,7 @@ pub(crate) struct MatrixTable {
 
 /// The table of the walks for `matrix`, `None` if a score other than `BLAST_SCORE_MIN` does not
 /// fit a byte.
-// NCBI reference: aa_ungapped.c:804-883 `matrix[q[i]][s[i]]`; the scores are those of the
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 `matrix[q[i]][s[i]]`; the scores are those of the
 // function the reference walks call for a matrix other than BLOSUM62 (`protein_score`).
 fn build_matrix_table(matrix: ScoringMatrix) -> Option<MatrixTable> {
     let mut table = Box::new([0i8; TABLE_LEN]);
@@ -173,7 +173,7 @@ struct Walk {
 /// reads `qp[i]`, `sp[i]` (right) or `qp[-i]`, `sp[-i]` (left).
 ///
 /// SAFETY: the `n` positions of both sequences are readable.
-// NCBI reference: aa_ungapped.c:804-883 (see the module comment).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 (see the module comment).
 #[inline(always)]
 unsafe fn walk<const RIGHT: bool>(
     tab: &Table,
@@ -232,7 +232,7 @@ fn extend_left(
 ) -> (i32, i32, u8) {
     let n = s_off.min(q_off);
     if n < 0 {
-        // NCBI reference: aa_ungapped.c:853-883, `best_i = n + 1` with no step taken.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:853-883, `best_i = n + 1` with no step taken.
         return (maxscore, 0, 0);
     }
     // n + 1 steps down from (q_off, s_off); both offsets are >= n.
@@ -264,7 +264,7 @@ fn extend_right(
 ) -> (i32, i32, i32, u8) {
     let n = (subject.len() as i32 - s_off).min(query.len() as i32 - q_off);
     if n <= 0 {
-        // NCBI reference: aa_ungapped.c:804-835, the loop does not run: i = 0.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-835, the loop does not run: i = 0.
         return (maxscore, 0, s_off, 0);
     }
     // n steps up from (q_off, s_off); n is the room left in both slices. A negative offset was
@@ -296,7 +296,7 @@ fn supported(query: &[u8], subject: &[u8], dropoff: i32, word_size: usize) -> bo
 /// The steps of [`two_hit`] and [`two_hit_of`] after their checks, on the table `$tab`: one text
 /// for both, expanded in place, so that BLOSUM62's `two_hit` compiles as it did before `two_hit_of`
 /// (an `#[inline(always)]` function in its place changed `two_hit`'s register allocation).
-// NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 macro_rules! two_hit_steps {
     ($tab:ident, $query:ident, $subject:ident, $s_left_off:ident, $s_right_off:ident,
      $q_right_off:ident, $dropoff:ident, $word_size:ident) => {{
@@ -371,7 +371,7 @@ macro_rules! two_hit_steps {
 
 /// `Some(result)` when the fast path handled the call (`result` may be `None`, the reference's
 /// early return), `None` when the reference has to run.
-// NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 pub(crate) fn two_hit(
     query: &[u8],
     subject: &[u8],
@@ -403,7 +403,7 @@ pub(crate) fn two_hit(
 
 /// [`two_hit`] with another matrix's table ([`matrix_table`]), for words of up to
 /// `matrix.max_word_size` residues.
-// NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn two_hit_of(
     matrix: &MatrixTable,
@@ -440,7 +440,7 @@ pub(crate) fn two_hit_of(
 }
 
 /// As [`two_hit`], for `s_BlastAaExtendOneHit`.
-// NCBI reference: aa_ungapped.c:1020-1083 `s_BlastAaExtendOneHit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1020-1083 `s_BlastAaExtendOneHit`.
 pub(crate) fn one_hit(
     query: &[u8],
     subject: &[u8],

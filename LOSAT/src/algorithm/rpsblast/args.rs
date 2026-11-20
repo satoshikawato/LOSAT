@@ -57,7 +57,7 @@ use crate::blastinput::value_parsers::*;
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpsblastArgs {
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // ```c
     //     arg_desc.AddDefaultKey(kArgQuery, "input_file",
     //                      "Input file name",

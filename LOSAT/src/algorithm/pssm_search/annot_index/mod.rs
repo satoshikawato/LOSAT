@@ -8,7 +8,7 @@
 //! message with a memory address, a crash, BitMagic's decoding, a signed overflow, the order of
 //! memory addresses) is LOSAT's refusal, each naming its condition (`Refusal`).
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (tblastn_app.cpp:222-226)
+//! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (c++/src/app/blast/tblastn_app.cpp:222-226)
 //! ```c++
 //! 		_ASSERT(pssm->HasQuery());
 //! 		_ASSERT(pssm->GetQuery().IsSeq());  // single query only!

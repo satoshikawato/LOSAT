@@ -1,6 +1,6 @@
 //! NCBI composition-adjustment support.
 //!
-//! Reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/
+//! NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/
 
 pub mod adjust_scores;
 // The core of the position-based composition-based statistics (mode 1) of a PSSM (line PS,
@@ -8,7 +8,7 @@ pub mod adjust_scores;
 pub(crate) mod compo_scale;
 pub mod matrix_tables;
 pub mod redo_alignment;
-// NCBI's smith_waterman.c: the kernels of the Smith-Waterman redo (`-use_sw_tback`; series PR,
+// NCBI's c++/src/algo/blast/composition_adjustment/smith_waterman.c: the kernels of the Smith-Waterman redo (`-use_sw_tback`; series PR,
 // item PS11c-3).
 pub(crate) mod smith_waterman;
 // No NCBI counterpart: `LOSAT_X_REDOCONTAINIDX`, the redo's kept alignments with an index by

@@ -2,7 +2,7 @@
 //! set; `src/algorithm/blastx/x_seed_scan.rs` module header, tblastn's
 //! `src/algorithm/tblastx/x_scan_byte.rs` for the scan) on whole searches.
 //!
-//! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127
 //! ```c
 //! for (s = s_first; s <= s_last; s++) {
 //!     index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);

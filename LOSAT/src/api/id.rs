@@ -15,7 +15,7 @@
 //!     m_Ostream << s_GetSeqIdListString(m_SubjectId, eAccVersion);
 //! }
 //! ```
-//! NCBI's id is a `std::string` (`s_GetSeqIdListString`, tabular.cpp:165-195), whose bytes the
+//! NCBI's id is a `std::string` (`s_GetSeqIdListString`, c++/src/objtools/align_format/tabular.cpp:165-195), whose bytes the
 //! stream writes as they are: a byte of a title that is not UTF-8 reaches the report as itself.
 //! `Id` keeps those bytes; its text (`to_str`, `to_string_lossy`) is a view of them.
 #![warn(missing_docs, unused)]

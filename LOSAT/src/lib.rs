@@ -109,32 +109,32 @@ pub(crate) mod seqid;
 /// The mask readers and writers of NCBI's masking tools (`dustmasker`, `segmasker`,
 /// `convert2blastmask`).
 pub(crate) mod seqmasks_io;
-// NCBI objtools/blast/seqdb_writer (CWriteDB) and app/blastdb/makeblastdb.cpp:
+// NCBI objtools/blast/seqdb_writer (CWriteDB) and c++/src/app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
 pub(crate) mod writedb;
-// NCBI app/blastdb/blastdbcmd.cpp: the BLAST database client (its -info).
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp: the BLAST database client (its -info).
 pub(crate) mod blastdbcmd;
-// NCBI app/dustmasker/dust_mask_app.cpp: the masker of low-complexity nucleotide regions.
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp: the masker of low-complexity nucleotide regions.
 pub(crate) mod dustmasker;
-// NCBI app/segmasker/segmasker.cpp: the masker of low-complexity protein regions.
+// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp: the masker of low-complexity protein regions.
 pub(crate) mod segmasker;
-// NCBI app/blastdb/convert2blastmask.cpp: the masking information of lower case FASTA input.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp: the masking information of lower case FASTA input.
 pub(crate) mod convert2blastmask;
-// NCBI corelib/ncbiapp.cpp and corelib/ncbiargs.cpp: the application and argument reader of
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp and c++/src/corelib/ncbiargs.cpp: the application and argument reader of
 // blastdbcmd, dustmasker, segmasker and convert2blastmask.
 pub(crate) mod ncbi_app;
-// NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;
 // LOSAT's own words in place of NCBI's names and toolkit internals in messages, and the one
 // mapping of NCBI's frozen messages to LOSAT's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12):
 // hidden, outside the public API, for the tests and LOSAT Web's adapter.
 #[doc(hidden)]
 pub mod wording;
-// NCBI corelib/ncbistr.cpp: the number conversions of `NStr`.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp: the number conversions of `NStr`.
 pub(crate) mod ncbi_str;
-// NCBI corelib/version.cpp: what `-version` and the full versions print (`CVersionAPI`).
+// NCBI reference (598d8ae6): c++/src/corelib/version.cpp: what `-version` and the full versions print (`CVersionAPI`).
 pub(crate) mod ncbi_version;
-// NCBI corelib/ncbiargs.cpp: what `-xmlhelp` prints (`CArgDescriptions::PrintUsageXml`).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp: what `-xmlhelp` prints (`CArgDescriptions::PrintUsageXml`).
 pub(crate) mod ncbi_xmlhelp;
 // NCBI's rpsbproc 0.5.1 (RpsbProc/src/rpsbproc_main.cpp of the 2025-05-13 package): the CDD
 // domain annotation of rpsblast's archives.
@@ -143,7 +143,7 @@ pub(crate) mod rpsbproc;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_api;
 
-// NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
 pub(crate) mod cli;
 // The body of the `losat` binary (`src/main.rs`): the one item of this crate that the binary names.
 #[doc(hidden)]

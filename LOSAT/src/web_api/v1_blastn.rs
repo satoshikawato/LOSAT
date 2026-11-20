@@ -35,7 +35,7 @@ pub(super) fn run_web_pair(
     query_fasta: &str,
     subject_fasta: &str,
 ) -> Result<Vec<u8>> {
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
+    // NCBI reference (598d8ae6): c++/include/algo/blast/api/local_blast.hpp:76-78
     // ```c
     // CLocalBlast(CRef<IQueryFactory> query_factory,
     //             CRef<CBlastOptionsHandle> opts_handle,
@@ -67,7 +67,7 @@ pub(super) fn run_web_pair(
     // NCBI's errors there (fail-fast) and adds its checks of LOSAT's limits only for a
     // search.
     crate::utils::threading::validate_threads(args.num_threads)?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
     // ```c
     // BlastSeqBlkSetSequence(subj, sequence.data.release(),
     //    ((sentinels == eSentinels) ? sequence.length - 2 :

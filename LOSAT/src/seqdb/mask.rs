@@ -1,7 +1,7 @@
 //! The mask data of a BLAST database (`makeblastdb -mask_data`): the filtering algorithms
 //! that were applied to the sequences, and the masked ranges of each sequence.
 //!
-//! NCBI reads them in `CSeqDBImpl` (`seqdbimpl.cpp`: `x_BuildMaskAlgorithmList`,
+//! NCBI reads them in `CSeqDBImpl` (`c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp`: `x_BuildMaskAlgorithmList`,
 //! `GetMaskAlgorithmDetails`, `GetAvailableMaskAlgorithmDescriptions`, `GetMaskData`) with
 //! the id table `CSeqDB_IdRemapper`. The data is in the column titled `BlastDb/MaskData` of
 //! each volume ([`super::column`]): its metadata maps the volume's algorithm ids to

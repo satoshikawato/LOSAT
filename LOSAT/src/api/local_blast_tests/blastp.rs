@@ -102,7 +102,7 @@ fn run(inputs: &Inputs, formats: &[&str], extra: &[&str], observe: bool) -> Run 
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 //     // Add tab in front of field, except for the first field.
@@ -112,7 +112,7 @@ fn run(inputs: &Inputs, formats: &[&str], extra: &[&str], observe: bool) -> Run 
 // }
 // m_Ostream << "\n";
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 // ```c++
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```
@@ -146,7 +146,7 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 // ```c
 // if (args[kArgOutputFormat]) {
 //     string fmt_choice =
@@ -157,7 +157,7 @@ fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new(1);
     let queries = queries(&inputs.query);
     let subjects = subjects(&inputs.subject);
-    // NCBI blast_args.cpp:2845-2851 and tabular.cpp:70-99: a custom specification of
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851 and c++/src/objtools/align_format/tabular.cpp:70-99: a custom specification of
     // outfmt 0 and a token that is not a field name are ignored ("0 qseqid", "6 nosuchfield"
     // run as "0" and "6"); SAM (17) is NCBI's error for blastp (blast_args.cpp:2876-2879; LOSAT's
     // BLASTP writes every other format of NCBI's blastp since line RG T3a), and a delimiter that a
@@ -257,7 +257,7 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
     }
 }
 
-// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// NCBI derives the hit list size per output format (c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973): with
 // `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
 // so formats that need different hit list sizes are refused before anything is written
 // (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
@@ -377,7 +377,7 @@ fn run_local_outputs(
     (sinks, diagnostics, result)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
 // ```c
 //     // Validate that at least one query context is valid
 //     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {

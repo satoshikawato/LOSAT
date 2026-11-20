@@ -3,7 +3,7 @@
 //! `CDeflineGenerator::GenerateDefline` over the title of the record (the defline after
 //! `>`, its first word included, as bytes), and `CShowBlastDefline::GetSeqIdList` over it.
 //!
-//! NCBI reference: c++/src/objmgr/util/create_defline.cpp:3952-3962
+//! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3952-3962
 //! ```c
 //!     if (! m_Reconstruct) {
 //!         // x_SetFlags set m_MainTitle from a suitable descriptor, if any;
@@ -17,7 +17,7 @@
 //!         }
 //!     }
 //! ```
-//! NCBI reference: c++/src/objmgr/util/create_defline.cpp:4050-4073
+//! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4050-4073
 //! ```c
 //!     if (! (flags & fLeavePrefixSuffix)) {
 //!         // remove TPA or TSA prefix, will rely on other data in record to set
@@ -43,7 +43,7 @@
 //!         decoded.erase (pos + 1);
 //!     }
 //! ```
-//! NCBI reference: c++/src/objmgr/util/create_defline.cpp:4092-4101
+//! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4092-4101
 //! ```c
 //!     // produce final result
 //!     string penult = mag + prefix + decoded + suffix;
@@ -68,7 +68,7 @@
 //! wrap and reads past the end of the string (and crashes); `clean_and_compress` stops at
 //! the end of the string there (approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
 
-/// NCBI reference: c++/src/objmgr/util/create_defline.cpp:3431-3446
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3431-3446
 /// ```c
 /// static const char* s_tpaPrefixList [] = {
 ///   "MAG ",
@@ -106,7 +106,7 @@ const TPA_PREFIXES: [&str; 14] = [
 
 /// The title that NCBI generates for a protein record without one.
 ///
-/// NCBI reference: c++/src/objmgr/util/create_defline.cpp:2508-2509
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2508-2509
 /// ```c
 ///     if (m_MainTitle.empty()  &&  !m_LocalAnnotsOnly) {
 ///         m_MainTitle = "unnamed protein product";
@@ -119,7 +119,7 @@ const UNNAMED_PROTEIN_PRODUCT: &[u8] = b"unnamed protein product";
 /// (`CUtf8::GuessEncoding` gave `eEncoding_Unknown`: a title that is not UTF-8 with one of
 /// the bytes 0x81, 0x8D, 0x8F, 0x90 and 0x9D).
 ///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:4528-4534
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4528-4534
 /// ```c
 ///     if (encoding == eEncoding_Unknown) {
 ///         encoding = CUtf8::GuessEncoding(str);
@@ -573,13 +573,13 @@ fn pdb_or_patent_title(ids: &BioseqFacts) -> Vec<u8> {
 /// protein title gives `unnamed`). `Err` where `GenerateDefline` throws (NCBI stops with
 /// an exception; RP-20).
 ///
-/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:787-789
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:787-789
 /// ```c
 ///         if((m_IsBl2Seq && (!m_BelieveQuery))|| m_IsRemoteSearch) {
 ///         	tabinfo.SetParseSubjectDefline(true);
 ///         }
 /// ```
-/// NCBI reference: c++/src/objtools/align_format/tabular.cpp:522-532
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:522-532
 /// ```c
 /// void CBlastTabularInfo::SetSubjectId(const CBioseq_Handle& bh)
 /// {
@@ -593,7 +593,7 @@ fn pdb_or_patent_title(ids: &BioseqFacts) -> Vec<u8> {
 ///     CShowBlastDefline::GetSeqIdList(bh, subject_id_list, m_SubjectId);
 /// }
 /// ```
-/// NCBI reference: c++/src/objtools/align_format/tabular.cpp:482-496
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
 /// ```c
 ///         if (sid_in->IsLocal()) {
 ///             string id_token;
@@ -611,7 +611,7 @@ fn pdb_or_patent_title(ids: &BioseqFacts) -> Vec<u8> {
 ///                 if (obj_id.IsStr())
 ///                     id_token = obj_id.GetStr();
 /// ```
-/// NCBI reference: c++/src/objtools/align_format/showdefline.cpp:218-242
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-242
 /// ```c
 ///     ITERATE(vector< CConstRef<CSeq_id> >, itr, original_seqids) {
 ///         CRef<CSeq_id> next_seqid(new CSeq_id());
@@ -1349,7 +1349,7 @@ fn source_title(protein: bool, ids: &BioseqFacts) -> Vec<u8> {
 
 /// The entities of `NStr::HtmlDecode`, in NCBI's order.
 ///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:4221-4232
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4221-4232
 /// ```c
 /// static struct tag_HtmlEntities
 /// {
@@ -1428,7 +1428,7 @@ const NCBI_HTML_ENTITIES: [(u32, &str); 280] = [
 /// written by `x_AppendChar` without any check (`&#0;` gives a NUL byte, `&#xD800;` a
 /// surrogate's bytes).
 ///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:4523-4618
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4523-4618
 /// ```c
 /// string NStr::HtmlDecode(const CTempString str, EEncoding encoding, THtmlDecode* result_flags)
 /// {
@@ -1523,7 +1523,7 @@ const NCBI_HTML_ENTITIES: [(u32, &str); 280] = [
 ///         }
 ///     }
 /// ```
-/// NCBI reference: c++/include/corelib/ncbistr.hpp:5729-5759 (`CUtf8::x_Append` of a
+/// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:5729-5759 (`CUtf8::x_Append` of a
 /// `TUnicodeSymbol` buffer: `x_TCharToUnicodeSymbol` takes the symbol as it is for a
 /// 4-byte character, then `x_AppendChar( u8str, ch )`).
 fn html_decode(text: &[u8]) -> Result<(Vec<u8>, bool), UnknownEncoding> {
@@ -1631,7 +1631,7 @@ enum Encoding {
 /// `CUtf8::GuessEncoding`. The UTF-8 test checks the lead bytes and the number of
 /// continuation bytes only (not the ranges of the second byte after E0, ED, F0 and F4).
 ///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:6711-6769
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:6711-6769
 /// ```c
 /// EEncoding CUtf8::GuessEncoding(const CTempString& src)
 /// {
@@ -1749,7 +1749,7 @@ fn guess_encoding(src: &[u8]) -> Encoding {
     }
 }
 
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:7143-7166
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7143-7166
 /// ```c
 /// bool CUtf8::x_EvalFirst(char ch, SIZE_TYPE& more)
 /// {
@@ -1798,7 +1798,7 @@ fn eval_first(ch: u8, more: &mut usize) -> bool {
     true
 }
 
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:7169-7172
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7169-7172
 /// ```c
 /// bool CUtf8::x_EvalNext(char ch)
 /// {
@@ -1814,7 +1814,7 @@ fn eval_next(ch: u8) -> bool {
 /// one-byte string has no six-byte pair), an ISO-8859-1 or Windows-1252 title converts it
 /// (`CharToSymbol`, then `x_AppendChar`).
 ///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:7062-7115
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7062-7115
 /// ```c
 /// CStringUTF8& CUtf8::x_Append( CStringUTF8& self, const CTempString& src,
 ///     EEncoding encoding, EValidate validate)
@@ -1838,7 +1838,7 @@ fn eval_next(ch: u8) -> bool {
 ///     return self;
 /// }
 /// ```
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:6851-6881
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:6851-6881
 /// ```c
 /// // cp1252, codepoints for chars 0x80 to 0x9F
 /// static const TUnicodeSymbol s_cp1252_table[] = {
@@ -1882,7 +1882,7 @@ fn append_as_utf8(out: &mut Vec<u8>, ch: u8, encoding: Encoding) {
     }
 }
 
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:7040-7060
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7040-7060
 /// ```c
 /// CStringUTF8& CUtf8::x_AppendChar( CStringUTF8& self, TUnicodeSymbol c)
 /// {
@@ -1948,7 +1948,7 @@ fn trim_leading_spaces(text: &mut Vec<u8>) {
 /// a byte of 0x80 or more loses that byte. In the middle of the title the sign does not
 /// matter, because every pattern ends with an ASCII byte.
 ///
-/// NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:219-312
 /// ```c
 ///     char curr = *in++; // initialize with first character
 ///     left--;
@@ -2091,7 +2091,7 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> (Vec<u8>, bool) {
 /// `NStr::ReplaceInPlace(src, search, replace)` with its defaults (from the start, every
 /// occurrence): each search resumes after the text just put in.
 ///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:3401-3428
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
 /// ```c
 ///     if ( start_pos + search.size() > src.size()  ||  search == replace )
 ///         return src;
@@ -2508,7 +2508,7 @@ mod tests {
         })
     }
 
-    // NCBI reference: c++/src/corelib/ncbistr.cpp:4543-4590 (NStr::HtmlDecode): table
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4543-4590 (NStr::HtmlDecode): table
     // entities and numeric references only, in the title after its final `.,;~ ` are
     // trimmed (create_defline.cpp:3952-3960), with NCBI's start of an entity after `x`.
     #[test]
@@ -2547,7 +2547,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/corelib/ncbistr.cpp:6711-6769 (CUtf8::GuessEncoding).
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:6711-6769 (CUtf8::GuessEncoding).
     #[test]
     fn encodings_are_guessed_as_ncbi_guesses_them() {
         for (text, encoding) in [
@@ -2573,7 +2573,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/corelib/ncbistr.cpp:4588-4606,7040-7060 (numeric references,
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4588-4606,7040-7060 (numeric references,
     // `x_AppendChar` without a check); RP oracle cases u09-u11, y01-y04.
     #[test]
     fn numeric_references_are_written_without_a_check() {
@@ -2600,7 +2600,7 @@ mod tests {
         assert_eq!(html_decode(b"id \x81 &amp;"), Err(UnknownEncoding));
     }
 
-    // NCBI reference: c++/src/objmgr/util/create_defline.cpp:302-311 (signed `curr`, the
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:302-311 (signed `curr`, the
     // protein bracket rules); RP oracle cases u01-u03, u19, u20.
     #[test]
     fn the_last_byte_is_a_signed_char_and_protein_brackets_are_joined() {
@@ -2782,7 +2782,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/corelib/ncbistr.cpp:3197-3234 (`TruncateSpacesInPlace`): the C
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3197-3234 (`TruncateSpacesInPlace`): the C
     // `isspace` bytes of both ends, none in the middle.
     #[test]
     fn a_nucleotide_source_title_loses_white_space_at_its_ends() {

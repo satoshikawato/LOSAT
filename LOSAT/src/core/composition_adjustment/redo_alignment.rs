@@ -1,8 +1,8 @@
 //! Port of the non-Smith-Waterman protein and translated-subject control flow from
 //! `composition_adjustment/redo_alignment.{h,c}` used by `blastp` postprocess.
 //!
-//! Reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h
-//! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c
+//! NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h
+//! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c
 
 use anyhow::{bail, Result};
 use std::cell::Cell;
@@ -59,33 +59,33 @@ pub(crate) fn redo_calc_lambda(
     ))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:41-46
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:41-46
 // ```c
 // /** The natural log of 2 ... */
 // #define LOCAL_LN2 0.69314718055994530941723212145818
 // ```
 pub(crate) const LOCAL_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:791-797
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:791-797
 // ```c
 // #define KAPPA_BIT_TOL 2.0
 // ```
 pub(crate) const KAPPA_BIT_TOL: f64 = 2.0;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:79-84
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:79-84
 // ```c
 // static const int kWindowBorder = 200;
 // static const int kReMatrixAdjustmentPseudocounts = 20;
 // ```
 pub const WINDOW_BORDER: i32 = 200;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1050
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1050
 // ```c
 // #define MINIMUM_LENGTH_NEAR_IDENTICAL 50
 // ```
 pub const MINIMUM_LENGTH_NEAR_IDENTICAL: i32 = 50;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1269-1271
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1269-1271
 // ```c
 // const double kMinFractionNearIdentical = 0.95;
 // int max_shift = 8;
@@ -95,7 +95,7 @@ const NEAR_IDENTICAL_MAX_SHIFT: usize = 8;
 const NEAR_IDENTICAL_WORD_SIZE: usize = 8;
 const NEAR_IDENTICAL_HASH_MASK: u64 = 0xFFFFFFFFFF;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1124-1128
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1124-1128
 // ```c
 // ECompoAdjustModes compo_adjust_mode = params->compo_adjust_mode;
 // ```
@@ -137,7 +137,7 @@ impl BlastCompoAdjustMode {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_constants.h:61-68
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/composition_constants.h:61-68
 // ```c
 // typedef enum EMatrixAdjustRule {
 //     eDontAdjustMatrix              = (-1),
@@ -159,7 +159,7 @@ pub enum EMatrixAdjustRule {
     UserSpecifiedRelEntropy = 4,
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:49-67
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:49-67
 // ```c
 // typedef struct BlastCompo_Alignment {
 //     int score;
@@ -175,14 +175,14 @@ pub enum EMatrixAdjustRule {
 // } BlastCompo_Alignment;
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:316-323
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:316-323
 // ```c
 // GapEditScript * editScript = align->context;
 // ...
 // Blast_HSPInit(..., align->score, &editScript, &new_hsp);
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1921-1926
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1921-1926
 // ```c
 // BlastHSP * hsp = in_align->context;
 // q_start = hsp->query.gapped_start - query_range->begin;
@@ -194,7 +194,7 @@ pub enum BlastCompoAlignmentContext {
     EditScript(Vec<GapEditOp>),
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:49-67
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:49-67
 // ```c
 // typedef struct BlastCompo_Alignment {
 //     ...
@@ -216,7 +216,7 @@ pub struct BlastCompoAlignment {
     pub next: Option<Box<BlastCompoAlignment>>,
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:97-106
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:97-106
 // ```c
 // typedef struct BlastCompo_GappingParams {
 //     int gap_open;
@@ -235,7 +235,7 @@ pub struct BlastCompoGappingParams {
     pub context: Cell<Option<NonNull<c_void>>>,
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:111-118
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:111-118
 // ```c
 // typedef struct BlastCompo_SequenceRange
 // {
@@ -251,7 +251,7 @@ pub struct BlastCompoSequenceRange {
     pub context: i32,
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:123-130
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:123-130
 // ```c
 // typedef struct BlastCompo_SequenceData {
 //     Uint1 * data;
@@ -267,7 +267,7 @@ pub struct BlastCompoSequenceData {
 }
 
 impl BlastCompoSequenceData {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-127
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:112-127
     // ```c
     // (*seq_blk)->sequence_start = (Uint1 *) buffer;
     // (*seq_blk)->sequence = (*seq_blk)->sequence_start+1;
@@ -285,7 +285,7 @@ impl BlastCompoSequenceData {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
     // ```c
     // const Uint1* query, const Uint1* subject
     // ```
@@ -296,7 +296,7 @@ impl BlastCompoSequenceData {
         &self.buffer[start..end]
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1619-1646
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1619-1646
     // ```c
     // queryData->length = q_range->end - q_range->begin;
     // ...
@@ -311,7 +311,7 @@ impl BlastCompoSequenceData {
         Self::from_ncbistdaa(&self.data()[begin..end])
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1677-1704
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1677-1704
     // ```c
     // origData = query->data + q_range->begin;
     // queryData->length = q_range->end - q_range->begin;
@@ -345,7 +345,7 @@ impl BlastCompoSequenceData {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1638-1646
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1638-1646
     // ```c
     // seqData->data    = &seqData->data[range->begin - 1];
     // *seqData->data++ = '\0';
@@ -370,7 +370,7 @@ impl BlastCompoSequenceData {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:143-146
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:143-146
 // ```c
 // typedef struct BlastCompo_MatchingSequence {
 //   Int4 length;
@@ -383,7 +383,7 @@ pub struct BlastCompoMatchingSequence<'a> {
     pub length: i32,
     pub index: i32,
     pub data: &'a [u8],
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1494-1497,1522-1525
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1494-1497,1522-1525
     // ```c
     // local_data->seq_arg.seq->gen_code_string;
     // Blast_GetPartialTranslation(..., local_data->seq_arg.seq->gen_code_string, ...);
@@ -402,7 +402,7 @@ pub struct BlastCompoMatchingSequence<'a> {
 }
 
 impl<'a> BlastCompoMatchingSequence<'a> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1067-1106
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1067-1106
     // ```c
     // self->length = BlastSeqSrcGetSeqLen(...);
     // self->index = subject_index;
@@ -417,7 +417,7 @@ impl<'a> BlastCompoMatchingSequence<'a> {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1494-1497,1522-1525
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1494-1497,1522-1525
     // ```c
     // na_sequence = local_data->seq_arg.seq->sequence_start;
     // Blast_GetPartialTranslation(...,
@@ -444,7 +444,7 @@ impl<'a> BlastCompoMatchingSequence<'a> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:166-178
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:166-178
 // ```c
 // typedef struct BlastCompo_QueryInfo {
 //     int origin;
@@ -463,7 +463,7 @@ pub struct BlastCompoQueryInfo {
     pub words: Option<Vec<u64>>,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:85-97
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:85-97
 // ```c
 // typedef struct s_WindowInfo
 // {
@@ -481,7 +481,7 @@ pub struct WindowInfo {
     pub hspcnt: i32,
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:328-347
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:328-347
 // ```c
 // typedef struct Blast_RedoAlignParams {
 //     Blast_MatrixInfo * matrix_info;
@@ -527,7 +527,7 @@ impl BlastRedoAlignParams {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:214-236
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:214-236
 // ```c
 // get_range_type(..., Boolean shouldTestIdentical, ...);
 // ```
@@ -585,7 +585,7 @@ pub(crate) fn x_whole_subject_composition(
     read_aa_composition(range.subject.data())
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:312-322
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:312-322
 // ```c
 // typedef struct Blast_RedoAlignCallbacks {
 //     calc_lambda_type * calc_lambda;
@@ -628,7 +628,7 @@ pub struct BlastRedoAlignCallbacks {
     pub redo_one_alignment: BlastRedoOneAlignmentFn,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1292
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1292
 // ```c
 // int
 // Blast_RedoOneMatch(...,
@@ -643,7 +643,7 @@ pub struct BlastRedoOneMatchResult {
     pub lambda_ratio: Option<f64>,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1110-1121
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1110-1121
 // ```c
 // static Uint8 s_GetHash(const Uint1* data, int word_size)
 // {
@@ -665,7 +665,7 @@ fn get_hash(data: &[u8], word_size: usize) -> u64 {
     hash
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2235-2272
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2235-2272
 // ```c
 // static int
 // s_CreateWordArray(const Uint1* seq_data, Int4 seq_len, Uint8** words)
@@ -698,7 +698,7 @@ pub fn build_query_word_hashes(query_seq: &[u8]) -> Vec<u64> {
     hashes
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:103-118
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:103-118
 // ```c
 // BlastCompo_AlignmentNew(int score,
 //                         EMatrixAdjustRule matrix_adjust_rule,
@@ -736,7 +736,7 @@ pub fn blast_compo_alignment_new(
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:160-178
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:160-178
 // ```c
 // static int
 // s_AlignmentCmp(const BlastCompo_Alignment * a,
@@ -771,7 +771,7 @@ pub fn blast_compo_alignment_cmp(a: &BlastCompoAlignment, b: &BlastCompoAlignmen
     b.query_end.cmp(&a.query_end)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:200-208
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:200-208
 // ```c
 // static int
 // s_DistinctAlignmentsLength(BlastCompo_Alignment * list)
@@ -803,7 +803,7 @@ fn list_to_vec(mut list: Option<Box<BlastCompoAlignment>>) -> Vec<BlastCompoAlig
     out
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:214-280
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:214-280
 // ```c
 // static void
 // s_DistinctAlignmentsSort(BlastCompo_Alignment ** plist, int hspcnt)
@@ -816,7 +816,7 @@ pub fn distinct_alignments_sort(plist: &mut Option<Box<BlastCompoAlignment>>) {
     distinct_alignments_sort_internal(plist, hspcnt);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:214-280
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:214-280
 // ```c
 // static void
 // s_DistinctAlignmentsSort(BlastCompo_Alignment ** plist, int hspcnt)
@@ -899,7 +899,7 @@ fn distinct_alignments_sort_internal(plist: &mut Option<Box<BlastCompoAlignment>
     *plist = merged;
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:138-152
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:138-152
 // ```c
 // static void
 // s_AlignmentsRev(BlastCompo_Alignment ** plist)
@@ -918,7 +918,7 @@ fn alignments_rev(plist: &mut Option<Box<BlastCompoAlignment>>) {
     *plist = reversed;
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:282-294
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:282-294
 // ```c
 // static BlastCompo_Alignment *
 // s_AlignmentCopy(const BlastCompo_Alignment * align)
@@ -940,7 +940,7 @@ fn alignment_copy(align: &BlastCompoAlignment) -> Box<BlastCompoAlignment> {
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:303-316
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:303-316
 // ```c
 // static Boolean
 // s_IsSameEndPoint(const BlastCompo_Alignment* newAlign,
@@ -960,7 +960,7 @@ fn is_same_endpoint(new_align: &BlastCompoAlignment, align: &BlastCompoAlignment
             || (align.query_end == new_align.query_end && align.match_end == new_align.match_end))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:322-351
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:322-351
 // ```c
 // static Boolean
 // s_IsSimilarEndPoint(const BlastCompo_Alignment* newAlign,
@@ -995,7 +995,7 @@ pub(crate) fn is_similar_endpoint(
             && (new_align.query_end - new_align.match_end == align.query_end - align.match_end))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:386-451
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:386-451
 // ```c
 // static void
 // s_WithDistinctEnds(BlastCompo_Alignment **p_newAlign,
@@ -1035,7 +1035,7 @@ pub fn with_distinct_ends(
         return;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:420-441
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:420-441
     // ```c
     // tail  = &newAlign->next;
     // align = oldAlignments;
@@ -1073,7 +1073,7 @@ pub fn with_distinct_ends(
     *p_old_alignments = Some(new_align);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:468-489
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:468-489
 // ```c
 // static s_WindowInfo *
 // s_WindowInfoNew(int begin, int end, int context,
@@ -1109,7 +1109,7 @@ fn window_info_new(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:538-564
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:538-564
 // ```c
 // static void
 // s_WindowInfoJoin(s_WindowInfo * win1, s_WindowInfo ** pwin2)
@@ -1134,7 +1134,7 @@ fn window_info_join(win1: &mut WindowInfo, win2: WindowInfo) {
     *tail = win2.align;
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:497-505
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:497-505
 // ```c
 // static void
 // s_WindowSwapRange(s_WindowInfo * window)
@@ -1148,7 +1148,7 @@ fn window_swap_range(window: &mut WindowInfo) {
     std::mem::swap(&mut window.query_range, &mut window.subject_range);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:569-593
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:569-593
 // ```c
 // static int
 // s_LocationCompareWindows(const void * vp1, const void *vp2)
@@ -1180,7 +1180,7 @@ fn location_compare_windows(w1: &WindowInfo, w2: &WindowInfo) -> Ordering {
     w1.query_range.end.cmp(&w2.query_range.end)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:598-621
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:598-621
 // ```c
 // static int
 // s_SubjectCompareWindows(const void * vp1, const void *vp2)
@@ -1267,7 +1267,7 @@ pub(crate) fn get_translated_length(length: i32, f: i32) -> i32 {
     (length - f % 3) / 3
 }
 
-// NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,644-765:
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,644-765:
 // static const int kWindowBorder = 200;
 // translated_length = s_GetTranslatedLength(sequence_length, frame, is_pos_based);
 // begin = MAX(0, align->matchStart - border);
@@ -1495,7 +1495,7 @@ fn translated_query_composition(
     Ok(read_aa_composition(&query.data()[left..right]))
 }
 
-// NCBI c++/src/algo/blast/core/blast_kappa.c:1504-1525;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1504-1525;
 // c++/src/algo/blast/core/blast_util.c:428-454,1141-1205:
 // translation_start = frame > 0 ? 3 * range->begin
 //     : self->length - 3 * range->end + frame + 1;
@@ -1548,7 +1548,7 @@ fn translated_subject_window_sequence(
     Ok(translated)
 }
 
-// NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938:
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938:
 // start = align->matchStart - range->begin;
 // end = align->matchEnd - range->begin;
 // Blast_GetCompositionRange(&left, &right, data, length, start, end);
@@ -1569,7 +1569,7 @@ fn translated_subject_composition(
     Ok(read_aa_composition(&data[left..right]))
 }
 
-// NCBI c++/src/algo/blast/core/blast_kappa.c:1417-1455,1530-1548:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1417-1455,1530-1548:
 // #define BLASTP_MASK_RESIDUE 21
 // #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
 // BlastSetUp_Filter(eBlastTypeTblastn, seqData->data, seqData->length, ...);
@@ -1593,7 +1593,7 @@ fn mask_translated_subject_seg(translation: &mut [u8]) -> Result<bool> {
     Ok(!intervals.is_empty())
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1475-1552,1677-1704
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1475-1552,1677-1704
 // ```c
 // queryData->data[idx] = (origData[idx] != 24) ? origData[idx] : 3;
 // status = Blast_GetPartialTranslation(..., &translation_buffer, ...);
@@ -1656,7 +1656,7 @@ pub fn translated_subject_get_range<'seq>(
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:738-787
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:738-787
 // ```c
 // static int
 // s_WindowsFromProteinAligns(BlastCompo_Alignment * alignments,
@@ -1699,7 +1699,7 @@ pub(crate) fn windows_from_protein_aligns(
         let query_length = query_info.seq.length;
 
         if windows[query_index].is_none() {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:800-806
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:800-806
             // ```c
             // if (windows[query_index] == NULL) {
             //     windows[query_index] =
@@ -1718,7 +1718,7 @@ pub(crate) fn windows_from_protein_aligns(
             ));
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:807-812
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:807-812
         // ```c
         // copiedAlign = s_AlignmentCopy(align);
         // copiedAlign->next = windows[query_index]->align;
@@ -1737,7 +1737,7 @@ pub(crate) fn windows_from_protein_aligns(
 
     let mut packed = Vec::with_capacity(query_count as usize);
     for mut window in windows.into_iter().flatten() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:815-820
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:815-820
         // ```c
         // if (windows[query_index] != NULL) {
         //     windows[window_index] = windows[query_index];
@@ -1747,7 +1747,7 @@ pub(crate) fn windows_from_protein_aligns(
         // ```
         alignments_rev(&mut window.align);
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:821-833
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:821-833
         // ```c
         // /* shrink to fit */
         // ...
@@ -1764,7 +1764,7 @@ pub(crate) fn windows_from_protein_aligns(
     Ok(packed)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:804-833
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:804-833
 // ```c
 // static Boolean
 // s_IsContained(BlastCompo_Alignment * in_align,
@@ -1802,7 +1802,7 @@ pub fn is_contained(
     false
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:936-1013
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:936-1013
 // ```c
 // static int s_ExtendRight(Uint1* query_seq, int query_len,
 //                          Uint1* subject_seq, int subject_len,
@@ -1885,7 +1885,7 @@ fn extend_right(
     (num_identical, q_pos, s_pos, align_len)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1025-1103
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1025-1103
 // ```c
 // static int s_ExtendLeft(Uint1* query_seq, int query_len,
 //                         Uint1* subject_seq, int subject_len,
@@ -1972,7 +1972,7 @@ fn extend_left(
     (num_identical, query_ext_len, subject_ext_len, align_len)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1124-1204
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1124-1204
 // ```c
 // static int s_FindNumIdentical(Uint1* query_seq,
 //                               const Uint8* query_hashes,
@@ -1990,7 +1990,7 @@ fn find_num_identical(
     subject_seq: &[u8],
     max_shift: usize,
 ) -> usize {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1160-1164
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1160-1164
     // ```c
     // if (!query_seq || !query_hashes || !subject_seq
     //     || query_len < word_size || subject_len < word_size) {
@@ -1998,7 +1998,7 @@ fn find_num_identical(
     // }
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1166-1188
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1166-1188
     // ```c
     // for (s_pos = 0; s_pos < subject_len - word_size; s_pos++) {
     //     ...
@@ -2041,7 +2041,7 @@ fn find_num_identical(
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1166-1188
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1166-1188
 // ```c
 // for (s_pos = 0; s_pos < subject_len - word_size; s_pos++) {
 //     ...
@@ -2107,7 +2107,7 @@ fn num_identical_by(
     num_identical
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1153-1188 (see
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1153-1188 (see
 // `find_num_identical`); c++/src/algo/blast/core/blast_kappa.c:2235-2272 (`build_query_word_hashes`)
 // ```c
 //     for (q_pos = query_from; q_pos < query_len - word_size; q_pos++) {
@@ -2160,7 +2160,7 @@ fn x_find_num_identical_on_residues(
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1259-1312
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1259-1312
 // ```c
 // static Boolean
 // s_TestNearIdentical(const BlastCompo_SequenceData* seqData,
@@ -2204,7 +2204,7 @@ pub fn test_near_identical(
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1322-1333 (see
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1322-1333 (see
 // `test_near_identical`)
 // ```c
 // num_identical += s_FindNumIdentical(queryData->data + qStart + query_right_len,
@@ -2248,7 +2248,7 @@ pub(crate) fn x_test_near_identical_on_residues(
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1259-1312
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1259-1312
 // ```c
 // static Boolean
 // s_TestNearIdentical(const BlastCompo_SequenceData* seqData,
@@ -2314,7 +2314,7 @@ fn near_identical_by(
         return (num_identical as f64) / (align_len as f64) > MIN_FRACTION_NEAR_IDENTICAL;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1322-1333
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1322-1333
     // ```c
     // num_identical += s_FindNumIdentical(queryData->data + qStart + query_right_len,
     //                         query_words + qStart + query_right_len,
@@ -2338,7 +2338,7 @@ fn near_identical_by(
     (num_identical as f64) / (align_len as f64) > MIN_FRACTION_NEAR_IDENTICAL
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1053-1097
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1053-1097
 // ```c
 // static Boolean s_preliminaryTestNearIdentical(..., double cutoff)
 // {
@@ -2375,7 +2375,7 @@ pub fn preliminary_test_near_identical(
     (align.match_end - align.match_start + 1) >= query_length.min(MINIMUM_LENGTH_NEAR_IDENTICAL)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1292
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1292
 // ```c
 // int
 // Blast_RedoOneMatch(BlastCompo_Alignment ** alignments,
@@ -2388,7 +2388,7 @@ pub fn preliminary_test_near_identical(
 //     ...
 // }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146
 // ```c
 // Blast_RedoOneMatch(..., BlastCompo_QueryInfo query_info[],
 //                    int numQueries, ...);
@@ -2702,7 +2702,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:865-889
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:865-889
     // ```c
     // if (subject_is_translated || query_is_translated)
     //     return s_WindowsFromTranslatedAligns(..., query_info, numQueries,
@@ -2801,7 +2801,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
             );
         }
         let query_index = usize::try_from(window.query_range.context)?;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1162-1188
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1162-1188
         // ```c
         // query_index = window->align->queryIndex;
         // query_composition = &query_info[query_index].composition;
@@ -2849,7 +2849,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
             };
 
             if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical) {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1188-1208
+                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1188-1208
                 // ```c
                 // status = callbacks->get_range(
                 //         matchingSeq,
@@ -2939,7 +2939,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
                     .as_ref()
                     .expect("range result initialized before redo_one_alignment");
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1219-1254
+                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1219-1254
                 // ```c
                 // if (compo_adjust_mode != eNoCompositionBasedStats &&
                 //     (subject_is_translated || hsp_index == 0
@@ -2956,7 +2956,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
                         || hsp_index == 0
                         || (near_identical != old_near_identical))
                 {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938,1234-1238
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938,1234-1238
                     // ```c
                     // s_GetComposition(&subject_composition, alphsize,
                     //     &subject, &window->subject_range, in_align,
@@ -2997,7 +2997,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
                     {
                         adjust_search_failed = true;
                     } else {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1228-1249
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1228-1249
                         // ```c
                         // adjust_search_failed =
                         //     Blast_AdjustScores(..., &matrix_adjust_rule,
@@ -3014,7 +3014,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
                             range.subject.length,
                             params.compo_adjust_mode,
                             params.composition_test_index,
-                            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1240-1247
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1240-1247
                             // ```c
                             // Blast_AdjustScores(matrix, query_composition,
                             //         query.length, &subject_composition,
@@ -3023,7 +3023,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
                             //         NRrecord, &matrix_adjust_rule,
                             // ```
                             composition_workspace,
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1248
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1248
                             // ```c
                             // Blast_AdjustScores(..., callbacks->calc_lambda,
                             //                    pvalueForThisPair, ...);
@@ -3114,7 +3114,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
                         .as_ref()
                         .is_some_and(|align| align.score >= params.cutoff_score)
                     {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1268-1269
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1268-1269
                         // ```c
                         // s_WithDistinctEnds(&newAlign, &alignments[query_index],
                         //                    ..., num_adjustments == 1);
@@ -3137,13 +3137,13 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1272-1274
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1272-1274
     // ```c
     // s_WithDistinctEnds(&newAlign, &alignments[query_index],
     //                    free_align_context, num_adjustments == 1);
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1277-1292
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1277-1292
     // ```c
     // function_level_cleanup:
     // ...
@@ -3190,7 +3190,7 @@ mod tests {
     use super::BlastCompoAlignmentContext::PreliminaryHspIndex;
     use super::*;
 
-    // NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,644-751;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,644-751;
     // c++/src/algo/blast/core/blast_kappa.c:1498-1525:
     // begin = MAX(0, align->matchStart - border);
     // end = MIN(translated_length, align->matchEnd + border);
@@ -3331,7 +3331,7 @@ mod tests {
                     window.subject_range
                 );
             }
-            // NCBI composition_adjustment/redo_alignment.c:906-938:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938:
             // Blast_GetCompositionRange(&left, &right, data, length, start, end);
             // Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
             let first_window = &actual[0];
@@ -3373,7 +3373,7 @@ mod tests {
         }
     }
 
-    // NCBI core/blast_kappa.c:1417-1455,1530-1548:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1417-1455,1530-1548:
     // BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1";
     // Blast_MaskTheResidues(seqData->data, seqData->length, FALSE, ...);
     #[test]
@@ -3421,7 +3421,7 @@ mod tests {
         assert_eq!(compared, 7);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1172-1208;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1172-1208;
     // core/blast_kappa.c:1488-1552,1684-1704
     // ```c
     // if (hsp_index == 0 || subject_maybe_biased)
@@ -3657,7 +3657,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146,1172-1269;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146,1172-1269;
     // core/blast_kappa.c:1475-1552,1896-1957
     // ```c
     // status = s_WindowsFromAligns(..., subject_is_translated, ...);
@@ -3755,7 +3755,7 @@ mod tests {
             .flat_map(|line| line.bytes().map(aa_char_to_ncbistdaa))
             .collect();
         assert_eq!(query.len(), 160);
-        // NCBI blast_setup.c:614-638 and saved hard-SEG query composition:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-638 and saved hard-SEG query composition:
         // hard query filtering replaces the first 40 K residues with X.
         query[..40].fill(21);
         let composition = read_aa_composition(&query);
@@ -3998,7 +3998,7 @@ mod tests {
             eff_search_space: 1.0,
             words: None,
         };
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2939-2955
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2939-2955
         // ```c
         // while (allMatches) {
         //     matchingSeq = allMatches->matchingSeq;
@@ -4087,7 +4087,7 @@ mod tests {
             redo_one_alignment: test_redo_one_alignment,
         };
 
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
         // ```c
         // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
         // status_code = Blast_CompositionWorkspaceInit(
@@ -4167,7 +4167,7 @@ mod tests {
 
     #[test]
     fn test_find_num_identical_accepts_short_hash_slice_for_9aa_window() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1160-1188
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1160-1188
         // ```c
         // if (!query_seq || !query_hashes || !subject_seq
         //     || query_len < word_size || subject_len < word_size) {
@@ -4225,7 +4225,7 @@ mod tests {
 
     #[test]
     fn test_test_near_identical_keeps_fraction_check_when_middle_slice_has_no_words() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1314-1333
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1314-1333
         // ```c
         // if (query_left_len + query_right_len >= query_len
         //     || subject_left_len + subject_right_len >= subject_len) {

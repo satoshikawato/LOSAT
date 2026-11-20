@@ -8,7 +8,7 @@ use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 /// `CStringException` of `NStr::StringToInt` (flags 0: an optional sign and decimal digits within
 /// the range of an `int`, no spaces) for a value it cannot convert, an empty one too.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91
 /// ```c
 ///     // used for experimentation purposes
 ///     char* batch_sz_str = getenv("BATCH_SIZE");
@@ -18,7 +18,7 @@ use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 ///         return retval;
 ///     }
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:99
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:99
 /// ```c
 ///     if (! use_default) return 0;
 /// ```
@@ -35,7 +35,7 @@ pub(crate) fn get_query_batch_size(
 /// hits, and each later batch at the target over the (mixed) ratio of successful ungapped
 /// extensions per residue of the batches before.
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:57-83
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:57-83
 /// ```c++
 /// class CBatchSizeMixer
 /// {
@@ -93,7 +93,7 @@ impl BatchSizeMixer {
     /// The next batch size; `hits` is the number of successful ungapped extensions of the
     /// batch just searched (`None` before the first batch).
     ///
-    /// NCBI reference: c++/src/app/blast/blast_app_util.cpp:65-81
+    /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:65-81
     /// ```c++
     /// Int4 CBatchSizeMixer::GetBatchSize(Int4 hits)
     /// {
@@ -309,7 +309,7 @@ impl QueryScope {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (tblastn_app.cpp:
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (c++/src/app/blast/tblastn_app.cpp:
     // 224-226 likewise)
     // ```c++
     // 		_ASSERT(pssm->HasQuery());
@@ -684,7 +684,7 @@ impl QueryBatches {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:134-171
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-171
 // ```c
 // CRef<CBlastQueryVector>
 // CBlastInput::GetNextSeqBatch(CScope& scope)
@@ -706,13 +706,13 @@ impl QueryBatches {
 //             throw;
 //         }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:378-380
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:378-380
 // ```c
 //     if (queries.Empty()) {
 //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
 //     }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
 // ```c
 //         } catch (const CException& e) {
 //             ...
@@ -727,7 +727,7 @@ impl QueryBatches {
 //         NCBI_THROW(CBlastException, eSetup, messages.ToString());
 //     }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux.cpp:1013-1025
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1013-1025
 // ```c
 // TSearchMessages::ToString() const
 // {
@@ -1022,7 +1022,7 @@ impl QueryReading {
 
 /// NCBI's message for a query or subject without letters.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup.hpp:190-198
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup.hpp:190-198
 /// ```c
 ///     TSeqPos size() const {
 ///         TSeqPos retval = x_Size();
@@ -1341,7 +1341,7 @@ mod tests {
             ("007", 7),
             ("2147483647", i32::MAX),
             ("-2147483648", i32::MIN),
-            // NCBI reads up to a NUL (`while (char ch = str[pos])`, ncbistr.cpp:841).
+            // NCBI reads up to a NUL (`while (char ch = str[pos])`, c++/src/corelib/ncbistr.cpp:841).
             ("12\u{0}x", 12),
         ] {
             assert_eq!(

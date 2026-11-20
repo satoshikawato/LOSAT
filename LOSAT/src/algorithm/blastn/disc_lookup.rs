@@ -5,7 +5,7 @@
 //! The lookup table itself is the megablast table (`lookup.rs` `TwoStageLookup`), built
 //! with these indices (`lookup.rs` `build_disc_mb_lookup`).
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:184-189
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:184-189
 // ```c
 // /** General types of discontiguous word templates */
 // typedef enum {
@@ -21,7 +21,7 @@ pub enum DiscWordType {
     TwoTemplates = 2,
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:191-235
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:191-235
 // ```c
 // /** Enumeration of all discontiguous word templates; the enumerated values
 //  * encode the weight, template length and type information
@@ -101,7 +101,7 @@ impl DiscTemplateType {
 
     /// The second template of a two-template search: the next enumerated value.
     ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:707-715
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:707-715
     /// ```c
     ///    /* For now leave only one possibility for the second template.
     ///       Note that the intention here is to select both the coding
@@ -121,7 +121,7 @@ impl DiscTemplateType {
 /// The template of a word size (weight), template length and template type; every
 /// unsupported combination is the contiguous template.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:600-643
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:600-643
 /// ```c
 /// static EDiscTemplateType
 /// s_GetDiscTemplateType(Int4 weight, Uint1 length,
@@ -210,7 +210,7 @@ pub fn get_disc_template_type(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:300-316
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:300-316
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_11_16_Coding(Uint8 accum)
 // {
@@ -234,7 +234,7 @@ fn discontig_index_11_16_coding(accum: u64) -> u32 {
         | ((lo & 0xf0000000) >> 10)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:318-333
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:318-333
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_11_16_Optimal(Uint8 accum)
 // {
@@ -256,7 +256,7 @@ fn discontig_index_11_16_optimal(accum: u64) -> u32 {
         | ((lo & 0xfc000000) >> 10)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:335-353
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:335-353
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_11_18_Coding(Uint8 accum)
 // {
@@ -284,7 +284,7 @@ fn discontig_index_11_18_coding(accum: u64) -> u32 {
         | ((hi & 0x0000000c) << 18)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:355-373
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:355-373
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_11_18_Optimal(Uint8 accum)
 // {
@@ -312,7 +312,7 @@ fn discontig_index_11_18_optimal(accum: u64) -> u32 {
         | ((hi & 0x0000000f) << 18)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:375-394
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:375-394
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_11_21_Coding(Uint8 accum)
 // {
@@ -342,7 +342,7 @@ fn discontig_index_11_21_coding(accum: u64) -> u32 {
         | ((hi & 0x00000300) << 12)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:396-414
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:396-414
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_11_21_Optimal(Uint8 accum)
 // {
@@ -370,7 +370,7 @@ fn discontig_index_11_21_optimal(accum: u64) -> u32 {
         | ((hi & 0x000003f0) << 12)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:416-431
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:416-431
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_12_16_Coding(Uint8 accum)
 // {
@@ -392,7 +392,7 @@ fn discontig_index_12_16_coding(accum: u64) -> u32 {
         | ((lo & 0xffc00000) >> 8)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:433-448
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:433-448
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_12_16_Optimal(Uint8 accum)
 // {
@@ -414,7 +414,7 @@ fn discontig_index_12_16_optimal(accum: u64) -> u32 {
         | ((lo & 0xfc000000) >> 8)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:450-468
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:450-468
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_12_18_Coding(Uint8 accum)
 // {
@@ -442,7 +442,7 @@ fn discontig_index_12_18_coding(accum: u64) -> u32 {
         | ((hi & 0x0000000c) << 20)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:470-488
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:470-488
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_12_18_Optimal(Uint8 accum)
 // {
@@ -470,7 +470,7 @@ fn discontig_index_12_18_optimal(accum: u64) -> u32 {
         | ((hi & 0x0000000f) << 20)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:490-509
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:490-509
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_12_21_Coding(Uint8 accum)
 // {
@@ -500,7 +500,7 @@ fn discontig_index_12_21_coding(accum: u64) -> u32 {
         | ((hi & 0x00000300) << 14)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:511-529
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:511-529
 // ```c
 // static NCBI_INLINE Int4 DiscontigIndex_12_21_Optimal(Uint8 accum)
 // {
@@ -531,7 +531,7 @@ fn discontig_index_12_21_optimal(accum: u64) -> u32 {
 /// The lookup table index of the discontiguous word that ends with the base in the
 /// low-order bits of `accum`.
 ///
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:540-588
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:540-588
 /// ```c
 /// static NCBI_INLINE Int4 ComputeDiscontiguousIndex(Uint8 accum,
 ///                                     EDiscTemplateType template_type)
@@ -575,7 +575,7 @@ pub fn compute_discontiguous_index(accum: u64, template_type: DiscTemplateType) 
 
 /// The scan routine NCBI chooses for a discontiguous table.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2617-2627
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2617-2627
 /// ```c
 ///     if (mb_lt->discontiguous) {
 ///         if (mb_lt->two_templates)
@@ -676,7 +676,7 @@ pub(crate) fn disc_word_scan_subject_until(
     }
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2202-2273
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2202-2273
 /// ```c
 /// static Int4 s_MB_DiscWordScanSubject_1(const LookupTableWrap* lookup_wrap,
 ///        const BLAST_SequenceBlk* subject,
@@ -859,7 +859,7 @@ fn mb_disc_word_scan_subject_1(
     }
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2289-2367
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2289-2367
 /// ```c
 /// static Int4 s_MB_DiscWordScanSubject_TwoTemplates_1(
 ///        const LookupTableWrap* lookup_wrap,
@@ -1123,7 +1123,7 @@ fn x_index_11_18_3(lo: u32, hi: u32) -> u32 {
         | ((hi & 0x00000030) << 16)
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2366-2479
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2366-2479
 /// ```c
 /// static Int4 s_MB_DiscWordScanSubject_11_18_1(
 ///        const LookupTableWrap* lookup_wrap,
@@ -1376,7 +1376,7 @@ fn x_index_11_21_3(lo: u32, hi: u32) -> u32 {
         | ((hi & 0x00000c00) << 10)
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2481-2598
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2481-2598
 /// ```c
 /// static Int4 s_MB_DiscWordScanSubject_11_21_1(
 ///        const LookupTableWrap* lookup_wrap,
@@ -1578,7 +1578,7 @@ fn mb_disc_word_scan_subject_11_21_1(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:83
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:83
 // ```c
 // #define COMPRESSION_RATIO 4
 // ```

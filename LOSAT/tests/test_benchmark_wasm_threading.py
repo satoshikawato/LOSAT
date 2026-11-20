@@ -12,7 +12,7 @@ import unittest
 import benchmark_wasm_threading as benchmark
 
 
-# NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 # x_PrintField(*iter); m_Ostream << "\n";
 # Synthetic executables test orchestration, not the search or its oracle bytes.
 class BenchmarkFailureTests(unittest.TestCase):
@@ -62,7 +62,7 @@ if os.environ.get('LOSAT_WASI_THREADS_DEBUG'):
                 self.assertFalse(any(x["phase"] == "cold" for x in samples))
                 self.assertTrue(json.loads((output / "excluded.json").read_text()))
 
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
     # (*thread)->Join(&result);
     # Non-finite limits must fail before starting a potentially unbounded child.
     def test_nonfinite_timeouts_rejected_before_run_creation(self):

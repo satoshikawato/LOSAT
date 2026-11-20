@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf, process::Command};
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // TBlastThreads the_threads(GetNumberOfThreads());
 // (*thread)->Run(); (*thread)->Join(&result);
 // WASI implementation boundary: Rust 1.92's cdylib link omits startup objects.

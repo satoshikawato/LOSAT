@@ -741,7 +741,7 @@ fn fill_part<const H24: bool>(
             unsafe { t.apply::<H24>(b as usize, q) };
         }
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:74-76
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:74-76
     // ```c
     // /* add the hit */
     // chain[chain[1] + 2] = query_offset;

@@ -1,6 +1,6 @@
 //! Backbone lookup table for TBLASTX - EXACT NCBI BLAST port
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c
 
 use super::super::diagnostics::diagnostics_enabled;
 use super::super::translation::QueryFrame;
@@ -67,7 +67,7 @@ fn blosum62_ideal_karlin_params() -> KarlinParams {
     ideal_karlin_params_for_matrix(ScoringMatrix::Blosum62, (-4, 11))
 }
 
-// NCBI c++/src/algo/blast/core/blast_stat.c:1506-1528:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1506-1528:
 // for each finite matrix score, update sbp->loscore and sbp->hiscore.
 pub(crate) fn matrix_score_bounds(matrix: ScoringMatrix) -> (i32, i32) {
     let mut low = i32::MAX;
@@ -84,12 +84,12 @@ pub(crate) fn matrix_score_bounds(matrix: ScoringMatrix) -> (i32, i32) {
     (low, high)
 }
 
-// NCBI c++/src/algo/blast/core/blast_stat.c:2833-2848:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2848:
 // stdrfp = Blast_ResFreqNew(sbp); Blast_ResFreqStdComp(sbp, stdrfp);
 // sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
 // BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
 fn ideal_karlin_params_for_matrix(matrix: ScoringMatrix, bounds: (i32, i32)) -> KarlinParams {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2848
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2848
     // ```c
     // stdrfp = Blast_ResFreqNew(sbp);
     // Blast_ResFreqStdComp(sbp, stdrfp);
@@ -276,7 +276,7 @@ pub trait XHit: Copy + Default + Send + Sync + 'static {
         in_rest: std::arch::x86_64::__m256i,
     ) -> std::arch::x86_64::__m256i;
 
-    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
     // of a cell's hits, read in order)
     // ```c
     //                     for (i = 0; i < numhits; i++) {
@@ -356,7 +356,7 @@ impl XHit for i32 {
         unsafe { std::arch::x86_64::_mm256_maskload_epi32(p, in_rest) }
     }
 
-    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
     // of a cell's hits, read in order)
     // ```c
     //                     for (i = 0; i < numhits; i++) {
@@ -455,7 +455,7 @@ impl XHit for u16 {
         unsafe { _mm256_cvtepu16_epi32(_mm_loadu_si128(p.cast())) }
     }
 
-    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:110-112 (the query offsets
     // of a cell's hits, read in order)
     // ```c
     //                     for (i = 0; i < numhits; i++) {
@@ -517,7 +517,7 @@ pub trait XCell: Copy + Default + Send + Sync + 'static {
     }
 
     /// The cell's hits: its own entries, or the `count()` hits from its cursor in `overflow`.
-    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`,
     // blastp/x_seed_fused.rs)
     fn hits<'a>(&'a self, overflow: &'a [Self::Hit]) -> &'a [Self::Hit];
 
@@ -727,7 +727,7 @@ impl XCell for BackboneCell16 {
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_aalookup.c:562-603:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-603:
 // row = info->matrix[query_word[current_pos]];
 // score + row[i] controls neighboring word inclusion.
 #[inline(always)]
@@ -750,11 +750,11 @@ pub struct BlastAaLookupTable<C: XCell = BackboneCell> {
     pub backbone: Vec<C>,
     pub overflow: Vec<C::Hit>,
     // Presence vector: PV_ARRAY_TYPE = Uint4
-    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:41-44
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:41-44
     pub pv: Vec<u32>,
     pub frame_bases: Vec<i32>,
     pub num_contexts: usize,
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:246-250
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:246-250
     // ```c
     // Uint4 QueryInfo_GetSeqBufLen(const BlastQueryInfo* qinfo)
     // {
@@ -763,7 +763,7 @@ pub struct BlastAaLookupTable<C: XCell = BackboneCell> {
     // }
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-127
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:112-127
     // ```c
     // (*seq_blk)->sequence_start = (Uint1 *) buffer;
     // (*seq_blk)->sequence = (*seq_blk)->sequence_start+1;
@@ -776,7 +776,7 @@ pub struct BlastAaLookupTable<C: XCell = BackboneCell> {
     pub mask: i32,
     pub longest_chain: i32,
     // NCBI BlastAaLookupTable has no lazy-neighbor flag; only NCBI fields are stored.
-    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:95-140
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:95-140
     pub threshold: i32,
     pub row_max: Vec<i32>,
 }
@@ -1177,7 +1177,7 @@ struct NeighborInfo<'a> {
     neighbor_words_generated: usize,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:96-97
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:96-97
 // ```c
 // BlastAaLookupIndexQuery((BlastAaLookupTable*) lookup_wrap->lut, matrix,
 //                         query, lookup_segments, 0);
@@ -1190,7 +1190,7 @@ struct PreparedLookupQuery {
     skipped_seg_mask: usize,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1032-1114
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1032-1114
 // ```c
 // start_offset = query_info->contexts[context].query_offset;
 // end_offset = query_info->contexts[context].query_length + start_offset - 1;
@@ -1273,13 +1273,13 @@ pub(crate) fn build_lookup_segments_for_context(
     lookup_segments
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:96-100
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:96-100
 // ```c
 // if (word_length > to - from + 1)
 //     continue;
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:102-128
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:102-128
 // ```c
 // seq = query->sequence + from;
 // word_target = seq + lut_word_length;
@@ -1297,14 +1297,14 @@ fn count_lookup_positions(lookup_segments: &[(i32, i32)], word_length: usize) ->
         .sum()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-314
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-314
 // ```c
 // info->contexts[i].query_offset = new_offsets[i];
 // distance = new_offsets[i+1] - new_offsets[i];
 // info->contexts[i].query_length = distance ? distance-1 : 0;
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:621-636
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-636
 // ```c
 // if (!mask_at_hash) {
 //     BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc, program_number);
@@ -1315,7 +1315,7 @@ fn count_lookup_positions(lookup_segments: &[(i32, i32)], word_length: usize) ->
 // }
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1098-1101
 // ```c
 // /* Increment offset by 1 extra byte for the sentinel NULLB
 //    between frames. */
@@ -1676,11 +1676,11 @@ fn x_context_karlin(
     ideal_params: KarlinParams,
 ) -> (bool, KarlinParams) {
     let ctx_comp = compute_aa_composition(&frame.aa_seq, frame.aa_len);
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803:
     // score frequencies use this score block's matrix and lo/hi scores.
     let sfp =
         compute_score_freq_profile_for_matrix(&ctx_comp, std_comp, bounds.0, bounds.1, matrix);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2803
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
     // ```c
     // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
     // if (loop_status) {
@@ -1782,7 +1782,7 @@ fn x_prepare_lookup_query(
                 query_offset += frame.aa_seq.len() as i32 - 1;
                 continue;
             }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2803
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
             // ```c
             // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
             // ```
@@ -1808,7 +1808,7 @@ fn x_prepare_lookup_query(
     prepared
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:621-636
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-636
 // ```c
 // if (lookup_segments) {
 //     BLAST_ComplementMaskLocations(program_number, query_info,
@@ -1816,7 +1816,7 @@ fn x_prepare_lookup_query(
 // }
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1351
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1349-1351
 // ```c
 // s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
 //                                 query, locations);
@@ -2057,7 +2057,7 @@ fn lookup_chain_entries(chain: &[i32]) -> &[i32] {
     &chain[2..2 + num_used]
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:33-77
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:33-77
 // ```c
 // index = ComputeTableIndex(wordsize, charsize, seq);
 // if (backbone[index] == NULL) {
@@ -2126,7 +2126,7 @@ fn blast_lookup_add_word_hit(
     chain[1] += 1;
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:79-132
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:79-132
 // ```c
 // for (loc = locations; loc; loc = loc->next) {
 //     Int4 from = loc->ssr->left;
@@ -2207,7 +2207,7 @@ fn blast_lookup_index_query_exact_matches(
     total_exact_positions
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:546-606
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:546-606
 // ```c
 // score -= info->row_max[query_word[current_pos]];
 // row = info->matrix[query_word[current_pos]];
@@ -2234,13 +2234,13 @@ fn blast_lookup_index_query_exact_matches(
 fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_pos: usize) {
     let query_residue = info.query_word[current_pos] as usize;
     let score = score - info.row_max[query_residue];
-    // NCBI c++/src/algo/blast/core/blast_aalookup.c:562-563:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563:
     // row = info->matrix[query_word[current_pos]];
     let matrix = info.matrix;
 
     if current_pos == info.wordsize - 1 {
         for residue in 0..info.alphabet_size {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:580-582
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-582
             // ```c
             // for (i = 0; i < alphabet_size; i++) {
             //     if (score + row[i] >= threshold) {
@@ -2265,7 +2265,7 @@ fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_
     }
 
     for residue in 0..info.alphabet_size {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:600-603
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:600-603
         // ```c
         // for (i = 0; i < alphabet_size; i++) {
         //     if (score + row[i] >= threshold) {
@@ -2280,7 +2280,7 @@ fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:472-544
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:472-544
 // ```c
 // w = query + offset_list[2];
 // score = matrix[w[0]][w[0]];
@@ -2315,13 +2315,13 @@ fn blast_aa_add_word_hits(
     let query_offset = usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
     let query_word = &query[query_offset..];
     let query_residue = query_word[0] as usize;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:492-496
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:492-496
     // ```c
     // score = matrix[w[0]][w[0]];
     // for (i = 1; i < lookup->word_length; i++)
     //     score += matrix[w[i]][w[i]];
     // ```
-    // NCBI c++/src/algo/blast/core/blast_aalookup.c:492-496:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:492-496:
     // score = matrix[w[0]][w[0]]; then add each matrix[w[i]][w[i]].
     let mut self_score = lookup_matrix_score(matrix, query_residue, query_residue);
     for residue in query_word.iter().take(word_length).skip(1) {
@@ -2376,13 +2376,13 @@ fn blast_aa_add_word_hits(
 
 /// Build NCBI-style lookup table with presence vector and overflow.
 ///
-/// Reference: blast_aalookup.c BlastAaLookupIndexQuery + BlastAaLookupFinalize
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c BlastAaLookupIndexQuery + BlastAaLookupFinalize
 ///
 /// Neighbor words are always precomputed in the lookup table (no lazy mode).
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-543
 ///
 /// NCBI reference (fixed alphabet and neighbor precomputation):
-/// ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:436-456
+/// c++/src/algo/blast/core/blast_aalookup.c:436-456
 /// ```c
 /// ASSERT(lookup->alphabet_size <= BLASTAA_SIZE);
 /// ...
@@ -2480,7 +2480,7 @@ pub(crate) fn x_tbx_build_ncbi_lookup(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
 // lookup->word_length = opt->word_size; lookup->threshold = opt->threshold;
 // row_max[i] = MAX(row_max[i], matrix[i][j]);
 // s_AddWordHits(lookup, matrix, query->sequence, ...);
@@ -2767,7 +2767,7 @@ fn build_lookup_from_prepared(
         contexts,
         skipped_seg_mask: _,
     } = prepared;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:246-250
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:246-250
     // ```c
     // Uint4 QueryInfo_GetSeqBufLen(const BlastQueryInfo* qinfo)
     // {
@@ -2776,7 +2776,7 @@ fn build_lookup_from_prepared(
     // }
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,654
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,654
     // ```c
     // int buflen = QueryInfo_GetSeqBufLen(qinfo);
     // TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
@@ -2784,7 +2784,7 @@ fn build_lookup_from_prepared(
     // BlastSeqBlkSetSequence(*seqblk, buf.release(), buflen - 2);
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:147-160
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:147-160
     // ```c
     // seq_blk->sequence = (Uint1*) sequence + 1;
     // seq_blk->length = seqlen;
@@ -2800,7 +2800,7 @@ fn build_lookup_from_prepared(
         .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
         .unwrap_or(0);
 
-    // NCBI c++/src/algo/blast/core/blast_aalookup.c:438-444:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:438-444:
     // row_max[i] = matrix[i][0];
     // for (j = 1; j < alphabet_size; j++) row_max[i] = MAX(row_max[i], matrix[i][j]);
     let row_max: Vec<i32> = (0..alphabet_size)
@@ -2812,7 +2812,7 @@ fn build_lookup_from_prepared(
         })
         .collect();
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-469
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
     // ```c
     // exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
     // BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
@@ -2869,7 +2869,7 @@ fn build_lookup_from_prepared(
     }
 
     // Phase 1b: Add neighboring words (NCBI precomputed neighbors).
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-543
     let residue_mask: usize = (1usize << charsize) - 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:246-247
     // ```c
@@ -2970,7 +2970,7 @@ fn build_lookup_from_prepared(
     // Phase 2: Finalize
     let mut backbone: Vec<BackboneCell> = vec![BackboneCell::default(); backbone_size];
     // NCBI allocates pv as: (backbone_size >> PV_ARRAY_BTS) + 1.
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:327-329
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:327-329
     let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
     let mut pv: Vec<u32> = vec![0u32; pv_size];
 
@@ -3046,7 +3046,7 @@ fn build_lookup_from_prepared(
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:282-299
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:282-299
     // ```c
     // for (i = 0; i < lookup->backbone_size; i++) {
     //     if (lookup->thin_backbone[i]) {
@@ -3075,7 +3075,7 @@ fn build_lookup_from_prepared(
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:337-360
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-360
     // ```c
     // for (i = 0; i < lookup->backbone_size; i++) {
     //     if (lookup->thin_backbone[i]) {
@@ -3166,7 +3166,7 @@ mod tests {
     use crate::stats::lookup_protein_params_ungapped;
     use crate::utils::matrix::{blosum62_score, ncbistdaa, BLASTAA_SIZE};
 
-    // NCBI blast_filter.c:1032-1114: the complement of the masks of one context, without the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1032-1114: the complement of the masks of one context, without the
     // empty intervals at the ends.
     #[test]
     fn lookup_segments_are_the_complement_of_the_masks() {
@@ -3238,7 +3238,7 @@ mod tests {
         assert!(arena.x_unthresholded_slabs.is_empty());
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:87-129
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:87-129
     // ```c
     // if (seq >= word_target) {
     //     BlastLookupAddWordHit(backbone, lut_word_length, charsize,
@@ -3416,14 +3416,14 @@ mod tests {
         count
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-314
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-314
     // ```c
     // info->contexts[i].query_offset = new_offsets[i];
     // distance = new_offsets[i+1] - new_offsets[i];
     // info->contexts[i].query_length = distance ? distance-1 : 0;
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1098-1101
     // ```c
     // offset += length + 1;
     // frame_offsets[context+1] = offset;
@@ -3460,7 +3460,7 @@ mod tests {
         assert_eq!(prepared.contexts[1].frame_base, 4);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1045-1056
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1045-1056
     // ```c
     // start_offset = query_info->contexts[context].query_offset;
     // end_offset = query_info->contexts[context].query_length + start_offset - 1;
@@ -3471,7 +3471,7 @@ mod tests {
     // }
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1067-1114
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1067-1114
     // ```c
     // filter_start = start_offset + seq_range->left;
     // filter_end = start_offset + seq_range->right;
@@ -3502,7 +3502,7 @@ mod tests {
         assert_eq!(prepared.skipped_seg_mask, 4);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2789
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2789
     // ```c
     // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
     // if (loop_status) {
@@ -3523,12 +3523,12 @@ mod tests {
         assert!(!prepared.contexts[0].is_valid);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:246-250
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:246-250
     // ```c
     // return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-127
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:112-127
     // ```c
     // (*seq_blk)->sequence = (*seq_blk)->sequence_start+1;
     // (*seq_blk)->length = length;
@@ -3552,7 +3552,7 @@ mod tests {
         assert_eq!(lookup.query_length, 7);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:102-128
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:102-128
     // ```c
     // seq = query->sequence + from;
     // word_target = seq + lut_word_length;
@@ -3587,7 +3587,7 @@ mod tests {
         assert_eq!(lookup.get_context_idx(4), 1);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:340-357
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:340-357
     // ```c
     // if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
     //     dest = bbc[i].payload.entries;
@@ -3613,7 +3613,7 @@ mod tests {
         assert_eq!(lookup.get_hits(aaa_index), &[0, 1, 2, 3]);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:504-543
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:504-543
     // ```c
     // if (lookup->threshold == 0 || score < lookup->threshold) {
     //     for (i = 0; i < offset_list[1]; i++) {
@@ -3644,7 +3644,7 @@ mod tests {
         assert_eq!(lookup.get_hits(aaa_index), &[0, 1, 2, 3]);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:96-128
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:96-128
     // ```c
     // if (word_length > to - from + 1)
     //     continue;
@@ -3679,7 +3679,7 @@ mod tests {
         assert_eq!(lookup.get_hits(aaa_index), &[0, 4]);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:92-100
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:92-100
     // ```c
     // for (loc = locations; loc; loc = loc->next) {
     //     Int4 from = loc->ssr->left;

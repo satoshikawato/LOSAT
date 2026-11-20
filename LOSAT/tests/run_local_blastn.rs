@@ -189,7 +189,7 @@ fn the_cli_writes_a_cl_tag_and_the_library_none() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
@@ -200,7 +200,7 @@ fn the_cli_writes_a_cl_tag_and_the_library_none() {
 //     ...
 // }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
 // ```c
 // if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
 //    hitlist_size = args[kArgMaxTargetSequences].AsInteger();
@@ -305,7 +305,7 @@ fn custom_tabular_formats_of_one_search_match_the_cli_run_of_that_format() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261-274,299-300
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-274,299-300
 // ```c
 //         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
 //     ...
@@ -349,7 +349,7 @@ fn an_invalid_query_after_the_first_batch_is_reported_with_its_batch() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
 // ```c
 //         catch(CBlastException & e ) {
 //         	// Skip bad subject sequence
@@ -359,7 +359,7 @@ fn an_invalid_query_after_the_first_batch_is_reported_with_its_batch() {
 //         		warning += "Subject sequence contains no data";
 //         		ERR_POST(Warning << warning);
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-636
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-636
 // ```c
 //         } catch (const CException& e) {
 //             // FIXME: is index this the right value for the 2nd arg? Also, how

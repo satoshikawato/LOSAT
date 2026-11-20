@@ -104,7 +104,7 @@ fn run_search(
     command.output().expect("run LOSAT CLI")
 }
 
-// NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-210,732-737, blastp_app.cpp:280-285,
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:206-210,732-737, c++/src/app/blast/blastp_app.cpp:280-285,
 // tblastn_app.cpp:294-299, tblastx_app.cpp:197-202, blastn_app.cpp:304-309 and
 // psiblast_app.cpp:262-266 (psiblast fetches ahead before it writes the archive).
 #[test]
@@ -367,7 +367,7 @@ fn a_location_part_that_ncbi_cannot_convert_is_its_exception() {
 //     use_old_fsc = getenv("OLD_FSC");
 //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
 // ```
-// NCBI sets OLD_FSC for any -searchsp (blast_args.cpp:303-307), so BLASTP, BLASTX, TBLASTN and
+// NCBI sets OLD_FSC for any -searchsp (c++/src/algo/blast/blastinput/blast_args.cpp:303-307), so BLASTP, BLASTX, TBLASTN and
 // PSIBLAST with OLD_FSC (any value, the empty one too) write the frozen bytes of `-searchsp 0`
 // (rows sp.<program>.zero.0 and ps.subj.sp.zero.tk.0 of outfmt0_manifest.tsv; NCBI 2.17.0 writes
 // the same bytes with OLD_FSC=1, and psiblast with OLD_FSC=true, probe `ofsctrue.tk.subj.0` of line

@@ -3158,7 +3158,7 @@ mod tests {
         assert_eq!(coverage_percent(1000, 1000), 100);
     }
 
-    // NCBI tabular.cpp:626-633 and 693-700: without the taxonomy database's names, `staxids`
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:626-633 and 693-700: without the taxonomy database's names, `staxids`
     // brings `N/A` fillers, quoted in a CSV (the singular names only for a non-zero taxid, the
     // plural ones once per taxid).
     #[test]
@@ -3261,7 +3261,7 @@ mod tests {
             ),
             "N/A,\"N/A\",N/A,0\n"
         );
-        // NCBI tabular.cpp:612-624 and 669-680 with the names found (RESULTS.md §3 of line OF
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:612-624 and 669-680 with the names found (RESULTS.md §3 of line OF
         // taxdb): the plural blast names and super kingdoms are sorted sets, `-` and
         // `unclassified` are dropped, an empty common name stays empty in the plural list and is
         // `N/A` alone; a taxid not found gets the fillers.
@@ -3352,7 +3352,7 @@ mod tests {
         );
     }
 
-    // NCBI tabular.cpp:900-908 (the frames only with a field of `SetCounts`' block, `num_ident >
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908 (the frames only with a field of `SetCounts`' block, `num_ident >
     // 0` for `nident`), tabular.cpp:1003-1021 (the positives of the rows by the formatter's
     // matrix, `GetAsciiProteinMatrix`: U and C count as C-C, a J pair not, `*` with `*` is 1)
     // and tabular.cpp:1293-1298 (psiblast's round).
@@ -3453,7 +3453,7 @@ mod tests {
         );
     }
 
-    // NCBI tabular.cpp:219-255 (`sseqid`, `sacc`, `saccver`, `sgi`: the subject's own ids) and
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:219-255 (`sseqid`, `sacc`, `saccver`, `sgi`: the subject's own ids) and
     // :387-439 (`salltitles` joined by `<>`, `stitle` the first title, an empty one `N/A`); a local
     // query's id is its `qseqid`, `qacc` and `qaccver` alike.
     #[test]
@@ -3570,7 +3570,7 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
 
-    // NCBI tabular.cpp:828-875 and 1374-1378 (the catch of `SetFields` and `SetSubjectId(list)`):
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 and 1374-1378 (the catch of `SetFields` and `SetSubjectId(list)`):
     // NCBI BLAST+ 2.17.0 `blastn -subject` with two titles `Subject_9 bad x\x81y title`,
     // `Subject_7 other \x8dz` (probe `remaining-gaps-20261112/T/t7`, `s.bb.blastn.f6wide`), and a
     // found subject before a failed one (`s.gb`): `sseqid` Unknown, `sgi` 0, the Seq-align ids added
@@ -3640,7 +3640,7 @@ mod tests {
         );
     }
 
-    // NCBI tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId(list)`, `return -1`)
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId(list)`, `return -1`)
     // where the load of the subject throws (`DB contains no accession info.`, a batch whose
     // prefetch is off; probe of line DBID pfoff-2, `R/pfoff/p2`, `bp.U2.*`, DECISIONS 62 (12)):
     // the row keeps the last loaded row's ids, titles and taxonomy, `sall*` add the Seq-align id
@@ -3758,7 +3758,7 @@ mod tests {
         assert!(may_stop_at_failed_lookup(Some(&spec("staxid ssciname"))));
     }
 
-    // NCBI tabular.cpp:828-875 (the catch of the subject block) for the default fields (probe of
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block) for the default fields (probe of
     // line DBID pfoff-2, `R/pfoff/p2`, `*.U2.dflt.6`; review 2, M3): the one writer of the
     // default tables' rows of a subject whose load throws (BLASTP's, BLASTN's, TBLASTN's and
     // TBLASTX's, `TabularRows::write_thrown_default`; BLASTX's are the `std` fields of
@@ -3803,7 +3803,7 @@ mod tests {
         );
     }
 
-    // NCBI tabular.cpp:833-898: which rows end the run where the load throws (`slen`, the
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-898: which rows end the run where the load throws (`slen`, the
     // letters after the subject block), which are written (a field of that block), and which
     // read nothing; `nident` alone reads only on rows with identities.
     #[test]
@@ -3977,7 +3977,7 @@ mod tests {
         );
     }
 
-    // NCBI tabular.cpp:174-185 (`FindBestChoice` of the empty `m_SubjectId`, a null pointer:
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:174-185 (`FindBestChoice` of the empty `m_SubjectId`, a null pointer:
     // NCBI BLAST+ 2.17.0 exits 255) and :262-268 (`staxid` of an `m_SubjectTaxId` that no row set:
     // a different number in each run, probe of line RG T7 `6 qseqid sseqid staxid`).
     #[test]

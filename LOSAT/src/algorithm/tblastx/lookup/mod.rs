@@ -1,7 +1,7 @@
 //! Lookup table construction for TBLASTX - EXACT NCBI BLAST port
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c
-//!            ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c
+//!            c++/include/algo/blast/core/blast_aalookup.h
 //!
 //! # Module Structure
 //!
@@ -9,7 +9,7 @@
 //! - `compressed` - compressed amino-acid lookup primitives for `blastp-fast`
 
 mod backbone;
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:186-267
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:186-267
 // ```c
 // /* ------------ compressed alphabet protein blast defines ---------------*/
 // typedef struct BlastCompressedAaLookupTable { ... } BlastCompressedAaLookupTable;
@@ -64,7 +64,7 @@ use crate::utils::matrix::BLASTAA_SIZE;
 ///
 /// NCBI uses BLASTAA_SIZE = 28 for all amino acid lookup operations.
 // NCBI reference (NCBISTDAA alphabet includes stop codon):
-// ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:115-118
+// c++/src/algo/blast/core/blast_encoding.c:115-118
 // ```c
 // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
 // '-','A','B','C','D','E','F','G','H','I','K','L','M',
@@ -75,7 +75,7 @@ pub const LOOKUP_WORD_LENGTH: usize = 3;
 pub const LOOKUP_ALPHABET_SIZE: usize = BLASTAA_SIZE; // 28 (NCBI standard)
 
 // Presence Vector - NCBI style (PV_ARRAY_TYPE = Uint4, 32-bit).
-// Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:41-44
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:41-44
 pub(crate) const PV_ARRAY_BTS: usize = 5;
 pub(crate) const PV_ARRAY_MASK: usize = 31;
 
@@ -121,7 +121,7 @@ pub(crate) fn compute_mask(word_length: usize, charsize: usize) -> usize {
 pub fn pv_test(pv: &[u32], index: usize) -> bool {
     // NCBI PV_TEST macro:
     // lookup[(index) >> PV_ARRAY_BTS] & (1U << (index & PV_ARRAY_MASK))
-    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:55-57
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57
     (pv[index >> PV_ARRAY_BTS] & (1u32 << (index & PV_ARRAY_MASK))) != 0
 }
 
@@ -129,7 +129,7 @@ pub fn pv_test(pv: &[u32], index: usize) -> bool {
 pub(crate) fn pv_set(pv: &mut [u32], index: usize) {
     // NCBI PV_SET macro:
     // lookup[(index) >> PV_ARRAY_BTS] |= (1U << (index & PV_ARRAY_MASK))
-    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:49-50
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-50
     pv[index >> PV_ARRAY_BTS] |= 1u32 << (index & PV_ARRAY_MASK);
 }
 
@@ -143,7 +143,7 @@ pub struct QueryContext {
     pub aa_len: usize,
     pub orig_len: usize,
     pub frame_base: i32,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_query_info.h:60-69
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_query_info.h:60-69
     // ```c
     // typedef struct BlastContextInfo {
     //     Int4 query_offset;
@@ -154,7 +154,7 @@ pub struct QueryContext {
     // ```
     pub is_valid: bool,
     /// NCBI: `kbp[context]` - Karlin parameters for this context
-    /// Reference: link_hsps.c line 750-752, 866-867
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c line 750-752, 866-867
     pub karlin_params: KarlinParams,
 }
 

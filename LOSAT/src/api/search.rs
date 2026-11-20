@@ -17,7 +17,7 @@ use super::input::Inputs;
 use super::program::Program;
 use crate::cli::{Cli, Commands};
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
 // ```c
 // arg_desc.AddDefaultKey(kArgOutput, "output_file",
 //                "Output file name",

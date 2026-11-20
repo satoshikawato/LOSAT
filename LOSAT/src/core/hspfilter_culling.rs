@@ -1,6 +1,6 @@
-//! NCBI BLAST HSP culling (`-culling_limit`): the interval tree of `hspfilter_culling.c`.
+//! NCBI BLAST HSP culling (`-culling_limit`): the interval tree of `c++/src/algo/blast/core/hspfilter_culling.c`.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_culling.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c
 //!
 //! The interval tree of NCBI's culling writer and pipe: every HSP of a query context is
 //! saved in the tree of its context unless `culling_max` HSPs already dominate it, and a
@@ -23,7 +23,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:52-60
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:52-60
 /// ```c
 /// typedef struct LinkedHSP {
 ///     BlastHSP * hsp;
@@ -63,7 +63,7 @@ pub(crate) struct CullKey {
     pub(crate) subject_offset: i64,
 }
 
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:200-207
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:200-207
 /// ```c
 /// typedef struct CTreeNode {
 ///     Int4 begin;                /* left endpoint */
@@ -82,7 +82,7 @@ struct CTreeNode {
     hsplist: VecDeque<usize>,
 }
 
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:435
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:435
 /// ```c
 ///    Int4 kNumHSPtoFork = 20;  /** number of HSP to trig forking children */
 /// ```
@@ -114,7 +114,7 @@ pub(crate) struct CullingForest<H> {
 }
 
 impl<H> CullingForest<H> {
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:487-493
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:487-493
     /// ```c
     /// static int
     /// s_BlastHSPCullingInit(void* data, void* results)
@@ -160,7 +160,7 @@ impl<H> CullingForest<H> {
     /// a limit of 1). LOSAT adds in `i64` (Owner 2026-10-22, NCBI parity DECISIONS 17: no
     /// reproduction of NCBI's undefined behaviour), so every limit above 1 is three more.
     ///
-    /// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:338-340
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:338-340
     /// ```c
     ///             if(params->culling_max > 1){
     ///             	params->culling_max += 3;
@@ -179,7 +179,7 @@ impl<H> CullingForest<H> {
     /// into the tree `cid` (made with the length `qlen` on first use) unless `culling_max`
     /// HSPs already dominate it; an HSP that is not saved is freed.
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:612-633
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:612-633
     /// ```c
     ///       A.sid   = hsp_list->oid;
     ///       A.merit = params->culling_max;
@@ -236,7 +236,7 @@ impl<H> CullingForest<H> {
     /// (`Blast_GetQueryIndexFromContext`); the result has one entry for each query with a
     /// tree, in query order.
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:516-581
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581
     /// ```c
     ///    for (cid=0; cid < cull_data->num_contexts; ++cid) {
     ///       if (c_tree[cid]) {
@@ -307,7 +307,7 @@ impl<H> CullingForest<H> {
             .collect()
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:79-120
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:79-120
     /// ```c
     /// static Boolean s_DominateTest(LinkedHSP *p, LinkedHSP *y) {
     ///     Int8 b1 = p->begin;
@@ -375,7 +375,7 @@ impl<H> CullingForest<H> {
         d >= 0
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:123-133
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:123-133
     /// ```c
     /// static Boolean s_FullPass(LinkedHSP *list, LinkedHSP *y) {
     ///     LinkedHSP *p = list;
@@ -402,7 +402,7 @@ impl<H> CullingForest<H> {
         true
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:136-163
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:136-163
     /// ```c
     /// static Int4 s_ProcessHSPList(LinkedHSP **list, LinkedHSP *y) {
     ///     Int4 num = 0;
@@ -452,7 +452,7 @@ impl<H> CullingForest<H> {
         num
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:166-189
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:166-189
     /// ```c
     /// static Int4 s_MarkDownHSPList(LinkedHSP **list) {
     ///     Int4 num = 0;
@@ -493,7 +493,7 @@ impl<H> CullingForest<H> {
         num
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:228-247
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:228-247
     /// ```c
     /// static CTreeNode * s_CTreeNodeNew(CTreeNode * parent, ECTreeChild dir) {
     ///     Int4 midpt;
@@ -548,7 +548,7 @@ impl<H> CullingForest<H> {
         }
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:376-381
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:376-381
     /// ```c
     /// static CTreeNode * s_CTreeNew(Int4 qlen) {
     ///     CTreeNode * tree = s_CTreeNodeNew(NULL, eLeft);
@@ -564,7 +564,7 @@ impl<H> CullingForest<H> {
         tree
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:258-299
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:258-299
     /// ```c
     ///     p = node->hsplist;
     ///     q = p;  /* q is predecessor of p */
@@ -594,7 +594,7 @@ impl<H> CullingForest<H> {
     ///       }
     ///    }
     /// ```
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:193-197
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:193-197
     /// ```c
     /// static void s_AddHSPtoList(LinkedHSP **list, LinkedHSP *y) {
     ///     y->next = *list;
@@ -642,7 +642,7 @@ impl<H> CullingForest<H> {
 
     /// Returns whether the node is freed (NCBI sets `*node = NULL`).
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:319-330
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:319-330
     /// ```c
     /// static void s_MarkDownCTree(CTreeNode ** node) {
     ///    if (! (*node)) return;
@@ -677,7 +677,7 @@ impl<H> CullingForest<H> {
 
     /// Returns whether the node is freed (NCBI sets `*node = NULL`).
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:334-370
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:334-370
     /// ```c
     /// static void s_ProcessCTree(CTreeNode ** node, LinkedHSP *x) {
     ///    Int4 midpt;
@@ -757,7 +757,7 @@ impl<H> CullingForest<H> {
         }
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:396-423
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:396-423
     /// ```c
     /// static LinkedHSP * s_RipHSPOffCTree(CTreeNode *tree) {
     ///     LinkedHSP *q, *p;
@@ -789,7 +789,7 @@ impl<H> CullingForest<H> {
         self.rip_hsp_off_ctree(right, out);
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:430-470
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:430-470
     /// ```c
     /// static Boolean s_SaveHSP(CTreeNode *tree, LinkedHSP *A) {
     /// ...
@@ -911,7 +911,7 @@ mod tests {
             .collect()
     }
 
-    // NCBI c++/src/algo/blast/api/setup_factory.cpp:338-340: the preliminary writer adds
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:338-340: the preliminary writer adds
     // 3 to a limit above 1. NCBI's Int4 sum overflows near INT4_MAX; LOSAT's does not.
     #[test]
     fn the_preliminary_limit_adds_three_above_one_without_overflow() {
@@ -951,7 +951,7 @@ mod tests {
         assert!(f.nodes.len() <= nodes + 3);
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:136-163: an HSP never dominates
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:136-163: an HSP never dominates
     // itself (`r != y`), so a limit of 1 keeps the best HSP of overlapping ones, whichever
     // comes first.
     #[test]
@@ -966,7 +966,7 @@ mod tests {
         assert_eq!(kept(f), vec![(0, vec![50])]);
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:79-120: with equal score and range
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:79-120: with equal score and range
     // the lower OID dominates; another tree has its own HSPs.
     #[test]
     fn ties_are_broken_by_oid_and_trees_do_not_interact() {
@@ -980,7 +980,7 @@ mod tests {
         assert_eq!(all[1].1, vec![(0, vec![(50, 2)])]);
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:100-112: with the same OID the HSP
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:100-112: with the same OID the HSP
     // with the lower subject offset dominates, and equal keys dominate each other, so the
     // HSP saved later loses.
     #[test]
@@ -1012,7 +1012,7 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:258-299,453-458: a leaf with 20
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:258-299,453-458: a leaf with 20
     // HSPs forks; HSPs that do not overlap are all kept.
     #[test]
     fn many_disjoint_hsps_fork_and_survive() {
@@ -1023,7 +1023,7 @@ mod tests {
         assert_eq!(kept(f)[0].1.len(), 40);
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:396-423,516-581: the rip takes a
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:396-423,516-581: the rip takes a
     // node's list, then the left subtree, then the right subtree; the lists of a query are
     // made in the order of the first HSP of each subject.
     #[test]

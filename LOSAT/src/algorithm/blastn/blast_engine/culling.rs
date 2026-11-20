@@ -1,7 +1,7 @@
 //! BLASTN `-culling_limit`: NCBI's culling writer of the preliminary stage and its culling
 //! pipe after the traceback (`core::hspfilter_culling` holds the interval tree both share).
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_culling.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c
 //!
 //! This module is a child of `run` for the preliminary HSP types that `run` keeps private.
 //! Nothing here runs without `-culling_limit` (a limit of 0 is NCBI's `SetCullingLimit(0)`,
@@ -23,7 +23,7 @@ fn int4(length: usize) -> i32 {
 /// The key of an HSP for the tree: the range on the plus strand of the query. A minus
 /// context folds its range over the query length.
 ///
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:617-633
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:617-633
 /// ```c
 ///       A.cid   = isBlastn ? (A.hsp->context  - A.hsp->context % NUM_STRANDS) : A.hsp->context;
 ///       A.sid   = hsp_list->oid;
@@ -75,7 +75,7 @@ pub(super) struct PrelimCulling {
 }
 
 impl PrelimCulling {
-    /// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:318-342
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:318-342
     /// ```c
     ///         else if (filt_opts->culling_opts &&
     ///                  (filt_opts->culling_stage & ePrelimSearch))
@@ -105,7 +105,7 @@ impl PrelimCulling {
 
     /// `s_BlastHSPCullingRun` for the HSPs of subject `oid` (all queries, both strands).
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:602-644
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:602-644
     /// ```c
     ///    for (i=0; i<hsp_list->hspcnt; ++i) {
     ///       /* wrap the hsp with a LinkedHSP structure */
@@ -146,7 +146,7 @@ impl PrelimCulling {
     /// sorted by score, and as many lists as the tree keeps: the hit list is made with
     /// `prelim_hitlist_size` as its maximum but is not cut to it, and it is not heapified.
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:516-581
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581
     /// ```c
     ///          if (!results->hitlist_array[qid]) {
     ///             results->hitlist_array[qid] = Blast_HitListNew(params->prelim_hitlist_size);
@@ -212,7 +212,7 @@ impl PrelimCulling {
 /// into a new tree with the merit `culling_limit` (without the three of the preliminary
 /// writer), and the kept HSPs made into the query's hit list again.
 ///
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:699-733
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:699-733
 /// ```c
 /// static int
 /// s_BlastHSPCullingPipeRun(void* data, BlastHSPResults* results)
@@ -257,7 +257,7 @@ pub(super) fn cull_traceback(
     culling_limit: i32,
     prelim_hitlist_size: usize,
 ) {
-    // NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:707-713
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:707-713
     // ```c
     //          for (sid = 0; sid < num_list; ++sid) {
     //         	 hsp_list = results->hitlist_array[qid]->hsplist_array[sid];
@@ -278,7 +278,7 @@ pub(super) fn cull_traceback(
         .first()
         .map_or(0, |list| list.query_index);
 
-    // NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:715-725
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:715-725
     // ```c
     //       for (sid = 0; sid < num_list; ++sid) {
     //          s_BlastHSPCullingRun(data,
@@ -376,7 +376,7 @@ mod tests {
             .unwrap_or_default()
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:617-633: a minus HSP is folded to
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:617-633: a minus HSP is folded to
     // the plus strand, so a minus HSP over the same plus range as a better plus HSP is
     // dominated by it, and one elsewhere is not.
     #[test]
@@ -395,7 +395,7 @@ mod tests {
         assert_eq!(scores(&lists, 0), vec![(0, vec![100, 50])]);
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:516-581, blast_hits.c:3125-3133: the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581, c++/src/algo/blast/core/blast_hits.c:3125-3133: the
     // hit list is made with `prelim_hitlist_size` and holds more lists than that, in the
     // order of the first HSP of each subject, with the best e-value, worst e-value and low
     // score set.
@@ -449,7 +449,7 @@ mod tests {
         assert_eq!(lists[1].as_ref().unwrap().hsplist_count, 4);
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:100-112: the lower OID wins a tie,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:100-112: the lower OID wins a tie,
     // and the subject must come in OID order for the later one to lose.
     #[test]
     fn identical_hsps_of_two_subjects_keep_the_lower_oid() {

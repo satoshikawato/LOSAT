@@ -572,7 +572,7 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
                 }
             }
             // A diagonal past the end of `seq1` (`x_past_seq1_end`).
-            // NCBI reference (598d8ae6): greedy_align.c:565-600
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565-600
             if x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index) {
                 diag_upper = k;
                 *current.add(k as usize) = seq2_index;

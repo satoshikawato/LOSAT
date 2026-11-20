@@ -1657,7 +1657,7 @@ mod tests {
         result
     }
 
-    // NCBI reference: c++/src/app/blastdb/makeblastdb.cpp:1037-1039 (`NStr::EndsWith(seq_file,
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1039 (`NStr::EndsWith(seq_file,
     // ".gz" / ".bz2" / ".zst", NStr::eNocase)`): the suffix in any case, nothing else.
     #[test]
     fn a_name_announces_its_compression_by_its_suffix_in_any_case() {

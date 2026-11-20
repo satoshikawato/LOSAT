@@ -1108,9 +1108,9 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
 
 
 # NCBI references:
-# - ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+# - c++/src/algo/blast/format/blast_format.cpp:770-832
 #   dispatches the selected output format.
-# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# - c++/src/objtools/align_format/tabular.cpp:1098-1108
 #   writes the selected fields and row terminator directly to the output stream.
 def _load_native_authority_bytes(raw: bytes, path: Path) -> NativeAuthority:
     try:
@@ -1192,9 +1192,9 @@ def run_capture(
 
 
 # NCBI references:
-# - ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+# - c++/src/algo/blast/format/blast_format.cpp:770-832
 #   formats the search result produced from the supplied query and subject.
-# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# - c++/src/objtools/align_format/tabular.cpp:1098-1108
 #   emits the raw fields whose certification fingerprint is input-byte-bound.
 # Certification therefore materializes the exact candidate Git blobs before either
 # implementation runs; checkout filters are not an input authority.
@@ -1512,7 +1512,7 @@ def replace_output(command: Sequence[str], output: Path) -> list[str]:
     raise CertificationFailure(f"output option absent from command: {command}")
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+# NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-832
 # The frozen raw-output hashes select accepted formatter bytes, so the manifest
 # that supplies them is parsed from the exact candidate Git blob.
 def _canonical_lines(raw: bytes) -> tuple[list[str], list[str]]:
@@ -1724,7 +1724,7 @@ def _input_arguments(
     return arguments
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:794-808
+# NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:794-808
 # ```c++
 # if (m_FormatType == CFormattingArgs::eTabularWithComments) {
 #     if (m_IsDbScan)
@@ -1866,8 +1866,8 @@ def required_fixture_relatives(steps: Sequence[SearchStep]) -> list[PurePosixPat
 
 
 # NCBI references:
-# - ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
-# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# - c++/src/algo/blast/format/blast_format.cpp:770-832
+# - c++/src/objtools/align_format/tabular.cpp:1098-1108
 # The exact query/subject bytes feed the certified raw formatter bytes. Copy the
 # candidate blob verbatim; do not normalize or repair committed data.
 def stage_required_fixtures(
@@ -1946,7 +1946,7 @@ def fixture_staging_identity(records: Sequence[StagedFixture]) -> dict[str, obje
     }
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+# NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-832
 # ```c++
 # ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
 #     tabinfo.SetFields(**itr, *m_Scope, &m_ScoringMatrix);
@@ -2075,7 +2075,7 @@ def build_steps(
     return steps
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
 #   x_PrintField(*iter); m_Ostream << "\n";
 # Gate A compares these raw bytes by SHA-256 without normalization. The known
 # frozen mismatches are read from the candidate commit's Git blob, like the
@@ -2199,7 +2199,7 @@ def allowed_known_mismatch_lines(
     ]
 
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
 #   x_PrintField(*iter); m_Ostream << "\n";
 # One rule for a Gate A output hash in execution, resume and aggregation: the
 # Gate A manifest hash, or, for a case in frozen_mismatch_allowlist.json, only its
@@ -2350,9 +2350,9 @@ def _authority_executable(
 
 
 # NCBI references:
-# - ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+# - c++/src/algo/blast/format/blast_format.cpp:770-832
 #   selects the requested tabular formatter before the search output is written.
-# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# - c++/src/objtools/align_format/tabular.cpp:1098-1108
 #   preserves the requested field order and row terminator in the raw stream.
 def _verify_native_invocation_identity(
     repo_root: Path,
@@ -2509,9 +2509,9 @@ def verify_native_invocation_identity(
 
 
 # NCBI references:
-# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:59-91
+# - c++/src/objtools/align_format/tabular.cpp:59-91
 #   expands the selected tabular fields in their requested order.
-# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# - c++/src/objtools/align_format/tabular.cpp:1098-1108
 #   writes those exact rows and terminators; Gate B therefore hashes raw bytes.
 def verify_native_raw_fingerprint(
     authority: NativeAuthority,
@@ -2571,9 +2571,9 @@ def line_endings_only(left: Path, right: Path) -> bool:
 
 
 # NCBI references:
-# - ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:828-832
+# - c++/src/algo/blast/format/blast_format.cpp:828-832
 #   emits retained alignments before this post-acceptance comparison exists.
-# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+# - c++/src/objtools/align_format/tabular.cpp:1100-1108
 #   writes exact field values and terminators already bound by Gate B's raw hash.
 def report_native_vs_losat_diagnostic(
     catalog: Catalog,

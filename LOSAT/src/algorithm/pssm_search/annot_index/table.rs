@@ -1008,7 +1008,7 @@ impl Indexer<'_> {
                     // `SetTableKeyAndIndex` puts the row's handle in `key.m_Handle`.
                     self.handles.set_key(id.as_ref());
                 }
-                // NCBI's row map is made for each location (seq_annot_info.cpp:1130).
+                // NCBI's row map is made for each location (c++/src/objmgr/seq_annot_info.cpp:1130).
                 self.handles.end_object();
             }
         }

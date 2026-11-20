@@ -5,7 +5,7 @@
 //!
 //! NCBI BLAST style: Each translated sequence is wrapped with sentinel bytes
 //! at the beginning and end to ensure proper extension termination.
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:438-453
 
 use super::constants::SENTINEL_BYTE;
 use crate::utils::genetic_code::{complement, revcomp, GeneticCode};
@@ -26,7 +26,7 @@ pub struct QueryFrame {
     /// When accessing amino acid at logical position i, use `aa_seq[i + 1]`.
     /// When reporting coordinates, subtract 1 from the raw position.
     ///
-    /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:438-453
     ///   `prot_seq[0] = NULLB;`  // sentinel at beginning
     ///   `prot_seq[index_prot] = NULLB;`  // sentinel at end
     pub aa_seq: Vec<u8>,
@@ -59,7 +59,7 @@ fn codon_to_aa_ncbistdaa(codon: &[u8], table: &GeneticCode) -> u8 {
 ///
 /// NCBI BLAST places NULLB sentinel bytes at the beginning and end of each
 /// translated sequence to ensure proper extension termination.
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:438-453
 /// ```c
 ///   prot_seq[0] = NULLB;  // First character is sentinel
 ///   prot_seq[index_prot] = NULLB;  // Last character is sentinel

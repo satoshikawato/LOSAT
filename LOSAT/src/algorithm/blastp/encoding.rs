@@ -13,7 +13,7 @@ pub struct EncodedProtein {
     pub aa_len: usize,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:115-121
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-121
 // ```c
 // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
 // '-','A','B','C','D','E','F','G','H','I','K','L','M',
@@ -29,7 +29,7 @@ pub fn ncbistdaa_to_ascii(residue: u8) -> char {
     TABLE.get(residue as usize).copied().unwrap_or('X')
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-127
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:112-127
 // ```c
 // (*seq_blk)->sequence_start = (Uint1 *) buffer;
 // /* The first byte is a sentinel byte. */
@@ -39,12 +39,12 @@ pub fn ncbistdaa_to_ascii(residue: u8) -> char {
 // (*seq_blk)->length = length;
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:110-121
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:110-121
 // ```c
 // ... AMINOACID_TO_NCBISTDAA ...
 // const Uint1 kProtSentinel = NULLB;
 // ```
-// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:894-899
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-899
 // ```c
 //     for (i = 0; i < sv.size(); i++) {
 //         // Change unsupported residues to X
@@ -70,20 +70,20 @@ pub fn encode_protein_sequence(seq: &[u8]) -> EncodedProtein {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:382-385
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:382-385
 // ```c
 // if (Blast_QueryIsProtein(program_number))
 //     BLAST_ScoreSetAmbigRes(sbp, 'X');
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:337-370
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:337-370
 // ```c
 // BlastSetUp_Filter(..., query_blk, ...);
 // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
 // query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315
 // ```c
 // query_offset = 0;
 // for (index = 0; index < query_info->last_context; ++index) {
@@ -240,7 +240,7 @@ fn encode_query_frame<const MASK_AT_HASH: bool>(
 mod tests {
     use super::*;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-127
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:112-127
     // ```c
     // (*seq_blk)->sequence_start = (Uint1 *) buffer;
     // (*seq_blk)->sequence = (*seq_blk)->sequence_start+1;
@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(encoded.aa_seq[4], 0);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:115-121
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-121
     // ```c
     // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
     // '-','A','B','C','D','E','F','G','H','I','K','L','M',

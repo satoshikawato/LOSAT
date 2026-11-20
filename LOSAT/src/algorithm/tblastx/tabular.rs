@@ -365,7 +365,7 @@ pub(super) fn write_tblastx_tabular(
             query_length,
         );
         let query_hits = &by_query[q_idx];
-        // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208: a skipped search has a
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208: a skipped search has a
         // null alignment set, so outfmt 7 has no count line (`report::write_tabular`).
         table.query_header(
             &mut buf,
@@ -660,7 +660,7 @@ pub(super) fn write_tblastx_tabular(
 mod tests {
     use super::*;
 
-    // NCBI blast_format.cpp:348-357: outfmt 20's line of the field names, after the warning of its
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357: outfmt 20's line of the field names, after the warning of its
     // formatter when `taxdb.bti` is not found and a plural name is shown.
     #[test]
     fn outfmt_20_writes_its_line_and_its_formatter_s_warning() {
@@ -683,7 +683,7 @@ mod tests {
         assert!(out.is_empty() && err.is_empty());
     }
 
-    // NCBI tabular.cpp:900-908 and 970-986: `nident` alone enters the block (and reads the rows)
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908 and 970-986: `nident` alone enters the block (and reads the rows)
     // with a positive engine count only; the other count fields always, the row fields read the
     // rows.
     #[test]

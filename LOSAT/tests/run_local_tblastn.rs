@@ -115,7 +115,7 @@ fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
     (bytes, output.stderr)
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:289-301
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289-301
 // ```c
 // CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
 // results = lcl_blast.Run();
@@ -124,7 +124,7 @@ fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
 //     formatter.PrintOneResultSet(**result, query);
 // }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
 // ```c
 // if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
 //    hitlist_size = args[kArgMaxTargetSequences].AsInteger();
@@ -216,7 +216,7 @@ fn cli_run(query: &Path, subject: &Path, extra: &[&str]) -> (Option<i32>, Vec<u8
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
 // ```c
 //         catch(CBlastException & e ) {
 //         	// Skip bad subject sequence
@@ -226,7 +226,7 @@ fn cli_run(query: &Path, subject: &Path, extra: &[&str]) -> (Option<i32>, Vec<u8
 //         		warning += "Subject sequence contains no data";
 //         		ERR_POST(Warning << warning);
 // ```
-// NCBI reference: c++/src/algo/blast/core/blast_setup.c:969-979
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-979
 // ```c
 //    if (sbp->gbp) {
 //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);

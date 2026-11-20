@@ -250,7 +250,7 @@ pub fn field(row: &[u8], index: usize) -> String {
         .to_string()
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 //     // Add tab in front of field, except for the first field.
@@ -260,7 +260,7 @@ pub fn field(row: &[u8], index: usize) -> String {
 // }
 // m_Ostream << "\n";
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 // ```c++
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```

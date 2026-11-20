@@ -1,4 +1,4 @@
-//! NCBI corelib/ncbiargs.cpp: what an NCBI application prints for `-xmlhelp`
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp: what an NCBI application prints for `-xmlhelp`
 //! (`CArgDescriptions::PrintUsageXml`), the description of its arguments in XML.
 //!
 //! LOSAT prints NCBI BLAST+ 2.17.0's XML of each program, frozen (`ncbi_xmlhelp/<program>.xml`),

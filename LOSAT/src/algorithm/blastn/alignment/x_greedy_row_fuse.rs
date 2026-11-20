@@ -216,7 +216,7 @@ unsafe fn x_greedy_row_fused<const REVERSE: bool>(
             if index < 0 {
                 // A diagonal past the end of `seq1` (`x_past_seq1_end`), unless the fence was
                 // already hit on entry (C returns at the first kept diagonal then).
-                // NCBI reference (598d8ae6): greedy_align.c:565-600
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565-600
                 let seq1_index = seq2_index + block_first + i as i32;
                 if !cold.fence_hit
                     && x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index)

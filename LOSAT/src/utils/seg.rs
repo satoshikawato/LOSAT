@@ -16,17 +16,17 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::seg_lnfact::LNFAC;
 
 /// Natural log of 20 (alphabet size for amino acids).
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2196
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2196
 ///   const double kLn20 = 2.9957322735539909;
 const K_LN20: f64 = 2.9957322735539909;
 
 /// NCBI BLAST ln(2) constant.
-/// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/ncbi_math.h
 /// #define NCBIMATH_LN2 0.69314718055994530941723212145818
 const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 /// Natural log values for 0.1, 0.2, 0.3, ... 1.0 used by NCBI when window total=10.
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1305-1311
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1305-1311
 #[expect(
     clippy::approx_constant,
     reason = "NCBI's log_win10[] digits (blast_seg.c:1307-1311): -2.30258509 is not the f64 of -LN_10, and the std constant would change SEG's entropy"
@@ -46,7 +46,7 @@ const LOG_WIN10: [f64; 11] = [
 ];
 
 /// NCBI s_lnfact: log(n!) using either tabulated data (lnfact[]) or Stirling's formula.
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1854-1859
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1854-1859
 /// ```c
 /// static double s_lnfact(Int4 n) {
 ///   if (n < sizeof(lnfact)/sizeof(*lnfact))
@@ -64,7 +64,7 @@ fn s_lnfact(n: usize) -> f64 {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1324-1350,2190-2217
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1324-1350,2190-2217
 // ```c
 // typedef struct Alpha {
 //    Int4 alphabet;
@@ -117,7 +117,7 @@ impl SegAlpha {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1335-1350,1541-1705
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1335-1350,1541-1705
 // ```c
 // typedef struct SSequence {
 //    struct SSequence* parent;
@@ -257,7 +257,7 @@ impl<'a> SegWindow<'a> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1631-1657
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1631-1657
 // ```c
 // while ((svi = *sv++) != 0) {
 //    if (svi == class && *sv < class) {
@@ -299,9 +299,9 @@ fn increment_sv(state: &mut [i32], class: i32) {
 
 /// Calculate ln(number of permutations) for a given state vector
 /// This is equation 3 from Wootton & Federhen: ln(n!) - sum(ln(count_i!))
-/// Reference: blast_seg.c s_LnPerm()
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c s_LnPerm()
 fn ln_perm(sv: &[i32], window_length: i32) -> f64 {
-    // NCBI reference (verbatim, blast_seg.c:1867-1882):
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1867-1882
     // ```c
     // ans = s_lnfact(window_length);
     // for (i=0; sv[i]!=0; i++) { ans -= s_lnfact(sv[i]); }
@@ -318,9 +318,9 @@ fn ln_perm(sv: &[i32], window_length: i32) -> f64 {
 
 /// Calculate ln(number of compositions) for a given state vector
 /// This is equation 1 from Wootton & Federhen
-/// Reference: blast_seg.c s_LnAss()
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c s_LnAss()
 fn ln_ass(sv: &[i32], alphasize: i32) -> f64 {
-    // NCBI reference (verbatim, blast_seg.c:1892-1933):
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1892-1933
     // ```c
     // ans = lnfact[alphasize];
     // if (sv[0] == 0) return ans;
@@ -384,7 +384,7 @@ fn ln_ass(sv: &[i32], alphasize: i32) -> f64 {
 
 /// Calculate the K2 complexity score (probability-based)
 /// This is the natural log of P_0 from equation 3 of Wootton & Federhen
-/// Reference: blast_seg.c s_GetProb()
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c s_GetProb()
 fn get_prob(sv: &[i32], window_length: i32) -> f64 {
     let alphasize = 20; // Standard amino acid alphabet
     let totseq = (window_length as f64) * K_LN20;
@@ -401,7 +401,7 @@ fn get_prob(sv: &[i32], window_length: i32) -> f64 {
 }
 
 /// NCBI SEG entropy (Shannon entropy, bits) implementation.
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1592-1624 (s_Entropy)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1592-1624 (s_Entropy)
 fn entropy_from_state_vector(state: &[i32]) -> f64 {
     // Memo (was LOSAT_X_SEGMEMO): the entropy is a pure function of the
     // state vector, and a 12-letter window has at most a few hundred distinct
@@ -604,7 +604,7 @@ impl Default for SegParams {
 
 impl SegParams {
     pub fn new(window: usize, locut: f64, hicut: f64) -> Self {
-        // NCBI parameter normalization (blast_seg.c:s_SegParametersCheck):
+        // NCBI parameter normalization (c++/src/algo/blast/core/blast_seg.c:s_SegParametersCheck):
         // ```c
         // if (sparamsp->window <= 0) sparamsp->window = 12;
         // if (sparamsp->locut < 0.0) sparamsp->locut = 0.0;
@@ -664,7 +664,7 @@ impl SegMasker {
         let params = SegParams::new(window, locut, hicut);
 
         // downset = (window+1)/2 - 1, upset = window - downset
-        // Reference: blast_seg.c:2050-2051
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2050-2051
         let downset = params.window.div_ceil(2) - 1;
         let upset = params.window - downset;
 
@@ -716,7 +716,7 @@ impl SegMasker {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1541-1604,1745-1780
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1541-1604,1745-1780
     // ```c
     // win = s_OpenWin(seq, 0, window);
     // s_EntropyOn(win);
@@ -733,7 +733,7 @@ impl SegMasker {
         (win.entropy, win.bogus as usize)
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1745-1803
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1745-1803
     // ```c
     // win = s_OpenWin(seq, 0, window);
     // s_EntropyOn(win);
@@ -782,7 +782,7 @@ impl SegMasker {
 
     /// Find the left boundary of a low-complexity region
     /// Starting from position i, search left until entropy > hicut
-    /// Reference: blast_seg.c:1813-1825 (s_FindLow)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1813-1825 (s_FindLow)
     fn find_low(&self, i: usize, limit: usize, h: &[f64]) -> usize {
         // NCBI reference (verbatim):
         // ```c
@@ -806,7 +806,7 @@ impl SegMasker {
 
     /// Find the right boundary of a low-complexity region
     /// Starting from position i, search right until entropy > hicut
-    /// Reference: blast_seg.c:1836-1848 (s_FindHigh)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1836-1848 (s_FindHigh)
     fn find_high(&self, i: usize, limit: usize, h: &[f64]) -> usize {
         // NCBI reference (verbatim):
         // ```c
@@ -829,7 +829,7 @@ impl SegMasker {
     }
 
     /// NCBI s_Trim: trim [leftend..=rightend] to minimize s_GetProb.
-    /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1974-2018
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1974-2018
     ///
     /// Note: `leftend` and `rightend` are **inclusive** indices in `seq`.
     fn trim_segment(&self, seq: &[u8], leftend: usize, rightend: usize) -> (usize, usize) {
@@ -841,7 +841,7 @@ impl SegMasker {
             return (leftend, rightend);
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1987-2007
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1987-2007
         // ```c
         // lend = 0;
         // rend = seq->length - 1;
@@ -896,7 +896,7 @@ impl SegMasker {
     /// Mask a sequence and return the list of masked intervals, the overlapping segments merged:
     /// `SeqBufferSeg` as BLAST's filters call it (`sparamsp->overlaps = TRUE`, blast_filter.c
     /// and the composition adjustment's `s_DoSegSequenceData`).
-    /// Reference: blast_seg.c:2030-2116 (s_SegSeq)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2030-2116 (s_SegSeq)
     pub fn mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         self.seq_buffer_seg::<true>(seq)
     }
@@ -992,7 +992,7 @@ impl SegMasker {
                         if lend < leftend {
                             let rend = leftend - 1;
                             if rend < seq.len() && lend <= rend {
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2086-2101
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2086-2101
                                 // ```c
                                 //             SSeg *leftsegs = (SSeg*) NULL;
                                 // ...
@@ -1018,7 +1018,7 @@ impl SegMasker {
                         }
                     }
 
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2104-2108
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2104-2108
                     // ```c
                     // seg = (SSeg*) calloc(1, sizeof(SSeg));
                     // seg->begin = leftend + offset;
@@ -1042,7 +1042,7 @@ impl SegMasker {
 
         seg_seq(self, seq, 0, &mut segs_inclusive);
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1142-1154
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1142-1154
         // ```c
         // sparamsp = SegParametersNewAa();
         // sparamsp->overlaps = TRUE;
@@ -1050,7 +1050,7 @@ impl SegMasker {
         //                       seqloc_retval);
         // ```
         //
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2125-2149
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2125-2149
         // ```c
         // if (sparamsp->overlaps)
         //    s_MergeSegs(seqwin, segs);
@@ -1059,7 +1059,7 @@ impl SegMasker {
             merge_segs_inclusive(seq.len(), &mut segs_inclusive);
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2300-2319
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2300-2319
         // ```c
         // s_SegsToBlastSeqLoc(segs, offset, seg_locs);
         // ```
@@ -1072,7 +1072,7 @@ impl SegMasker {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2125-2149
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2125-2149
 // ```c
 // s_MergeSegs(SSequence* seq, SSeg* segs)
 // {
@@ -1632,7 +1632,7 @@ impl SegMasker {
         let index = self.x_letter_index();
         let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
 
-        // NCBI blast_seg.c:2030-2116 (s_SegSeq); the control flow of `seg_seq` in
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2030-2116 (s_SegSeq); the control flow of `seg_seq` in
         // `mask_sequence_reference`.
         fn seg_seq(
             masker: &SegMasker,
@@ -2047,7 +2047,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1000-1004
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1000-1004
     // ```c
     // /** NCBIstdaa encoding for 'X' character */
     // #define BLASTP_MASK_RESIDUE 21
@@ -2076,7 +2076,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1000-1004
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1000-1004
     // ```c
     // /** NCBIstdaa encoding for 'X' character */
     // #define BLASTP_MASK_RESIDUE 21
@@ -2108,7 +2108,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1000-1004
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1000-1004
     // ```c
     // /** NCBIstdaa encoding for 'X' character */
     // #define BLASTP_MASK_RESIDUE 21
@@ -2145,7 +2145,7 @@ mod tests {
     // `segmasker` interval output is `0-based closed`; Rust stores merged
     // `MaskedInterval` values as `0-based half-open`.
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1415-1438
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1415-1438
     // ```c
     // #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
     // static int
@@ -2183,7 +2183,7 @@ mod tests {
     // `segmasker` interval output is `0-based closed`; Rust stores merged
     // `MaskedInterval` values as `0-based half-open`.
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:337-370
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:337-370
     // ```c
     // BlastSetUp_Filter(..., query_blk, ...);
     // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
@@ -2211,7 +2211,7 @@ mod tests {
     // `segmasker` interval output is `0-based closed`; Rust stores merged
     // `MaskedInterval` values as `0-based half-open`.
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:337-370
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:337-370
     // ```c
     // BlastSetUp_Filter(..., query_blk, ...);
     // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
@@ -2248,7 +2248,7 @@ mod tests {
     // `segmasker` interval output is `0-based closed`; Rust stores merged
     // `MaskedInterval` values as `0-based half-open`.
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:337-370
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:337-370
     // ```c
     // BlastSetUp_Filter(..., query_blk, ...);
     // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
@@ -2358,7 +2358,7 @@ mod tests {
     // `segmasker` interval output is `0-based closed`; Rust stores merged
     // `MaskedInterval` values as `0-based half-open`.
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1415-1438
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1415-1438
     // ```c
     // #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
     // static int
@@ -2475,7 +2475,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2125-2149
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2125-2149
     // ```c
     // if (seg->begin - nextseg->end - 1 < hilenmin) {
     //     ...

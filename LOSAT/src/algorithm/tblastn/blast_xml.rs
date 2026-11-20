@@ -575,7 +575,7 @@ impl PreparedXml {
                             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                                 let hsp = &linked.hsp;
                                 let frame = i32::from(hsp.frame);
-                                // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1087-1105:
                                 // translated coordinates use three nucleotide letters per
                                 // residue and reverse strand endpoints run in descending order.
                                 let subject_len = i32::try_from(subject_seq.len())?;

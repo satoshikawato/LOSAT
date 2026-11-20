@@ -138,7 +138,7 @@ xstats = []
 # them and says so on stderr. No NCBI counterpart.
 diagnostics = []
 parallel = ["rayon"]
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 # ```c
 # int num_threads = args[kArgNumThreads].AsInteger();
 # if (num_threads > kMaxValue) {

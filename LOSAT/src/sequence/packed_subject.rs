@@ -947,7 +947,7 @@ mod tests {
         }
     }
 
-    /// NCBI's reader applying `runs` to the letters of `packed` (seqdbvol.cpp:834-842), as
+    /// NCBI's reader applying `runs` to the letters of `packed` (c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:834-842), as
     /// ncbi4na codes.
     fn ncbi_letters(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Vec<u8> {
         let mut seq: Vec<u8> = (0..length)

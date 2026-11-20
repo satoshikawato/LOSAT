@@ -145,7 +145,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         context_karlin,
         search_karlin,
     } = inputs;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c
     // db_length = BlastSeqSrcGetTotLen(seq_src);
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
@@ -156,7 +156,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     let progress_bar = (subjects_parallel && args.progress_bar)
         .then(|| batch_progress_bar(subject_count, ProgressDrawTarget::stderr()));
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
     // ```c
     // if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
     //    hitlist_size = args[kArgMaxTargetSequences].AsInteger();
@@ -165,7 +165,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // m_NumAlignments = hitlist_size;
     // ```
     let hitlist_size = args.report_counts.hitlist_size;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
     // ```c
     // Int4
     // GetPrelimHitlistSize(Int4 hitlist_size, Int4 compositionBasedStats,
@@ -187,7 +187,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
     // BLASTN-specific debug mode: set LOSAT_DEBUG_BLASTN=1 to enable detailed hit loss diagnostics
     let blastn_debug = std::env::var("LOSAT_DEBUG_BLASTN").is_ok();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:350-692
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:350-692
     // ```c
     // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
     // ...
@@ -196,7 +196,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // Blast_IntervalTreeReset(tree);
     // ```
     let blastn_trace_enabled = blastn_trace::enabled();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3267-3282
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3267-3282
     // ```c
     // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
     //                  true);
@@ -241,7 +241,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
     // ```c
     // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking)
     //     ? bool(args[kArgUseLCaseMasking])
@@ -259,7 +259,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     let penalty = config.penalty;
     let gap_open = config.gap_open;
     let gap_extend = config.gap_extend;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:455-463
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-463
     // ```c
     //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
     //       params->gap_x_dropoff = (Int4)
@@ -322,7 +322,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     if x_qgroup_par::on() && !x_qgroup_batch {
         crate::utils::xreach::x_reach!("LOSAT_X_QGROUPPAR", false);
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
     // ```c
     // return ((hsp->num_ident * 100.0 <
     //         align_length * hit_options->percent_identity) ||
@@ -330,10 +330,10 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // ```
     let percent_identity = args.percent_identity_value();
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1130 (BlastScoreBlkNuclMatrixCreate)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1052-1130 (BlastScoreBlkNuclMatrixCreate)
     let score_matrix = build_blastna_matrix(reward, penalty);
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:236-259
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:236-259
     // ```c
     // for (i = 0; i < 256; i++) {
     //    Int4 score = 0;
@@ -346,18 +346,18 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // ```
     let nucl_score_table = build_nucl_score_table(reward, penalty);
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:218-221
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:218-221
     // ```c
     // p->cutoffs[context].x_dropoff_init =
     //     (Int4)(sbp->scale_factor *
     //            ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
     // ```
-    // NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
     // m_InitWordOpts.Reset((BlastInitialWordOptions*)calloc(1, sizeof(BlastInitialWordOptions)));
-    // NCBI reference: c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
     // SetInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
     // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
-    // NCBI reference: c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
     // SetMBInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
     // Traditional megablast retains the zero-initialized X-drop option (0 bits, so 0 here):
     // its raw X-drop is the subject's word cutoff in ParametersUpdate
@@ -491,7 +491,7 @@ fn subject_schedule(inputs: &ScheduleInputs<'_>) -> SubjectSchedule {
     if x_few_subj::on() && subjects_parallel && subjects.prepared().is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNFEWSUBJ", x_serial_subjects);
     }
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
     let use_parallel = subjects_parallel && !x_serial_subjects;

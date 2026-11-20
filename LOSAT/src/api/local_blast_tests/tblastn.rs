@@ -134,7 +134,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
@@ -145,7 +145,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
 //     ...
 // }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1443-1451
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1443-1451
 // ```c
 // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
 // ```
@@ -279,7 +279,7 @@ impl Drop for Inputs {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:289-301
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289-301
 // ```c
 // CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
 // results = lcl_blast.Run();
@@ -325,7 +325,7 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3971-3980
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3971-3980
 // ```c++
 // x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
 // ...
@@ -352,7 +352,7 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
 // ```c
 // arg_desc.AddDefaultKey(kArgOutputFormat, "format",
 //                        kOutputFormatDescription,
@@ -365,7 +365,7 @@ fn unsupported_formats_fail_before_searching() {
     let queries = queries(&inputs.query);
     let subjects = subjects(&inputs.subject);
     let (query_name, subject_name) = inputs.names();
-    // NCBI blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
     // "0 qseqid" is outfmt 0. A delimiter that a field separates its entries with is NCBI's
     // error (blast_args.cpp:2753-2792, `s_ValidateCustomDelim`). SAM (17) is BLASTN's alone (TBLASTN
     // writes 1 to 4 since line RG T3b).
@@ -399,7 +399,7 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
-// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// NCBI derives the hit list size per output format (c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973): with
 // `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
 // so formats that need different hit list sizes are refused before anything is written
 // (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
@@ -469,7 +469,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
     }
 }
 
-// NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
 // 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
 // such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print
 // only the ids. LOSAT writes the title `, ` stopped at the end of the string (approved

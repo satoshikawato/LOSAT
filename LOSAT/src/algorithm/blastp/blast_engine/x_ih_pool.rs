@@ -17,7 +17,7 @@
 //!         match_array = (BlastInitHSP *)
 //!             realloc(match_array, num_avail * sizeof(BlastInitHSP));
 //! ```
-//! NCBI resets a thread's list for each subject (`BlastInitHitListReset`, blast_engine.c:491) and
+//! NCBI resets a thread's list for each subject (`BlastInitHitListReset`, c++/src/algo/blast/core/blast_engine.c:491) and
 //! keeps its array, so each thread holds the largest array any of its subjects needed. The subject
 //! scratch (`BlastpSubjectScratch::init_hsps`, cleared, never shrunk) did the same, and each
 //! worker's malloc arena also kept the arrays its vector outgrew: the search held the sum over the

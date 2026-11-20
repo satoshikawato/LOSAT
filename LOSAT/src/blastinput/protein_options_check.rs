@@ -38,7 +38,7 @@ pub struct ProteinOptionsCheck<'a> {
 /// identity matrix. LOSAT has no greedy or Smith-Waterman extension option or cutoff score
 /// option for these programs, so NCBI's other checks cannot fail.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1759-1776
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1759-1776
 /// ```c
 ///    if ((status = BlastExtensionOptionsValidate(program_number, ext_options,
 ///                                                blast_msg)) != 0)
@@ -58,7 +58,7 @@ pub struct ProteinOptionsCheck<'a> {
 /// ```
 pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Result<()> {
     use crate::blastinput::app::options_error;
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:910-936 (the scoring
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:910-936 (the scoring
     // check of BLAST_ValidateOptions; blastp and tblastn may use IDENTITY)
     // ```c
     //                 if (options->gapped_calculation && !Blast_ProgramIsRpsBlast(program_number))
@@ -108,7 +108,7 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
             }
         }
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1303-1395 (the lookup
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1303-1395 (the lookup
     // check of BLAST_ValidateOptions for blastp and tblastn)
     // ```c
     //     if (program_number != eBlastTypeBlastn &&
@@ -216,7 +216,7 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
     if check.x_dropoff.is_some_and(|x_dropoff| x_dropoff <= 0.0) {
         return Err(options_error("x_dropoff must be greater than zero"));
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1511-1517 (the hit saving
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1511-1517 (the hit saving
     // check of the hit list size, before the e-value's)
     // ```c
     // 	if (options->hitlist_size < 1)
@@ -229,7 +229,7 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
     if check.hitlist_size < 1 {
         return Err(options_error("No hits are being saved"));
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1518-1521 (the hit
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1521 (the hit
     // saving check; LOSAT's blastp and tblastn have no cutoff score option)
     // ```c
     // 	if (options->expect_value <= 0.0 && options->cutoff_score <= 0)
@@ -242,7 +242,7 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
             "expect value or cutoff score must be greater than zero",
         ));
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1783-1795
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1783-1795
     // ```c
     //        char* matrix = BLAST_StrToUpper(score_options->matrix);
     //        Boolean is_identity = strcmp(matrix, "IDENTITY") == 0;

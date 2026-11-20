@@ -242,7 +242,7 @@ pub(super) fn check(
     if unreadable {
         return Err(Off::Unreadable);
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315
     // A batch's concatenated query holds each query's six frames, each at most a third of the
     // query's letters, after a sentinel byte: at most `2 * letters + 7` per query. All queries
     // bound every batch (`check_diag_table_window`).

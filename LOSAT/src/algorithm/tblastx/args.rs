@@ -7,7 +7,7 @@ use std::path::PathBuf;
 // Command-line arguments for TBLASTX (translated DNA vs translated DNA search)
 //
 // NCBI reference (CTblastxAppArgs argument set):
-// ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:66-118
+// c++/src/algo/blast/blastinput/tblastx_args.cpp:66-118
 // ```c
 // arg.Reset(new CGenericSearchArgs( !kQueryIsProtein, false, false, true));
 // ...
@@ -37,7 +37,7 @@ use std::path::PathBuf;
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct TblastxArgs {
-    // NCBI blast_args.cpp:3425-3427:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427:
     // arg_desc.AddDefaultKey(kArgQuery, "input_file", "Input file name",
     //                        CArgDescriptions::eInputFile, kDfltArgQuery);
     // The default `-` is standard input.
@@ -118,12 +118,12 @@ pub struct TblastxArgs {
     pub searchsp: Option<i64>,
     #[arg(long, default_value_t = 10.0, value_parser = tblastx_real)]
     pub evalue: f64,
-    // NCBI blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
     // (Int4) value and the report prints the double. Omitted, the matrix's suggestion
     // (`word_threshold`).
     #[arg(long, value_parser = tblastx_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion]")]
     pub threshold: Option<f64>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:624-629 (tblastx_args.cpp:81
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:624-629 (c++/src/algo/blast/blastinput/tblastx_args.cpp:81
     // adds it)
     // ```c
     // CMatrixNameArg::SetArgumentDescriptions(CArgDescriptions& arg_desc)
@@ -172,7 +172,7 @@ pub struct TblastxArgs {
     // A value other than 0 is NCBI's options error (`check_ncbi_options`); 0 changes nothing.
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]")]
     pub max_intron_length: Option<i32>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927
     // ```c
     //     m_NumDescriptions = m_DfltNumDescriptions;
     //     m_NumAlignments = m_DfltNumAlignments;
@@ -183,7 +183,7 @@ pub struct TblastxArgs {
     //         hitlist_size = m_NumAlignments;
     //     }
     // ```
-    // NCBI reference: c++/src/objtools/align_format/format_flags.cpp:219,221
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:219,221
     // ```c
     // const size_t kDfltArgNumDescriptions = 500;
     // const size_t kDfltArgNumAlignments = 250;
@@ -192,7 +192,7 @@ pub struct TblastxArgs {
     // shows 250 alignments, so the option has no clap default.
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep (default: 500)", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
-    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
     #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
@@ -205,10 +205,10 @@ pub struct TblastxArgs {
     // report, which `check_ncbi_options` sets from `-max_target_seqs`, `-num_descriptions`,
     // `-num_alignments` and the output format (`blastinput::report_counts`). Not a public
     // option.
-    // Reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
     #[arg(skip)]
     pub report_counts: crate::blastinput::report_counts::ReportCounts,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:196-206
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-206
     // ```c
     //         arg_desc.AddOptionalKey(kArgQueryCovHspPerc, "float_value",
     //                             "Percent query coverage per hsp",
@@ -240,11 +240,11 @@ pub struct TblastxArgs {
     //           SSegOptionsNew(&segOptions);
     //       ptr++;
     //   }
-    // Source: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:572-580
+    // Source: c++/src/algo/blast/core/blast_filter.c:572-580
     //
     // Therefore, for tblastx we do NOT apply nucleotide-level DUST masking.
 
-    // NCBI blast_args.cpp:396-406: opt.SetSegFiltering(false/true);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406: opt.SetSegFiltering(false/true);
     // opt.SetSegFilteringWindow(...); opt.SetSegFilteringLocut(...);
     // opt.SetSegFilteringHicut(...);
     // Read when NCBI's filtering handler reads it (`blastinput/app.rs` `parse_seg_option`).
@@ -278,7 +278,7 @@ pub struct TblastxArgs {
     // archive (outfmt 11) records (`SumStatistics`); the search reads `sum_stats()`.
     #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics [default: true]")]
     pub sum_stats: Option<bool>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
     // arg_desc.AddFlag(kArgUseLCaseMasking,
     //     "Use lower case filtering in query and subject sequence(s)?", true);
     // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
@@ -312,7 +312,7 @@ pub struct TblastxArgs {
     #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 16, 18 and 20", "6, 7, 10 and 20", ""))]
     pub outfmt: String,
 
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
     // ```c
     // CHspFilteringArgs::ExtractAlgorithmOptions(const CArgs& args,
     //                                            CBlastOptions& opts)
@@ -327,7 +327,7 @@ pub struct TblastxArgs {
     // (outfmt 11) records (`Culling`); the search uses `culling_limit()`.
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // ```c++
     //     // query location
     //     arg_desc.AddOptionalKey(kArgQueryLocation, "range",
@@ -342,7 +342,7 @@ pub struct TblastxArgs {
         help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
     )]
     pub query_loc: Option<String>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // ```c++
     //         // subject location
     //         arg_desc.AddOptionalKey(kArgSubjectLocation, "range",
@@ -424,7 +424,7 @@ impl TblastxArgs {
 
     /// The matrix of `-matrix`.
     ///
-    /// NCBI reference: c++/src/util/tables/raw_scoremat.c:157-161 (the matrix that the score
+    /// NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:157-161 (the matrix that the score
     /// block loads, `BlastScoreBlkProteinMatrixLoad`, for the upper-cased name; blast_setup.c:385)
     /// ```c
     ///     case 'I': case 'i':
@@ -433,7 +433,7 @@ impl TblastxArgs {
     ///         }
     ///         return &NCBISM_Identity;
     /// ```
-    /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3103-3105, 3136 (the tables of
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3103-3105, 3136 (the tables of
     /// the length adjustment, found by `strcasecmp`; a name without a table leaves the
     /// arrays unset, and `sfree` of them aborts)
     /// ```c
@@ -482,7 +482,7 @@ impl TblastxArgs {
 
     /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.
     ///
-    /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (TBLASTX's default
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (TBLASTX's default
     /// threshold is always the suggestion's)
     /// ```c
     ///     if (args[kArgWordScoreThreshold]) {
@@ -505,7 +505,7 @@ impl TblastxArgs {
 
     /// The two-hit window: `-window_size`, or the matrix's suggestion.
     ///
-    /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:485-497
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
     /// ```c
     ///     if (args[kArgWindowSize]) {
     ///         opt.SetWindowSize(args[kArgWindowSize].AsInteger());

@@ -1,7 +1,7 @@
 //! tblastn's lookup scan without a branch on the presence vector (`src/algorithm/tblastx/x_aascan_bf.rs`;
 //! the former switch `LOSAT_X_TBNSCANBF` graduated on 2026-10-26) on whole searches.
 //!
-//! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127
 //! ```c
 //! for (s = s_first; s <= s_last; s++) {
 //!     index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
@@ -101,7 +101,7 @@ fn scans(stderr: &str) -> Option<[u64; 2]> {
     }))
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (above). The report does not
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (above). The report does not
 // depend on the threads, and the line says the loop scanned at one and at four threads. The search
 // of all proteins took more calls than units: the offset array filled.
 #[test]

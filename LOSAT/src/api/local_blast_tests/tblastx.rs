@@ -88,7 +88,7 @@ fn queries(path: &std::path::Path) -> Vec<FastaRecord> {
 fn subjects(path: &std::path::Path) -> Vec<FastaRecord> {
     reader_records(path, ReaderConfig::subject("TBLASTX", false, true))
 }
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 //     // Add tab in front of field, except for the first field.
@@ -98,7 +98,7 @@ fn subjects(path: &std::path::Path) -> Vec<FastaRecord> {
 // }
 // m_Ostream << "\n";
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 // ```c++
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```
@@ -124,7 +124,7 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
 // ```c
 // arg_desc.AddDefaultKey(kArgOutputFormat, "format",
 //                        kOutputFormatDescription,
@@ -167,7 +167,7 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
-// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// NCBI derives the hit list size per output format (c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973): with
 // `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
 // so formats that need different hit list sizes are refused before anything is written
 // (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
@@ -398,7 +398,7 @@ fn native_error(result: anyhow::Result<()>) -> (i32, String) {
     (native.exit, native.message.clone())
 }
 
-// NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
 // 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
 // such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print
 // only the ids. LOSAT writes the title `, ` stopped at the end of the string (approved
@@ -443,7 +443,7 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
 // ```c
 //     // Validate that at least one query context is valid
 //     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
@@ -502,7 +502,7 @@ fn a_batch_without_valid_contexts_and_with_queries_without_letters_stops() {
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:969-980
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
 // ```c
 //    if (sbp->gbp) {
 //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
@@ -555,7 +555,7 @@ fn subjects_with_fewer_letters_than_subjects_stop_the_search() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
 // ```c++
 //     // set sequence range
 //     retval->SetInt().SetFrom(from);
@@ -596,7 +596,7 @@ fn intervals_without_letters_are_records_without_residues() {
     );
 }
 
-// NCBI reference: c++/src/objtools/readers/fasta.cpp:919-935 (CFastaReader: a residue that is
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:919-935 (CFastaReader: a residue that is
 // not an IUPAC nucleotide letter is removed with a warning). NCBI's check of the hit saving
 // options (blast_options.c:1518-1523) comes before `Query is Empty!`.
 // This is the half about the entry: a hand-set expect value of 0 (or one that underflows to 0) is

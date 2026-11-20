@@ -451,7 +451,7 @@ mod culling;
 //         formatter.PrintEpilog(opt);
 // ```
 pub mod report;
-// NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod anchored;
 mod archive;
@@ -462,7 +462,7 @@ mod blast_xml;
 // exceptions, the Seq-loc mapper's rows of `-subject`).
 mod empty_rows;
 mod seqalign;
-// NCBI c++/src/objtools/align_format/tabular.cpp (CBlastTabularInfo): the tabular reports with a
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp (CBlastTabularInfo): the tabular reports with a
 // field list or a delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).
 mod tabular;
 

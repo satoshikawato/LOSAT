@@ -827,7 +827,7 @@ fn errors_of_the_ranges_follow_the_command_line() {
     let _ = std::fs::remove_file(&short_subject);
 }
 
-// NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-210,732-737 and
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:206-210,732-737 and
 // c++/src/app/blast/blastx_app.cpp:283-288: NCBI searches each `-subject` sequence on its own
 // with BL2SEQ_LEGACY (LOSAT refuses it), and converts PRE_FETCH_SEQS_LIMIT with NStr::StringToInt
 // before the first batch's report, whose `CStringException` ends the program after the outfmt 0

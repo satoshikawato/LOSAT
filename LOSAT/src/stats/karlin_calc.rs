@@ -1,6 +1,6 @@
 //! NCBI-style Karlin-Altschul parameter calculation from amino acid composition
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c
 //!   - Blast_ResFreqString: compute amino acid composition
 //!   - BlastScoreFreqCalc: compute score frequency profile
 //!   - Blast_KarlinBlkUngappedCalc: compute Lambda, K, H
@@ -12,11 +12,11 @@ use crate::stats::KarlinParams;
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::{ncbistdaa, protein_score, BLASTAA_SIZE};
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:121-122
 const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
 const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:56-72
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:56-72
 const BLAST_SCORE_RANGE_MAX: i32 = BLAST_SCORE_MAX - BLAST_SCORE_MIN;
 const BLAST_KARLIN_K_SUMLIMIT_DEFAULT: f64 = 0.0001;
 const BLAST_KARLIN_LAMBDA_ACCURACY_DEFAULT: f64 = 1.0e-5;
@@ -26,7 +26,7 @@ const BLAST_KARLIN_K_ITER_MAX: i32 = 100;
 
 /// Standard amino acid frequencies (Robinson probabilities).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1794-1816
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1794-1816
 /// ```c
 /// static BLAST_LetterProb Robinson_prob[] = {
 ///       { 'A', 78.05 },
@@ -41,7 +41,7 @@ const STD_AA_FREQS: [f64; 20] = [
     42.64, 51.29, 71.20, 58.41, 64.41, 13.30, 32.16,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1863-1879
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1863-1879
 // ```c
 // for (index=0; index<(int)DIM(STD_AMINO_ACID_FREQS); index++)
 // {
@@ -76,7 +76,7 @@ const STD_AA_NCBISTDAA: [u8; 20] = [
 ];
 
 /// Compute amino acid composition from sequence
-/// Reference: NCBI Blast_ResFreqString (blast_stat.c:2078-2091)
+/// Reference: NCBI Blast_ResFreqString (c++/src/algo/blast/core/blast_stat.c:2078-2091)
 ///   - BlastResCompStr: count residues
 ///   - Blast_ResFreqResComp: normalize to frequencies
 ///
@@ -102,7 +102,7 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1984-2014
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1984-2014
     // ```c
     // for (lp = str, lpmax = lp+length; lp < lpmax; lp++)
     // {
@@ -115,7 +115,7 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
     // }
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:382-385
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:382-385
     // ```c
     // sbp->read_in_matrix = TRUE;
     // BLAST_ScoreSetAmbigRes(sbp, 'X');
@@ -137,12 +137,12 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
 }
 
 /// Compute standard amino acid composition
-/// Reference: NCBI Blast_ResFreqStdComp (blast_stat.c:1887-1917)
+/// Reference: NCBI Blast_ResFreqStdComp (c++/src/algo/blast/core/blast_stat.c:1887-1917)
 /// Uses Robinson standard frequencies
 pub fn compute_std_aa_composition() -> [f64; BLASTAA_SIZE] {
     let mut freq = [0.0; BLASTAA_SIZE];
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1887-1901
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1887-1901
     // ```c
     // retval = Blast_GetStdAlphabet(sbp->alphabet_code, residues, DIM(STD_AMINO_ACID_FREQS));
     // for (index=0; index<DIM(STD_AMINO_ACID_FREQS); index++)
@@ -154,7 +154,7 @@ pub fn compute_std_aa_composition() -> [f64; BLASTAA_SIZE] {
         freq[residue as usize] = STD_AA_FREQS[index];
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1909-1910
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1909-1910
     // ```c
     // Blast_ResFreqNormalize(sbp, rfp, 1.0);
     // ```
@@ -262,7 +262,7 @@ impl ScoreFreqProfile {
 
 /// Build a score frequency profile from already-combined score probabilities.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2151-2205
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2151-2205
 /// ```c
 /// for (score = sfp->score_min; score <= sfp->score_max; score++)
 ///    sfp->sprob[score] = 0.0;
@@ -323,7 +323,7 @@ pub fn score_freq_profile_from_probabilities(
 }
 
 /// Compute score frequency profile from two amino acid compositions
-/// Reference: NCBI BlastScoreFreqCalc (blast_stat.c:2151-2205)
+/// Reference: NCBI BlastScoreFreqCalc (c++/src/algo/blast/core/blast_stat.c:2151-2205)
 ///
 /// # Arguments
 /// * `comp1` - Query composition (28 frequencies)
@@ -348,7 +348,7 @@ pub fn compute_score_freq_profile(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_stat.c:2167-2180:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2167-2180:
 // matrix = sbp->matrix->data;
 // score = matrix[index1][index2];
 // sfp->sprob[score] += rfp1->prob[index1] * rfp2->prob[index2];
@@ -367,10 +367,10 @@ pub fn compute_score_freq_profile_for_matrix(
     }
 
     // Compute score probabilities: P(score) = sum_{i,j: matrix[i][j]=score} comp1[i] * comp2[j]
-    // Reference: blast_stat.c:2171-2181
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2171-2181
     for i in 0..BLASTAA_SIZE {
         for j in 0..BLASTAA_SIZE {
-            // NCBI c++/src/algo/blast/core/blast_stat.c:2171-2179:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2171-2179:
             // score = matrix[index1][index2];
             let score = protein_score(matrix, i as u8, j as u8);
             if score >= score_min {
@@ -382,7 +382,7 @@ pub fn compute_score_freq_profile_for_matrix(
     }
 
     // Find observed min/max and compute average
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2183-2205
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2183-2205
     let mut score_sum = 0.0;
     let mut obs_min = BLAST_SCORE_MIN;
     let mut obs_max = BLAST_SCORE_MIN;
@@ -420,7 +420,7 @@ pub fn compute_score_freq_profile_for_matrix(
     sfp
 }
 
-/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:405-419
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:405-419
 /// ```c
 /// Int4 BLAST_Gcd(Int4 a, Int4 b)
 /// {
@@ -456,7 +456,7 @@ pub(crate) fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
     a
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2099-2109
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2099-2109
 fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
     if lo >= 0 || hi <= 0 || lo < BLAST_SCORE_MIN || hi > BLAST_SCORE_MAX {
         return Err("Invalid score range".to_string());
@@ -467,7 +467,7 @@ fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
     Ok(())
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2491-2563
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2491-2563
 fn nlm_karlin_lambda_nr(
     sfp: &ScoreFreqProfile,
     d: i32,
@@ -548,7 +548,7 @@ fn nlm_karlin_lambda_nr(
 }
 
 /// Compute Lambda using Newton-Raphson method
-/// Reference: NCBI Blast_KarlinLambdaNR (blast_stat.c:2567-2598)
+/// Reference: NCBI Blast_KarlinLambdaNR (c++/src/algo/blast/core/blast_stat.c:2567-2598)
 /// Uses NlmKarlinLambdaNR internally (blast_stat.c:2491-2563)
 fn compute_lambda_nr(sfp: &ScoreFreqProfile, initial_guess: f64) -> Result<f64, String> {
     let low = sfp.obs_min();
@@ -637,7 +637,7 @@ pub(crate) fn calc_lambda_of_score_probs(
 }
 
 /// Compute H from Lambda
-/// Reference: NCBI BlastKarlinLtoH (blast_stat.c:2607-2633)
+/// Reference: NCBI BlastKarlinLtoH (c++/src/algo/blast/core/blast_stat.c:2607-2633)
 fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, String> {
     if lambda < 0.0 {
         return Err("Lambda must be non-negative".to_string());
@@ -667,7 +667,7 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
 }
 
 /// Compute K from Lambda and H
-/// Reference: NCBI BlastKarlinLHtoK (blast_stat.c:2247-2418)
+/// Reference: NCBI BlastKarlinLHtoK (c++/src/algo/blast/core/blast_stat.c:2247-2418)
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2247-2248,2346-2348,2412-2413
 // ```c
 // BlastKarlinLHtoK(Blast_ScoreFreq* sfp, double lambda, double H)
@@ -745,7 +745,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     let mut low_alignment_score = 0;
     let mut high_alignment_score = 0;
     let mut inner_sum = 1.0;
-    // NCBI's `oldsum` and `oldsum2` (blast_stat.c:2266, 2344, 2379-2380) are read only under
+    // NCBI's `oldsum` and `oldsum2` (c++/src/algo/blast/core/blast_stat.c:2266, 2344, 2379-2380) are read only under
     // `#ifdef ADD_GEOMETRIC_TERMS_TO_K` (blast_stat.c:2383-2410), which nothing defines.
     alignment_score_probabilities[0] = 1.0;
 
@@ -852,7 +852,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
 }
 
 /// Compute Karlin-Altschul parameters from score frequency profile
-/// Reference: NCBI Blast_KarlinBlkUngappedCalc (blast_stat.c:2699-2734)
+/// Reference: NCBI Blast_KarlinBlkUngappedCalc (c++/src/algo/blast/core/blast_stat.c:2699-2734)
 ///
 /// # Arguments
 /// * `sfp` - Score frequency profile
@@ -881,7 +881,7 @@ pub fn compute_karlin_params_ungapped(sfp: &ScoreFreqProfile) -> Result<KarlinPa
 }
 
 /// Apply check_ideal logic: use ideal params if computed Lambda >= ideal Lambda
-/// Reference: NCBI blast_stat.c:2796-2797
+/// Reference: NCBI c++/src/algo/blast/core/blast_stat.c:2796-2797
 ///
 /// # Arguments
 /// * `computed` - Computed Karlin parameters from sequence composition
@@ -899,7 +899,7 @@ pub fn apply_check_ideal(computed: KarlinParams, ideal: KarlinParams) -> KarlinP
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2852
 // ```c
 // Blast_ScoreBlkKbpIdealCalc(BlastScoreBlk* sbp)
 // {
@@ -960,7 +960,7 @@ mod tests {
 
     #[test]
     fn test_compute_aa_composition() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2009-2012
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2009-2012
         // ```c
         // for (index=0; index<sbp->ambig_occupy; index++)
         // {
@@ -997,7 +997,7 @@ mod tests {
 
     #[test]
     fn test_compute_aa_composition_excludes_x_from_denominator() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:382-385
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:382-385
         // ```c
         // sbp->read_in_matrix = TRUE;
         // BLAST_ScoreSetAmbigRes(sbp, 'X');
@@ -1012,7 +1012,7 @@ mod tests {
 
     #[test]
     fn test_compute_std_aa_composition() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1794-1816
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1794-1816
         // ```c
         // static BLAST_LetterProb Robinson_prob[] = {
         //       { 'A', 78.05 },

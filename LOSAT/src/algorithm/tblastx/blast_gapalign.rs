@@ -1,6 +1,6 @@
 //! HSP extraction and coordinate adjustment for TBLASTX
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2384-2392, 4719-4775
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392, 4719-4775
 //!
 //! This module contains InitHSP (initial HSP with absolute coordinates) and
 //! functions for converting to UngappedHit (context-relative coordinates).
@@ -15,7 +15,7 @@ use std::cmp::Ordering;
 
 /// NCBI BlastInitHSP equivalent - stores initial HSP with absolute coordinates
 ///
-/// Reference: blast_hits.h:BlastInitHSP, blast_extend.c:360-375 BlastSaveInitHsp
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:BlastInitHSP, c++/src/algo/blast/core/blast_extend.c:360-375 BlastSaveInitHsp
 ///
 /// This structure stores HSPs after extension but before coordinate conversion.
 /// Coordinates are stored as absolute positions in the concatenated buffer.
@@ -33,22 +33,22 @@ use std::cmp::Ordering;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct InitHSP {
     /// Query absolute coordinate (concatenated buffer, 0-based)
-    /// Reference: blast_query_info.c:311-315, blast_util.c:112-116.
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315, c++/src/algo/blast/core/blast_util.c:112-116.
     pub q_start_absolute: i32,
     /// Query end absolute coordinate (concatenated buffer, 0-based)
-    /// Reference: blast_query_info.c:311-315, blast_util.c:112-116.
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315, c++/src/algo/blast/core/blast_util.c:112-116.
     pub q_end_absolute: i32,
     /// Subject coordinate (frame-relative, 0-based)
-    /// Reference: blast_aascan.c:110-113.
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:110-113.
     pub s_start: i32,
     /// Subject end coordinate (frame-relative, 0-based)
-    /// Reference: blast_aascan.c:110-113.
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:110-113.
     pub s_end: i32,
     /// Seed query offset stored in `offsets.qs_offsets.q_off`.
-    /// Reference: blast_extend.c:351-370, blast_gapalign.c:4756-4768.
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:351-370, c++/src/algo/blast/core/blast_gapalign.c:4756-4768.
     pub q_seed_absolute: i32,
     /// Seed subject offset stored in `offsets.qs_offsets.s_off`.
-    /// Reference: blast_extend.c:351-370, blast_gapalign.c:4756-4768.
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:351-370, c++/src/algo/blast/core/blast_gapalign.c:4756-4768.
     pub s_seed: i32,
     /// Raw score from extension
     pub score: i32,
@@ -82,7 +82,7 @@ pub fn trace_init_hsp_if_match(stage: &str, init: &InitHSP, contexts: &[QueryCon
 
     let ctx = &contexts[init.ctx_idx];
     // Convert absolute query coords to context-relative (0-based).
-    // Reference: blast_gapalign.c:4756-4768, blast_query_info.c:311-315.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768, c++/src/algo/blast/core/blast_query_info.c:311-315.
     let q_start_rel = adjust_initial_hsp_offsets(init.q_start_absolute, ctx.frame_base);
     let q_end_rel = adjust_initial_hsp_offsets(init.q_end_absolute, ctx.frame_base);
     if q_start_rel < 0 || q_end_rel < 0 || init.s_start < 0 || init.s_end < 0 {
@@ -115,7 +115,7 @@ pub fn trace_init_hsp_if_match(stage: &str, init: &InitHSP, contexts: &[QueryCon
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:274-304
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-304
 // ```c
 // static int score_compare_match(const void *v1, const void *v2)
 // {
@@ -147,7 +147,7 @@ pub(crate) fn score_compare_init_hsps_ncbi(a: &InitHSP, b: &InitHSP) -> Ordering
         .then_with(|| a.q_start_absolute.cmp(&b.q_start_absolute))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:306-310
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
 // ```c
 // void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
 // {
@@ -155,7 +155,7 @@ pub(crate) fn score_compare_init_hsps_ncbi(a: &InitHSP, b: &InitHSP) -> Ordering
 //           sizeof(BlastInitHSP), score_compare_match);
 // }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:234-235
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
 // ```c
 // Blast_InitHitListSortByScore(init_hitlist);
 // return status;
@@ -169,7 +169,7 @@ pub(crate) fn sort_init_hsps_by_score_ncbi(init_hsps: &mut [InitHSP]) {
 
 /// NCBI s_AdjustInitialHSPOffsets equivalent
 ///
-/// Reference: blast_gapalign.c:2384-2392
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
 ///
 /// NCBI code:
 /// ```c
@@ -198,7 +198,7 @@ pub fn adjust_initial_hsp_offsets(
 
 /// NCBI BLAST_GetUngappedHSPList equivalent
 ///
-/// Reference: blast_gapalign.c:4719-4775
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719-4775
 ///
 /// NCBI code flow:
 /// 1. Get context for each InitHSP (s_GetUngappedHSPContext)
@@ -210,7 +210,7 @@ pub fn adjust_initial_hsp_offsets(
 /// (with context-relative coordinates). Reevaluation is performed separately
 /// by Blast_HSPListReevaluateUngapped equivalent.
 ///
-/// NCBI reference (verbatim, blast_gapalign.c:4756-4768):
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768
 /// ```c
 /// context = s_GetUngappedHSPContext(query_info, init_hsp);
 /// s_AdjustInitialHSPOffsets(init_hsp, query_info->contexts[context].query_offset);
@@ -285,7 +285,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
         // NCBI: s_GetUngappedHSPContext equivalent
         // Context is already stored in init_hsp.ctx_idx
 
-        // NCBI: s_AdjustInitialHSPOffsets (blast_gapalign.c:2384-2392)
+        // NCBI: s_AdjustInitialHSPOffsets (c++/src/algo/blast/core/blast_gapalign.c:2384-2392)
         // Convert absolute coordinates to context-relative coordinates
         // NCBI: init_hsp->ungapped_data->q_start -= query_start;
         // where query_start = query_info->contexts[context].query_offset
@@ -294,7 +294,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
         let q_end_relative = adjust_initial_hsp_offsets(init_hsp.q_end_absolute, ctx.frame_base);
         let q_seed_relative = adjust_initial_hsp_offsets(init_hsp.q_seed_absolute, ctx.frame_base);
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2384-2392
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
         // ```c
         // ASSERT(init_hsp->ungapped_data == NULL ||
         //        init_hsp->ungapped_data->q_start >= 0);
@@ -303,7 +303,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             q_start_relative >= 0,
             "NCBI BLAST requires context-relative ungapped q_start >= 0"
         );
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4760-4767
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4767
         // ```c
         // Blast_HSPInit(ungapped_data->q_start,
         //               ungapped_data->length+ungapped_data->q_start,
@@ -337,7 +337,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             "NCBI BLAST requires non-negative ungapped subject seed offset"
         );
 
-        // NCBI: Blast_HSPInit (blast_hits.c:150-189)
+        // NCBI: Blast_HSPInit (c++/src/algo/blast/core/blast_hits.c:150-189)
         // query.offset = ungapped_data->q_start (context-relative, 0-based)
         // query.end = ungapped_data->length + ungapped_data->q_start
         //
@@ -367,7 +367,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             .expect("NCBI BLAST requires non-negative ungapped subject seed");
 
         // Offsets are already 0-based in query/subject->sequence buffers.
-        // Reference: blast_gapalign.c:4756-4768, blast_aascan.c:110-113.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768, c++/src/algo/blast/core/blast_aascan.c:110-113.
         let (qs_l, qe_l) = (qs, qe);
         let (ss_l, se_l) = (ss, se);
 
@@ -389,7 +389,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             q_aa_end: qe_l,
             s_aa_start: ss_l,
             s_aa_end: se_l,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4756-4768
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768
             // ```c
             // Blast_HSPInit(...,
             //               init_hsp->offsets.qs_offsets.q_off,
@@ -404,7 +404,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             raw_score: init_hsp.score, // Original extension score (before reevaluation)
             e_value: f64::INFINITY,
             num_ident: 0, // Will be computed during reevaluation
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4719-4724
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719-4724
             // ```c
             // for (index=0;index<init_hsp_array->total;index++) {
             //     init_hsp = init_hsp_array->init_hsp_array[index];
@@ -415,7 +415,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-480
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-480
             // ```c
             // link_hsp_array =
             //    (LinkHSPStruct**) malloc(total_number_of_hsps*sizeof(LinkHSPStruct*));
@@ -425,7 +425,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             link_id: 0,
             chain_next_link_id: None,
             hsp_link_num: 0,
-            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:141-145,162
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:141-145,162
             // ```c
             // BlastHSP* Blast_HSPNew(void)
             // {
@@ -456,14 +456,14 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
 
 /// The final sort of `get_ungapped_hsp_list_into` (`Blast_HSPListSortByScore`).
 fn sort_converted_hsps_by_score_ncbi(ungapped_hits: &mut [UngappedHit]) {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4719-4775
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719-4775
     // ```c
     // Blast_HSPListSaveHSP(hsp_list, new_hsp);
     // ...
     // Blast_HSPListSortByScore(hsp_list);
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
     // ```c
     // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
     //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
@@ -472,7 +472,7 @@ fn sort_converted_hsps_by_score_ncbi(ungapped_hits: &mut [UngappedHit]) {
     //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
     // }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1349-1369
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1349-1369
     // ```c
     // if (!Blast_HSPListIsSortedByScore(hsp_list)) {
     //     qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
@@ -484,7 +484,7 @@ fn sort_converted_hsps_by_score_ncbi(ungapped_hits: &mut [UngappedHit]) {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
 // ```c
 // int ScoreCompareHSPs(const void* h1, const void* h2)
 // {
@@ -500,7 +500,7 @@ pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit)
         .then_with(|| b.q_aa_end.cmp(&a.q_aa_end))
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1355
 // ```c
 // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
 //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
@@ -510,7 +510,7 @@ pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit)
 // }
 // return result;
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1366-1377
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1366-1377
 // ```c
 // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //       ScoreCompareHSPs);
@@ -547,7 +547,7 @@ where
     if hits.len() <= 1 {
         return;
     }
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1381
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
     // ```c
     // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
     // {
@@ -558,7 +558,7 @@ where
     if ungapped_hits_is_sorted_by_score_with(hits, compare) {
         return;
     }
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
     // ```c
     // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
     //       ScoreCompareHSPs);
@@ -642,7 +642,7 @@ pub(crate) fn get_ungapped_hsp_list_int4(
     hits
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1369
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1355-1369
 // ```c
 // Boolean Blast_HSPListIsSortedByScore(const BlastHSPList* hsp_list)
 // {
@@ -761,7 +761,7 @@ mod tests {
             raw_score,
             e_value: 0.0,
             num_ident: 0,
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
             // ```c
             // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
             //       ScoreCompareHSPs);
@@ -777,7 +777,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:274-310
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-310
     // score_compare_match breaks score/s_start/length ties on the ABSOLUTE
     // q_start, so equal context-relative HSPs of different query frames leave
     // the word finder in context order whatever their scan order was.
@@ -833,7 +833,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1369
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1355-1369
     // ```c
     // if (!Blast_HSPListIsSortedByScore(hsp_list)) {
     //     qsort(..., ScoreCompareHSPs);
@@ -913,7 +913,7 @@ mod tests {
 
     #[test]
     fn test_ncbi_score_sort_preserves_current_hsp_list_order_for_equal_hits() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1355
         // ```c
         // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
         //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
@@ -937,7 +937,7 @@ mod tests {
         assert_eq!(ordered, vec![(100, 2), (100, 1), (90, 0)]);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2384-2392
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
     // ```c
     // ASSERT(init_hsp->ungapped_data == NULL ||
     //        init_hsp->ungapped_data->q_start >= 0);

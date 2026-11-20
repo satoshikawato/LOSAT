@@ -1,6 +1,6 @@
 //! Core HSP linking algorithm
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c
 
 use crate::stats::sum_statistics::{
     defaults::{GAP_SIZE, OVERLAP_SIZE},
@@ -15,7 +15,7 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::sync::OnceLock;
-// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c
 // CMTArgs(...)
 // {
@@ -179,7 +179,7 @@ fn link_shadow_enabled() -> bool {
     *FLAG.get_or_init(|| std::env::var_os("LOSAT_LINK_FAST_SHADOW").is_some())
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-982
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:901-982
 // ```c
 // ordering_method =
 //    prob[0]<=prob[1] ? eLinkSmallGaps : eLinkLargeGaps;
@@ -232,7 +232,7 @@ fn trace_hit_matches_target(target: TraceHspTarget, h: &UngappedHit) -> bool {
         )
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:343-349
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:343-349
 // ```c
 // context1 = h1->context/(NUM_FRAMES / 2);
 // context2 = h2->context/(NUM_FRAMES / 2);
@@ -241,12 +241,12 @@ fn trace_hit_matches_target(target: TraceHspTarget, h: &UngappedHit) -> bool {
 // else if (context1 > context2)
 //    return 1;
 // ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:76-77
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:76-77
 // ```c
 //     retval->first_context = 0;
 //     retval->last_context = retval->num_queries * kNumContexts - 1;
 // ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_util.c:1373-1376
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1373-1376
 // ```c
 // BLAST_GetNumberOfContexts(EBlastProgramType p)
 // {
@@ -262,7 +262,7 @@ fn translated_context_group(hit: &UngappedHit) -> usize {
     hit.q_idx as usize * 2 + usize::from(hit.q_frame < 0)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:331-375
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:331-375
 // ```c
 // static int s_RevCompareHSPsTbx(const void *v1, const void *v2)
 // {
@@ -315,7 +315,7 @@ fn rev_compare_hsps_tbx_int4(a: &UngappedHit, b: &UngappedHit) -> Ordering {
         .then_with(|| b.s_end_int4().cmp(&a.s_end_int4()))
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:234-263
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:234-263
 // ```c
 // static int s_RevCompareHSPsTransl(const void *v1, const void *v2)
 // {
@@ -332,7 +332,7 @@ fn rev_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
         .then_with(|| b.s_aa_start.cmp(&a.s_aa_start))
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:157-186
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:157-186
 // ```c
 // static int s_FwdCompareHSPsTransl(const void* v1, const void* v2)
 // {
@@ -349,7 +349,7 @@ fn fwd_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
         .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-486
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-486
 // ```c
 // link_hsp_array =
 //    (LinkHSPStruct**) malloc(total_number_of_hsps*sizeof(LinkHSPStruct*));
@@ -359,7 +359,7 @@ fn fwd_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
 // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //       s_RevCompareHSPsTbx);
 // ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-994
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
 // ```c
 // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //       s_RevCompareHSPsTransl);
@@ -371,7 +371,7 @@ fn sort_hsps_by_ncbi_link_order<C>(hits: &mut [UngappedHit], compare: C)
 where
     C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
 {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
     // ```c
     // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
     //       s_RevCompareHSPsTbx);
@@ -382,7 +382,7 @@ where
     sort_ungapped_hits_by_index_replay(hits, compare);
 }
 
-// NCBI reference: c++/src/algo/blast/core/link_hsps.c:990-994
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
 // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //       s_RevCompareHSPsTransl);
 // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
@@ -393,7 +393,7 @@ fn sort_linked_hsp_references(
     hits: &mut [&mut UngappedHit],
     compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
 ) {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
     // ```c
     // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
     //       s_RevCompareHSPsTbx);
@@ -429,7 +429,7 @@ struct LhHelper {
     maxsum1: i64,       // NCBI: threshold for stopping link attempts (unused with if(0))
 }
 
-// NCBI c++/src/algo/blast/core/link_hsps.c:608-633,654-658:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633,654-658:
 // max0 = -cutoff[0]; max1 = -cutoff[1];
 // if(sum0>=max0) { max0=sum0; best[0]=H; }
 // if(sum1>=max1) { max1=sum1; best[1]=H; }
@@ -442,7 +442,7 @@ struct DualMaximum {
     index: [usize; 2],
 }
 
-// NCBI c++/src/algo/blast/core/link_hsps.c:610-623:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:610-623:
 // for (H=hp_start->next; H!=NULL; H=H->next) {
 //   if(sum0>=max0) { max0=sum0; best[0]=H; }
 //   if(sum1>=max1) { max1=sum1; best[1]=H; }
@@ -478,7 +478,7 @@ impl DualMaximum {
     }
 }
 
-// NCBI c++/src/algo/blast/core/link_hsps.c:603-659,897-908,942-978:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:603-659,897-908,942-978:
 // if (!first_pass) { /* find the current max sums */ }
 // if(!use_current_max) { /* recompute stored sums */ }
 // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
@@ -490,7 +490,7 @@ struct DualMaximumTree {
     nodes: Vec<DualMaximum>,
 }
 
-// NCBI c++/src/algo/blast/core/link_hsps.c:608-633,755-758,869-873,975-978:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633,755-758,869-873,975-978:
 // H->hsp_link.sum[index] = new_sum;
 // if(sum0>=max0) { max0=sum0; best[0]=H; }
 // if(sum1>=max1) { max1=sum1; best[1]=H; }
@@ -544,7 +544,7 @@ impl DualMaximumTree {
 }
 
 /// HSP link information (NCBI BlastHSPLink structure)
-/// Reference: link_hsps.c:63-71
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-71
 #[derive(Clone)]
 struct HspLink {
     score: i32,
@@ -576,7 +576,7 @@ struct HspLink {
 }
 
 /// Thread-local buffer pools for memory reuse across frame groups
-/// NCBI reference: link_hsps.c:452-454 allocates lh_helper once with size MAX(1024, hspcnt+5)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:452-454 allocates lh_helper once with size MAX(1024, hspcnt+5)
 /// and reuses it across all frame groups (lines 553-983)
 struct BufferPools {
     lh_helpers: Vec<LhHelper>,
@@ -587,7 +587,7 @@ struct BufferPools {
 // Main entry point
 // ---------------------------------------------------------------------------
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
 // for (frame_index=0; frame_index<num_query_frames; frame_index++)
 // {
@@ -642,7 +642,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         Err(untouched) => hits = untouched,
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-480
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-480
     // ```c
     // link_hsp_array =
     //    (LinkHSPStruct**) malloc(total_number_of_hsps*sizeof(LinkHSPStruct*));
@@ -650,7 +650,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     //    link_hsp_array[index] = (LinkHSPStruct*) calloc(1, sizeof(LinkHSPStruct));
     //    link_hsp_array[index]->hsp = hsp_array[index];
     // ```
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1773-1776
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1773-1776
     // ```c
     //     /* Remove any information on number of linked HSPs from previous
     //        linking. */
@@ -666,7 +666,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 
     let diag_enabled = diagnostics_enabled();
 
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:488-493
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:488-493
     // cutoff[0] = link_hsp_params->cutoff_small_gap;
     // cutoff[1] = link_hsp_params->cutoff_big_gap;
     // gap_prob = link_hsp_params->gap_prob;
@@ -693,20 +693,20 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     }
 
     // =======================================================================
-    // NCBI link_hsps.c EXACT REPLICATION:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c EXACT REPLICATION:
     // 1. Sort ALL HSPs by s_RevCompareHSPsTbx (lines 484-490)
     // 2. Scan sorted list and detect frame boundaries (lines 514-534)
     // 3. Process each frame group SEQUENTIALLY (lines 553-982)
     // =======================================================================
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2722-2725
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2722-2725
     // ```c
     // kbp->K = BlastKarlinLHtoK(sfp, kbp->Lambda, kbp->H);
     // ...
     // kbp->logK = log(kbp->K);
     // ```
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:750-752
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:750-752
     // ```c
     // new_xsum = H_hsp_xsum + H->hsp->score * kbp[H->hsp->context]->Lambda
     //           - kbp[H->hsp->context]->logK;
@@ -717,7 +717,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         .map(|ctx| ctx.karlin_params.k.glibc_ln())
         .collect();
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
     // ```c
     // /* Sort by (reverse) position. */
     // if (kTranslatedQuery) {
@@ -726,7 +726,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // ```
     sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:510-531
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:510-531
     // ```c
     // Int4 strand_factor = (kTranslatedQuery ? 3 : 1);
     // ...
@@ -761,7 +761,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     }
 
     // Step 3: Process each frame group (parallel when enabled, sequential otherwise).
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
     // ```c
     // for (frame_index=0; frame_index<num_query_frames; frame_index++)
     // {
@@ -772,9 +772,9 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // NCBI processes groups in frame_index order (0, 1, 2, ...), which matches
     // the order of frame_groups in LOSAT (created from sorted HSP list).
     //
-    // NCBI memory pooling: link_hsps.c:452-454 allocates lh_helper once with
+    // NCBI memory pooling: c++/src/algo/blast/core/link_hsps.c:452-454 allocates lh_helper once with
     // MAX(1024, hspcnt+5) and reuses it across all frame groups.
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:553-558
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
     // for (frame_index=0; frame_index<num_query_frames; frame_index++) { ... }
     crate::utils::threading::report_stage(
         "tblastx",
@@ -859,7 +859,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
             .flat_map(|(_, hits)| hits)
             .collect()
     } else {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
         // ```c
         // for (frame_index=0; frame_index<num_query_frames; frame_index++)
         // {
@@ -958,7 +958,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         ordered
     };
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-994
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
     // ```c
     // if (kTranslatedQuery) {
     //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
@@ -966,7 +966,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
     //          s_FwdCompareHSPsTransl);
     // ```
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:990-994,1080-1085
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994,1080-1085
     // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
     // hsp_list->hsp_array[index] = H->hsp;
     // Preserve the existing empty/singleton replay shortcut. The owned group
@@ -1056,7 +1056,7 @@ pub(crate) fn link_one_hit_with_int4_ends(
     linked
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1012-1028
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1012-1028
 // ```c
 // /* hook up the HSP's. */
 // first_hsp = NULL;
@@ -1069,7 +1069,7 @@ pub(crate) fn link_one_hit_with_int4_ends(
 //    ordering_method = H->ordering_method;
 //    if (H->hsp_link.link[ordering_method] == NULL)
 // ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1044-1059
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1044-1059
 // ```c
 // /* The first one has the number of links correct. */
 // num_links = H->hsp_link.num[ordering_method];
@@ -1083,7 +1083,7 @@ pub(crate) fn link_one_hit_with_int4_ends(
 // ```
 fn replay_ncbi_output_list(mut sorted_hits: Vec<&mut UngappedHit>) -> Vec<UngappedHit> {
     if sorted_hits.len() <= 1 {
-        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1080-1085
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1085
         // hsp_list->hsp_array[index] = H->hsp;
         // Retain the existing singleton path, including a non-head singleton.
         // Materialize once at this Rust ownership boundary.
@@ -1111,7 +1111,7 @@ fn replay_ncbi_output_list(mut sorted_hits: Vec<&mut UngappedHit>) -> Vec<Ungapp
 
         let mut current = index;
         let mut hops = 0usize;
-        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1044-1061
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1044-1061
         // ```c
         // 			/* The first one has the number of links correct. */
         // 			num_links = H->hsp_link.num[ordering_method];
@@ -1154,7 +1154,7 @@ fn replay_ncbi_output_list(mut sorted_hits: Vec<&mut UngappedHit>) -> Vec<Ungapp
 
     replayed_indices
         .into_iter()
-        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1080-1085
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1085
         // hsp_list->hsp_array[index] = H->hsp;
         // Preserve the complete replay, including all chain members. Only
         // this final boundary copies payloads back into an owned result Vec.
@@ -1162,7 +1162,7 @@ fn replay_ncbi_output_list(mut sorted_hits: Vec<&mut UngappedHit>) -> Vec<Ungapp
         .collect()
 }
 
-// NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-863
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863
 // H2_helper=&lh_helper[H2_index]; H2_index--;
 // if(b0) { H2_index=next_larger; }
 // if(!(b0|b1|b2)) { H_hsp_num=H2->hsp_link.num[index];
@@ -1195,7 +1195,7 @@ macro_rules! visit_large_gap_predecessor {
                     $current_idx, sum, $h_sum, next_larger
                 );
             }
-            // NCBI reference: c++/src/algo/blast/core/link_hsps.c:838-859
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:838-859
             // b0 = sum <= H_hsp_sum;
             // H2_index--;
             // if (b0) { H2_index = next_larger; }
@@ -1243,7 +1243,7 @@ macro_rules! visit_large_gap_predecessor {
     }};
 }
 
-// NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-863
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863
 // for (H2_index=H_index-1; H2_index>1;) {
 //     H2_helper=&lh_helper[H2_index]; H2_index--;
 //     if (b0) { H2_index=next_larger; }
@@ -1273,7 +1273,7 @@ fn scan_large_gap_predecessors(
     mut h_xsum: f64,
     mut h_link: usize,
 ) -> (i64, i16, f64, usize) {
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:675-684,876-885
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:675-684,876-885
     // Int4 prev=H_index-1;
     // while((cur_sum>=prev_sum) && (prev>0)) { prev=lh_helper[prev].next_larger; }
     // lh_helper[H_index].next_larger=prev;
@@ -1284,7 +1284,7 @@ fn scan_large_gap_predecessors(
 
     #[cfg(all(losat_wasi_threads, feature = "wasm-threads"))]
     {
-        // NCBI link_hsps.c:827: for(H2_index=H_index-1; H2_index>1;)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827: for(H2_index=H_index-1; H2_index>1;)
         // Preserve the no-visit case before borrowing any helper slice.
         if h_lh_idx - 1 > 1 {
             let mut prefix = &pool_lh_helpers[2..h_lh_idx];
@@ -1547,7 +1547,7 @@ fn link_hsp_group_ncbi(
     //   if (h1->subject.offset > h2->subject.offset) return -1;
     //   if (h1->subject.end   < h2->subject.end)   return  1;
     //   if (h1->subject.end   > h2->subject.end)   return -1;
-    // Source: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:s_RevCompareHSPsTbx (lines ~359-374)
+    // Source: c++/src/algo/blast/core/link_hsps.c:s_RevCompareHSPsTbx (lines ~359-374)
     // ========================================================================
     #[inline]
     fn frame_relative_coords(hit: &UngappedHit) -> (i32, i32, i32, i32) {
@@ -1564,7 +1564,7 @@ fn link_hsp_group_ncbi(
         )
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-559
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-559
     // ```c
     // /* Sort by (reverse) position. */
     // qsort(link_hsp_array, total_number_of_hsps, sizeof(LinkHSPStruct*),
@@ -1584,7 +1584,7 @@ fn link_hsp_group_ncbi(
 
     // NCBI uses the first HSP in this frame/strand group to select the query context
     // used for effective length/search-space in sum-statistics.
-    // Reference: link_hsps.c:559-562
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:559-562
     let query_context = group_hits[0].ctx_idx as usize;
     let query_len_aa = query_contexts[query_context].aa_len as i64;
     let subject_len_aa = (subject_len_nucl / 3).max(1);
@@ -1677,7 +1677,7 @@ fn link_hsp_group_ncbi(
 
     // NOTE: We already sorted group_hits above using NCBI's reverse comparator semantics.
 
-    // NCBI `link_hsps.c` does NOT pre-initialize per-HSP e-values here.
+    // NCBI `c++/src/algo/blast/core/link_hsps.c` does NOT pre-initialize per-HSP e-values here.
     // Every HSP receives its (possibly linked-set) e-value during the
     // extraction phase (NCBI lines 955-980).
 
@@ -1698,7 +1698,7 @@ fn link_hsp_group_ncbi(
     pool_hsp_links.reserve(n);
     for (i, hit) in group_hits.iter().enumerate() {
         // NCBI parity: Use frame-relative coordinates for trim calculations
-        // Reference: link_hsps.c:545-549
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:545-549
         let (q_off, q_end, s_off, s_end) = frame_relative_coords(hit);
         let q_len_quarter = (q_end - q_off) / 4;
         let s_len_quarter = (s_end - s_off) / 4;
@@ -1792,7 +1792,7 @@ fn link_hsp_group_ncbi(
     // We allocate n+2 entries and use direct index calculation:
     // - pool_lh_helpers[0], pool_lh_helpers[1]: sentinels
     // - pool_lh_helpers[i+2]: corresponds to pool_hsp_links[i]
-    // NCBI `link_hsps.c` allocates `lh_helper` with `calloc`, so the sentinel
+    // NCBI `c++/src/algo/blast/core/link_hsps.c` allocates `lh_helper` with `calloc`, so the sentinel
     // entries are zero-initialized. We mirror that exactly (sums=0, next_larger=0).
     // NCBI line 576: lh_helper[0].maxsum1 = -10000;
     // NCBI memory pooling: reuse pool_lh_helpers buffer instead of allocating fresh
@@ -1831,7 +1831,7 @@ fn link_hsp_group_ncbi(
     // Remaining entries (2..n+2) will be populated during linking passes
     // Use pool_lh_helpers directly throughout the function (all lh_helpers references replaced)
 
-    // NCBI c++/src/algo/blast/core/link_hsps.c:654-658:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:654-658:
     // /* Inside this while loop, the linked list order never changes */
     // Allocate once per sorted group; stable leaves survive all cached rounds.
     let mut maximum_tree = DualMaximumTree::new(n);
@@ -1842,13 +1842,13 @@ fn link_hsp_group_ncbi(
     // NCBI: path_changed tracks whether any removed HSP had linked_to > 0
     // If path_changed == 0, we can skip chain validation entirely
     let mut path_changed = true;
-    // NCBI `link_hsps.c` sets `gap_prob = link_hsp_params->gap_prob;` (:468) regardless of
+    // NCBI `c++/src/algo/blast/core/link_hsps.c` sets `gap_prob = link_hsp_params->gap_prob;` (:468) regardless of
     // `ignore_small_gaps` (cutoff[0]==0, :495). With small gaps the E-values of sets of more than
     // one HSP are divided by `gap_prob` and `1-gap_prob` (:918-935); with large gaps only they are
     // not divided (:939-952). gap_prob is 0 for small search spaces (blast_parameters.c:1076).
 
     while remaining > 0 {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:603-652
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:603-652
         // ```c
         // use_current_max=0;
         // if (!first_pass){
@@ -1871,7 +1871,7 @@ fn link_hsp_group_ncbi(
         // NCBI lines 603-652: Try to reuse previous max
         if !first_pass {
             // NCBI lines 607-625: Find the current max sums
-            // NCBI reference (verbatim, link_hsps.c:610-623):
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:610-623
             //   for (H=hp_start->next; H!=NULL; H=H->next) {
             //      Int4 sum0=H->hsp_link.sum[0];
             //      Int4 sum1=H->hsp_link.sum[1];
@@ -1883,7 +1883,7 @@ fn link_hsp_group_ncbi(
             // so they cannot appear in hp_start->next traversal.
             // In LOSAT, we also unlink processed HSPs (lines 1623-1642), so they cannot
             // appear in active_head traversal either. No defensive checks needed.
-            // NCBI c++/src/algo/blast/core/link_hsps.c:608-633:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633:
             // if(sum0>=max0) { max0=sum0; best[0]=H; }
             // if(sum1>=max1) { max1=sum1; best[1]=H; }
             // Read the exact stored-score maxima before unchanged path validation.
@@ -1943,7 +1943,7 @@ fn link_hsp_group_ncbi(
         }
 
         if !use_current_max {
-            // NCBI `link_hsps.c` (s_BlastEvenGapLinkHSPs) lines 659-686:
+            // NCBI `c++/src/algo/blast/core/link_hsps.c` (s_BlastEvenGapLinkHSPs) lines 659-686:
             //
             //   if(!use_current_max){
             //     for (H=hp_start,H_index=1; H!=NULL; H=H->next,H_index++) {
@@ -2107,7 +2107,7 @@ fn link_hsp_group_ncbi(
                     // NCBI lines 750-767: Update this HSP's link info (the sum in i64, see LhHelper)
                     let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_small));
                     let ctx_idx = pool_hsp_links[i].ctx_idx;
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:750-752
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:750-752
                     // ```c
                     // new_xsum = H_hsp_xsum + H->hsp->score * kbp[H->hsp->context]->Lambda
                     //           - kbp[H->hsp->context]->logK;
@@ -2187,7 +2187,7 @@ fn link_hsp_group_ncbi(
                     false
                 };
 
-                // NCBI `link_hsps.c` lines 781-795:
+                // NCBI `c++/src/algo/blast/core/link_hsps.c` lines 781-795:
                 //   H->hsp_link.changed=1;
                 //   H2 = H->hsp_link.link[index];
                 //   if ((!first_pass) && ((H2==0) || (H2->hsp_link.changed==0))) { ... }
@@ -2235,7 +2235,7 @@ fn link_hsp_group_ncbi(
                             );
                         }
 
-                        // NCBI `link_hsps.c` lines 812-823 (note the hardcoded `if(1)`):
+                        // NCBI `c++/src/algo/blast/core/link_hsps.c` lines 812-823 (note the hardcoded `if(1)`):
                         //   if(!first_pass&&H2&&H2->linked_to>=0){
                         //      if(1){
                         //         H_hsp_sum=H2->hsp_link.sum[index]-1;
@@ -2256,7 +2256,7 @@ fn link_hsp_group_ncbi(
                             }
                         }
 
-                        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:812-863
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:812-863
                         // H_hsp_sum=H2->hsp_link.sum[index]-1;
                         // for (H2_index=H_index-1; H2_index>1;) { ... }
                         // Enter once per original HSP, after its initial-best setup.
@@ -2276,7 +2276,7 @@ fn link_hsp_group_ncbi(
                                 h_link,
                             );
                         }
-                        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-863
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863
                         // for(H2_index=H_index-1; H2_index>1;) { H2_index--; ... }
                         // Keep the indexed scan in the caller without a function/tuple boundary.
                         #[cfg(not(all(losat_wasi_threads, feature = "wasm-threads")))]
@@ -2298,7 +2298,7 @@ fn link_hsp_group_ncbi(
                 // NCBI lines 863-895: Update this HSP's link info (the sum in i64, see LhHelper)
                 let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_big));
                 let ctx_idx = pool_hsp_links[i].ctx_idx;
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:866-867
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:866-867
                 // ```c
                 // new_xsum = H_hsp_xsum + H->hsp->score * kbp[H->hsp->context]->Lambda
                 //           - kbp[H->hsp->context]->logK;
@@ -2342,7 +2342,7 @@ fn link_hsp_group_ncbi(
 
                 // Update next_larger for this entry (NCBI lines 876-884)
                 //
-                // NCBI `link_hsps.c` (s_BlastEvenGapLinkHSPs) lines 876-885:
+                // NCBI `c++/src/algo/blast/core/link_hsps.c` (s_BlastEvenGapLinkHSPs) lines 876-885:
                 //   Int4 cur_sum=lh_helper[H_index].sum[1];
                 //   Int4 prev = H_index-1;
                 //   Int4 prev_sum = lh_helper[prev].sum[1];
@@ -2379,7 +2379,7 @@ fn link_hsp_group_ncbi(
                 }
             }
 
-            // NCBI c++/src/algo/blast/core/link_hsps.c:755-758,869-898:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:755-758,869-898:
             // H->hsp_link.sum[index] = new_sum;
             // path_changed=0; first_pass=0;
             // Rebuild only after both existing DP stages finish. Preserve their
@@ -2401,7 +2401,7 @@ fn link_hsp_group_ncbi(
                 // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
                 pool_hsp_links[bi].sum[0] +=
                     i64::from(pool_hsp_links[bi].num[0]) * i64::from(cutoff_small);
-                // NCBI c++/src/algo/blast/core/link_hsps.c:907-908:
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:907-908:
                 // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
                 // Mirror the persistent addback even if another chain is selected.
                 maximum_tree.update(bi, DualMaximum::active(bi, pool_hsp_links[bi].sum));
@@ -2422,7 +2422,7 @@ fn link_hsp_group_ncbi(
                     eff_search_space,
                     divisor,
                 );
-                // NCBI `link_hsps.c` lines 918-922:
+                // NCBI `c++/src/algo/blast/core/link_hsps.c` lines 918-922:
                 //   if( num > 1 ) {
                 //     if( gap_prob == 0 || (prob /= gap_prob) > INT4_MAX ) prob = INT4_MAX;
                 //   }
@@ -2510,7 +2510,7 @@ fn link_hsp_group_ncbi(
         } else if let Some(i) = best[1 - ordering] {
             i
         } else {
-            // NCBI reference: link_hsps.c:589-982
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:589-982
             // In NCBI, the while (number_of_hsps > 0) loop processes ALL HSPs.
             // If active_head becomes SENTINEL_IDX but remaining > 0, this indicates
             // a bug in the linking logic. NCBI would never reach this state.
@@ -2546,7 +2546,7 @@ fn link_hsp_group_ncbi(
         }
 
         // NCBI lines 959-963: Determine if this is a linked set (multi-HSP chain)
-        // NCBI reference (verbatim, link_hsps.c:959-962):
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:959-962
         //   if (best[ordering_method]->hsp_link.link[ordering_method])
         //      linked_set = TRUE;
         //   else
@@ -2559,7 +2559,7 @@ fn link_hsp_group_ncbi(
         // This is set BEFORE the loop that processes chain members
         pool_hsp_links[best_i].start_of_chain = true;
         group_hits[best_i].start_of_chain = true;
-        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1044-1045
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1044-1045
         // ```c
         // 			/* The first one has the number of links correct. */
         // 			num_links = H->hsp_link.num[ordering_method];
@@ -2618,7 +2618,7 @@ fn link_hsp_group_ncbi(
                 pool_hsp_links[cur].prev_active = SENTINEL_IDX;
             }
 
-            // NCBI c++/src/algo/blast/core/link_hsps.c:965-978:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:965-978:
             // for (H=best[ordering_method]; H!=NULL; H=H->hsp_link.link[ordering_method]) {
             //   if (H->prev) (H->prev)->next=H->next;
             // }
@@ -2626,7 +2626,7 @@ fn link_hsp_group_ncbi(
             maximum_tree.update(cur, DualMaximum::INACTIVE);
 
             // NCBI line 972: H->linked_set = linked_set
-            // NCBI reference (verbatim, link_hsps.c:972):
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:972
             //   H->linked_set = linked_set;
             // This is set for ALL HSPs in the chain (both head and members)
             pool_hsp_links[cur].linked_set = linked_set;
@@ -2638,7 +2638,7 @@ fn link_hsp_group_ncbi(
 
             // Set E-value for ALL HSPs in the chain (not just head)
             // This is key: chain members inherit the chain's E-value
-            // NCBI reference (verbatim, link_hsps.c:974):
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:974
             //   H->hsp->evalue = prob[ordering_method];
             group_hits[cur].e_value = evalue;
 
@@ -2647,12 +2647,12 @@ fn link_hsp_group_ncbi(
             group_hits[cur].linked_set = linked_set;
 
             let next = pool_hsp_links[cur].link[ordering];
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1027-1028
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1027-1028
             // ```c
             // ordering_method = H->ordering_method;
             // if (H->hsp_link.link[ordering_method] == NULL)
             // ```
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1046-1056
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1046-1056
             // ```c
             // link = H->hsp_link.link[ordering_method];
             // while (link)
@@ -2692,7 +2692,7 @@ fn link_hsp_group_ncbi(
             .unwrap_or(false);
 
         if trace_link_selections || chain_contains_trace_target {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-982
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:901-982
             // ```c
             // prob[0] = BLAST_SmallGapSumE(...);
             // prob[1] = BLAST_LargeGapSumE(...);
@@ -2758,7 +2758,7 @@ fn link_hsp_group_ncbi(
         }
 
         if chain_contains_trace_target {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1046-1056
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1046-1056
             // ```c
             // link = H->hsp_link.link[ordering_method];
             // while (link)
@@ -2803,7 +2803,7 @@ fn link_hsp_group_ncbi(
         }
 
         if debug_chaining && chain_members.iter().any(|&idx| target_hsp_idx == Some(idx)) {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-952
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:901-952
             // ```c
             // prob[0] = BLAST_SmallGapSumE(...);
             // prob[1] = BLAST_LargeGapSumE(...);
@@ -2892,14 +2892,14 @@ fn link_hsp_group_ncbi(
     // This function returns ALL HSPs with their linked_set/start_of_chain flags
     // properly set for downstream use.
     //
-    // NCBI reference: link_hsps.c:589-982
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:589-982
     // In NCBI, the while (number_of_hsps > 0) loop processes ALL HSPs.
     // HSPs that are not selected as best in one iteration are still processed
     // in subsequent iterations. Therefore, there are NO unprocessed HSPs in NCBI.
     // If active_head becomes SENTINEL_IDX but remaining > 0, this indicates
     // a bug in the linking logic, not a valid case for E-value calculation.
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:492-496
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:492-496
     // ```c
     // cutoff[0] = link_hsp_params->cutoff_small_gap;
     // cutoff[1] = link_hsp_params->cutoff_big_gap;
@@ -2939,7 +2939,7 @@ fn link_hsp_group_ncbi(
 mod tests {
     use super::*;
 
-    // NCBI c++/src/algo/blast/core/link_hsps.c:608-633:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633:
     // if(sum0>=max0) { max0=sum0; best[0]=H; }
     // if(sum1>=max1) { max1=sum1; best[1]=H; }
     // Reconciled T01 list scan, retained verbatim as the tree's reference.
@@ -2959,7 +2959,7 @@ mod tests {
                     best_sum[0] = pool_hsp_links[cur].sum[0];
                     best[0] = Some(cur);
                 }
-                // NCBI c++/src/algo/blast/core/link_hsps.c:618-623:
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:618-623:
                 // if(sum1>=max1) { max1=sum1; best[1]=H; }
                 // Both independent maxima are complete before path validation.
                 if pool_hsp_links[cur].sum[1] >= best_sum[1] {
@@ -2969,7 +2969,7 @@ mod tests {
                 cur = pool_hsp_links[cur].next_active;
             }
         } else {
-            // NCBI c++/src/algo/blast/core/link_hsps.c:624-633:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:624-633:
             // for (H=hp_start->next; H!=NULL; H=H->next) {
             //    Int4 sum=H->hsp_link.sum[1];
             //    if(sum>=maxscore) { maxscore=sum; best[1]=H; }
@@ -2988,7 +2988,7 @@ mod tests {
         (best, best_sum)
     }
 
-    // NCBI c++/src/algo/blast/core/link_hsps.c:610-633,755-758,975-978:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:610-633,755-758,975-978:
     // for (H=hp_start->next; H!=NULL; H=H->next) { /* stored sums */ }
     // if (H->prev) (H->prev)->next=H->next;
     // Finite state fixture with stable leaves and a separately maintained list.
@@ -3030,7 +3030,7 @@ mod tests {
         (links, head)
     }
 
-    // NCBI c++/src/algo/blast/core/link_hsps.c:608-633:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633:
     // max0 = -cutoff[0]; max1 = -cutoff[1];
     // if(sum0>=max0) { max0=sum0; best[0]=H; }
     // if(sum1>=max1) { max1=sum1; best[1]=H; }
@@ -3075,7 +3075,7 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/link_hsps.c:907-908,936-937,965-978:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:907-908,936-937,965-978:
     // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
     // ordering_method = prob[0]<=prob[1] ? eLinkSmallGaps : eLinkLargeGaps;
     // for (H=best[ordering_method]; H!=NULL; H=H->hsp_link.link[ordering_method])
@@ -3116,7 +3116,7 @@ mod tests {
         assert_eq!(tree.maxima([10, 20], false), ([None, None], [-10, -20]));
     }
 
-    // NCBI c++/src/algo/blast/core/link_hsps.c:659,755-758,869-873:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:659,755-758,869-873:
     // if(!use_current_max) { ... H->hsp_link.sum[index] = new_sum; ... }
     #[test]
     fn dual_maximum_rebuild_replaces_unrepaired_state() {
@@ -3145,7 +3145,7 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/link_hsps.c:659,755-758,869-873,975-978:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:659,755-758,869-873,975-978:
     // if(!use_current_max) { ... H->hsp_link.sum[index] = new_sum; ... }
     // if (H->prev) (H->prev)->next=H->next;
     // Deterministic finite transitions, including rebuilt arbitrary stored state.
@@ -3217,7 +3217,7 @@ mod tests {
             raw_score: id, // Use raw_score as ID for verification
             e_value: 1e-10,
             num_ident: 0, // Mock value for tests
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
             // ```c
             // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
             //       ScoreCompareHSPs);
@@ -3226,7 +3226,7 @@ mod tests {
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:63-65
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-65
             // ```c
             // typedef struct BlastHSPLink {
             //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
@@ -3260,13 +3260,13 @@ mod tests {
 
     #[test]
     fn test_replay_ncbi_output_list_inserts_chain_members_after_head() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1018-1020
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1018-1020
         // ```c
         // /* If this is not a single piece or the start of a chain, then Skip it. */
         // if (H->linked_set == TRUE && H->start_of_chain == FALSE)
         //    continue;
         // ```
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1046-1056
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1046-1056
         // ```c
         // link = H->hsp_link.link[ordering_method];
         // while (link)
@@ -3298,7 +3298,7 @@ mod tests {
 
     #[test]
     fn replay_gives_every_chain_hsp_the_head_count() {
-        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1044-1061
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1044-1061
         // ```c
         // 			/* The first one has the number of links correct. */
         // 			num_links = H->hsp_link.num[ordering_method];
@@ -3338,7 +3338,7 @@ mod tests {
 
     #[test]
     fn test_link_sort_tie_preserves_current_hsp_list_order_for_equal_hits() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
         // ```c
         // /* Sort by (reverse) position. */
         // if (kTranslatedQuery) {
@@ -3359,7 +3359,7 @@ mod tests {
 
     /// Verify LOSAT's HSP sort order matches NCBI's s_RevCompareHSPsTbx
     ///
-    /// NCBI comparison logic (link_hsps.c:359-375):
+    /// NCBI comparison logic (c++/src/algo/blast/core/link_hsps.c:359-375):
     /// ```c
     /// // ALL fields use the same pattern: h1 < h2 → return 1 (DESCENDING)
     /// if (h1->query.offset < h2->query.offset)   return  1;
@@ -3470,7 +3470,7 @@ mod tests {
     /// This documents the correct interpretation of s_RevCompareHSPsTbx
     #[test]
     fn test_ncbi_comparison_semantics() {
-        // NCBI s_RevCompareHSPsTbx (link_hsps.c:367-370):
+        // NCBI s_RevCompareHSPsTbx (c++/src/algo/blast/core/link_hsps.c:367-370):
         // if (h1->subject.offset < h2->subject.offset) return 1;
         // if (h1->subject.offset > h2->subject.offset) return -1;
         //
@@ -3520,7 +3520,7 @@ mod tests {
         println!("✓ Confirmed: LOSAT uses DESCENDING order for subject.offset (matches NCBI)");
     }
 
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:478-486,990-994
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:478-486,990-994
     // link_hsp_array[index]->hsp = hsp_array[index];
     // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
     #[test]
@@ -3565,7 +3565,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1018-1020,1046-1056,1080-1085
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1018-1020,1046-1056,1080-1085
     // if (H->linked_set == TRUE && H->start_of_chain == FALSE) continue;
     // H->next = (LinkHSPStruct*) link; H = H->next;
     // hsp_list->hsp_array[index] = H->hsp;
@@ -3596,7 +3596,7 @@ mod tests {
         assert_eq!(format!("{:?}", replayed[1]), format!("{:?}", replayed[3]));
     }
 
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:553-558,990-994,1080-1085
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558,990-994,1080-1085
     // hp_start->next = hp_frame_start[frame_index];
     // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
     // hsp_list->hsp_array[index] = H->hsp;
@@ -3668,7 +3668,7 @@ mod tests {
             }
         }
     }
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-863,876-885
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863,876-885
     // for (H2_index=H_index-1; H2_index>1;) { ... if(b0) H2_index=next_larger; }
     // The end sentinels 0/1 cannot select a predecessor, even with tracing enabled.
     #[test]
@@ -3723,7 +3723,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:838-859
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:838-859
     // b0=sum<=H_hsp_sum; b1=q_off_t<=H_query_etrim; b2=s_off_t<=H_sub_etrim;
     // if (!(b0|b1|b2)) { H2=H2_helper->ptr; H_hsp_xsum=H2->hsp_link.xsum[index]; }
     // Strict ties retain the first visited HSP, using the helper's mapped index.

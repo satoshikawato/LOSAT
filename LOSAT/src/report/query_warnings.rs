@@ -13,16 +13,16 @@ use std::io::{self, Write};
 /// report written so far reaches standard output before each of them; a failed write of
 /// the report stops NCBI there (its stream throws, `blast_format.cpp:118-119`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbidiag.cpp:4086
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
 /// ```c
 ///         CDiagHandler* handler = new CStreamDiagHandler(&NcbiCerr, true, kLogName_Stderr);
 /// ```
-/// NCBI reference: ncbi-blast/c++/include/corelib/ncbistre.hpp:543-544
+/// NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:543-544
 /// ```c
 /// #define NcbiCout                 IO_PREFIX::cout
 /// #define NcbiCerr                 IO_PREFIX::cerr
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
 /// ```c
 ///     if (results.HasWarnings()) {
 ///         ERR_POST(Warning << results.GetWarningStrings());
@@ -1085,7 +1085,7 @@ pub fn query_posts(
 
 /// The warning for a query whose ungapped Karlin-Altschul parameters cannot be computed.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2783-2790
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2783-2790
 /// ```c
 ///       if (loop_status) {
 ///           contexts[context].is_valid = FALSE;
@@ -1095,14 +1095,14 @@ pub fn query_posts(
 ///              kBlastErrMsg_CantCalculateUngappedKAParams);
 ///           }
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_message.c:37-40
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:37-40
 /// ```c
 /// const char* kBlastErrMsg_CantCalculateUngappedKAParams
 ///     = "Could not calculate ungapped Karlin-Altschul parameters due "
 ///       "to an invalid query sequence or its translation. Please verify the "
 ///       "query sequence(s) and/or filtering options";
 /// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:534-543
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:534-543
 /// ```c++
 ///                 const string kTitle = queries.GetTitle(index);
 ///                 string query_id = id->GetSeqIdString();
@@ -1115,7 +1115,7 @@ pub fn query_posts(
 ///
 ///                 messages[index].SetQueryId(query_id);
 /// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_results.cpp:283-291
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:283-291
 /// ```c++
 ///     string retval(m_Errors.GetQueryId());
 ///     if ( !retval.empty() ) {    // in case the query id is not known
@@ -1213,7 +1213,7 @@ pub fn sorted_query_messages(messages: &[String]) -> Vec<&String> {
 /// has the same severity (warning) and the same error id (the query's index), so NCBI's
 /// `operator<` reduces to the comparison of the message strings.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:1043-1054
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1043-1054
 /// ```c++
 /// TSearchMessages::RemoveDuplicates()
 /// {
@@ -1226,7 +1226,7 @@ pub fn sorted_query_messages(messages: &[String]) -> Vec<&String> {
 ///             unique(sm->begin(), sm->end(), TQueryMessagesEqualComparator());
 ///         sm->erase(new_end, sm->end());
 /// ```
-/// NCBI reference: c++/include/algo/blast/api/blast_types.hpp:295-304
+/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:295-304
 /// ```c++
 /// CSearchMessage::operator<(const CSearchMessage& rhs) const
 /// {
@@ -1235,7 +1235,7 @@ pub fn sorted_query_messages(messages: &[String]) -> Vec<&String> {
 ///         m_Message < rhs.m_Message) {
 ///         return true;
 /// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:620-622
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:620-622
 /// ```c++
 ///                     CRef<CSearchMessage> m
 ///                         (new CSearchMessage(eBlastSevWarning, index, warnings));
@@ -1313,7 +1313,7 @@ pub fn query_warning_with_seq_id(
 /// it is longer than 35 bytes. The bytes are the title's, raw; the cut can fall inside a
 /// UTF-8 sequence.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:533-543
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:533-543
 /// ```c++
 ///             if (const CSeq_id* id = queries.GetSeqId(index)) {
 ///                 const string kTitle = queries.GetTitle(index);
@@ -1342,7 +1342,7 @@ pub fn warning_query_id(local_id: &[u8], title: &[u8]) -> Vec<u8> {
 
 /// The warning of a protein query with pyrrolysine (O), which NCBI reads as X, or `None`.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:920-932
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:920-932
 /// ```c
 ///     if (warnings && replaced_residues.size() > 0) {
 ///         *warnings += "One or more O characters replaced by X for ";
@@ -1445,7 +1445,7 @@ fn residue_positions(positions: &[usize]) -> Option<String> {
 
 /// The warning for a hit list size below 5.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
 /// ```c++
 ///     if(hitlist_size < 5){
 ///    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
@@ -1461,7 +1461,7 @@ mod tests {
 
     #[test]
     fn messages_of_a_query_are_in_ncbis_sorted_order() {
-        // NCBI blast_aux.cpp:1043-1054 sorts a query's messages (same error id and
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1043-1054 sorts a query's messages (same error id and
         // severity, so by text) and removes repeats.
         let query = FastaRecord::new("Query_1", b"q1", b"OOO");
         let o = replaced_o_message(b"OOO").unwrap();

@@ -20,7 +20,7 @@ use crate::utils::matrix::ncbistdaa;
 use crate::utils::seg::SegParams;
 use anyhow::Result;
 
-// NCBI c++/src/algo/blast/blastinput/blast_fasta_input.cpp:486-502;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:486-502;
 // c++/src/algo/blast/api/blast_setup_cxx.cpp:655-657;
 // c++/src/algo/blast/core/blast_filter.c:1241-1255;
 // c++/src/algo/blast/core/blast_setup.c:614-638:
@@ -131,17 +131,17 @@ pub(super) fn tblastn_report_mask_intervals(
     intervals
 }
 
-// NCBI reference: c++/include/algo/blast/core/blast_def.h:141-150
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:141-150
 // typedef union BlastOffsetPair {
 //     struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
 // } BlastOffsetPair;
-// NCBI c++/src/algo/blast/core/blast_engine.c:808-812:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:808-812:
 // subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Seed {
     pub frame: i8,
-    // NCBI c++/src/algo/blast/core/blast_engine.c:241-250:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:241-250:
     // backup.offset identifies this chunk before WordFinder returns local offsets.
     pub chunk_offset: u32,
     pub query_offset: u32,
@@ -796,7 +796,7 @@ pub(super) fn x_scan_plan(
 ) -> Result<Option<XScanPlan>> {
     // An unknown genetic code is refused before the subject length is looked at.
     GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
     // return word_length * 3 + 2;
     // if (seq_arg.seq->length < min_subj_seq_length) { ... continue; }
     let length = subject.len();
@@ -937,7 +937,7 @@ pub(super) fn x_scan_plan(
     // The query-side lookup table: BlastAaLookupTableNew and BlastAaLookupIndexQuery on the masked
     // query. The table-only variant (`x_lookup_table_for_profile`, graduated 2026-10-22, was
     // LOSAT_X_LUTSPLIT) skips the per-context Karlin blocks, which the table does not read.
-    // NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245:
     // lookup->word_length = opt->word_size;
     // lookup->threshold = (Int4)opt->threshold;
     let x_build_lookup = || {
@@ -945,7 +945,7 @@ pub(super) fn x_scan_plan(
             Some(frames) => frames.iter().map(|frame| vec![frame.clone()]).collect(),
             None => queries
                 .iter()
-                // NCBI blast_filter.c:1241-1255 merges lowercase query and SEG masks.
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1241-1255 merges lowercase query and SEG masks.
                 .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
                 .collect(),
         };
@@ -1085,7 +1085,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
     pairs: &mut Vec<BlastOffsetPair>,
     mut on_pairs: impl FnMut(&[BlastOffsetPair]),
 ) {
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1018-1019
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1018-1019
     // BlastChooseProteinScanSubject(lookup_wrap);
     // aux_struct->WordFinder = BlastAaWordFinder;
     // The scan variant of the unit is chosen once per table, as NCBI picks one scansub: the
@@ -1155,7 +1155,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
     // The scan calls of the unit, for LOSAT_X_STATS.
     let mut x_calls = 0u64;
     for (range_index, &(left, right)) in ranges.iter().enumerate() {
-        // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-501
         // scan_range[1] = subject->seq_ranges[0].left;
         // scan_range[2] = subject->seq_ranges[0].right - wordsize;
         // if (scan_range[2] < scan_range[1])
@@ -1317,9 +1317,9 @@ mod tests {
         records
     }
 
-    // NCBI c++/src/algo/blast/core/blast_query_info.c:68-96:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:68-96:
     // one context per protein query; query offsets advance by length + 1.
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505:
     // scansub emits the ordered global offset pairs for each subject frame.
     // This comparison uses the unmodified candidate stream from the pinned
     // local -subject oracle; no final-output filter is applied to candidates.
@@ -1407,9 +1407,9 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
     // word_length and neighbor scores come from the selected options/matrix.
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505:
     // the subject scanner emits global query offsets in its observed order.
     #[test]
     fn alternate_matrix_word2_candidates_and_contexts_match_ncbi() {
@@ -1481,10 +1481,10 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
     // CRandom random(base_length); ambiguous ncbi4na bases are picked once
     // for the compressed ncbi2na preliminary subject.
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:767-775,804-812
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:767-775,804-812
     // BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na, ...);
     // subject->sequence = translation_buffer + frame_offsets[context] + 1;
     #[test]
@@ -1543,7 +1543,7 @@ mod tests {
         assert_eq!(compared, 78);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:478-505
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505
     // scansub = (TAaScanSubjectFunction)(lookup->scansub_callback);
     // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     // for (i = 0; i < hits; ++i) { query_offset = offset_pairs[i].qs_offsets.q_off;
@@ -1592,10 +1592,10 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831
     // if (context == 0) { /* convert subject scan ranges to AA */ }
     // else if (context == 3) { /* reverse ranges for minus frames */ }
-    // NCBI reference: c++/src/algo/blast/core/masksubj.inl:51-71
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:51-71
     // range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
     // range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
     #[test]
@@ -1650,9 +1650,9 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
     // CRandom random(base_length); each ambiguous 4na value consumes one GetRand().
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:492-505
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
     // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     #[test]
     fn ncbi_ambiguity_spectrum_frames_and_candidates_match() {
@@ -1719,7 +1719,7 @@ mod tests {
         assert_eq!(actual.len(), 181);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_util.c:1080-1101
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1101
     // frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
     // offset += length + 1;
     // frame_offsets[context+1] = offset;
@@ -1790,7 +1790,7 @@ mod tests {
         assert_eq!(frames_checked, 6);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:200-234
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234
     // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
     // Blast_InitHitListSortByScore(init_hitlist);
     // The comparison-only C probe captures NCBI's saved seed pair. Each
@@ -1834,7 +1834,7 @@ mod tests {
         assert_eq!(compared, 10);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_filter.c:337-370
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:337-370
     // BlastSetUp_Filter(..., query_blk, ...);
     // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
     #[test]
@@ -1883,10 +1883,10 @@ mod tests {
             .is_empty());
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:747-775,804-841
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:747-775,804-841
     // BLAST_GetAllTranslations(..., subject->gen_code_string, ...);
     // subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:478-505
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505
     // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     #[test]
     fn code32_api_oracle_candidates_match_in_set_and_order() {
@@ -1928,7 +1928,7 @@ mod tests {
         assert_eq!(actual.len(), 199);
     }
 
-    // NCBI reference: c++/src/objects/seqfeat/gc.prt:340-347
+    // NCBI reference (598d8ae6): c++/src/objects/seqfeat/gc.prt:340-347
     // id 32 , ncbieaa "FFLLSSSSYYWWCCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
     #[test]
     fn code_32_changes_search_words_and_ambiguity_resolves() {
@@ -1978,10 +1978,10 @@ mod tests {
         )
         .is_ok());
     }
-    // NCBI c++/src/algo/blast/core/blast_query_info.c:68-96:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:68-96:
     // each protein query receives one context; offsets advance length + 1,
     // and the X-only third context is invalid for the lookup.
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505 and
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505 and
     // c++/src/algo/blast/core/blast_engine.c:804-841:
     // scansub emits every pair in frame/chunk order over both long chunks.
     #[test]
@@ -2042,7 +2042,7 @@ mod tests {
             12
         );
         assert_eq!(trace.lines().filter(|l| l.starts_with("END\t")).count(), 12);
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505:
         // scansub reads the same per-call scan
         // parameters and chunk state before returning each ordered pair.
         let params: Vec<_> = trace
@@ -2139,11 +2139,11 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:804-841:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-841:
     // for (context=first_context; context<=last_context; context++) {
     //     status = s_BlastSearchEngineOneContext(...);
     // }
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:495-505:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-505:
     // scan_range[1] = subject->seq_ranges[0].left;
     // scan_range[2] = subject->seq_ranges[0].right - wordsize;
     // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
@@ -2225,7 +2225,7 @@ mod tests {
                 );
             }
         }
-        // NCBI blast_engine.c:246-264,478-500,804-841:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264,478-500,804-841:
         // s_GetNextSubjectChunk skips a middle chunk with no soft range;
         // each surviving chunk calls WordFinder in frame order.
         for (fixture, early_hit) in [
@@ -2329,7 +2329,7 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264:
     // split only when offset + MAX_DBSEQ_LEN < hard-range right;
     // the next offset overlaps the first chunk by DBSEQ_CHUNK_OVERLAP.
     #[test]

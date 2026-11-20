@@ -1,4 +1,4 @@
-//! NCBI-ScoreMat's `PssmWithParameters` (objects/scoremat/scoremat.asn): the value that psiblast
+//! NCBI-ScoreMat's `PssmWithParameters` (c++/src/objects/scoremat/scoremat.asn): the value that psiblast
 //! writes with `-out_pssm` (`MSerial_AsnText`), and its writer over an `Encoder`, in the member
 //! order of the ASN.1 module, so that the ASN.1 binary and the archive can write the same value.
 //! The reader of the ASN.1 text is `blastinput::pssm_text`.

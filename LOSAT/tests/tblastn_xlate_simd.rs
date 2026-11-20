@@ -2,7 +2,7 @@
 //! (`LOSAT_X_TBNXLATESIMD`, in the strict set; `src/algorithm/tblastn/x_subject_translate.rs`),
 //! on whole searches.
 //!
-//! NCBI reference: c++/src/algo/blast/core/blast_util.c:584-596
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596
 //! ```c
 //!          while (nt_seq < (nt_seq_end-10)) {
 //!             byte_value1 = *(++nt_seq);
@@ -117,7 +117,7 @@ fn w128_cpu() -> bool {
 
 const W128: (&str, &str) = ("LOSAT_X_TBNXLATE128", "2");
 
-// NCBI reference: c++/src/algo/blast/core/blast_util.c:584-596 (above). The default and `=0`
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (above). The default and `=0`
 // give the same report at one and four threads; by default the vector loop read codons where
 // the CPU has AVX2, with `=0` none.
 #[test]
@@ -155,7 +155,7 @@ fn the_switch_acts_on_packed_subjects_only() {
     assert_eq!(stats(&stderr), None);
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_util.c:584-596 (above). `LOSAT_X_TBNXLATE128`'s
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (above). `LOSAT_X_TBNXLATE128`'s
 // 128-bit loop (the loop of the wasm32 build, here its x86-64 SSSE3 / SSE4.1 build, taken with `=2`
 // in place of AVX2) gives the report of the word loop (`LOSAT_X_TBNXLATESIMD=0`) at one and four
 // threads, and reads codons where the CPU has SSSE3 and SSE4.1.

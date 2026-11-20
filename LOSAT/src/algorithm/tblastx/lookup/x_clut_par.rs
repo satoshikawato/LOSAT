@@ -1768,7 +1768,7 @@ fn x_next_count_range(
 /// the cells' counts (then cursors), the cells of more than 5 offsets.
 type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
 
-// NCBI reference (598d8ae6): as `x_stripe_build` (blast_aalookup.c:787-849, :1197-1235)
+// NCBI reference (598d8ae6): as `x_stripe_build` (c++/src/algo/blast/core/blast_aalookup.c:787-849, :1197-1235)
 // ```c
 //     Int4 num_entries = backbone_cell->num_used;
 //     ...

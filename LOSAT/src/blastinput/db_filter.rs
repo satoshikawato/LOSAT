@@ -196,7 +196,7 @@ pub(crate) const NO_TAXONOMY_WARNING: &str =
      files. Please see the section 'Taxonomic filtering for BLAST databases' in \
      https://www.ncbi.nlm.nih.gov/books/NBK569839/ for details.\n";
 
-/// NCBI's default name of the taxonomy file (`kDefaultName`, tax4blastsqlite.cpp).
+/// NCBI's default name of the taxonomy file (`kDefaultName`, c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp).
 pub(crate) const TAXONOMY_FILE: &str = "taxonomy4blast.sqlite3";
 
 impl DbFilterArgs {

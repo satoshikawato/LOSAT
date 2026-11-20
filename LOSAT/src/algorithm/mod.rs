@@ -10,7 +10,7 @@
 //! not list. Rows are added only by review, for an edge down the layering; remove a row when its
 //! edge goes (fewer edges are welcome).
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastp_args.cpp:71-115
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:71-115
 // ```c
 // arg.Reset(new CGenericSearchArgs(kQueryIsProtein, false, false,
 //                                  false, false, true));
@@ -50,7 +50,7 @@ pub mod rpsblast;
 //     static const string kProgram("rpstblastn");
 // ```
 pub mod rpstblastn;
-// NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:45-62
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:45-62
 // static const string kProgram("tblastn");
 // static const char kDefaultTask[] = "tblastn";
 // SetTask(kDefaultTask);

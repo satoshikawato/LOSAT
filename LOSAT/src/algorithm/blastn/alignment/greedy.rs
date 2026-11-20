@@ -37,7 +37,7 @@ use crate::common::GapEditOp;
 /// Thread-local memory pool for non-affine greedy alignment.
 /// This avoids per-call allocation overhead by reusing memory across calls.
 /// Similar to NCBI BLAST's SGreedyAlignMem structure.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/greedy_align.h:88-99
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/greedy_align.h:88-99
 /// ```c
 /// typedef struct SGreedyAlignMem {
 ///    Int4 max_dist;
@@ -101,7 +101,7 @@ thread_local! {
 }
 
 /// Scratch memory for affine greedy alignment.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/greedy_align.h:88-99
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/greedy_align.h:88-99
 /// ```c
 /// typedef struct SGreedyAlignMem {
 ///    SGreedyOffset** last_seq2_off_affine;
@@ -109,7 +109,7 @@ thread_local! {
 ///    Int4* max_score;
 /// } SGreedyAlignMem;
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:240-251
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:240-251
 /// ```c
 ///       gamp->diag_bounds = (Int4*) calloc(2*(max_d+1+max_cost), sizeof(Int4));
 ///       gamp->last_seq2_off_affine = (SGreedyOffset**)
@@ -169,7 +169,7 @@ struct AffineRow {
 
 /// The rows of `last_seq2_off` of one affine greedy extension.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:1181-1197
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1181-1197
 /// ```c
 ///         if (d > max_penalty) {
 ///             if (edit_block == NULL) {
@@ -308,12 +308,12 @@ pub struct GreedyOffset {
     delete_off: i32, // Best offset for a path ending in a deletion (gap in seq1)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:358-364 (FENCE_SENTRY)
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:358-364 (FENCE_SENTRY)
 // Visible to `x_greedy_prelim`, which writes it around a window.
 pub(super) const FENCE_SENTRY: u8 = 201;
 
 /// Greedy seed descriptor for locating the best start point.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/greedy_align.h:102-106 (SGreedySeed)
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/greedy_align.h:102-106 (SGreedySeed)
 #[derive(Clone, Copy, Default)]
 struct GreedySeed {
     start_q: i32,
@@ -322,7 +322,7 @@ struct GreedySeed {
 }
 
 /// Edit script operation types used by greedy traceback.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:44-54 (EGapAlignOpType)
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:44-54 (EGapAlignOpType)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GapAlignOpType {
     Del,     // eGapAlignDel
@@ -334,7 +334,7 @@ enum GapAlignOpType {
 impl GapAlignOpType {
     #[inline]
     fn to_gap_edit_op(self, num: i32) -> GapEditOp {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:44-54
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:44-54
         match self {
             GapAlignOpType::Sub => GapEditOp::Sub(num as u32),
             GapAlignOpType::Del => GapEditOp::Del(num as u32),
@@ -345,7 +345,7 @@ impl GapAlignOpType {
 }
 
 /// Preliminary edit operation for greedy traceback.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:63-68 (GapPrelimEditScript)
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:63-68 (GapPrelimEditScript)
 #[derive(Clone, Copy, Debug)]
 struct GapPrelimEditOp {
     op_type: GapAlignOpType,
@@ -353,7 +353,7 @@ struct GapPrelimEditOp {
 }
 
 /// Offset-indexed row storage for non-affine greedy traceback.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:674-678
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:674-678
 /// ```c
 /// last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool,
 ///                          (diag_upper - diag_lower + 7) / 3);
@@ -365,7 +365,7 @@ enum NonAffineGreedyRowStorage {
     Pool { start: usize },
 }
 
-// NCBI reference: c++/src/algo/blast/core/greedy_align.c:673-678
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:673-678
 // last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool,
 //                          (diag_upper - diag_lower + 7) / 3);
 // last_seq2_off[d + 1] = last_seq2_off[d + 1] - diag_lower + 2;
@@ -377,7 +377,7 @@ struct NonAffineGreedyRow {
     storage: NonAffineGreedyRowStorage,
 }
 
-// NCBI reference: c++/src/algo/blast/core/greedy_align.c:523-526,548-550,589
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:523-526,548-550,589
 // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
 // seq2_index = MAX(last_seq2_off[d - 1][k + 1], last_seq2_off[d - 1][k]) + 1;
 // last_seq2_off[d][k] = seq2_index;
@@ -437,7 +437,7 @@ impl NonAffineGreedyRow {
 
 /// Persistent non-affine greedy scratch memory.
 ///
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/greedy_align.h:88-99
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/greedy_align.h:88-99
 /// ```c
 /// typedef struct SGreedyAlignMem {
 ///    Int4 max_dist;
@@ -472,7 +472,7 @@ impl GreedyNonAffineMem {
     }
 
     fn ensure_base_capacity(&mut self, row_len: usize) {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:211-228
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:211-228
         // ```c
         // gamp->last_seq2_off = (Int4**) malloc((max_d + 2) * sizeof(Int4*));
         // gamp->last_seq2_off[0] =
@@ -489,7 +489,7 @@ impl GreedyNonAffineMem {
     }
 
     fn ensure_max_score_capacity(&mut self, len: usize) {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:257
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:257
         // ```c
         // gamp->max_score = (Int4*) malloc(sizeof(Int4) * (max_d + 1 + d_diff));
         // ```
@@ -501,7 +501,7 @@ impl GreedyNonAffineMem {
     }
 
     fn refresh_traceback_pool(&mut self) {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:67-77
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:67-77
         // ```c
         // static void s_RefreshMBSpace(SMBSpace* space)
         // {
@@ -515,7 +515,7 @@ impl GreedyNonAffineMem {
         self.traceback_used = 0;
     }
 
-    // NCBI reference: c++/src/algo/blast/core/greedy_align.c:548-550,666-678
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:548-550,666-678
     // seq2_index = MAX(last_seq2_off[d - 1][k + 1], last_seq2_off[d - 1][k]) + 1;
     // if (edit_block == NULL) last_seq2_off[d + 1] = last_seq2_off[d - 1];
     // else last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool, ...);
@@ -549,7 +549,7 @@ impl GreedyNonAffineMem {
     }
 
     fn alloc_traceback_row(&mut self, int_len: usize) -> usize {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:99-125
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:99-125
         // ```c
         // out_ptr = pool->space_array + pool->space_used;
         // pool->space_used += num_alloc;
@@ -568,7 +568,7 @@ impl GreedyNonAffineMem {
 }
 
 /// Preliminary edit block for greedy traceback.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:70-78 (GapPrelimEditBlock)
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:70-78 (GapPrelimEditBlock)
 struct GapPrelimEditBlock {
     edit_ops: Vec<GapPrelimEditOp>,
     num_ops: usize,
@@ -576,7 +576,7 @@ struct GapPrelimEditBlock {
 }
 
 impl GapPrelimEditBlock {
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:187-198 (GapPrelimEditBlockNew)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/gapinfo.c:187-198 (GapPrelimEditBlockNew)
     fn new() -> Self {
         Self {
             edit_ops: Vec::with_capacity(100),
@@ -585,14 +585,14 @@ impl GapPrelimEditBlock {
         }
     }
 
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:212-218 (GapPrelimEditBlockReset)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/gapinfo.c:212-218 (GapPrelimEditBlockReset)
     fn reset(&mut self) {
         self.num_ops = 0;
         self.last_op = GapAlignOpType::Invalid;
         self.edit_ops.clear();
     }
 
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:174-185 (GapPrelimEditBlockAdd)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/gapinfo.c:174-185 (GapPrelimEditBlockAdd)
     fn add(&mut self, op_type: GapAlignOpType, num_ops: i32) {
         if num_ops == 0 {
             return;
@@ -612,7 +612,7 @@ impl GapPrelimEditBlock {
         self.num_ops += 1;
     }
 
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:221-231 (GapPrelimEditBlockAppend)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/gapinfo.c:221-231 (GapPrelimEditBlockAppend)
     #[allow(dead_code)]
     fn append(&mut self, other: &GapPrelimEditBlock) {
         for op in &other.edit_ops {
@@ -622,12 +622,12 @@ impl GapPrelimEditBlock {
 }
 
 /// Scratch space for greedy gapped alignment (traceback + affine DP arrays).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:356-357
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:356-357
 /// ```c
 /// gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
 /// gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2799-2802
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2799-2802
 /// ```c
 /// fwd_prelim_tback = gap_align->fwd_prelim_tback;
 /// rev_prelim_tback = gap_align->rev_prelim_tback;
@@ -635,7 +635,7 @@ impl GapPrelimEditBlock {
 /// GapPrelimEditBlockReset(rev_prelim_tback);
 /// ```
 pub struct GreedyAlignScratch {
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/greedy_align.h:88-99
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/greedy_align.h:88-99
     // ```c
     // typedef struct SGreedyAlignMem {
     //    Int4 max_dist;
@@ -643,8 +643,8 @@ pub struct GreedyAlignScratch {
     //    ...
     // } SGreedyAlignMem;
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2818-2829
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2851-2862
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2818-2829
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2851-2862
     // ```c
     // new_dist = gap_align->greedy_align_mem->max_dist * 2;
     // ...
@@ -696,7 +696,7 @@ impl Default for GreedyAlignScratch {
 }
 
 /// Greedy edit script container.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:56-61 (GapEditScript)
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:56-61 (GapEditScript)
 struct GapEditScript {
     op_type: Vec<GapAlignOpType>,
     num: Vec<i32>,
@@ -704,7 +704,7 @@ struct GapEditScript {
 }
 
 impl GapEditScript {
-    /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:88-90 (GapEditScriptNew)
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:88-90 (GapEditScriptNew)
     fn new(size: usize) -> Self {
         Self {
             op_type: vec![GapAlignOpType::Invalid; size],
@@ -724,7 +724,7 @@ impl GapEditScript {
     }
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/gapinfo.h:56-61
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:56-61
 // ```c
 // typedef struct GapEditScript {
 //    EGapAlignOpType* op_type;
@@ -751,7 +751,7 @@ fn format_gap_edit_script_for_trace(esp: &GapEditScript) -> String {
     out
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/gapinfo.h:70-78
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:70-78
 // ```c
 // typedef struct GapPrelimEditBlock {
 //    GapPrelimEditScript* edit_ops;
@@ -855,7 +855,7 @@ pub(crate) fn greedy_align_one_direction_ex(
         }
 
         // Double max_dist and retry (NCBI BLAST's approach)
-        // NCBI reference: blast_gapalign.c:2820-2825
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2820-2825
         // /* double the max distance */
         // new_dist = gap_align->greedy_align_mem->max_dist * 2;
         // NCBI BLAST has NO upper limit - it continues until convergence or memory failure
@@ -918,7 +918,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
     }
 
     // Calculate match and mismatch costs for distance-based tracking
-    // NCBI reference: greedy_align.c:380-453
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:380-453
     // NCBI BLAST doubles scores if reward is odd to avoid fractions
     // IMPORTANT: x_drop must also be doubled to maintain consistent units
     // NCBI: if (match_score % 2 == 1) { match_score *= 2; mismatch_score *= 2; xdrop_threshold *= 2; }
@@ -931,7 +931,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
     let op_cost = match_cost + mismatch_cost; // Cost of a mismatch in distance terms
 
     // X-drop offset for score comparison (using scaled_xdrop for consistent units)
-    // NCBI reference: greedy_align.c:452-453
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:452-453
     // xdrop_offset = (xdrop_threshold + match_cost / 2) / (match_cost + mismatch_cost) + 1;
     let xdrop_offset = ((scaled_xdrop + match_cost / 2) / op_cost.max(1) + 1) as usize;
 
@@ -1016,7 +1016,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
             }
 
             // X-drop score threshold (using scaled_xdrop for consistent units)
-            // NCBI reference: greedy_align.c:496, 531-533
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:496, 531-533
             // max_score = aux_data->max_score + xdrop_offset;  (pointer arithmetic)
             // xdrop_score = max_score[d - xdrop_offset] + (match_cost + mismatch_cost) * d - xdrop_threshold;
             // xdrop_score = (Int4)ceil((double)xdrop_score / (match_cost / 2));
@@ -1046,7 +1046,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
                 }
 
                 // Find largest seq2 offset that increases distance from d-1 to d
-                // NCBI reference: greedy_align.c:548-550
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:548-550
                 // seq2_index = MAX(last_seq2_off[d - 1][k + 1], last_seq2_off[d - 1][k]) + 1;
                 // seq2_index = MAX(seq2_index, last_seq2_off[d - 1][k - 1]);
                 // Access the "prev" array based on the flag
@@ -1128,7 +1128,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
                     }
 
                     // Clamp bounds
-                    // NCBI reference: greedy_align.c:607-614
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:607-614
                     // if (seq2_index == len2) {
                     //     diag_lower = k + 1;
                     //     end2_reached = TRUE;
@@ -1157,7 +1157,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
             }
 
             // Compute max score for this distance
-            // NCBI reference: greedy_align.c:619-634
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:619-634
             // curr_score = curr_extent * (match_cost / 2) - d * (match_cost + mismatch_cost);
             // if (curr_score >= max_score[d - 1]) {
             //     max_score[d] = curr_score;
@@ -1249,7 +1249,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
     }
 
     // Score normalization (NCBI BLAST approach):
-    // NCBI reference: greedy_align.c:799-808
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:799-808
     // if (match_score % 2 == 1) {
     //     match_score *= 2;
     //     mismatch_score *= 2;
@@ -1276,7 +1276,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         };
 
     // Fill in derived scores and penalties (NCBI BLAST approach)
-    // NCBI reference: greedy_align.c:835-843
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:835-843
     // match_score_half = match_score / 2;
     // op_cost = match_score + mismatch_score;
     // gap_open = in_gap_open;
@@ -1369,7 +1369,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
     ];
 
     // Max score at each distance for X-drop
-    // NCBI reference: greedy_align.c:872-873
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:872-873
     // xdrop_offset = (xdrop_threshold + match_score_half) / score_common_factor + 1;
     let xdrop_offset =
         ((xdrop_threshold + match_score_half) / score_common_factor.max(1) + 1) as usize;
@@ -1441,7 +1441,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
     // For each distance
     while d <= scaled_max_dist {
         // Compute X-dropoff score threshold
-        // NCBI reference: greedy_align.c:920, 979-983
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:920, 979-983
         // max_score = aux_data->max_score + xdrop_offset;  (pointer arithmetic)
         // xdrop_score = max_score[d - xdrop_offset] + score_common_factor * d - xdrop_threshold;
         // xdrop_score = (Int4)ceil((double)xdrop_score / match_score_half);
@@ -1473,7 +1473,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
 
             // Find best offset for DELETE (gap in seq1) - look at k+1 diagonal
-            // NCBI reference: greedy_align.c:1000-1021
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1000-1021
             // seq2_index = kInvalidOffset;
             // if (k + 1 <= diag_upper[d - gap_open_extend] && k + 1 >= diag_lower[d - gap_open_extend]) {
             //     seq2_index = last_seq2_off[d - gap_open_extend][k+1].match_off;
@@ -1533,7 +1533,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
 
             // Find best offset for INSERT (gap in seq2) - look at k-1 diagonal
-            // NCBI reference: greedy_align.c:1026-1036
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1026-1036
             // seq2_index = kInvalidOffset;
             // if (k - 1 <= diag_upper[d - gap_open_extend] && k - 1 >= diag_lower[d - gap_open_extend]) {
             //     seq2_index = last_seq2_off[d - gap_open_extend][k-1].match_off;
@@ -1583,7 +1583,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
 
             // Compare with mismatch path (from diagonal k at d - op_cost)
-            // NCBI reference: greedy_align.c:1041-1047
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1041-1047
             // seq2_index = MAX(last_seq2_off[d][k].insert_off, last_seq2_off[d][k].delete_off);
             // if (k <= diag_upper[d - op_cost] && k >= diag_lower[d - op_cost]) {
             //     seq2_index = MAX(seq2_index, last_seq2_off[d - op_cost][k].match_off + 1);
@@ -1647,7 +1647,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
 
             // Clamp bounds to avoid walking off sequences
-            // NCBI reference: greedy_align.c:1103-1110
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1103-1110
             // if (seq1_index == len1) {
             //     curr_diag_upper = k;
             //     end1_diag = k - 1;
@@ -1668,7 +1668,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         }
 
         // Compute maximum score for distance d
-        // NCBI reference: greedy_align.c:1115-1129
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1115-1129
         // curr_score = curr_extent * match_score_half - d * score_common_factor;
         // if (curr_score > max_score[d - 1]) {
         //     max_score[d] = curr_score;
@@ -1702,7 +1702,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         }
 
         // Save diagonal bounds for this distance
-        // NCBI reference: greedy_align.c:1139-1147
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1139-1147
         // if (curr_diag_lower <= curr_diag_upper) {
         //     num_nonempty_dist++;
         //     diag_lower[d] = curr_diag_lower;
@@ -1725,7 +1725,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         }
 
         // Check if we should decrement num_nonempty_dist
-        // NCBI reference: greedy_align.c:1149-1150
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1149-1150
         // if (diag_lower[d - max_penalty] <= diag_upper[d - max_penalty])
         //     num_nonempty_dist--;
         // Note: d - max_penalty maps to index (d - max_penalty + max_penalty) = d in the array
@@ -1859,7 +1859,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
 // =============================================================================
 
 /// Convert preliminary greedy edit blocks to a gap edit script.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2471-2536
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2471-2536
 /// `recycled` gives its arrays to the script (`GapEditScript::x_renew`).
 fn prelim_edit_block_to_gap_edit_script(
     rev_prelim_tback: &GapPrelimEditBlock,
@@ -1884,7 +1884,7 @@ fn prelim_edit_block_to_gap_edit_script(
     let mut esp = recycled.x_renew(size);
     let mut index = 0usize;
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2509-2515
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2509-2515
     // ```c
     // index = 0;
     // for (i=0; i < rev_prelim_tback->num_ops; i++) {
@@ -1918,7 +1918,7 @@ fn prelim_edit_block_to_gap_edit_script(
         fwd_prelim_tback.num_ops as isize - 1
     };
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2523-2534
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2523-2534
     // ```c
     // if (merge_ops)
     //    i = fwd_prelim_tback->num_ops - 2;
@@ -1944,7 +1944,7 @@ fn prelim_edit_block_to_gap_edit_script(
 }
 
 /// Update edit script around a substitution run.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2572-2632
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2572-2632
 fn update_edit_script(esp: &mut GapEditScript, pos: isize, bf: i32, af: i32) {
     if bf > 0 {
         let mut op = pos;
@@ -2058,7 +2058,7 @@ fn update_edit_script(esp: &mut GapEditScript, pos: isize, bf: i32, af: i32) {
 }
 
 /// Rebuild edit script after updates.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2634-2667
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2634-2667
 fn rebuild_edit_script(esp: &mut GapEditScript) {
     let mut j: isize = -1;
     for i in 0..esp.size {
@@ -2101,7 +2101,7 @@ fn rebuild_edit_script(esp: &mut GapEditScript) {
 }
 
 /// Reduce small gaps in greedy edit script.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2669-2758
 fn reduce_gaps(
     esp: &mut GapEditScript,
     q: &[u8],
@@ -2111,7 +2111,7 @@ fn reduce_gaps(
     s_start: usize,
     s_end: usize,
 ) {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2669-2758
     // ```c
     // for (q1=q, s1=s, i=0; i<esp->size; i++) {
     //     if (esp->num[i] == 0) continue;
@@ -2157,7 +2157,7 @@ fn reduce_gaps(
                 if esp.num[i] >= 12 {
                     let mut nm1: i32 = 1;
                     if i > 0 {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2679-2681
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2679-2681
                         // ```c
                         //                if (i > 0) {
                         //                    while (q1-nm1>=q && (*(q1-nm1) == *(s1-nm1))) ++nm1;
@@ -2180,7 +2180,7 @@ fn reduce_gaps(
 
                     let mut nm2: i32 = 0;
                     if i < esp.size - 1 {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2687-2689
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2687-2689
                         // ```c
                         // while ((q1+1<qf) && (s1+1<sf) && (*(q1++) == *(s1++))) ++nm2;
                         // ...
@@ -2261,7 +2261,7 @@ fn reduce_gaps(
                     q_pos -= d as isize;
                 }
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2729-2736
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2729-2736
                 // ```c
                 // for (j=0; j<esp->num[i-1]; ++j, ++q1, ++s1, ++q, ++s) {
                 //    if (*q1 == *s1) nm1++;
@@ -2281,7 +2281,7 @@ fn reduce_gaps(
                     s_pos += 1;
                 }
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2737-2739
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2737-2739
                 // ```c
                 // for (j=0; j<d; ++j, ++q, ++s) {
                 //    if (*q == *s) nm2++;
@@ -2317,8 +2317,8 @@ fn reduce_gaps(
 }
 
 /// Find first mismatch with fence detection.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:297-375 (s_FindFirstMismatch)
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:313-317
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:297-375 (s_FindFirstMismatch)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:313-317
 // ```c
 // static NCBI_INLINE Int4 s_FindFirstMismatch(const Uint1 *seq1, const Uint1 *seq2,
 //                                 Int4 len1, Int4 len2,
@@ -2443,7 +2443,7 @@ fn affine_first_mismatch<const REVERSE: bool>(
 }
 
 /// Affine traceback helper from match state.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:148-178
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:148-178
 fn get_next_affine_tback_from_match(
     last_seq2_off: &AffineRows<'_>,
     diag_lower: &[i32],
@@ -2487,7 +2487,7 @@ fn get_next_affine_tback_from_match(
 }
 
 /// Affine traceback helper from insertion/deletion state.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:199-258
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:199-258
 fn get_next_affine_tback_from_indel(
     last_seq2_off: &AffineRows<'_>,
     diag_lower: &[i32],
@@ -2540,7 +2540,7 @@ fn get_next_affine_tback_from_indel(
 }
 
 /// Non-affine traceback helper.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:260-294
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:260-294
 fn get_next_non_affine_tback(
     last_seq2_off: &[NonAffineGreedyRow],
     non_affine_mem: &GreedyNonAffineMem,
@@ -2595,7 +2595,7 @@ fn get_next_non_affine_tback(
 // the same writes and the same bookkeeping as the loop below, but as a small
 // leaf routine that compares eight bases per step.
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:537-611
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-611
 // ```c
 // for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
 //     seq2_index = MAX(last_seq2_off[d - 1][k + 1],
@@ -2842,7 +2842,7 @@ unsafe fn x_greedy_cell_slow<const REVERSE: bool>(
     // The reference loop indexes the slices with these offsets.
     assert!(seq1_index >= 0 && seq2_index >= 0);
     let index = x_first_mismatch::<REVERSE>(seq1, seq2, len1, len2, seq1_index, seq2_index);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:331-334,356-359
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:331-334,356-359
     // ```c
     // if (seq2_index < len2 && seq2[len2-1 - seq2_index] == FENCE_SENTRY) {
     //     ASSERT(fence_hit);
@@ -2857,7 +2857,7 @@ unsafe fn x_greedy_cell_slow<const REVERSE: bool>(
             cold.fence_hit = true;
         }
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:571-576
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:571-576
     // ```c
     // if (fence_hit && *fence_hit) {
     //     return 0;
@@ -3085,7 +3085,7 @@ unsafe fn x_greedy_row_impl<const REVERSE: bool>(
             if index < 0 {
                 // A diagonal past the end of `seq1` (`x_past_seq1_end`), unless the fence was
                 // already hit on entry (C returns at the first kept diagonal then).
-                // NCBI reference (598d8ae6): greedy_align.c:565-600
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565-600
                 let seq1_index = seq2_index + block_first + i as i32;
                 if !cold.fence_hit
                     && x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index)
@@ -3447,7 +3447,7 @@ unsafe fn x_greedy_row(
 mod x_greedy_fused;
 
 /// Non-affine greedy alignment with optional traceback.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:379-751 (BLAST_GreedyAlign)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:379-751 (BLAST_GreedyAlign)
 /// The row descriptors come from `non_affine_mem` (`GreedyNonAffineMem::rows`), as NCBI's row
 /// pointers come from its `SGreedyAlignMem`, instead of a new vector per call.
 fn blast_greedy_align(
@@ -3523,7 +3523,7 @@ fn blast_greedy_align_rows(
     let mut end1_reached = false;
     let mut end2_reached = false;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:211-225
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:211-225
     // ```c
     // gamp->last_seq2_off[0] =
     //    (Int4*) malloc((max_d + max_d + 6) * sizeof(Int4) * 2);
@@ -3544,7 +3544,7 @@ fn blast_greedy_align_rows(
             + 1,
     );
     if store_traceback {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:479-490
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:479-490
         // ```c
         // mem_pool = aux_data->space;
         // ...
@@ -3556,7 +3556,7 @@ fn blast_greedy_align_rows(
         // space_used, preserving NCBI's allocation timing and stale cells.
         non_affine_mem.refresh_traceback_pool();
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:216-228
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:216-228
     // ```c
     // gamp->last_seq2_off[0] =
     //    (Int4*) malloc((max_d + max_d + 6) * sizeof(Int4) * 2);
@@ -3575,7 +3575,7 @@ fn blast_greedy_align_rows(
     non_affine_mem.ensure_max_score_capacity(max_score_len);
     let max_score_offset = xdrop_offset as usize;
     for index in 0..max_score_offset {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:496-498
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:496-498
         // ```c
         // max_score = aux_data->max_score + xdrop_offset;
         // for (index = 0; index < xdrop_offset; index++)
@@ -3664,7 +3664,7 @@ fn blast_greedy_align_rows(
             (d & 1) as usize
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:548-550,657-678
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:548-550,657-678
         // ```c
         // seq2_index = MAX(last_seq2_off[d - 1][k + 1],
         //                  last_seq2_off[d - 1][k]) + 1;
@@ -3676,7 +3676,7 @@ fn blast_greedy_align_rows(
         let previous_row = last_seq2_off[prev_row_idx];
         let current_row = last_seq2_off[row_idx];
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:523-526
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:523-526
         // ```c
         // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
         // last_seq2_off[d - 1][diag_lower] = kInvalidOffset;
@@ -3694,7 +3694,7 @@ fn blast_greedy_align_rows(
             ((raw as f64) / (match_cost as f64 / 2.0)).ceil() as i32
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:537-550,562,589,673-678
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-550,562,589,673-678
         // ```c
         // for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
         //     seq2_index = MAX(last_seq2_off[d - 1][k + 1],
@@ -3810,7 +3810,7 @@ fn blast_greedy_align_rows(
                     seq1, seq2, len1, len2, seq1_index, seq2_index, reverse, fence_hit,
                 );
                 if *fence_hit {
-                    // NCBI reference: c++/src/algo/blast/core/greedy_align.c:523-526,571-576
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:523-526,571-576
                     // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
                     // if (fence_hit && *fence_hit) { return 0; }
                     // NCBI's row writes already reside in persistent scratch.
@@ -3868,7 +3868,7 @@ fn blast_greedy_align_rows(
             diag_upper += 1;
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:666-678
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:666-678
         // ```c
         // if (edit_block == NULL) {
         //     last_seq2_off[d + 1] = last_seq2_off[d - 1];
@@ -3879,7 +3879,7 @@ fn blast_greedy_align_rows(
         // }
         // ```
         if store_traceback {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:666-678
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:666-678
             // ```c
             // last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool,
             //                          (diag_upper - diag_lower + 7) / 3);
@@ -3890,7 +3890,7 @@ fn blast_greedy_align_rows(
             // down to that 3-Int4 allocation unit exactly as in NCBI.
             let row_len = (((diag_upper - diag_lower + 7) / 3) * 3).max(0) as usize;
             let pool_start = non_affine_mem.alloc_traceback_row(row_len);
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:673-678
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:673-678
             // ```c
             // last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool,
             //                          (diag_upper - diag_lower + 7) / 3);
@@ -3918,7 +3918,7 @@ fn blast_greedy_align_rows(
 
     d = best_dist;
     seq2_index = *seq2_align_len;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:697-751
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:697-751
     // ```c
     // d = best_dist;
     // seq2_index = *seq2_align_len;
@@ -4056,7 +4056,7 @@ pub(crate) fn greedy_xdrop_offset(
 }
 
 /// Affine greedy alignment with optional traceback.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:755-1249 (BLAST_AffineGreedyAlign)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:755-1249 (BLAST_AffineGreedyAlign)
 ///
 /// No NCBI counterpart: NCBI tests `reverse` inside `s_FindFirstMismatch` on every call; the
 /// direction is a type parameter here, as in the non-affine kernels (`x_first_mismatch`).
@@ -4124,7 +4124,7 @@ fn blast_affine_greedy_align(
 }
 
 /// `blast_affine_greedy_align` for one direction.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:755-1249 (BLAST_AffineGreedyAlign)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:755-1249 (BLAST_AffineGreedyAlign)
 fn blast_affine_greedy_align_dir<const REVERSE: bool>(
     seq1: &[u8],
     len1: i32,
@@ -4203,19 +4203,19 @@ fn blast_affine_greedy_align_dir<const REVERSE: bool>(
     let diag_len = (scaled_max_dist + max_penalty + 2) as usize;
     let diag_offset = max_penalty;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:848-856
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:848-856
     // ```c
     // max_dist = aux_data->max_dist;
     // scaled_max_dist = max_dist * gap_extend;
     // diag_origin = max_dist + 2;
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:920-935
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:920-935
     // ```c
     // max_score = aux_data->max_score + xdrop_offset;
     // diag_lower = aux_data->diag_bounds;
     // diag_upper = aux_data->diag_bounds + scaled_max_dist + 1 + max_penalty;
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:920-942
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:920-942
     // ```c
     //     max_score = aux_data->max_score + xdrop_offset;
     //     for (index = 0; index < xdrop_offset; index++)
@@ -4476,7 +4476,7 @@ fn blast_affine_greedy_align_dir<const REVERSE: bool>(
             diag_upper[diag_idx] = -INVALID_DIAG;
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:1145-1150
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1145-1150
         // ```c
         // if (curr_diag_lower <= curr_diag_upper) {
         //     num_nonempty_dist++;
@@ -4591,7 +4591,7 @@ fn blast_affine_greedy_align_dir<const REVERSE: bool>(
 }
 
 /// Core greedy gapped alignment result (internal).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2539-2569 (s_BlastGreedyGapAlignStructFill)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2539-2569 (s_BlastGreedyGapAlignStructFill)
 // No NCBI counterpart: visible to `x_greedy_prelim`, which reads them.
 pub(super) struct GreedyGappedCore {
     pub(super) q_start: i32,
@@ -4605,7 +4605,7 @@ pub(super) struct GreedyGappedCore {
 }
 
 /// Greedy gapped alignment core (with or without traceback).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
 // No NCBI counterpart: visible to `x_greedy_prelim`, which calls it on a window of the packed
 // subject, one base per byte, or on the one-byte copy of the whole subject.
 //
@@ -4670,7 +4670,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     let (query_left, q_len_left) = query.left_of(q_off);
     let (subject_right, s_len_right) = subject.right_of(s_off);
     let (subject_left, s_len_left) = subject.left_of(s_off);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2793
     // ```c
     // if (!compressed_subject) {
     //    s = subject + s_off;
@@ -4680,7 +4680,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     //    rem = s_off % 4;
     // }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2833-2834
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2833-2834
     // ```c
     // if (compressed_subject)
     //    rem = 0;
@@ -4689,7 +4689,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     // both directions (`subject_right`, `subject_left`). NCBI has no early return here: a start
     // past the end of the subject range (`s_avail <= 0`) still extends to the left.
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:323-330
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:323-330
     // ```c
     // max_subject_length = MIN(max_subject_length, MAX_DBSEQ_LEN);
     // max_subject_length = MIN(GREEDY_MAX_COST,
@@ -4714,7 +4714,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     let fwd_prelim_tback = &mut scratch.fwd_prelim_tback;
     let rev_prelim_tback = &mut scratch.rev_prelim_tback;
     if do_traceback {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2799-2802
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2799-2802
         // ```c
         // GapPrelimEditBlockReset(fwd_prelim_tback);
         // GapPrelimEditBlockReset(rev_prelim_tback);
@@ -4740,7 +4740,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     let mut score: i32;
 
     loop {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2808-2817
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2808-2817
         // ```c
         // score = BLAST_AffineGreedyAlign(q, q_avail, s, s_avail, FALSE, X,
         //        score_params->reward, -score_params->penalty,
@@ -4773,7 +4773,7 @@ pub(super) fn greedy_gapped_alignment_internal(
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2805-2831
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2805-2831
             // ```c
             // score = BLAST_AffineGreedyAlign(..., &q_ext_r, &s_ext_r, ...);
             // if (score >= 0) break;
@@ -4792,7 +4792,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     }
 
     loop {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2839-2847
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2839-2847
         // ```c
         // score1 = BLAST_AffineGreedyAlign(query, q_off,
         //         subject, s_off, TRUE, X,
@@ -4826,7 +4826,7 @@ pub(super) fn greedy_gapped_alignment_internal(
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2836-2864
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2836-2864
             // ```c
             // score1 = BLAST_AffineGreedyAlign(..., &q_ext_l, &s_ext_l, ...);
             // if (score1 >= 0) { score += score1; break; }
@@ -4866,7 +4866,7 @@ pub(super) fn greedy_gapped_alignment_internal(
             let s_end = s_off + s_ext_r;
             let debug_traceback = debug_greedy_traceback_enabled(q_off, s_off);
             if debug_traceback {
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2876-2882
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2876-2882
                 // ```c
                 // esp = Blast_PrelimEditBlockToGapEditScript(rev_prelim_tback,
                 //                                      fwd_prelim_tback);
@@ -4887,7 +4887,7 @@ pub(super) fn greedy_gapped_alignment_internal(
                 );
             }
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2881 (s_ReduceGaps query+q_off-q_ext_l, subject+s_off-s_ext_l)
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2881 (s_ReduceGaps query+q_off-q_ext_l, subject+s_off-s_ext_l)
             // The alignment's letters in the concatenated query and the whole subject
             // (`SeqPointer::at`).
             reduce_gaps(
@@ -4900,7 +4900,7 @@ pub(super) fn greedy_gapped_alignment_internal(
                 subject.at(s_end),
             );
             if debug_traceback {
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2669-2758
                 // ```c
                 // static void s_ReduceGaps(GapEditScript* esp, const Uint1 *q,
                 //                         const Uint1 *s, const Uint1 *qf,
@@ -4973,7 +4973,7 @@ pub(super) fn greedy_gapped_alignment_internal(
 /// the result are NCBI's `Int4` offsets in the context and in the range, outside them where the
 /// alignment is (a subject start below 0 in the range lies before the range's start, its shift in
 /// the whole subject).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2936
 pub fn greedy_gapped_alignment_with_traceback(
     query: ContextQuery<'_>,
     subject: AdjustedSubject<'_>,
@@ -5014,7 +5014,7 @@ pub fn greedy_gapped_alignment_with_traceback(
     }
     // The script's arrays go back to the scratch for the next one (`x_edit_script`).
     scratch.x_edit_script = edit_script;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-597
     // ```c
     // Blast_HSPUpdateWithTraceback(gap_align, hsp);
     //
@@ -5222,7 +5222,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: c++/src/algo/blast/core/greedy_align.c:500-501,523-526,571-576
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:500-501,523-526,571-576
     // last_seq2_off[0][diag_origin] = seq1_index;
     // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
     // last_seq2_off[d - 1][diag_lower] = kInvalidOffset;
@@ -5271,7 +5271,7 @@ mod tests {
 
     #[test]
     fn test_greedy_traceback_ncbi_regression_cases() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2936
         // ```c
         // BLAST_AffineGreedyAlign(..., fwd_prelim_tback, ...);
         // BLAST_AffineGreedyAlign(..., rev_prelim_tback, ...);
@@ -5375,7 +5375,7 @@ mod tests {
         ) in cases
         {
             let mut scratch = GreedyAlignScratch::new();
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:479-490
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:479-490
             // ```c
             // else { s_RefreshMBSpace(mem_pool); }
             // ```
@@ -5413,7 +5413,7 @@ mod tests {
 
     #[test]
     fn test_greedy_reverse_and_empty_boundary_cases() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:380-453
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:380-453
         // ```c
         // Int4 BLAST_GreedyAlign(..., Boolean reverse, ...)
         // {

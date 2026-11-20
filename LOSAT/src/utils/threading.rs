@@ -1,7 +1,7 @@
 //! Search-scoped execution; NCBI owns search semantics, Rayon only schedules.
 use anyhow::{ensure, Context, Result};
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // TBlastThreads the_threads(GetNumberOfThreads());
 // (*thread)->Run(); (*thread)->Join(&result);
 // This borrow cannot outlive the one search, or the run (`with_run_pool`), that owns the pool.
@@ -66,13 +66,13 @@ impl<'a> SearchPool<'a> {
 }
 
 impl SearchPool<'_> {
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:147
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:147
     // TBlastThreads the_threads(GetNumberOfThreads());
     pub fn threads(&self) -> usize {
         *self.requested
     }
 
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
     // (*thread)->Run(); (*thread)->Join(&result);
     pub fn enabled(&self) -> bool {
         #[cfg(feature = "parallel")]
@@ -81,7 +81,7 @@ impl SearchPool<'_> {
         false
     }
 
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
     // (*thread)->Run(); (*thread)->Join(&result);
     // Nested DP/linking/redo work uses this same pool, never the global pool.
     pub fn install<F, R>(&self, work: F) -> R
@@ -97,7 +97,7 @@ impl SearchPool<'_> {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187,3205-3236
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187,3205-3236
 // arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
 // NCBI warns when restricting threads. LOSAT's explicit-N contract instead
 // rejects unsupported requests, without silently reducing the requested pool.
@@ -137,7 +137,7 @@ pub fn validate_threads(requested: usize) -> Result<()> {
     Ok(())
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // TBlastThreads the_threads(GetNumberOfThreads());
 // (*thread)->Run(); (*thread)->Join(&result);
 // The caller occupies slot zero, so N includes the caller and N-1 children.
@@ -357,7 +357,7 @@ fn run_pool<'a>(requested: usize) -> Option<&'a rayon::ThreadPool> {
     (size == requested).then(|| unsafe { &*pool })
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:172-180
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180
 // (*thread)->Run(); (*thread)->Join(&result);
 // Erase only the scoped caller callback's lifetime for Rayon's 'static startup
 // hook. No borrowed data is dereferenced by a child, and scope joins all children.
@@ -377,7 +377,7 @@ unsafe impl Sync for CallerCallback {}
 
 #[cfg(feature = "parallel")]
 impl CallerCallback {
-    // NCBI reference: prelim_stage.cpp:172-180; Run precedes Join.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180; Run precedes Join.
     // SAFETY: body must remain live until slot zero and all children return.
     unsafe fn new<F: FnMut()>(body: &mut F) -> Self {
         unsafe fn invoke<F: FnMut()>(data: *mut ()) {
@@ -390,14 +390,14 @@ impl CallerCallback {
         }
     }
 
-    // NCBI reference: prelim_stage.cpp:172-180; Run precedes Join.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180; Run precedes Join.
     // SAFETY: invoke once, on the caller which owns the still-live body.
     unsafe fn call(&self) {
         unsafe { (self.invoke)(self.data) };
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668
 // /* Use a local diagnostics structure ... shared between multiple threads */
 // LOSAT_WASI_THREADS_DEBUG is read once per process, as LOSAT's other switches are: the stage
 // reports run once per subject chunk, and a read of the environment there cost about 340
@@ -418,7 +418,7 @@ pub(crate) fn write_diagnostic_line(line: String) {
     let _ = std::io::stderr().write_all(line.as_bytes());
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:147,177-188
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:147,177-188
 // TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Join(&result);
 fn report_pool(program: &str, requested: usize, pool: usize) {
     if diagnostics_enabled() {
@@ -426,7 +426,7 @@ fn report_pool(program: &str, requested: usize, pool: usize) {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668
 // /* Use a local diagnostics structure ... shared between multiple threads */
 // Record stage selection separately from the already verified pool size.
 // The test is taken where the stage runs (blastn reports a stage for every subject chunk); the
@@ -438,7 +438,7 @@ pub fn report_stage(program: &str, stage: &str, work_items: usize, parallel: boo
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668
 // /* Use a local diagnostics structure ... shared between multiple threads */
 // The line of `report_stage`, written only when LOSAT_WASI_THREADS_DEBUG is on.
 #[cold]
@@ -493,7 +493,7 @@ pub(crate) fn probe_write(message: String) {
 mod tests {
     use super::*;
 
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187
     // arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
     #[test]
     fn invalid_request_never_enters_search() {
@@ -503,7 +503,7 @@ mod tests {
         .is_err());
     }
 
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     #[test]
@@ -526,7 +526,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:172-180
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180
     // (*thread)->Run(); (*thread)->Join(&result);
     #[test]
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]

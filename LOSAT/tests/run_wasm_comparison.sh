@@ -1,5 +1,5 @@
 #!/bin/bash
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
 # const string kArgQuery("query");
 # const string kArgSubject("subject");
 # Reuse exactly the native comparison's inputs/options for command-Wasm.

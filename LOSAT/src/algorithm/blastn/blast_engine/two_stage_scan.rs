@@ -232,7 +232,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     // `s_TypeOfWord` checks the lookup words of every word hit (the
     // compressed query reads ambiguity codes as bases, and the lookup
     // table has no words with ambiguity codes).
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:407-411
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:407-411
     // ```c
     //     if (locations &&
     //         lookup->word_length > lookup->lut_word_length ) {
@@ -260,7 +260,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     let mut dbg_left_ext_iters = 0usize;
     let mut dbg_right_ext_iters = 0usize;
     let mut dbg_ungapped_ext_calls = 0usize;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
     // ```c
     // for (; s <= s_end; s += scan_step) {
     //     num_hits = s_BlastLookupGetNumHits(lookup, index);
@@ -285,7 +285,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         None
     };
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:451-497
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:451-497
     // ```c
     // const int kScanSubjectOffsetArraySize = GetOffsetArraySize(lookup);
     // hitsfound = scansub(lookup_wrap, subject, offset_pairs,
@@ -293,7 +293,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     // if (hitsfound == 0) continue;
     // hits_extended += extend(offset_pairs, hitsfound, ...);
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1482-1534
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1482-1534
     // ```c
     // Int4 total_hits = 0;
     // ...
@@ -306,7 +306,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     let offset_pairs = state.offset_pairs.as_mut_slice();
     let mut offset_pairs_len = 0usize;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:451-497
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:451-497
     // ```c
     // const int kScanSubjectOffsetArraySize = GetOffsetArraySize(lookup);
     // hitsfound = scansub(lookup_wrap, subject, offset_pairs,
@@ -367,7 +367,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                        s_range: usize,
                        current_lut_kmer: u64,
                        second_template_index: Option<u64>| {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
         // ```c
         // for (; s <= s_end; s += scan_step) {
         //     num_hits = s_BlastLookupGetNumHits(lookup, index);
@@ -384,7 +384,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             *dbg_total_s_positions += 1;
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
         // ```c
         // for (; s <= s_end; s += scan_step) {
         //     num_hits = s_BlastLookupGetNumHits(lookup, index);
@@ -409,7 +409,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             0
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
         // ```c
         // for (; s <= s_end; s += scan_step) {
         //     num_hits = s_BlastLookupGetNumHits(lookup, index);
@@ -430,7 +430,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             );
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1504-1533
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1504-1533
         // ```c
         // max_hits -= mb_lt->longest_chain;
         // if (total_hits >= max_hits)
@@ -456,7 +456,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 *dbg_seeds_found += 1;
             }
             if q_off_1 != 0 {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
                 // ```c
                 // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
                 // offset_pairs[i++].qs_offsets.s_off = s_off;
@@ -469,7 +469,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 offset_pairs_len += 1;
             }
         });
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1456-1469
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1456-1469
         // ```c
         // /** access the megablast lookup table with two templates */
         // #define MB_ACCESS_HITS2()                               \
@@ -502,7 +502,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             });
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
         // ```c
         // offset_array_size = OFFSET_ARRAY_SIZE +
         //     ((BlastMBLookupTable*)lookup->lut)->longest_chain;
@@ -523,7 +523,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     // (`lookup::XPvView`), which test each word there before they call out.
     let pv_view = two_stage.x_pv_view();
     if let Some(disc) = two_stage.disc() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1684
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1684
         // ```c
         //     scan_range[0] = 0;  /* subject seq mask index */
         //     scan_range[1] = 0;	/* start pos of scan */
@@ -847,7 +847,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
     // ```c
     // for (; s <= s_end; s += scan_step) {
     //     num_hits = s_BlastLookupGetNumHits(lookup, index);
@@ -873,7 +873,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:451-497
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:451-497
     // ```c
     // hitsfound = scansub(lookup_wrap, subject, offset_pairs,
     //                     kScanSubjectOffsetArraySize, &scan_range[1]);
@@ -892,7 +892,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
     // ```c
     // for (; s <= s_end; s += scan_step) {
     //     num_hits = s_BlastLookupGetNumHits(lookup, index);

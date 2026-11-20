@@ -378,7 +378,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         } else {
             None
         };
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:730-733
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:730-733
         // ```c
         // Int4 context = BSearchContextInfo(q_off, query_info);
         // ```
@@ -392,7 +392,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         // Use pre-computed cutoff score (computed once per query-subject pair)
         let cutoff_score = cutoff_scores[context_idx];
 
-        // NCBI reference: na_ungapped.c:1081-1140
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1081-1140
         // CRITICAL: In two-stage lookup, seed finding phase ONLY finds lut_word_length matches.
         // The word_length matching happens LATER in s_BlastnExtendInitialHit (extension phase).
         //
@@ -412,7 +412,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             continue;
         }
 
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:663-664
         // ```c
         // diag = s_off + diag_table->diag_array_length - q_off;
         // real_diag = diag & diag_table->diag_mask;
@@ -437,7 +437,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             *dbg_window_seeds += 1;
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
         // ```c
         // num_hits = s_BlastLookupGetNumHits(lookup, index);
         // if (num_hits == 0)
@@ -478,13 +478,13 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         }
 
         // NCBI BLAST does NOT check mask_array/mask_hash at seed level
-        // NCBI reference: na_ungapped.c:671-672
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:671-672
         // NCBI only checks: if (s_off_pos < last_hit) return 0;
         // This check happens below (line 753) using hit_level_array[real_diag].last_hit
         // The mask_array/mask_hash check above was LOSAT-specific and caused excessive filtering
         // REMOVED to match NCBI BLAST behavior
 
-        // NCBI reference: na_ungapped.c:1081-1140
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1081-1140
         // For two-stage lookup, verify word_length match BEFORE ungapped extension
         // This is done by left+right extension from the lut_word_length match position
         let Some((q_ext_start, s_ext_start, word_ext_left, word_ext_right)) =
@@ -506,7 +506,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             continue;
         };
 
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1155
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1093-1155
         // ```c
         // q_offset -= ext_left;
         // s_offset -= ext_left;
@@ -518,7 +518,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         //                                  word_length, lut_word_length,
         //                                  lookup_wrap,
         // ```
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-839
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-839
         // ```c
         // diag = s_off - q_off;
         // s_end = s_off + word_length;
@@ -563,7 +563,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             continue;
         }
 
-        // NCBI reference: na_ungapped.c:674-683
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-683
         // After word_length verification, call type_of_word for two-hit mode
         // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
         //     word_type = s_TypeOfWord(...);
@@ -581,7 +581,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         let mut hit_ready = true;
         let query_mask = ctx.masks.as_slice();
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1155
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1093-1155
         // ```c
         // q_offset -= ext_left;
         // s_offset -= ext_left;
@@ -633,7 +633,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             );
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
         // ```c
         // if (! PV_TEST(pv, index, mb_lt->pv_array_bts)) {
         //     return FALSE;
@@ -655,7 +655,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             if !two_stage.has_hits(kmer) {
                 return true;
             }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1027-1034
             // ```c
             // /* Also add 1 to all indices, because lookup table indices count
             //    from 1. */
@@ -666,7 +666,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             !two_stage.contains_hit(kmer, q_off_1)
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-676
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-676
         // ```c
         // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
         //     word_type = s_TypeOfWord(...);
@@ -674,7 +674,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         let s_end_pos_i32 = s_end_pos as i32;
         let window_end = last_hit + window_size as i32;
         if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-680
             // ```c
             // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
             //                          query_mask, query_info, s_range,
@@ -694,7 +694,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             );
             word_type = wt;
             extended = ext;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-680
             // ```c
             // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
             //                          query_mask, query_info, s_range,
@@ -714,7 +714,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             s_end += extended;
             s_end_pos += extended;
 
-            // NCBI reference: na_ungapped.c:685-717
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:685-717
             // for single word, also try off diagonals
             // if (word_type == 1) {
             //     /* try off-diagonals */
@@ -757,7 +757,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 //     hit_ready = 0;
                 // }
                 if !off_found {
-                    // NCBI reference: na_ungapped.c:713-716
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:713-716
                     // if (!off_found) {
                     //     /* This is a new hit */
                     //     hit_ready = 0;
@@ -766,7 +766,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 }
             }
         } else {
-            // NCBI reference: na_ungapped.c:718-726
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-726
             // else if (check_masks) {
             //     /* check the masks for the word */
             //     if(!s_TypeOfWord(query, subject, &q_off, &s_off,
@@ -777,8 +777,8 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             //     s_end_pos += extended;
             // }
             // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
             // ```c
             // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
             //                 query_mask, query_info, s_range,
@@ -799,7 +799,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 // Non-word, skip this hit
                 continue;
             }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
             // ```c
             // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
             //                 query_mask, query_info, s_range,
@@ -814,7 +814,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             // hit_ready remains true (default) - extension will proceed
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:841-921
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:841-921
         // ```c
         // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
         //     word_type = s_TypeOfWord(..., TRUE, &extended);
@@ -868,7 +868,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             );
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:728-766
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:728-766
         // ```c
         // if (hit_ready) {
         //     if (word_params->ungapped_extension) {
@@ -877,7 +877,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         // }
         // ```
         if !hit_ready {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772
             // ```c
             // hit_level_array[real_diag].last_hit = s_end_pos;
             // hit_level_array[real_diag].flag = hit_ready;
@@ -886,7 +886,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
             // }
             // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
             // ```c
             // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
@@ -914,7 +914,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         // Now do ungapped extension from the adjusted position
         // NCBI BLAST: s_BlastnExtendInitialHit calls ungapped extension after word_length verification
         // Use q_off and s_off (adjusted by type_of_word if called)
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-749
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:740-749
         // ```c
         // if (word_params->matrix_only_scoring || word_length < 11)
         //    s_NuclUngappedExtendExact(..., -(cutoffs->x_dropoff), ...);
@@ -975,7 +975,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         let ungapped_se = ungapped.s_start + ungapped.length;
         let ungapped_score = ungapped.score;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-758
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:740-758
         // ```c
         // s_NuclUngappedExtendExact(..., -(cutoffs->x_dropoff), ungapped_data);
         // ...
@@ -1024,19 +1024,19 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             }
         }
 
-        // NCBI reference: na_ungapped.c:757-758
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:757-758
         // s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
         // This is the END of the UNGAPPED extension, used for last_hit update
         let ungapped_s_end_pos = ungapped_se + diag_offset as usize;
 
         // Skip if ungapped score is too low
-        // NCBI reference: na_ungapped.c:752
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752
         // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
         // Use dynamically calculated cutoff_score instead of fixed threshold
         // off_found is set by off-diagonal search (Step 3)
         // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
         if !(off_found || ungapped_score >= cutoff_score) {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:752-760
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752-760
             // ```c
             // if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
             //     ...
@@ -1054,7 +1054,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                     q_pos_usize, s_pos, ungapped_score, min_ungapped_score
                 );
             }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772
             // ```c
             // hit_level_array[real_diag].last_hit = s_end_pos;
             // hit_level_array[real_diag].flag = hit_ready;
@@ -1102,7 +1102,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
         }
 
         // NCBI architecture: Collect ungapped hit for batch processing
-        // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
         // Gapped extension will be done later in score order with containment check
         // `UngappedHit::saved` holds NCBI's saving of the hit (`BLAST_SaveInitialHit`) and its
         // offsets in the context (`s_AdjustInitialHSPOffsets`, a negative `Int4` start for a hit
@@ -1112,7 +1112,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             UngappedHit::saved(q_idx, ctx, q_off, s_off, &ungapped),
         );
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772
         // ```c
         // hit_level_array[real_diag].last_hit = s_end_pos;
         // hit_level_array[real_diag].flag = hit_ready;
@@ -1228,7 +1228,7 @@ pub(super) fn word_extend_pair(
     let (q_ext_start, s_ext_start, word_ext_left, word_ext_right) = if let Some(small_na_word) =
         &small_na_word
     {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1651-1663
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1651-1663
         // ```c
         //     /* if sequence is masked, fall back to generic scanner and extender */
         //     if (subject->mask_type != eNoSubjMasking) {
@@ -1254,7 +1254,7 @@ pub(super) fn word_extend_pair(
         (q_word, s_word, q_off0.saturating_sub(q_word), 0)
     } else if word_length > lut_word_length {
         // NCBI BLAST: s_BlastNaExtend left/right extension uses packed subject
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1144
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1093-1144
         // ```c
         // Int4 ext_left = 0;
         // Int4 s_off = s_offset;
@@ -1285,7 +1285,7 @@ pub(super) fn word_extend_pair(
         //     if (ext_left + ext_right < ext_to) continue;
         // }
         let ext_to = word_length - lut_word_length;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1101-1114
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1101-1114
         // ```c
         // Int4 ext_left = 0;
         // Int4 s_off = s_offset;
@@ -1309,7 +1309,7 @@ pub(super) fn word_extend_pair(
             if debug_enabled {
                 *dbg_left_ext_iters += 1;
             }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1101-1114
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1101-1114
             // ```c
             // Uint1 *q = query->sequence + q_offset;
             // ...
@@ -1337,7 +1337,7 @@ pub(super) fn word_extend_pair(
         }
 
         // RIGHT extension (forwards from lut_word_length end)
-        // NCBI BLAST: na_ungapped.c:1120-1136
+        // NCBI BLAST: c++/src/algo/blast/core/na_ungapped.c:1120-1136
         // if (ext_left < ext_to) {
         //     Int4 ext_right = 0;
         //     s_off = s_offset + lut_word_length;
@@ -1354,7 +1354,7 @@ pub(super) fn word_extend_pair(
         //     }
         // }
         // Only do right extension if left didn't get all bases
-        // NCBI reference: na_ungapped.c:1120-1136
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1120-1136
         // if (ext_left < ext_to) {
         //     Int4 ext_right = 0;
         //     s_off = s_offset + lut_word_length;
@@ -1371,14 +1371,14 @@ pub(super) fn word_extend_pair(
         if ext_left < ext_to {
             // NCBI BLAST: s_off = s_offset + lut_word_length;
             // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
-            // Reference: na_ungapped.c:1122-1124
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1122-1124
             let mut s_off = kmer_start + lut_word_length;
             if s_off + (ext_to - ext_left) > s_range {
                 // Not enough room in subject, skip this seed (NCBI behavior)
                 return None;
             }
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1120-1136
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1120-1136
             // ```c
             // q = query->sequence + q_offset + lut_word_length;
             // ...
@@ -1396,13 +1396,13 @@ pub(super) fn word_extend_pair(
             let mut s_idx = s_off / COMPRESSION_RATIO;
 
             // NCBI BLAST: for (; ext_right < ext_to - ext_left; ++ext_right)
-            // Reference: na_ungapped.c:1128-1136
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1128-1136
             while ext_right < (ext_to - ext_left) {
                 if debug_enabled {
                     *dbg_right_ext_iters += 1;
                 }
                 // NCBI BLAST: if (base mismatch) break;
-                // Reference: na_ungapped.c:1129-1131
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1129-1131
                 // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds: `s_off + (ext_to -
                 // ext_left) <= s_range` (tested above) and `s_range` is at most the subject's length
                 // (the fn's preconditions).
@@ -1423,7 +1423,7 @@ pub(super) fn word_extend_pair(
             }
 
             // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;
-            // Reference: na_ungapped.c:1139-1140
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1139-1140
             if ext_left + ext_right < ext_to {
                 // Word_length match failed, skip this seed
                 return None;
@@ -1432,7 +1432,7 @@ pub(super) fn word_extend_pair(
 
         // Adjust positions for type_of_word and ungapped extension
         // NCBI BLAST: q_offset -= ext_left; s_offset -= ext_left;
-        // Reference: na_ungapped.c:1143-1144
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1143-1144
         (
             q_off0 - ext_left,
             kmer_start - ext_left,
@@ -1579,7 +1579,7 @@ pub(super) fn off_diagonal_found(od: OffDiagonal<'_>) -> bool {
     //     Boolean off_found = FALSE;
     // ```
     let mut off_found = false;
-    // NCBI reference: na_ungapped.c:658, 692
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:658, 692
     // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
     // if (Delta < 0) Delta = 0;
     let delta_calc = window_size as isize - word_length as isize;
@@ -1589,7 +1589,7 @@ pub(super) fn off_diagonal_found(od: OffDiagonal<'_>) -> bool {
         scan_range.min(delta_calc as usize) as isize
     };
 
-    // NCBI reference: na_ungapped.c:689-690
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:689-690
     // Int4 s_a = s_off_pos + word_length - window_size;
     // Int4 s_b = s_end_pos - 2 * word_length;
     // CRITICAL: NCBI uses signed arithmetic (Int4), so s_a and s_b can be negative
@@ -1598,16 +1598,16 @@ pub(super) fn off_diagonal_found(od: OffDiagonal<'_>) -> bool {
     let s_b = s_end_pos as isize - 2 * word_length as isize;
 
     if use_array_indexing {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:688-694
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:688-694
         // ```c
         // orig_diag = real_diag + diag_table->diag_array_length;
         // off_diag  = (orig_diag + delta) & diag_table->diag_mask;
         // ```
         let orig_diag = diag + diag_array_length;
-        // NCBI reference: na_ungapped.c:693
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:693
         // for (delta = 1; delta <= Delta ; ++delta) {
         for delta in 1..=delta_max {
-            // NCBI reference: na_ungapped.c:694-702
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:694-702
             // Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
             // Int4 off_s_end = hit_level_array[off_diag].last_hit;
             // Int4 off_s_l   = diag_table->hit_len_array[off_diag];
@@ -1637,7 +1637,7 @@ pub(super) fn off_diagonal_found(od: OffDiagonal<'_>) -> bool {
                 break;
             }
 
-            // NCBI reference: na_ungapped.c:703-711
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:703-711
             // off_diag  = (orig_diag - delta) & diag_table->diag_mask;
             // off_s_end = hit_level_array[off_diag].last_hit;
             // off_s_l   = diag_table->hit_len_array[off_diag];
@@ -1669,7 +1669,7 @@ pub(super) fn off_diagonal_found(od: OffDiagonal<'_>) -> bool {
         }
     } else {
         let diag_i32 = diag as i32;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:859-874
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:859-874
         // ```c
         // off_rc = s_BlastDiagHashRetrieve(hash_table, diag + delta,
         //           &off_s_end, &off_s_l, &off_hit_saved);

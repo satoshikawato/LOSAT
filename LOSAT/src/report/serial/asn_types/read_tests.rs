@@ -499,7 +499,7 @@ fn an_empty_seq_descr_is_a_serial_exception() {
     serial(named::SEQ_DESCR, "Seq-descr ::= { }");
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/member.cpp:848-869 and objistrasn.cpp:1024-1155
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:848-869 and c++/src/serial/objistrasn.cpp:1024-1155
 // (quoted at `read::delayed`, `read::skip_number`, `read::string`): `Auth-list.names` is skipped
 // and kept as read, from its first byte that is not white space (c11): comments and spacing stay,
 // a number is not range-checked (c12), a bad char is posted without the piece; the skip still

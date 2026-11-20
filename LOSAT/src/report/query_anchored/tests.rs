@@ -930,7 +930,7 @@ lo24  281  ........P........MQ...G.E...M.R.........E........SEL..  335
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:266-283 and alnsegments.cpp:286-338
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:266-283 and c++/src/objtools/alnmgr/alnsegments.cpp:286-338
 // (quoted at `aln_mix::Mix::build_rows` and `fill_unaligned_regions`). zs3 of the review
 // (`-query in/selfseg3.fa -subject in/selfseg3.fa -parse_deflines -seg yes -outfmt 1`): SEG splits the
 // record's self diagonal into q1-30 (added first) and q111-150 (the longest segment). The latter's match

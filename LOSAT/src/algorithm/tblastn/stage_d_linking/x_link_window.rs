@@ -153,7 +153,7 @@ impl XLinkWindow {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1713-1723
     // ```c
     //        for (index1 = hsp_index_left; index1 < hsp_index_right; ++index1) {
     //            BlastLinkedHSPSet* lhsp = offset_hsp_array[index1];
@@ -531,7 +531,7 @@ mod tests {
         expected.hsps.iter().filter(|hsp| hsp.num > 1).count()
     }
 
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1414-1491 (s_LinkedHSPSetsAdmissible)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1414-1491 (s_LinkedHSPSetsAdmissible)
     // ```c
     // if (left_hsp->hsp->subject.end < right_hsp->hsp->subject.offset - gap_s) break;
     // if (left_hsp->hsp->subject.end > right_hsp->hsp->subject.offset + overlap || ...

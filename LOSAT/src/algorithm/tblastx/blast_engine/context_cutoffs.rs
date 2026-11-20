@@ -76,7 +76,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         debug_cutoffs_all,
         query_frames,
     } = inputs;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:521-528
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:521-528
     // ```c
     //        } else {
     //           ASSERT(sbp->kbp_gap == NULL);
@@ -87,7 +87,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     //           }
     //        }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:908-939
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-939
     // ```c
     //    if (seq_src) {
     //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
@@ -110,7 +110,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     //       }
     //    }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:969-980
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // ```c
     //    if (sbp->gbp) {
     //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
@@ -125,7 +125,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
     //    }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_message.c:215-219
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-219
     // ```c
     //     case BLASTERR_SUBJECT_LENGTH_INVALID:
     //         new_msg->message = strdup("The average subject length is too short");
@@ -133,7 +133,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     //         new_msg->context = context;
     //         break;
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:310-314
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:310-314
     // ```c
     //             retval = CPrelimSearchRunner(*m_InternalData, opts_memento.get())();
     //             if (retval) {
@@ -173,7 +173,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         .into());
     }
     // Precompute per-context cutoff scores using NCBI BLAST algorithm.
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:280-419
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:280-419
     //
     // NCBI cutoff calculation for tblastx ungapped path:
     // 1. gap_trigger from ungapped params (kbp_std)
@@ -199,7 +199,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         None => db_length_nucl / db_num_seqs,
     };
     // NCBI: cutoff scores are stored per query context (no subject-frame dimension).
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:320-324
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:320-324
     // ```c
     // BlastUngappedCutoffs *curr_cutoffs = parameters->cutoffs + context;
     // ...
@@ -207,7 +207,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // ```
     let mut cutoff_scores: Vec<i32> = vec![0; contexts_ref.len()];
     // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-403
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:401-403
     let mut cutoff_score_min = i32::MAX;
 
     // =======================================================================
@@ -215,9 +215,9 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // =======================================================================
     // NCBI stores these in query_info->contexts[ctx].length_adjustment and
     // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths
-    // (ncbi-blast/c++/src/algo/blast/core/blast_setup.c:700-850).
+    // (c++/src/algo/blast/core/blast_setup.c:700-850).
     // Compute once for the complete subject set and share with all subject jobs.
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:846-847
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:846-847
     //   query_info->contexts[index].eff_searchsp = effective_search_space;
     //   query_info->contexts[index].length_adjustment = length_adjustment;
     let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
@@ -239,7 +239,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         preliminary_spaces.map(|_| Vec::with_capacity(contexts_ref.len()));
 
     for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
-        // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:324-331;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:324-331;
         // blast_setup.c:774-847: invalid contexts keep zero effective lengths.
         // if (!query_info->contexts[context].is_valid) {
         //     curr_cutoffs->cutoff_score = INT4_MAX; continue;
@@ -256,21 +256,21 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             continue;
         }
         // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
         let ctx_params = &ctx.karlin_params;
 
         // NCBI: query_length = query_info->contexts[context].query_length
         let query_len_aa = ctx.aa_len as i64;
 
         // NCBI: gap_trigger uses kbp_std[context]->Lambda/logK.
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:340-345
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:340-345
         let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
 
         // =======================================================================
         // NCBI Parity: Use try_compute_eff_lengths_tblastx to get BOTH
         // length_adjustment and eff_searchsp from a single source of truth.
         // This mirrors BLAST_CalcEffLengths which computes and stores both values.
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-847
         // =======================================================================
         // `-dbsize` replaces the database length here only (`SubjectSetNumbers`).
         let eff_lengths = numbers.context_lengths(
@@ -293,7 +293,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
 
         // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
         // This uses the effective search space WITH length adjustment
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:942-946
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:942-946
         let cutoff_score_max = cutoff_score_max_for_tblastx(
             eff_searchsp,
             evalue_threshold, // User's E-value (typically 10.0)
@@ -302,7 +302,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
 
         // Step 2: Compute per-subject cutoff using BlastInitialWordParametersUpdate
         // This uses CUTOFF_E_TBLASTX=1e-300 and a simple searchsp formula
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-374
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-374
         let cutoff = cutoff_score_for_update_tblastx(
             query_len_aa,
             subject_len_nucl, // NUCLEOTIDE length, NOT divided by 3!
@@ -330,13 +330,13 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             eprintln!("[DEBUG CUTOFF] gap_trigger={}", gap_trigger);
             eprintln!("[DEBUG CUTOFF] final cutoff={}", cutoff);
         }
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:943-946
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943-946
         // ```c
         // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
         // params->cutoffs[context].cutoff_score = new_cutoff;
         // params->cutoffs[context].cutoff_score_max = new_cutoff;
         // ```
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:360-374
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:360-374
         // ```c
         // BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
         //               MIN((Uint8)subj_length, (Uint8)query_length)*((Uint8)subj_length),
@@ -370,7 +370,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         // All subject frames use the same cutoff (NCBI: per-context cutoffs only).
         cutoff_scores[ctx_idx] = cutoff;
     }
-    // NCBI reference: c++/src/algo/blast/api/blast_results.cpp:82-100
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-100
     // ```c++
     //     // find the first valid context corresponding to this query
     //     for (i = 0; i < context_per_query; i++) {
@@ -419,7 +419,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
             stats.aa_len = ctx.aa_len;
         }
     }
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-416
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:401-416
     // ```c
     // if (new_cutoff < cutoff_min) {
     //    cutoff_min = new_cutoff;
@@ -433,7 +433,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         );
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:101-110
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:101-110
     // if (kbp[index] && query_info->contexts[index].is_valid &&
     //     kbp[index]->Lambda > 0.0 && kbp[index]->Lambda < min_lambda) { ... }
     let context_params: Vec<KarlinParams> = contexts_ref

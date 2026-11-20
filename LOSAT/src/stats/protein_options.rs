@@ -5,7 +5,7 @@
 use super::protein_tables::{ProteinMatrixTable, ProteinTableRow, PROTEIN_MATRIX_TABLES};
 use crate::config::ScoringMatrix;
 
-/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:437-441
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
 /// ```c
 /// long BLAST_Nint(double x)
 /// {
@@ -21,7 +21,7 @@ pub fn blast_nint(x: f64) -> i64 {
 /// The table of the matrix `name` (case-insensitive, `strcasecmp`), IDENTITY only when
 /// `standard_only` is false.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3593-3605
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3593-3605
 /// ```c
 ///    vnp = head = BlastLoadMatrixValues(standard_only);
 ///    while (vnp)
@@ -51,7 +51,7 @@ pub fn matrix_table(name: &str, standard_only: bool) -> Option<&'static ProteinM
 /// The table of `matrix`: the one whose name is `matrix.ncbi_name()` (`strcasecmp`), found by
 /// its index in `PROTEIN_MATRIX_TABLES` instead of the name.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2958-2992 (the order of the tables)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2958-2992 (the order of the tables)
 /// ```c
 ///    matrix_info = MatrixInfoNew("BLOSUM80", blosum80_values, blosum80_prefs, BLOSUM80_VALUES_MAX);
 ///    ListNodeAddPointer(&retval, 0, matrix_info);
@@ -81,7 +81,7 @@ pub fn scoring_matrix_table(matrix: ScoringMatrix) -> &'static ProteinMatrixTabl
 
 /// The first row of `table` with the gap costs, the search of the table loaders.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3612-3616
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3612-3616
 /// ```c
 ///       for (index=0; index<max_number_values; index++)
 ///       {
@@ -109,7 +109,7 @@ pub enum TableStatus {
 
 /// The table row of the gap costs of the matrix `name`.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3608-3641
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3608-3641
 /// ```c
 ///    if (found_matrix)
 ///    {
@@ -160,7 +160,7 @@ fn snprintf(buffer: &mut Vec<u8>, size: i32, text: &str) -> i32 {
     text.len() as i32
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3760-3788
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3760-3788
 /// ```c
 /// #define BUF_SZ_1024 (1024)
 ///    int buffer_sz= BUF_SZ_1024 ;
@@ -202,7 +202,7 @@ pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> String {
     String::from_utf8_lossy(&buffer).into_owned()
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3792-3839
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3792-3839
 /// ```c
 /// #define BUF_SZ_2048 (2048)
 /// ...
@@ -258,7 +258,7 @@ pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -
 /// `BLAST_MATRIX_BEST` after the first (ungapped) row; `None` for a matrix that is not in
 /// the tables (NCBI then leaves its caller's values, 0 and 0).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3374-3396
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3374-3396
 /// ```c
 /// Int2 BLAST_GetProteinGapExistenceExtendParams(const char* matrixName,
 ///                                        Int4* gap_existence,
@@ -304,7 +304,7 @@ pub enum SuggestionProgram {
     TranslatedQuery,
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1174-1209
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1174-1209
 /// ```c
 /// Int2 BLAST_GetSuggestedThreshold(EBlastProgramType program_number, const char* matrixName, double* threshold)
 /// {
@@ -360,7 +360,7 @@ pub fn suggested_threshold(program: SuggestionProgram, matrix_name: &str) -> f64
     threshold
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1211-1236
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1211-1236
 /// ```c
 ///     if(strcasecmp(matrixName, "BLOSUM62") == 0)
 ///         *window_size = kB62_windowsize;

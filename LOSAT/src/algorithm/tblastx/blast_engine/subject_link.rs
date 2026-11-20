@@ -150,7 +150,7 @@ pub(super) fn subject_frame_bases(s_frames_listed: &[QueryFrame]) -> Vec<i32> {
         // NCBI concatenation shares the trailing NULLB sentinel between frames:
         //   offset += length + 1;
         // where `length` is the number of residues (excluding sentinels).
-        // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
+        // Source: c++/src/algo/blast/core/blast_util.c:1098-1101
         base += f.aa_seq.len() as i32 - 1;
     }
     subject_frame_bases
@@ -356,7 +356,7 @@ pub(super) fn sort_and_reap_after_first_link(
         diag_enabled,
         ..
     } = stage;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1802-1803
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1802-1803
     // ```c
     //     /* Sort the HSP array by score */
     //     Blast_HSPListSortByScore(hsp_list);
@@ -488,7 +488,7 @@ pub(super) fn reevaluate_subject_hits<S: TbxScore>(
         ..
     } = stage;
     // NCBI: Blast_HSPListReevaluateUngapped equivalent
-    // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497, c++/src/algo/blast/core/blast_hits.c:2609-2737
     // Perform batch reevaluation on all HSPs after merging all frames
     let mut ungapped_hits = reevaluate_ungapped_hsp_list(
         sc,
@@ -503,12 +503,12 @@ pub(super) fn reevaluate_subject_hits<S: TbxScore>(
         collect_hsp_saving_stats,
         stats_hsp_filtered_by_reeval,
     );
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2733-2734
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2733-2734
     // ```c
     // /* Sort the HSP array by score (scores may have changed!) */
     // Blast_HSPListSortByScore(hsp_list);
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1381
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
     // ```c
     // if (!Blast_HSPListIsSortedByScore(hsp_list)) {
     //     qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
@@ -556,7 +556,7 @@ pub(super) fn relink_subject_hits(
     } else {
         None
     };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
     // ```c
     // for (frame_index=0; frame_index<num_query_frames; frame_index++)
     // {

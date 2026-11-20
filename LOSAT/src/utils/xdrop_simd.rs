@@ -2,7 +2,7 @@
 //! that is intended to return exactly what the scalar transliterations of
 //! NCBI `Blast_SemiGappedAlign` / `ALIGN_EX` return.
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:563-635
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-635
 //! ```c
 //! for (b_index = first_b_index; b_index < b_size; b_index++) {
 //!     score_gap_col = score_array[b_index].best_gap;
@@ -4548,7 +4548,7 @@ mod kernel {
     /// its own: one call per traceback, so the vector kernels do not hold its state.
     #[inline(never)]
     unsafe fn walk<const NIB: bool>(sc: &mut XdropScratch, a_off: usize, b_off: usize) {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-726
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:689-726
         // ```c
         // while (a_index > 0 || b_index > 0) {
         //     next_script = edit_script[a_index][b_index - edit_start_offset[a_index]];
@@ -5734,7 +5734,7 @@ mod tests {
     // ```
     // The plain scalar transliteration of the C loops that the differential test compares the vector
     // kernels with.
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:835-959
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:835-959
     // (Blast_SemiGappedAlign, score-only) and :500-727 (ALIGN_EX).
     pub(super) fn reference(
         p: &Problem,

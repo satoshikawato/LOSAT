@@ -227,7 +227,7 @@ fn iteration_post(at: usize, program: &str, thrown: &XmlThrow) -> DocumentPost {
 
 /// The `BlastOutput` object through `</BlastOutput_param>`, filled from the first formatted
 /// query (`BlastXML_FormatReport`, blastxml_format.cpp:679-720), then `\n<BlastOutput_iterations>`.
-/// NCBI serializes it into a string first, outside any `try` (blastxml_format.cpp:724-733): its
+/// NCBI serializes it into a string first, outside any `try` (c++/src/algo/blast/format/blastxml_format.cpp:724-733): its
 /// posts come before it, and an exception ends the run with nothing of it written: the exception
 /// is returned (`Ok(Some)`, `DocumentPosts::ends_run`), after the posts.
 fn write_header(
@@ -741,7 +741,7 @@ impl HitWrite for Xml5Hits<'_> {
             enc.end_member();
             enc.end_sequence();
             enc.end_document();
-            // NCBI writes each `Hit` into a string stream of its own (blastxml_format.cpp:498-511)
+            // NCBI writes each `Hit` into a string stream of its own (c++/src/algo/blast/format/blastxml_format.cpp:498-511)
             // and then to the output: its posts come before it, and an exception leaves it out
             // and ends the `Iteration` (`IterationThrew`).
             let at = self.out.len();

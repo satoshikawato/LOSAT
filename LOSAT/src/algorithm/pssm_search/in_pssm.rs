@@ -772,7 +772,7 @@ pub(crate) fn psi_search_and_object(
         return Err(reader
             .refuse("a PSSM without a query sequence (NCBI BLAST+ stops with a C++ exception)"));
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537 (tblastn_app.cpp:226)
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537 (c++/src/app/blast/tblastn_app.cpp:226)
     // ```c++
     // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
     // ```
@@ -786,7 +786,7 @@ pub(crate) fn psi_search_and_object(
     let program = reader.program.to_ascii_lowercase();
     let mut annot = super::annot_index::index_entry(&program, entry, reader.database)
         .map_err(|refusal| reader.refuse(refusal.text()))?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:539-540 (tblastn_app.cpp:228)
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:539-540 (c++/src/app/blast/tblastn_app.cpp:228)
     // ```c++
     // 		CRef<CSeq_loc> sl(new CSeq_loc());
     // 		sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
@@ -2541,7 +2541,7 @@ mod tests {
         bytes
     }
 
-    // NCBI blast_setup_cxx.cpp:894-917 and 632-651 (quoted at `query_residues` and
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-917 and 632-651 (quoted at `query_residues` and
     // `query_warnings::invalid_residues_error`): a residue without an NCBIstdaa code stops the
     // search at its query set-up, after the strategy's request and psiblast's round-1 files
     // (NCBI BLAST+ 2.17.0, M4a-1c E probes `*_star_iupac.inv.*`, `old_ps_bad_*`).
@@ -2587,7 +2587,7 @@ mod tests {
         );
     }
 
-    // NCBI sequtil_tables.cpp:1748-1781: `*` of ncbieaa is the stop residue (25), which NCBI
+    // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1748-1781: `*` of ncbieaa is the stop residue (25), which NCBI
     // searches (M4a-1c E probes `*_star_eaa`); the gap residue (`-`, the code 0 of ncbistdaa) is
     // a residue too, which NCBI searches and its reports show as `-` and count as a residue
     // (M4a-1c E and LG probes `*_dash_eaa`, `*_std0*`): the record keeps it as `-`.
@@ -2625,7 +2625,7 @@ mod tests {
         );
     }
 
-    // NCBI psiblast_aux_priv.cpp:466-473: a PSSM of frequency ratios only sets its query up as it
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:466-473: a PSSM of frequency ratios only sets its query up as it
     // computes the scores, so the stop comes there (before the request; no PSSM files).
     #[test]
     fn a_ratios_only_pssm_stops_at_its_scores_on_a_residue_without_a_code() {
@@ -2643,7 +2643,7 @@ mod tests {
         assert!(stop.after_request() && !stop.after_round_files());
     }
 
-    // NCBI seq_vector_ci.cpp:530-547,566-569 (quoted at `query_residues`) and tabular.cpp:996-1022
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:530-547,566-569 (quoted at `query_residues`) and c++/src/objtools/align_format/tabular.cpp:996-1022
     // (quoted at `recount_shown_identities`): NCBI searches lower-case iupacaa as its capitals and
     // its reports read the Bioseq's own letters (`PsiSearch::bioseq_letters`); a query that NCBI
     // stops keeps NCBI's stop.

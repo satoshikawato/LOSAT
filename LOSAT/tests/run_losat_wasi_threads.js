@@ -1,6 +1,6 @@
 "use strict";
 const { createThreadHost } = require("./wasi_thread_host");
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); return status;
 (async () => {
   const wasm = process.argv[2];

@@ -40,7 +40,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use {super::TblastxArgs, crate::blastinput::fasta_reader::FastaRecord, std::sync::Arc};
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1475
 // ```c
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
@@ -118,7 +118,7 @@ pub(super) fn spawn_writer(
     query_records: &[FastaRecord],
     sorts_results: bool,
 ) -> std::thread::JoinHandle<Vec<TblastxHsp>> {
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
     // typedef struct BlastHSPList {
     //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
@@ -366,13 +366,13 @@ where
         x_seed_end,
         x_board,
     } = lp;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
     // if (num_threads > 1) {
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1475
     // ```c
     // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
     //        != BLAST_SEQSRC_EOF) {
@@ -390,7 +390,7 @@ where
 
     #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
     if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1427
         // ```c
         // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
         // /* iterate over all subject sequences */

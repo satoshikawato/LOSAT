@@ -113,7 +113,7 @@ impl Default for ReportContext {
 
 /// Format scientific notation with NCBI-style exponent padding.
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-988
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-988
 /// ```c
 /// if (evalue < 1.0e-99) {
 ///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
@@ -124,7 +124,7 @@ impl Default for ReportContext {
 ///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
 /// }
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:2389-2402
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2389-2402
 /// ```c
 /// switch (flags & fDoubleGeneral) {
 ///     case fDoubleScientific:
@@ -167,7 +167,7 @@ fn format_scientific_ncbi(value: f64, precision: usize) -> String {
 
 /// Write scientific notation with NCBI-style exponent padding.
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-988
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-988
 /// ```c
 /// if (evalue < 1.0e-99) {
 ///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
@@ -189,7 +189,7 @@ fn write_scientific_ncbi<W: Write + ?Sized>(
 
 /// Format E-value exactly as NCBI BLAST does (base GetScoreString logic).
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-983
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-983
 /// ```c
 /// if (evalue < 1.0e-180) {
 ///     snprintf(evalue_buf, sizeof(evalue_buf), "0.0");
@@ -234,7 +234,7 @@ pub fn format_evalue_ncbi(e_value: f64) -> String {
 
 /// Format E-value exactly as NCBI BLAST does for tabular output.
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1332-1337
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1332-1337
 /// ```c
 /// CAlignFormatUtil::GetScoreString(evalue, bit_score, 0, score, m_Evalue, ...);
 /// if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
@@ -253,7 +253,7 @@ pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
 
 /// Format bit score exactly as NCBI BLAST does
 ///
-/// Reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:986-994
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-994
 /// ```c
 /// if (bit_score > 99999){
 ///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
@@ -304,7 +304,7 @@ pub fn format_total_bitscore_ncbi(total_bit_score: f64) -> String {
 
 /// Format percent identity exactly as NCBI tabular output does.
 ///
-/// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
+/// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-441
 /// ```c
 /// inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
 /// {
@@ -313,7 +313,7 @@ pub fn format_total_bitscore_ncbi(total_bit_score: f64) -> String {
 ///     m_Ostream << NStr::DoubleToString(perc_ident, 3);
 /// }
 /// ```
-/// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/corelib/ncbistr.cpp:2388-2401
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2388-2401
 /// ```c
 /// case fDoubleFixed: // default
 /// default:
@@ -343,7 +343,7 @@ pub fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
 
 /// Write E-value exactly as NCBI BLAST does (base GetScoreString logic).
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-983
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-983
 /// ```c
 /// if (evalue < 1.0e-180) {
 ///     snprintf(evalue_buf, sizeof(evalue_buf), "0.0");
@@ -381,7 +381,7 @@ fn write_evalue_ncbi_base<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io
 
 /// Write E-value exactly as NCBI BLAST does for tabular output.
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1332-1337
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1332-1337
 /// ```c
 /// CAlignFormatUtil::GetScoreString(evalue, bit_score, 0, score, m_Evalue, ...);
 /// if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
@@ -400,7 +400,7 @@ fn write_evalue_ncbi_tabular<W: Write + ?Sized>(writer: &mut W, e_value: f64) ->
 
 /// Write bit score exactly as NCBI BLAST does.
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:986-993
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-993
 /// ```c
 /// if (bit_score > 99999){
 ///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
@@ -462,7 +462,7 @@ pub fn write_hit_fields_bytes<W: Write + ?Sized>(
     writer.write_all(query_id)?;
     write!(writer, "{}", delim)?;
     writer.write_all(subject_id)?;
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-441
     // ```c
     // double perc_ident =
     //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
@@ -508,13 +508,13 @@ pub fn write_hit_fields_bytes<W: Write + ?Sized>(
 /// The `# Query: ` line of the outfmt 7 header of a query with the title `query_title`
 /// (the bytes as they are; the ID of a local query is not shown).
 ///
-/// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
 /// ```c
 ///     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
 ///                                             m_ParseLocalIds, kHtmlFormat,
 ///                                             kTabularFormat, rid);
 /// ```
-/// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:725-743
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:725-743
 /// ```c
 ///     } else if (tabular) {
 ///         out << "# " << label << ": ";
@@ -544,7 +544,7 @@ pub fn write_outfmt7_query_line<W: Write + ?Sized>(
 
 // =============================================================================
 // outfmt 7: Tabular with comment lines (NCBI BLAST compatible)
-// Reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:PrintHeader()
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:PrintHeader()
 // =============================================================================
 
 #[cfg(test)]
@@ -553,7 +553,7 @@ mod tests {
 
     // ==========================================================================
     // E-value formatting tests (NCBI parity)
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-988
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-988
     // ```c
     // if (evalue < 1.0e-99) {
     //     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
@@ -561,7 +561,7 @@ mod tests {
     //     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
     // }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1328-1337
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1328-1337
     // ```c
     // CAlignFormatUtil::GetScoreString(evalue, bit_score, 0, score, m_Evalue, ...);
     // if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(format_evalue_ncbi_tabular(1000.0), "1000");
     }
 
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-975
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-975
     // ```c
     // if (evalue < 1.0e-99) {
     //     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
@@ -642,7 +642,7 @@ mod tests {
 
     // ==========================================================================
     // Bit score formatting tests (NCBI parity)
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:986-993
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-993
     // ```c
     // if (bit_score > 99999){
     //     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
@@ -690,7 +690,7 @@ mod tests {
         assert_eq!(format_bitscore_ncbi(123456.789), "1.235e+05");
     }
 
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-988
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-988
     // ```c
     // if (evalue < 1.0e-99) {
     //     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
@@ -713,7 +713,7 @@ mod tests {
 
     #[test]
     fn test_format_percent_identity_ncbi_divides_before_scaling() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
+        // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-441
         // ```c
         // double perc_ident =
         //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);

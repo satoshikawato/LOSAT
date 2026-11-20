@@ -43,7 +43,7 @@ echo "Output directory: $OUTDIR"
 echo "============================================="
 
 # Find LOSAT executable
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
 # ```c
 # m_ClientId = string(kProgram) + " " + CBlastVersion().Print();
 # ```

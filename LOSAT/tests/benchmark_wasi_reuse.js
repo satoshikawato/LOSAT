@@ -9,7 +9,7 @@ const { prepareThreadHost } = require("./wasi_thread_host");
 const { runPair } = require("./check_wasi_reactor");
 const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1410-1475
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1410-1475
 // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) { ... }
 // Each sample completes one search with the same inputs. Compile reuse and
 // reactor instance reuse are separate measurements with explicit boundaries.
@@ -19,7 +19,7 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
   assert.ok(["compiled-module", "same-instance"].includes(mode));
   assert.ok(mode !== "same-instance" || kind.endsWith("reactor"), "commands cannot reuse an exited instance");
   const jobs = JSON.parse(fs.readFileSync(jobsFile, "utf8"));
-  // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
+  // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
   // x_PrintField(*iter); ... m_Ostream << "\\n";
   // Never let a stale result supply bytes for a successful command invocation.
   fs.closeSync(fs.openSync(resultFile, "wx"));
@@ -33,13 +33,13 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
     prepared = await prepareThreadHost(artifact, kind); ({ timings, identity } = prepared);
   } else {
     const start = performance.now(), bytes = fs.readFileSync(artifact);
-    // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     // CATCH_ALL(status); ... return status;
     // Serial execution owns the inspected module; no second compile is requested.
     ({ module, identity } = prepareArtifact(bytes, kind));
     timings = { validation_including_raw_compile_seconds:(performance.now()-start)/1000, guard_seconds:0, second_compile_seconds:0 };
   }
-  // NCBI reference: c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180
+  // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180
   // m_iTotalLength += (Int8) (*iter)->length;
   // Explicit API inputs are prepared once per case, outside invocation timing.
   // Command jobs retain file paths; repeated job metadata never duplicates FASTA text.
@@ -61,7 +61,7 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
   async function create(job) {
     if (prepared) return prepared.create(job.argv || []);
     const wasi = new WASI({version:"preview1", args:[artifact,...(job.argv||[])], env:process.env, preopens:{"/":"/"}, returnOnExit:true});
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
     // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
     // Standard output and error wait for a full pipe as the native write blocks
     // (blockingStdioWrite, wasi_artifact.js).
@@ -70,7 +70,7 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
     if (kind.endsWith("reactor")) wasi.initialize(instance);
     return {instance, memory:instance.exports.memory, events:[], start:()=>wasi.start(instance), waitForWorkers:async()=>{}, close:async()=>{}};
   }
-  // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:172-188
+  // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-188
   // (*thread)->Run(); ... (*thread)->Join(&result);
   // Complete lifecycle, exact bytes, and success status must all hold for timing.
   try {
@@ -79,7 +79,7 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
       let host = mode === "same-instance" ? instances.get(key) : null;
       sample.status = "RUNNING"; save();
       // Evidence serialization is outside the measured runtime boundary.
-      // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+      // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
       // (*thread)->Join(&result);
       // Capture wall-clock evidence at the same endpoints as the monotonic timer.
       const realtimeStart = Date.now(), start = performance.now(), cpu = process.cpuUsage();
@@ -114,7 +114,7 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
           expected_sha256:job.expected_sha256, raw_equal:hash(data) === job.expected_sha256,
           events, host_worker_counts:counts, memory_bytes:host.memory.buffer.byteLength });
         if (prepared) {
-          // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:3429-3459
+          // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3459
           // #pragma omp parallel ... num_threads(actual_num_threads)
           // LOSAT's existing total-thread contract includes the caller.
           const expected = n - 1;

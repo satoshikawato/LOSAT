@@ -109,7 +109,7 @@ pub(super) type XTraced = (TraceStart, XSpecTraceback<DpTraceback, GreedyTraceba
 ///          }
 /// ```
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
 /// ```c
 /// if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, hit_options->min_diag_separation)) {
 ///     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
@@ -130,7 +130,7 @@ pub(super) fn prepare_traceback(
         score_matrix,
         ..
     } = traceback_ctx;
-    // NCBI's `query` (blast_traceback.c:386-387): the context in the concatenated query, read at
+    // NCBI's `query` (c++/src/algo/blast/core/blast_traceback.c:386-387): the context in the concatenated query, read at
     // the HSP's offsets, which lie outside it for a greedy HSP from a hit that passes an end of
     // its context. Both functions below give the same offsets on the context's letters alone for
     // an HSP in its context.
@@ -141,7 +141,7 @@ pub(super) fn prepare_traceback(
     let mut trace_q_start = prelim.seed_qs;
     let mut trace_s_start = prelim.seed_ss;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-460
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-460
     // ```c
     // if (!kIsOutOfFrame && hsp->query.gapped_start == 0 &&
     //                       hsp->subject.gapped_start == 0) {
@@ -185,7 +185,7 @@ pub(super) fn prepare_traceback(
         trace_s_start = s_start;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:466-472
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:466-472
     // ```c
     // AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
     //                    query_length, &start_shift);
@@ -489,7 +489,7 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
             .is_none()
     }));
     let jobs = &*speculative_jobs;
-    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-513
     // BLAST_GappedAlignmentWithTraceback(...);
     crate::utils::threading::report_stage("blastn", "dp_traceback", jobs.len(), jobs.len() > 1);
     speculative_results.clear();
@@ -505,7 +505,7 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
                         .step_by(num_threads)
                         .filter_map(|&index| {
                             let p = &prelim_hits[index];
-                            // NCBI reference: core/blast_traceback.c:436-472,509-513
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-472,509-513
                             // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
                             // AdjustSubjectRange(&s_start, &adjusted_s_length,
                             //                    q_start, query_length, &start_shift);
@@ -548,7 +548,7 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
             },
         )
     });
-    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:583-612
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-612
     // Blast_HSPUpdateWithTraceback(gap_align, hsp);
     // BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
     // One owner restores each result to its original batch index.
@@ -693,7 +693,7 @@ pub(super) fn trace_align_one(
             gap_letters,
             edit_ops,
         ) = {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
             // ```c
             // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, hit_options->min_diag_separation)) {
             //     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
@@ -703,7 +703,7 @@ pub(super) fn trace_align_one(
             // ```
             // N02 scheduling only: speculative values have no externally visible effects;
             // the original ordered contains/materialize/add sequence remains authoritative.
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:273-286,558-585
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:273-286,558-585
             // ```c
             // if (in_hsp->score > tree_hsp->score) return in_hsp;
             // /* equal scores: pick the shorter HSP */
@@ -769,7 +769,7 @@ pub(super) fn trace_align_one(
             return None;
         }
         match x_greedy_result {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-597
             // ```c
             // Blast_HSPUpdateWithTraceback(gap_align, hsp);
             //
@@ -913,7 +913,7 @@ pub(super) fn trace_build_hsp(
         traceback_edit_script_lengths,
         traceback_alignment_lengths,
     } = out;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:598-600
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:598-600
     // ```c
     // Blast_HSPAdjustSubjectOffset(hsp, start_shift);
     // ```
@@ -930,7 +930,7 @@ pub(super) fn trace_build_hsp(
     let final_ss = in_subject(final_ss + start_shift);
     let final_se = in_subject(final_se + start_shift);
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-597
     // ```c
     // Blast_HSPUpdateWithTraceback(gap_align, hsp);
     // ...
@@ -960,7 +960,7 @@ pub(super) fn trace_build_hsp(
         (matches, mismatches, gaps, gap_letters, aln_len)
     };
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-472
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-472
     // ```c
     // BlastGetOffsetsForGappedAlignment(..., &q_start, &s_start);
     // ...
@@ -969,7 +969,7 @@ pub(super) fn trace_build_hsp(
     // AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
     //                    query_length, &start_shift);
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-600
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-600
     // ```c
     // Blast_HSPUpdateWithTraceback(gap_align, hsp);
     // ...
@@ -1038,7 +1038,7 @@ pub(super) fn trace_build_hsp(
         return false;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-612
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-612
     // ```c
     // Blast_HSPUpdateWithTraceback(gap_align, hsp);
     // if (!delete_hsp && !kGreedyTraceback) {
@@ -1068,7 +1068,7 @@ pub(super) fn trace_build_hsp(
         IndexMethod::QueryAndSubject,
     );
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-250
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:234-250
     // ```c
     // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
     //                         hsp_list, kGapped, FALSE, sbp, 0,
@@ -1076,7 +1076,7 @@ pub(super) fn trace_build_hsp(
     // ...
     // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1887-1890
     // ```c
     // hsp->evalue =
     //     BLAST_KarlinStoE_simple(score, kbp[kbp_context],
@@ -1089,7 +1089,7 @@ pub(super) fn trace_build_hsp(
         eff_searchsp,
         round_down_evalue_score,
     );
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:234-246
     // ```c
     // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
     //                         hsp_list, kGapped, FALSE, sbp, 0,
@@ -1123,7 +1123,7 @@ pub(super) fn trace_build_hsp(
     } else {
         Some(edit_ops)
     };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4077
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4058-4077
     // ```c
     // if (gap_align->score >= cutoff) {
     //     ...

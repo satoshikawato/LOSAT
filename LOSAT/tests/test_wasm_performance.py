@@ -1,8 +1,8 @@
 """Gate negatives; no algorithm emulation or replacement expected output.
 
-NCBI c++/src/objtools/align_format/tabular.cpp:1098-1108:
+NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108:
   x_PrintField(*iter); ... m_Ostream << "\n";
-NCBI c++/src/algo/blast/format/blast_format.cpp:794-808:
+NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:794-808:
   dbname = string("User specified sequence set (Input: ") + m_SubjectTag ...;
 Synthetic subprocesses exercise the harness only, never certify a search.
 """
@@ -191,7 +191,7 @@ class GateTests(unittest.TestCase):
             "import pathlib,sys;pathlib.Path(sys.argv[-1]).write_bytes(b'');sys.exit(7)"
         )
         self.assertEqual(result["status"], "BAD_EXIT")
-        # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+        # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
         # (*thread)->Join(&result);
         # Exact recorded endpoints cover the same process lifetime on failure.
         self.assertGreater(result["monotonic_end"], result["monotonic_start"])
@@ -208,7 +208,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(result["status"], "TIMEOUT")
         self.assertGreater(result["wall_seconds"], 0)
 
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
     # (*thread)->Join(&result);
     # An early host timer wake must not terminate a search before its deadline.
     def test_early_watchdog_wake_preserves_success_and_cancellation(self):
@@ -222,7 +222,7 @@ class GateTests(unittest.TestCase):
         self.assertGreaterEqual(result["watchdog_clocks"]["early_wakeups"], 1)
         self.assertNotIn("fired", result["watchdog_clocks"])
 
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
     # (*thread)->Join(&result);
     # The same early wake still terminates a hung child at the monotonic deadline.
     def test_early_watchdog_wake_still_expires_at_monotonic_deadline(self):
@@ -306,7 +306,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
 # (*thread)->Run(); (*thread)->Join(&result);
 class ThreadEvidenceTests(unittest.TestCase):
     def record(self):

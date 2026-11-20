@@ -934,7 +934,7 @@ impl ListedSubjects {
     //
     //     if (!m_HdrFileOpened) x_OpenHdrFile();
     // ```
-    // NCBI first reads a header file (and opens it, seqdbvol.cpp:127-133) when the
+    // NCBI first reads a header file (and opens it, c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:127-133) when the
     // traceback's results become Seq-aligns: after the batch's traceback, for the final
     // hit lists only, query by query and in the order of each hit list. A header file
     // that is missing or cannot be read fails the batch there (`BLAST Database error`,

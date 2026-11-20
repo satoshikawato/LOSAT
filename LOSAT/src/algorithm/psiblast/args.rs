@@ -83,7 +83,7 @@ use crate::blastinput::value_parsers::*;
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct PsiblastArgs {
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // ```c
     //     arg_desc.AddDefaultKey(kArgQuery, "input_file",
     //                      "Input file name",
@@ -209,7 +209,7 @@ pub struct PsiblastArgs {
     pub export_search_strategy: Option<PathBuf>,
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
-    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
     #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
@@ -275,7 +275,7 @@ pub struct PsiblastArgs {
     pub gap_open: Option<i32>,
     #[arg(long = "gapextend", value_parser = ncbi_integer, help = "Cost to extend a gap [default: 1, or the matrix's best value]")]
     pub gap_extend: Option<i32>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:796-797
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     // ```c
     //     arg_desc.AddDefaultKey(kArgCompBasedStats, "compo", legend,
     //                            CArgDescriptions::eString, m_DefaultOpt);
@@ -308,7 +308,7 @@ pub struct PsiblastArgs {
     // ```
     #[arg(long)]
     pub lcase_masking: bool,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:803-806
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:803-806
     // ```c
     //     arg_desc.AddFlag(kArgUseSWTraceback,
     //                      "Compute locally optimal Smith-Waterman alignments?",
@@ -316,7 +316,7 @@ pub struct PsiblastArgs {
     // ```
     #[arg(long)]
     pub use_sw_tback: bool,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // ```c++
     //     arg_desc.AddOptionalKey(kArgQueryLocation, "range",
     //                             "Location on the query sequence in 1-based offsets "
@@ -329,7 +329,7 @@ pub struct PsiblastArgs {
         help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
     )]
     pub query_loc: Option<String>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // ```c++
     //         arg_desc.AddOptionalKey(kArgSubjectLocation, "range",
     //                         "Location on the subject sequence in 1-based offsets "
@@ -343,7 +343,7 @@ pub struct PsiblastArgs {
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
-    // NCBI's argument is a string (blast_args.cpp:2657-2660), parsed before the option
+    // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
     #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 6, 7, 10 and 20", "6, 7, 10 and 20", "; with -in_pssm: 0, 6 and 7"))]
     pub outfmt: String,

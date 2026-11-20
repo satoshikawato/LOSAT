@@ -253,7 +253,7 @@ pub(crate) fn display_positives(
 mod tests {
     use super::*;
 
-    // NCBI showalign.cpp:2131-2155 and align_format_util.cpp:3563-3581 (quoted above and at
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2155 and c++/src/objtools/align_format/align_format_util.cpp:3563-3581 (quoted above and at
     // `protein_display_score`): a masked capital compares as its capital; a PSSM query's
     // lower-case letter is identical to no subject letter and scores -1000.
     #[test]

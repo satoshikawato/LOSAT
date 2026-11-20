@@ -627,7 +627,7 @@ fn scan_strip_from<O: SeedOut, const PIECE: bool>(
     let end = job.end;
     let cut = Cut::new(&from);
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
         // ```c
         // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
         // offset_pairs[i++].qs_offsets.s_off = s_off;
@@ -690,7 +690,7 @@ fn scan_strip_csr<
     // run read again.
     let rank_once = super::x_bn_rank_once(true);
     let mut emit = |(kmer_start, index): (usize, u64), e: usize| {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
         // ```c
         // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
         // offset_pairs[i++].qs_offsets.s_off = s_off;
@@ -866,7 +866,7 @@ fn seed_of_pair<O: SeedOut>(
     let s_len = x.s_len;
     let search_seq_packed = x.search_seq_packed;
     let encoded_query_concat_blastna_with_sentinels = x.encoded_query_concat_blastna_with_sentinels;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:730-733
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:730-733
     // ```c
     // Int4 context = BSearchContextInfo(q_off, query_info);
     // ```
@@ -1071,7 +1071,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         let s_ext_start = seed.s as usize;
         let s_range = seed.s_range as usize;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-839
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-839
         // ```c
         // diag = s_off - q_off;
         // s_end = s_off + word_length;
@@ -1113,7 +1113,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         let mut hit_ready = true;
         let query_mask = ctx.masks.as_slice();
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
         // ```c
         // if (! PV_TEST(pv, index, mb_lt->pv_array_bts)) {
         //     return FALSE;
@@ -1173,7 +1173,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         s_end += ext;
         s_end_pos += ext;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
         // ```c
         // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
@@ -1277,7 +1277,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
         // ```
         if !(off_found || ungapped_score >= cutoff_score) {
             hit_ready = false;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
             // ```c
             // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
@@ -1310,7 +1310,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
             out.hit_keys.push(x_key);
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
         // ```c
         // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,

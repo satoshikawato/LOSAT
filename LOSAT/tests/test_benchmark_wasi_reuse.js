@@ -1,6 +1,6 @@
 "use strict";
 // Usage: node test_benchmark_wasi_reuse.js <artifact.wasm> [serial-command|threaded-command]  (BLASTN_BIN = NCBI blastn)
-// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 // x_PrintField(*iter); m_Ostream << "\n";
 // Real WASI command calls (serial or threaded, argv[3]) verify evidence retention. NCBI is a test oracle only.
 const fs = require("node:fs");

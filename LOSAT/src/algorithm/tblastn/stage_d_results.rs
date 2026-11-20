@@ -17,11 +17,11 @@ use super::stage_d_linking::{
 mod culling;
 pub(super) use culling::PrelimCulling;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.h:152-181;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.h:152-181;
 // core/blast_kappa.c:2494-2515:
 // while (NULL != (hsp_list = BlastCompo_HeapPop(heap)))
 //     Blast_HitListUpdate(hitlist, hsp_list);
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:305-358,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:305-358,
 // 3690-3706; core/blast_hits.h:126-143:
 // GapEditScript *editScript = align->context; align->context = NULL;
 // Blast_HSPInit(..., &editScript, &new_hsp);
@@ -31,14 +31,14 @@ pub(super) use culling::PrelimCulling;
 pub(super) struct KappaHspPayload {
     pub bit_score: f64,
     pub num_ident: i32,
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:515-526;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526;
     // c++/src/algo/blast/core/blast_hits.c:767-811,966-989:
     // Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp,
     //                                       scoring_options, 0, sbp);
     // *num_pos_ptr = num_pos + num_ident;
     // Alignment length and gap counts follow the same gap_info operation lengths.
     pub num_positives: usize,
-    // NCBI c++/src/objtools/align_format/tabular.cpp:971-1021,1090-1095:
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:971-1021,1090-1095:
     // alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
     // alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
     // if (m_QuerySeq[i] == m_SubjectSeq[i]) { ++num_ident; ++num_positives; }
@@ -70,7 +70,7 @@ pub(super) struct KappaResultList {
     pub payloads: Vec<KappaHspPayload>,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3125-3135,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3125-3135,
 // 3243-3297,3420-3437:
 // new_hitlist->hsplist_max = hitlist_size;
 // new_hitlist->low_score = INT4_MAX;
@@ -86,7 +86,7 @@ pub(super) struct KappaResultHitList {
 
 #[allow(dead_code)] // The public TBLASTN result path remains gated until C/D/E pass.
 impl KappaResultHitList {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3125-3135:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3125-3135:
     // new_hitlist->hsplist_max = hitlist_size;
     // new_hitlist->low_score = INT4_MAX;
     // new_hitlist->hsplist_count = 0;
@@ -101,7 +101,7 @@ impl KappaResultHitList {
         })
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3243-3297:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3243-3297:
     // hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list);
     // if (hit_list->hsplist_count < hit_list->hsplist_max)
     //     hit_list->hsplist_array[hit_list->hsplist_count++] = hsp_list;
@@ -154,7 +154,7 @@ impl KappaResultHitList {
         Ok(Some(discarded))
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3420-3437:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3420-3437:
     // for (index1 = 0; index1 < hit_list->hsplist_count/2; ++index1) {
     //     hsplist = hit_list->hsplist_array[index1];
     //     hit_list->hsplist_array[index1] =
@@ -165,7 +165,7 @@ impl KappaResultHitList {
         self.lists.reverse();
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:1763-1776;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1776;
     // c++/src/algo/blast/core/blast_hits.c:3383-3400:
     // if (BlastSeqSrcGetTotLen(seq_src) > 0)
     //     Blast_HSPResultsSortByEvalue(results);
@@ -210,7 +210,7 @@ impl KappaResultHitList {
         }
     }
 
-    // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // for (int index = 0; index < hit_list->hsplist_count; index++) {
     //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
     //     Blast_HSPListSortByEvalue(hsp_list);
@@ -222,13 +222,13 @@ impl KappaResultHitList {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:672-674
     // ```c++
     //     if (hsp->score == 0) {
     //         return CRef<CSeq_align>();
     //     }
     // ```
-    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1485-1490
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1485-1490
     // ```c++
     //             seqalign =
     //                 s_BlastHSP2SeqAlign(program, hsp, query_id, subject_id,
@@ -256,11 +256,11 @@ impl KappaResultHitList {
         self.lists.retain(|list| !list.hsps.hsps.is_empty());
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.h:169-181:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.h:169-181:
     // Int4 hsplist_count, hsplist_max;
     // double worst_evalue; Int4 low_score; Boolean heapified;
     // BlastHSPList** hsplist_array;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:845-865
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:845-865
     // ```c
     //    for (subject_index = 0;
     //         subject_index < hit_list->hsplist_count; ++subject_index) {
@@ -355,7 +355,7 @@ impl KappaResultHitList {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1734-1750:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1734-1750:
 // double best_evalue = (double) INT4_MAX;
 // for (index=0; index<hsp_list->hspcnt; index++)
 //     best_evalue = MIN(hsp_list->hsp_array[index]->evalue, best_evalue);
@@ -366,7 +366,7 @@ fn refresh_best_evalue(list: &mut LinkedHspList) {
         .fold(i32::MAX as f64, |best, hsp| best.min(hsp.evalue));
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1385-1455:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1385-1455:
 // if (evalue1 < 1.0e-180 && evalue2 < 1.0e-180) return 0;
 // if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0) return retval;
 // return ScoreCompareHSPs(v1, v2);
@@ -399,7 +399,7 @@ fn sort_hsps_by_evalue(list: &mut KappaResultList) {
     if list.payloads.is_empty() {
         list.hsps.hsps.sort_by(compare);
     } else {
-        // NCBI c++/src/algo/blast/core/blast_hits.c:1385-1455:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1385-1455:
         // return ScoreCompareHSPs(v1, v2); /* HSP pointer sort */
         // Thus each
         // bit score, identity count and edit script moves with its HSP.
@@ -414,7 +414,7 @@ fn sort_hsps_by_evalue(list: &mut KappaResultList) {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3071-3111:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3071-3111:
 // if ((retval = s_EvalueComp(h1->best_evalue, h2->best_evalue)) != 0) return retval;
 // if (h1->hsp_array[0]->score > h2->hsp_array[0]->score) return -1;
 // if (h1->hsp_array[0]->score < h2->hsp_array[0]->score) return 1;
@@ -423,7 +423,7 @@ fn compare_result_lists(a: &KappaResultList, b: &KappaResultList) -> Ordering {
     compare_preliminary_lists_for_kappa(a.oid, &a.hsps, b.oid, &b.hsps)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1627-1676,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1627-1676,
 // 3194-3210:
 // large_son = (*compar)(left_son, left_son+width) >= 0 ? left_son : left_son+width;
 // if ((*compar)(base, large_son) < 0) SWAP(base, large_son);
@@ -450,7 +450,7 @@ fn heapify_down(lists: &mut [KappaResultList], start: usize) {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:476-534
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:476-534
 // ```c
 //        for (j = 0; j < contexts_per_query; j++) {
 //            split_points[j] = -1;
@@ -525,7 +525,7 @@ pub(super) fn merge_query_chunk(
     Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2132-2217
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2132-2217
 // ```c
 //     if (hitlist1 == NULL)
 //         return 0;
@@ -623,7 +623,7 @@ fn hit_list_merge(
     Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2921-3029
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2921-3029
 // ```c
 //       for (index1 = 0; index1 < combined_hsp_list->hspcnt; index1++) {
 //          hsp1 = combined_hsp_list->hsp_array[index1];
@@ -704,7 +704,7 @@ fn query_hsp_lists_merge(
                 }
                 let end_diag = old[index1].hsp.q_end - old[index1].hsp.s_end;
                 let start_diag = candidate.hsp.q_start - candidate.hsp.s_start;
-                // NCBI blast_hits.c:1537: #define OVERLAP_DIAG_CLOSE 10
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537: #define OVERLAP_DIAG_CLOSE 10
                 if (end_diag - start_diag).abs() < 10
                     && super::search_gapped::merge_two_chunk_hsps(
                         &mut old[index1].hsp,
@@ -721,7 +721,7 @@ fn query_hsp_lists_merge(
     combine_by_score(incoming, combined);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2819-2829,2849
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2819-2829,2849
 // ```c
 //    /* If no previous HSP list, return a pointer to the old one */
 //    if (!combined_hsp_list) {
@@ -741,7 +741,7 @@ fn hsp_list_append(new: KappaResultList, combined: &mut KappaResultList) {
     combine_by_score(new.hsps.hsps, combined);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2758-2766
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766
 // ```c
 //    if (new_hspcnt >= hsp_list->hspcnt + combined_hsp_list->hspcnt) {
 //       /* All HSPs from both arrays are saved */
@@ -758,7 +758,7 @@ fn combine_by_score(incoming: Vec<LinkedHsp>, combined: &mut KappaResultList) {
     sort_hsps_by_score(combined);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1383
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1383
 // ```c
 // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
 // {
@@ -789,7 +789,7 @@ mod tests {
     use super::*;
     use crate::algorithm::tblastn::search_gapped::GappedHsp;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2494-2515;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // core/blast_hits.c:3420-3437:
     // for (query_index = 0; query_index < num_queries; query_index++) {
     //     while ((hsp_list = BlastCompo_HeapPop(heap)) != NULL)
@@ -888,7 +888,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2494-2515;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // core/blast_hits.c:3243-3297,3420-3437:
     // while (NULL != (hsp_list = BlastCompo_HeapPop(heap)))
     //     Blast_HitListUpdate(hitlist, hsp_list);

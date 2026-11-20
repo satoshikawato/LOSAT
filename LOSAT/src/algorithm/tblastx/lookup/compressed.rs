@@ -1,7 +1,7 @@
 //! Compressed amino-acid lookup primitives for the future `blastp-fast` path.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c
-//! Reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c
+//! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h
 
 use super::{ilog2, PV_ARRAY_BTS, PV_ARRAY_MASK};
 use crate::algorithm::tblastx::scan::OffsetPair;
@@ -24,7 +24,7 @@ use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 #[path = "x_clut_direct.rs"]
 pub mod x_clut_direct;
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:186-201
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:186-201
 // ```c
 // #define COMPRESSED_HITS_PER_BACKBONE_CELL 4
 // #define COMPRESSED_HITS_CELL_MASK 0x03
@@ -38,7 +38,7 @@ pub const COMPRESSED_HITS_PER_OVERFLOW_CELL: usize = 4;
 pub const COMPRESSED_OVERFLOW_CELLS_IN_BANK: usize = 209_710;
 pub const COMPRESSED_OVERFLOW_MAX_BANKS: usize = 1024;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1303-1306
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1306
 // ```c
 // /* compute a custom score matrix, for use only
 //    with lookup table creation. The matrix dimensions
@@ -47,7 +47,7 @@ pub const COMPRESSED_OVERFLOW_MAX_BANKS: usize = 1024;
 // ```
 pub type CompressedScoreMatrix = [[i32; BLASTAA_SIZE]; BLASTAA_SIZE];
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:203-208
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:203-208
 // ```c
 // typedef struct CompressedOverflowCell {
 //     struct CompressedOverflowCell* next;
@@ -60,7 +60,7 @@ pub struct CompressedOverflowCell {
     pub query_offsets: [i32; COMPRESSED_HITS_PER_OVERFLOW_CELL],
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:763-775
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:763-775
 // ```c
 // lookup->overflow_banks[bank_idx] = (CompressedOverflowCell*) malloc(...);
 // return lookup->overflow_banks[lookup->curr_overflow_bank] +
@@ -75,7 +75,7 @@ impl Default for CompressedOverflowCell {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:210-231
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:210-231
 // ```c
 // typedef struct CompressedMixedOffsets{
 //     Int4 query_offsets[COMPRESSED_HITS_PER_BACKBONE_CELL-2];
@@ -96,7 +96,7 @@ pub enum CompressedBackbonePayload {
     },
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:787-801
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-801
 // ```c
 // CompressedLookupBackboneCell *backbone_cell = lookup->backbone + index;
 // Int4 num_entries = backbone_cell->num_used;
@@ -108,7 +108,7 @@ impl Default for CompressedBackbonePayload {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:221-231
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:221-231
 // ```c
 // typedef struct CompressedLookupBackboneCell {
 //     Int4 num_used;
@@ -123,7 +123,7 @@ pub struct CompressedLookupBackboneCell {
     pub payload: CompressedBackbonePayload,
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:236-267
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:236-267
 // ```c
 // typedef struct BlastCompressedAaLookupTable {
 //     Int4 threshold;
@@ -152,7 +152,7 @@ pub struct BlastCompressedAaLookupTable {
     pub pv_array_bts: i32,
     pub compress_table: [u8; BLASTAA_SIZE],
     pub scaled_compress_table: [i32; BLASTAA_SIZE],
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:270-278
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:270-278
     // ```c
     // scaled_compress_table = lookup->scaled_compress_table;
     // ...
@@ -188,7 +188,7 @@ pub struct BlastCompressedAaLookupTable {
 const NCBI_OVERFLOW_CELL_CAPACITY: usize =
     COMPRESSED_OVERFLOW_CELLS_IN_BANK * COMPRESSED_OVERFLOW_MAX_BANKS;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:935-952
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:935-952
 // ```c
 // typedef struct CompressedNeighborInfo {
 //     Int4 row_max[BLASTAA_SIZE];
@@ -203,7 +203,7 @@ pub struct CompressedNeighborInfo {
     matrix_sorted_char: [[u8; BLASTAA_SIZE]; BLASTAA_SIZE],
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1289-1320
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1289-1320
 // ```c
 // lookup->word_length = word_size;
 // lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
@@ -262,7 +262,7 @@ impl BlastCompressedAaLookupTable {
         })
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:753-775
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:753-775
     // ```c
     // if (lookup->curr_overflow_cell == COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
     //     lookup->overflow_banks[bank_idx] = malloc(...);
@@ -272,7 +272,7 @@ impl BlastCompressedAaLookupTable {
     // return lookup->overflow_banks[lookup->curr_overflow_bank] +
     //                            lookup->curr_overflow_cell++;
     // ```
-    // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:759-768
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
     // ```c
     //     if (lookup->curr_overflow_cell ==
     //                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
@@ -313,7 +313,7 @@ impl BlastCompressedAaLookupTable {
         cell_index
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:782-849
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:782-849
     // ```c
     // switch (num_entries) {
     // case 0:
@@ -407,7 +407,7 @@ impl BlastCompressedAaLookupTable {
         self.backbone[index].num_used += 1;
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:859-909
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:859-909
     // ```c
     // switch (lookup->word_length) {
     // case 5:
@@ -433,7 +433,7 @@ impl BlastCompressedAaLookupTable {
         self.add_word_hit(index, query_offset);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:919-929
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:919-929
     // ```c
     // index = s_ComputeCompressedIndex(lookup->word_length, w,
     //                                  lookup->compressed_alphabet_size,
@@ -456,7 +456,7 @@ impl BlastCompressedAaLookupTable {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1071-1110
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1071-1110
     // ```c
     // lookup->exact_matches++;
     // score = 0;
@@ -515,7 +515,7 @@ impl BlastCompressedAaLookupTable {
         self.add_word_hits_core(info, word, &mut subject_word, score, 0, query_offset);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1008-1053
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1008-1053
     // ```c
     // score -= info->row_max[currQueryChar];
     // rowSorted = info->matrixSorted[currQueryChar];
@@ -582,7 +582,7 @@ impl BlastCompressedAaLookupTable {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1137-1176
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1137-1176
     // ```c
     // for (i = 0; i < lookup->alphabet_size; i++) {
     //     info.row_max[i] = compressed_matrix[i][0];
@@ -649,7 +649,7 @@ impl BlastCompressedAaLookupTable {
         true
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:343-384
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:343-384
     // ```c
     // dest[0].qs_offsets.q_off = backbone_cell->query_offset;
     // if (numhits <= COMPRESSED_HITS_PER_BACKBONE_CELL+1) {
@@ -724,7 +724,7 @@ impl BlastCompressedAaLookupTable {
         offsets
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:343-384
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:343-384
     // ```c
     // dest[0].qs_offsets.q_off = backbone_cell->query_offset;
     // dest[0].qs_offsets.s_off = s_off;
@@ -811,7 +811,7 @@ impl BlastCompressedAaLookupTable {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:229-384
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:229-384
     // ```c
     // while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
     //     for(s = s_first; s <= s_last; s++){
@@ -912,7 +912,7 @@ impl BlastCompressedAaLookupTable {
                 next_char = subject.get(s + word_length).copied().unwrap_or(0);
 
                 if compressed_char < 0 {
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:278-300
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:278-300
                     // ```c
                     // if(compressed_char < 0){ /* flush (rare) "bad" character(s) */
                     //     preshift = 0;
@@ -966,7 +966,7 @@ impl BlastCompressedAaLookupTable {
                             );
                             totalhits += numhits;
                         } else {
-                            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:373-378
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:373-378
                             // ```c
                             // s_range[1] = (Int4)(s - subject->sequence);
                             // return totalhits;
@@ -986,7 +986,7 @@ impl BlastCompressedAaLookupTable {
         totalhits
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1182-1242
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1182-1242
     // ```c
     // for (i = count = 0; i < lookup->backbone_size; i++) {
     //     if (lookup->backbone[i].num_used)
@@ -1034,7 +1034,7 @@ impl BlastCompressedAaLookupTable {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-58
 // ```c
 // while (range[1] > range[2]) {
 //     range[0]++;
@@ -1066,7 +1066,7 @@ fn determine_compressed_scanning_offsets(
     true
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:272-274
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:272-274
 // ```c
 // preshift = (Int4)((((Int8)index) * recip) >> 32);
 // ```
@@ -1077,7 +1077,7 @@ pub(crate) fn compressed_reciprocal_divide(index: i32, reciprocal_alphabet_size:
 }
 
 impl CompressedNeighborInfo {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:969-998
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:969-998
     // ```c
     // for (longChar = 0; longChar < BLASTAA_SIZE; longChar++) {
     //     for (shortChar = 0; shortChar < info->compressed_alphabet_size; shortChar++) {
@@ -1131,7 +1131,7 @@ impl CompressedNeighborInfo {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1289-1299
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1289-1299
 // ```c
 // if (word_size == 6 || word_size == 5) {
 //     lookup->compressed_alphabet_size = 15;
@@ -1150,7 +1150,7 @@ pub fn compressed_lookup_parameters(word_size: usize) -> Option<(usize, i32)> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4949-4952
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4949-4952
 // ```c
 // static const char* s_alphabet10 = "IJLMV AST BDENZ KQR G FY P H C W";
 // static const char* s_alphabet15 = "ST IJV LM KR EQZ A G BD P N F Y H C W";
@@ -1163,7 +1163,7 @@ fn compressed_alphabet_string(compressed_alphabet_size: usize) -> Option<&'stati
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4786-4805
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4786-4805
 // ```c
 // if (isspace(c)) {
 //     compressed_letter++;
@@ -1195,7 +1195,7 @@ fn build_compressed_reverse_lookup(compressed_alphabet_size: usize) -> Option<Ve
     Some(reverse)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4786-4805
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4786-4805
 // ```c
 // for (i = 0; i < BLASTAA_SIZE; i++)
 //     table[i] = compressed_alphabet_size;
@@ -1228,7 +1228,7 @@ pub fn build_compressed_translation(compressed_alphabet_size: usize) -> Option<[
     Some(table)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
 // ```c
 // long BLAST_Nint(double x)
 // {
@@ -1241,7 +1241,7 @@ fn blast_nint(x: f64) -> i32 {
     (x + if x >= 0.0 { 0.5 } else { -0.5 }) as i32
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4818-4858
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4818-4858
 // ```c
 // Blast_ResFreqStdComp(sbp, rfp);
 // for (letter = 0; letter < compressed_alphabet_size; letter++) {
@@ -1276,7 +1276,7 @@ fn compressed_probabilities(compressed_alphabet_size: usize) -> Option<[f64; BLA
     Some(compressed_prob)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4886-4937
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4886-4937
 // ```c
 // lambda = RPSfindUngappedLambda(sbp->name);
 // matrix_scale_factor /= lambda;
@@ -1343,7 +1343,7 @@ fn compressed_score_matrix_of(
     Some(scores)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1283-1355
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1283-1355
 // ```c
 // new_alphabet = SCompressedAlphabetNew(sbp,
 //                             lookup->compressed_alphabet_size,
@@ -1839,7 +1839,7 @@ impl CompressedWordCount {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1339-1347
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1339-1347
 // ```c
 // table_scale = iexp(lookup->compressed_alphabet_size, word_size - 1);
 // for (i = 0; i < BLASTAA_SIZE; i++) {
@@ -1868,7 +1868,7 @@ pub fn build_scaled_compress_table(
     scaled
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1339-1347
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1339-1347
 // ```c
 // lookup->scaled_compress_table = (Int4 *)malloc(
 //                                    BLASTAA_SIZE * sizeof(Int4));
@@ -1876,7 +1876,7 @@ pub fn build_scaled_compress_table(
 // lookup->scaled_compress_table[i] = table_scale * letter;
 // ```
 //
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:270-278
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:270-278
 // ```c
 // scaled_compress_table = lookup->scaled_compress_table;
 // ...
@@ -1888,7 +1888,7 @@ fn build_scaled_compress_table_u8(scaled_compress_table: &[i32; BLASTAA_SIZE]) -
     table
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:859-909
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:859-909
 // ```c
 // index = w[0] + W6p1[w[1]] + W6p2[w[2]] + W6p3[w[3]] + W6p4[w[4]];
 // ...
@@ -1942,7 +1942,7 @@ pub fn compute_encoded_compressed_index(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:304-322
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:304-322
 // ```c
 // *skip = 0;
 // for(i = 0; i < wordsize; i++) {
@@ -1977,7 +1977,7 @@ pub fn compute_compressed_index(
     (index, skip)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:304-322
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:304-322
 // ```c
 // *skip = 0;
 // for(i = 0; i < wordsize; i++) {
@@ -2010,7 +2010,7 @@ pub(crate) fn compute_compressed_index_u8(
     (index, skip)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:49-57
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
 // ```c
 // #define PV_SET(lookup, index, pv_array_bts) \
 //     lookup[(index) >> (pv_array_bts)] |= (1U << ((index) & PV_ARRAY_MASK))
@@ -2022,7 +2022,7 @@ pub fn compressed_pv_test(pv: &[u32], index: usize, pv_array_bts: usize) -> bool
     (pv[index >> pv_array_bts] & (1u32 << (index & PV_ARRAY_MASK))) != 0
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:49-57
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
 // ```c
 // #define PV_SET(lookup, index, pv_array_bts) \
 //     lookup[(index) >> (pv_array_bts)] |= (1U << ((index) & PV_ARRAY_MASK))
@@ -2667,7 +2667,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:782-849
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:782-849
     // ```c
     // case 5:
     //     new_cell->query_offsets[0] = backbone_cell->payload.query_offsets[2];
@@ -2726,7 +2726,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1182-1242
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1182-1242
     // ```c
     // PV_SET(pv, i, pv_array_bts);
     // longest_chain = MAX(count, longest_chain);
@@ -2757,7 +2757,7 @@ mod tests {
         ));
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:859-929
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:859-929
     // ```c
     // s_CompressedLookupAddEncoded(lookup, subject_word, query_offset);
     // ...
@@ -2788,7 +2788,7 @@ mod tests {
         assert_eq!(lookup.query_offsets_in_scan_order(encoded_index), vec![321]);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:322-384
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:322-384
     // ```c
     // if (PV_TEST(pv, index, pv_array_bts)) {
     //     Int4 s_off = (Int4)(s - subject->sequence);
@@ -2842,7 +2842,7 @@ mod tests {
         assert_eq!(s_range[1], 6);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:373-378
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:373-378
     // ```c
     // else {
     //     s_range[1] = (Int4)(s - subject->sequence);

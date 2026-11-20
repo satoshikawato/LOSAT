@@ -1,4 +1,4 @@
-//! NCBI's `CAlnMap` and `CAlnVec` (`objtools/alnmgr/alnmap.cpp`, `alnvec.cpp`) over the merged
+//! NCBI's `CAlnMap` and `CAlnVec` (`c++/src/objtools/alnmgr/alnmap.cpp`, `c++/src/objtools/alnmgr/alnvec.cpp`) over the merged
 //! Dense-seg of a query's section (`aln_mix::merge`), as the query-anchored reports read it:
 //! the anchor (`SetAnchor`), the alignment coordinates of the segments and of each row
 //! (`GetAlnStart`, `GetAlnStop`, `GetSeqAlnRange`, `GetSeqStart`, `GetSeqStop`),

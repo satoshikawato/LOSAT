@@ -1,6 +1,6 @@
 //! BLAST Utility Functions
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c
 //!
 //! This module provides:
 //! - `BLASTAA_SIZE`, the size of the amino acid alphabet of NCBI's lookup tables
@@ -13,7 +13,7 @@
 pub const BLASTAA_SIZE: usize = 28;
 
 /// NCBI blast core keeps the `'-'`/NULLB row and column at BLAST_SCORE_MIN.
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:121-122
 ///   #define BLAST_SCORE_MIN INT2_MIN
 pub const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
 
@@ -21,7 +21,7 @@ pub const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
 /// oracle) performs it with `cvttsd2si`: truncation toward zero, and `INT_MIN` for NaN and
 /// for values outside `Int4` (undefined in C). Rust's `as` saturates instead.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4047-4049,4059-4061
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4047-4049,4059-4061
 /// ```c
 /// /* Smallest float that might not cause a floating point exception in
 ///    S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda )); below.  */

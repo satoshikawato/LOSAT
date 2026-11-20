@@ -1954,7 +1954,7 @@ mod tests {
                 (array_size as i32, rng.below(array_size + 1) as i32)
             };
             let block_first = rng.below(1 << 20);
-            // NCBI's statements (blast_aascan.c:91-123) from candidate `first`.
+            // NCBI's statements (c++/src/algo/blast/core/blast_aascan.c:91-123) from candidate `first`.
             let (mut want, mut total, mut stop) = (Vec::new(), totalhits, None);
             for (i, cell) in cells.iter().enumerate().skip(first) {
                 let s_off = (block_first + cand[i]) as u32;

@@ -109,7 +109,7 @@ pub enum WinMaskError {
     /// (`seq_masker_istat_oascii.cpp:82-87, 111`).
     UnsetHashParameter { field: &'static str },
     /// A cache bit array of 0 words (units of 1 or 2 letters) that the cache boost would read:
-    /// NCBI reads past its `new Uint4[0]` (`seq_masker_cache_boost.cpp:40-48`).
+    /// NCBI reads past its `new Uint4[0]` (`c++/src/algo/winmask/seq_masker_cache_boost.cpp:40-48`).
     EmptyCacheBitArray { unit: u8 },
     /// A sequence of 2^32 letters or more: NCBI's positions are 32-bit (`TSeqPos`).
     SequenceTooLong { length: usize },

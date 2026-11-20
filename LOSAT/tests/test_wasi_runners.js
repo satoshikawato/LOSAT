@@ -13,10 +13,10 @@ const GUARD_CACHE = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-test
 process.env.LOSAT_WASI_GUARD_CACHE = GUARD_CACHE;
 process.on("exit", () => fs.rmSync(GUARD_CACHE, { recursive: true, force: true }));
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status)
 // return status;
-// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
 // LOG_POST(Error << "Error: " << e.what());
 // exit_code = BLAST_UNKNOWN_ERROR;
 // Exercise the host failure boundary with tiny real Wasm commands, including
@@ -51,7 +51,7 @@ const body = (instructions, locals = 0) => {
   return [...uleb(bytes.length), ...bytes];
 };
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;
 // Entry/export/memory variations exercise Wasm ABI inspection only. `writes` appends that many
 // fd_write calls of 4,096 bytes to descriptor `fd` (standard output, or 2 for standard error)
@@ -119,7 +119,7 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
   ]);
 }
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;
 // Host memory boundary only: one WASI call whose pointer argument is above 2 GiB.
 // clock_time_get writes the time to 0x80000008; the command exits with the call's
@@ -218,7 +218,7 @@ test("successful worker releases its parent and exits successfully", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
 // The native command's write to standard output or error blocks while a slow reader drains a full
 // pipe. Node can leave a piped descriptor 1 or 2 non-blocking (wasi_artifact.js, the comment above
@@ -264,7 +264,7 @@ for (const threaded of [false, true]) {
   }
 }
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;
 // node:wasi answers EINVAL (28) to a pointer argument that JavaScript sees as negative;
 // both runners pass WASI arguments as unsigned values (wasi_artifact.js).
@@ -289,7 +289,7 @@ test("WASI imports receive i32 arguments as unsigned values", () => {
   assert.deepEqual(seen, [[1, 1n, 2147483656], [4294967295]]);
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Host memory only: when the declared maximum cannot be reserved, the host provides a
 // shared memory with a smaller one. An engine either refuses to create the memory or
@@ -334,7 +334,7 @@ test("shared memory steps down when the declared maximum cannot be reserved", ()
   assert.ok(real.memory.buffer instanceof SharedArrayBuffer);
 });
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;
 // Check the Wasm-host preparation boundary independently from search behavior:
 // metadata stays serializable and the returned module executes with the same status.
@@ -362,7 +362,7 @@ test("prepared serial module preserves metadata and executes the inspected bytes
   assert.equal(secondWasi.start(second), 23);
 });
 
-// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;
 // Wasm validation and ABI errors remain errors in both public entry points.
 test("artifact preparation preserves validation and ABI rejection", () => {
@@ -446,7 +446,7 @@ test("the default guard cache directory follows each platform's convention", () 
   assert.equal(defaultGuardCacheDir({}, "win32"), path.join(home, "AppData", "Local", "losat", "wasi-guard"));
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // An artifact guarded at build time (`wasi_shared_memory.js guard`) runs as it is: the host
 // does not guard it again and writes nothing to the guard cache.
@@ -564,7 +564,7 @@ test("the guard cache keeps the entries used last", () => {
   }
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // The guard cache's index: a run compiles the cached bytes that the input file's index names at
 // once, and the checks that fail (cached bytes changed, another input's entry under this file's
@@ -802,7 +802,7 @@ const tidsOf = (events, type) => events.filter((e) => e.event === type).map((e) 
 const countOf = (events, type) => events.filter((e) => e.event === type).length;
 const outcome = (result) => ({ status: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr });
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
 // The lifecycle events keep their meaning for the guest's threads; standby workers have
 // their own events, and the unused ones are terminated at close.
@@ -877,7 +877,7 @@ test("invalid LOSAT_WASI_PRESPAWN values fail before the command starts", () => 
   }
 });
 
-// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
 // LOG_POST(Error << "Error: " << e.what()); exit_code = BLAST_UNKNOWN_ERROR;
 // Each test-only fault ends the command the same way with and without standby workers.
 for (const [fault, message] of [
@@ -971,7 +971,7 @@ test("a rejected spawn has the same result with LOSAT_WASI_PRESPAWN", () => {
   }
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // The guard cache returns exactly the guard's bytes, cold or warm, and rebuilds an entry
 // whose bytes or sidecar do not check out.

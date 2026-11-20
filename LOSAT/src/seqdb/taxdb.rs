@@ -1845,7 +1845,7 @@ mod tests {
         (names, messages, asked)
     }
 
-    // NCBI's `CSeqDBIntCache` (seqdbgeneral.hpp:1184-1196): a slot per `taxid & 255` that holds the
+    // NCBI's `CSeqDBIntCache` (c++/include/objtools/blast/seqdb_reader/impl/seqdbgeneral.hpp:1184-1196): a slot per `taxid & 255` that holds the
     // last taxid looked up there. LOSAT keeps only the answers that a lookup gives again without
     // a text: those that wrote one, and the refusals, are asked again.
     #[test]

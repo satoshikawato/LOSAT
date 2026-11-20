@@ -1,6 +1,6 @@
 //! The one-hit ungapped extension (`-window_size 0`).
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c
 
 use super::query_batch::{Again, InBatch, Pass, WalkEnd};
 use super::two_hit::{extend_left_ungapped, extend_right_ungapped};

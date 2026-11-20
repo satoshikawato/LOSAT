@@ -331,7 +331,7 @@ fn run_inner(
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
     strategy_slot: &mut Option<crate::report::archive::strategy::StrategyExport>,
 ) -> Result<()> {
-    // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
     // ```c
     //     // Setup some debugging features from environment variables.
     //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {

@@ -4,11 +4,11 @@
 //! The algorithm identifies low-complexity regions by calculating triplet-based
 //! complexity scores within sliding windows.
 //!
-//! Reference: NCBI BLAST symdust.cpp/hpp
+//! Reference: NCBI BLAST c++/src/algo/dustmask/symdust.cpp/hpp
 
 use std::collections::VecDeque;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/util/random_gen.cpp:241-264
+// NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:241-264
 // ```c
 // static const CRandom::TValue sm_State[CRandom::kStateSize] = {
 //     0xd53f1852,  0xdfc78b83,  0x4f256096,  0xe643df7,
@@ -18,7 +18,7 @@ use std::collections::VecDeque;
 // m_RJ = kStateOffset;
 // m_RK = kStateSize - 1;
 // ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/util/random_gen.hpp:217-240
+// NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:217-240
 // ```c
 // r = m_State[m_RK] + m_State[m_RJ--];
 // m_State[m_RK--] = r;
@@ -179,7 +179,7 @@ impl DustMasker {
 
     #[inline]
     fn convert_iupac_to_ncbi2na(base: u8, rng: &mut NcbiLfgRandom) -> u8 {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/dustmask/symdust.hpp:75-84
+        // NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
         // ```c
         // switch( r )
         // {
@@ -299,7 +299,7 @@ impl DustMasker {
         let end = seq.len();
         let mut result = Vec::new();
         let mut current_start = start;
-        // NCBI reference: ncbi-blast/c++/include/algo/dustmask/symdust.hpp:75-84
+        // NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
         // ```c
         // case 67: return 1;
         // case 71: return 2;
@@ -400,7 +400,7 @@ impl DustMasker {
             // Create triplet window tracker
             let mut window = TripletWindow::new(self.window, self.low_k, &self.thresholds);
 
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/dustmask/symdust.cpp:235-249
+            // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:235-249
             // ```c
             // seq_citer_type it(seq, start);
             // char c1 = *it, c2 = *++it;
@@ -492,7 +492,7 @@ impl DustMasker {
         if let Some(p) = perfect_list.back() {
             if p.start < wstart {
                 let interval_start = p.start + offset;
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/dustmask/symdust.cpp:185-208
+                // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:185-208
                 // ```c
                 // TMaskedInterval b = P.back().bounds_;
                 // if( b.first < wstart ) {
@@ -924,7 +924,7 @@ impl<'a> XTripletWindow<'a> {
 
 /// Triplet window tracker for DUST algorithm
 /// Uses VecDeque to match NCBI BLAST's deque with push_front/pop_back semantics
-// NCBI reference: ncbi-blast/c++/src/algo/dustmask/symdust.cpp:40-45
+// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:40-45
 // ```c
 // CSymDustMasker::triplets::triplets(
 //     size_type window, Uint1 low_k,
@@ -1098,7 +1098,7 @@ impl<'a> TripletWindow<'a> {
     // argument is in the comment below. (Was LOSAT_X_DUSTFAST; the literal std::list port
     // that it replaced was deleted when the merge graduated.)
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/dustmask/symdust.cpp:137-166
+    // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:137-166
     // ```c
     // for( impl_citer_type it( triplet_list_.begin() + count ),
     //      iend( triplet_list_.end() ); it != iend; ++it, ++count, --pos ) {

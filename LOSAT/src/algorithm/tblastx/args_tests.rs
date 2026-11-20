@@ -7,7 +7,7 @@ fn parse_args(args: &[&str]) -> TblastxArgs {
     let mut all_args = vec!["losat".to_string(), "tblastx".to_string()];
     all_args.extend(args.iter().map(|s| s.to_string()));
 
-    // NCBI blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
     all_args.extend(["-outfmt".into(), "6".into()]);
     let cli: crate::cli::Cli = crate::cli::try_parse_from(all_args).unwrap();
     let crate::cli::Commands::Tblastx(args) = cli.command else {
@@ -66,7 +66,7 @@ fn test_custom_threshold() {
     assert_eq!(args.word_threshold(), 20.0);
 }
 
-// NCBI c++/src/algo/blast/core/blast_options.c:1174-1235 (BLAST_GetSuggestedThreshold and
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1174-1235 (BLAST_GetSuggestedThreshold and
 // BLAST_GetSuggestedWindowSize) and c++/src/algo/blast/blastinput/blast_args.cpp:586-623
 // (TBLASTX takes the suggestion, plus 2, unless -threshold is given): PAM30 reads 18 and 15;
 // the name is kept as typed.

@@ -968,7 +968,7 @@ pub(super) struct QueryScan {
 //
 // 	return false;
 // ```
-// NCBI reads ahead of the search on the argument's one stream (`m_Ios`, ncbiargs.cpp:727-735) and
+// NCBI reads ahead of the search on the argument's one stream (`m_Ios`, c++/src/corelib/ncbiargs.cpp:727-735) and
 // seeks it back to `orig_p`. This read has no NCBI counterpart (NCBI reads the query file once; this
 // read is LOSAT's, for its refusals before the first byte), and it reads the same way: on the one
 // open file, put back where it started.

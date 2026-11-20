@@ -215,7 +215,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         return;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:358-373
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:358-373
     // ```c
     // /* Make sure the HSPs in the HSP list are sorted by score, as they should be. */
     // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
@@ -295,7 +295,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         return;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:371-373
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:371-373
     // ```c
     // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
     //                               0, subject_length + 1);
@@ -328,7 +328,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
 
     // =================================================================
     // NCBI POST-GAPPED PROCESSING
-    // Reference: blast_traceback.c:633-692
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:633-692
     // =================================================================
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1632-1633,1644
@@ -370,7 +370,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
     if debug_mode || blastn_debug {
         let phase2_tree_removed = hits_step4 - final_tree_hit_count;
         let evalue_removed = final_tree_hit_count.saturating_sub(final_hits.len());
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:234-246
         // ```c
         // Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
         // ```
@@ -388,7 +388,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
     }
 
     if !final_hits.is_empty() {
-        // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:633-692 (post-gapped processing is per-subject)
         *subject_hits = Some(final_hits);
     }
     if let Some(timing) = timing_ref {
@@ -397,7 +397,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
             std::mem::take(&mut traceback_alignment_lengths),
         );
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:358-373
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:358-373
     // ```c
     // /* Make sure the HSPs in the HSP list are sorted by score, as they should be. */
     // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));

@@ -1,7 +1,7 @@
 //! BLASTP `-culling_limit`: NCBI's culling writer of the preliminary stage and its culling
 //! pipe after the traceback (`core::hspfilter_culling` holds the interval tree both share).
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_culling.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c
 //!
 //! This module is a child of `blast_engine` for the subject result type that it keeps private.
 //! Nothing here runs without `-culling_limit` (a limit of 0 is NCBI's `SetCullingLimit(0)`,
@@ -23,7 +23,7 @@ fn int4(length: usize) -> i32 {
 
 /// The key of an HSP for the tree and the length of the tree's query.
 ///
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:612-633
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:612-633
 /// ```c
 ///       A.cid   = isBlastn ? (A.hsp->context  - A.hsp->context % NUM_STRANDS) : A.hsp->context;
 ///       A.sid   = hsp_list->oid;
@@ -68,7 +68,7 @@ pub(super) struct PrelimCulling {
 }
 
 impl PrelimCulling {
-    /// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:318-342
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:318-342
     /// ```c
     ///         else if (filt_opts->culling_opts &&
     ///                  (filt_opts->culling_stage & ePrelimSearch))
@@ -94,7 +94,7 @@ impl PrelimCulling {
 
     /// `s_BlastHSPCullingRun` for the HSPs of one subject (all queries of the call).
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:602-644
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:602-644
     /// ```c
     ///    for (i=0; i<hsp_list->hspcnt; ++i) {
     ///       /* wrap the hsp with a LinkedHSP structure */
@@ -147,7 +147,7 @@ fn save_list<H: HitListHsp>(forest: &mut CullingForest<H>, query: usize, list: B
 
 /// `s_BlastHSPCullingFinal` for one forest.
 ///
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:516-581
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581
 /// ```c
 ///          if (!results->hitlist_array[qid]) {
 ///             results->hitlist_array[qid] = Blast_HitListNew(params->prelim_hitlist_size);
@@ -218,7 +218,7 @@ fn hit_list_of<H: HitListHsp>(
 /// into a new tree with the merit `culling_limit` (without the three of the preliminary
 /// writer), and the kept HSPs made into the query's hit list again.
 ///
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:699-733
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:699-733
 /// ```c
 /// static int
 /// s_BlastHSPCullingPipeRun(void* data, BlastHSPResults* results)
@@ -259,7 +259,7 @@ fn hit_list_of<H: HitListHsp>(
 /// `hsplist_max` of the new hit list is the old one's: nothing reads it afterwards
 /// (`prune_by_size` and the sorts use `hsplist_count`).
 pub(super) fn cull_traceback(hit_list: &mut BlastpHitList, culling_limit: i32) {
-    // NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:707-713
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:707-713
     // ```c
     //          for (sid = 0; sid < num_list; ++sid) {
     //         	 hsp_list = results->hitlist_array[qid]->hsplist_array[sid];
@@ -281,7 +281,7 @@ pub(super) fn cull_traceback(hit_list: &mut BlastpHitList, culling_limit: i32) {
         .first()
         .map_or(0, |list| list.query_index);
 
-    // NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:715-725
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:715-725
     // ```c
     //       for (sid = 0; sid < num_list; ++sid) {
     //          s_BlastHSPCullingRun(data,
@@ -384,7 +384,7 @@ mod tests {
             .unwrap_or_default()
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:612-633: the key of a protein HSP is its
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:612-633: the key of a protein HSP is its
     // own query range (0-based start, exclusive end), its score and its 0-based subject offset;
     // `qlen` is the HSP's query length.
     #[test]
@@ -408,7 +408,7 @@ mod tests {
         assert_eq!(cull_key(&compact), (qlen, key));
     }
 
-    // NCBI hspfilter_culling.c:516-581 and blast_hits.c:3125-3133: the hit list is made with
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581 and c++/src/algo/blast/core/blast_hits.c:3125-3133: the hit list is made with
     // `prelim_hitlist_size` and holds more lists than that, in the order of the first HSP of
     // each subject in the rip, with the best e-value, worst e-value and low score set, and not
     // heapified.
@@ -451,7 +451,7 @@ mod tests {
         assert_eq!(lists[1].as_ref().unwrap().hsplist_count, 4);
     }
 
-    // NCBI hspfilter_culling.c:100-112: the lower OID wins a tie, and the subjects must come in
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:100-112: the lower OID wins a tie, and the subjects must come in
     // OID order for the later one to lose.
     #[test]
     fn identical_hsps_of_two_subjects_keep_the_lower_oid() {
@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(scores(&lists, 0), vec![(0, vec![80])]);
     }
 
-    // NCBI hspfilter_culling.c:602-644: the tree of a query is made with the length of its HSPs,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:602-644: the tree of a query is made with the length of its HSPs,
     // and a chunk call's parts are queries of their own: a better HSP of query 1 does not
     // dominate an HSP of query 0 over the same range.
     #[test]
@@ -483,7 +483,7 @@ mod tests {
         full_hsp(&hsp, oid, e_value)
     }
 
-    // NCBI hspfilter_culling.c:699-733: the lists are sorted by e-value (best first, then the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:699-733: the lists are sorted by e-value (best first, then the
     // first score, the higher OID first), the HSPs are saved in that order into a tree with the
     // limit itself (no +3), and the kept HSPs are made into lists again, each sorted by score.
     #[test]

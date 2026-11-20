@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const { inspectArtifact, prepareArtifact, createSharedMemory } = require("./wasi_artifact");
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates (wasi_shared_memory.js,
 // loaded when a module is guarded or checked for the build's guard here, not when the guard cache
@@ -38,7 +38,7 @@ const WORKER_START_TIMEOUT_MS = parsePositiveIntEnv(
   30000,
 );
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // ```c
 // int num_threads = args[kArgNumThreads].AsInteger();
 // if (num_threads > kMaxValue) {
@@ -118,7 +118,7 @@ function refillCount(argv) {
   return requestedThreads(argv);
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Host-only (LOSAT_WASI_GUARD_CACHE; on by default since 2026-10-19, `0` turns it off): reuse
 // the guarded bytes of an earlier run. The key is the SHA-256 of the input bytes and of the
@@ -321,7 +321,7 @@ function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
   return { ...guarded, cache: cached.cache };
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Host diagnostics only (LOSAT_WASI_THREADS_DEBUG): the guard counts of this run, or of the build.
 function guardSummary(guarded) {
@@ -331,7 +331,7 @@ function guardSummary(guarded) {
   return `shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies, ${guarded.grow} grows, ${guarded.atomic} atomics`;
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Host-only (LOSAT_WASI_GUARD_CACHE): the cache's index. An entry is named by the SHA-256 of the
 // input, so finding it reads and hashes the whole input before the compile can start, and the
@@ -435,7 +435,7 @@ async function compileIndexedGuard(wasmPath, compileStarted) {
   return { module, buffer, input, inputSha256, fill: record.fill, copy: record.copy, grow: record.grow, atomic: record.atomic };
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Apply the same shared-memory compatibility guard before main or worker
 // compilation. Workers normally receive this already compiled module.
@@ -484,7 +484,7 @@ async function terminateWorkers(workers) {
   await Promise.allSettled(pending);
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
 // Host-owned lifecycle records count attempts, ready confirmations, and real exit
 // events separately. Test-only failure injection never changes search behavior.
@@ -527,7 +527,7 @@ function bootEarlyWorkers(count, fault) {
   return early;
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // (*thread)->Run(); (*thread)->Join(&result);
 // Explicit module reuse for host measurements: each create still owns a fresh
 // instance/memory/worker set. There is no global cache or retained search pool

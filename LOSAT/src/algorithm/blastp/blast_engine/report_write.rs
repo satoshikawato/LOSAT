@@ -809,7 +809,7 @@ pub(super) fn write_pairwise(
         database_name: blastp_scan_mode_definition(subject_input_label),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
-        // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267: options.GetMatrixName(), as typed.
         matrix_name: Some(args.matrix_name.clone()),
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
@@ -817,7 +817,7 @@ pub(super) fn write_pairwise(
         window_size: args.window_size as i32,
         gapped_karlin: psi_report_karlin.map_or(gapped_params, |karlin| karlin.gapped),
         gumbel: gapped_gumbel,
-        // NCBI blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
         // or the -num_descriptions / -num_alignments / -max_target_seqs values
         // (`ReportCounts`).
         num_descriptions: args.num_descriptions,
@@ -1268,7 +1268,7 @@ pub(super) fn write_text(
     //         CRef<CBlastSearchQuery> q;
     //         try { q.Reset(m_Source->GetNextSequence(scope)); }
     // ```
-    // NCBI reads the next query batch (blastp_app.cpp:257-259) after this
+    // NCBI reads the next query batch (c++/src/app/blast/blastp_app.cpp:257-259) after this
     // batch's report, and the reader's messages and error go to `cerr`, which
     // the C++ library ties to `cout`: the rows written so far reach standard
     // output before them. The report is flushed when it is written, as the

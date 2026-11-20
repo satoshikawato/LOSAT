@@ -1,6 +1,6 @@
 //! NCBI-style sum-statistics HSP linking with lh_helper optimization
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c
 //!
 //! Key optimizations from NCBI:
 //! 1. `changed` flag: skip recomputation when previous link is still valid
@@ -28,7 +28,7 @@ pub use params::{compute_avg_query_length_ncbi, find_smallest_lambda_params, Lin
 // Re-export cutoff calculation
 pub use cutoffs::calculate_link_hsp_cutoffs_ncbi;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
 // for (frame_index=0; frame_index<num_query_frames; frame_index++)
 // {

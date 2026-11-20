@@ -1,6 +1,6 @@
 //! BLASTP ungapped extension helpers.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c
 
 use super::x_ungapped_fast;
 use crate::config::ScoringMatrix;
@@ -14,7 +14,7 @@ fn residue_score<const BLOSUM62: bool>(
     q_off: i32,
     s_off: i32,
 ) -> i32 {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:804-883
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883
     // ```c
     // score += matrix[q[i]][s[i]];
     // ```
@@ -27,7 +27,7 @@ fn residue_score<const BLOSUM62: bool>(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-154
 // ```c
 // typedef struct BlastUngappedData {
 //    Int4 q_start;
@@ -44,7 +44,7 @@ pub(crate) struct BlastpUngappedData {
     pub(crate) score: i32,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1078-1127
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1078-1127
 // ```c
 // *hsp_q = q_left_off - left_disp;
 // *hsp_s = s_left_off - left_disp;
@@ -57,7 +57,7 @@ pub(crate) struct BlastpOneHitUngappedResult {
     pub(crate) s_last_off: i32,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1129-1177
 // ```c
 // *right_extend = FALSE;
 // *s_last_off = s_right_off;
@@ -74,7 +74,7 @@ pub(crate) struct BlastpTwoHitUngappedResult {
     pub(crate) s_last_off: i32,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:804-835
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-835
 // ```c
 // static Int4 s_BlastAaExtendRight(Int4 ** matrix,
 //                         const BLAST_SequenceBlk * subject,
@@ -128,7 +128,7 @@ fn extend_right<const BLOSUM62: bool>(
     (best_score, best_i + 1, s_off + i)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:853-883
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:853-883
 // ```c
 // static Int4 s_BlastAaExtendLeft(Int4 ** matrix,
 //                        const BLAST_SequenceBlk * subject,
@@ -192,7 +192,7 @@ fn extend_left<const BLOSUM62: bool>(
     (best_score, n - best_i + 1)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1078-1127
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1078-1127
 // ```c
 // static Int4 s_BlastAaExtendOneHit(...)
 // {
@@ -227,7 +227,7 @@ pub fn extend_one_hit(
     dropoff: i32,
     word_size: usize,
 ) -> Option<BlastpOneHitUngappedResult> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1040-1044
     // ```c
     // if (use_pssm)
     //     sum += matrix[q_off + i][s[s_off + i]];
@@ -241,7 +241,7 @@ pub fn extend_one_hit(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1040-1044
 // ```c
 // if (use_pssm)
 //     sum += matrix[q_off + i][s[s_off + i]];
@@ -264,7 +264,7 @@ pub(crate) fn extend_one_hit_of(
     extend_one_hit_impl::<false>(matrix, query, subject, q_off, s_off, dropoff, word_size)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1040-1044
 // ```c
 // if (use_pssm)
 //     sum += matrix[q_off + i][s[s_off + i]];
@@ -331,7 +331,7 @@ pub(crate) fn extend_one_hit_for(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1020-1083
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1020-1083
 // ```c
 // static Int4 s_BlastAaExtendOneHit(...)
 // {
@@ -414,7 +414,7 @@ fn extend_one_hit_impl<const BLOSUM62: bool>(
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1129-1177
 // ```c
 // static Int4 s_BlastAaExtendTwoHit(...)
 // {
@@ -451,7 +451,7 @@ pub fn extend_two_hit(
     dropoff: i32,
     word_size: usize,
 ) -> Option<BlastpTwoHitUngappedResult> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1112-1116
     // ```c
     // if (use_pssm)
     //     score += matrix[q_right_off + i][s[s_right_off + i]];
@@ -483,7 +483,7 @@ pub fn extend_two_hit(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1112-1116
 // ```c
 // if (use_pssm)
 //     score += matrix[q_right_off + i][s[s_right_off + i]];
@@ -526,7 +526,7 @@ pub(crate) fn extend_two_hit_blosum62(
     .unwrap_or_else(reference)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1112-1116
 // ```c
 // if (use_pssm)
 //     score += matrix[q_right_off + i][s[s_right_off + i]];
@@ -575,7 +575,7 @@ pub(crate) fn extend_two_hit_table(
         })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155
 // ```c
 // static Int4 s_BlastAaExtendTwoHit(...)
 // {
@@ -666,7 +666,7 @@ mod tests {
     use super::*;
     use crate::utils::matrix::ncbistdaa;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1078-1127
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1078-1127
     // ```c
     // *hsp_q = q_left_off - left_disp;
     // *hsp_s = s_left_off - left_disp;
@@ -697,7 +697,7 @@ mod tests {
         assert_eq!(result.s_last_off, 5);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1129-1177
     // ```c
     // *right_extend = FALSE;
     // *s_last_off = s_right_off;
@@ -733,7 +733,7 @@ mod tests {
         assert_eq!(result.s_last_off, 6);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1129-1177
     // ```c
     // /* Extend to the right only if left extension reached the first hit. */
     // if (left_d >= (s_right_off - s_left_off)) {

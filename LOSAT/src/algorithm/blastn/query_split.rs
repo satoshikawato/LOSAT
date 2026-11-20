@@ -9,7 +9,7 @@ use crate::utils::dust::MaskedInterval;
 /// The query chunk size of the task when the environment variable `CHUNK_SIZE` is not set
 /// or blank (`SplitQuery_GetChunkSize`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:65-73
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:65-73
 /// ```c
 ///         switch (program) {
 ///         case eBlastn:
@@ -32,7 +32,7 @@ pub fn query_chunk_size(megablast: bool) -> usize {
 /// The overlap of two query chunks for a nucleotide query when the environment variable
 /// `OVERLAP_CHUNK_SIZE` is not set or blank.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:51-53
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:51-53
 /// ```c
 /// SplitQuery_GetOverlapChunkSize(EBlastProgramType program)
 /// {
@@ -43,7 +43,7 @@ pub const QUERY_CHUNK_OVERLAP: usize = 100;
 /// NCBI's query chunk size and chunk overlap (`size_t` values), from the environment
 /// variables `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` when they are set and not blank.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:54-62
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:54-62
 /// ```c
 /// size_t
 /// SplitQuery_GetChunkSize(EProgram program)
@@ -55,7 +55,7 @@ pub const QUERY_CHUNK_OVERLAP: usize = 100;
 ///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
 ///         retval = NStr::StringToInt(chunk_sz_str);
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:53-60
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:53-60
 /// ```c
 ///     size_t retval = 100;
 ///     // used for experimentation purposes
@@ -101,7 +101,7 @@ impl SplitSizes {
     /// NCBI's `CBatchSizeMixer` maximum: the chunk size less 1000 (`size_t`), converted to
     /// its `Int4` parameter.
     ///
-    /// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261
+    /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261
     /// ```c
     ///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
     /// ```
@@ -138,7 +138,7 @@ pub struct QueryChunk {
 /// The number of query chunks of a batch of `concatenated_query_length` residues, and the
 /// chunk size NCBI then uses.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
 /// ```c
 ///     // Fix for small query size
 ///     if ((*chunk_size) > overlap_size) {
@@ -187,7 +187,7 @@ pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
 ///
 /// The chunk ranges on the concatenated queries:
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:145-171
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
 /// ```c
 ///     size_t chunk_start = 0;
 ///     const size_t kOverlapSize =
@@ -223,7 +223,7 @@ pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
 ///
 /// The queries of a chunk, and their parts in it:
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:223-247
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:223-247
 /// ```c
 ///     query_ranges.push_back(TChunkRange(0, static_cast<unsigned int>(m_LocalQueryData->GetSeqLength(0)))); // FIXED
 ///     ...
@@ -244,7 +244,7 @@ pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
 /// ```
 /// (`TChunkRange` is a `COpenRange`, so `GetTo() + 1` is the end of the previous query.)
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:196-210
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:196-210
 /// ```c
 ///     CSeq_interval& interval = split_query_loc->SetInt();
 ///     const int qstart = chunk.GetFrom() - query_range.GetFrom();
@@ -266,7 +266,7 @@ pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
 ///
 /// The contexts of a chunk (the strand that is not searched is `None`):
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:392-410
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:392-410
 /// ```c
 ///             } else if (Blast_QueryIsNucleotide(kProgram)) {
 ///
@@ -358,7 +358,7 @@ pub fn split_query_batch(
 
 /// The position of the batch context `absolute_context` among the contexts of a chunk.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:251-264
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:251-264
 /// ```c
 /// CContextTranslator::GetContextInChunk(size_t chunk_num,
 ///                                       int absolute_context) const
@@ -383,7 +383,7 @@ fn context_in_chunk(chunk: &QueryChunk, absolute_context: usize) -> Option<usize
 
 /// The length of a batch context in a chunk (0 when the chunk does not have it).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:452-466
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:452-466
 /// ```c
 /// s_GetAbsoluteContextLength(const vector<const BlastQueryInfo*>& chunk_qinfo,
 ///                            int chunk_num,
@@ -418,7 +418,7 @@ fn absolute_context_length(
 /// The first chunk of the run of chunks, ending with `curr_chunk`, that have the batch
 /// context `absolute_context`.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:266-284
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:266-284
 /// ```c
 /// CContextTranslator::GetStartingChunk(size_t curr_chunk,
 ///                                      Int4 context_in_chunk) const
@@ -455,7 +455,7 @@ fn starting_chunk(chunks: &[QueryChunk], curr_chunk: usize, absolute_context: us
 /// chunk's part of a context starts in the batch's context (on the minus strand, from the
 /// query's end).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:612-662
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:612-662
 /// ```c
 ///         for (Int4 ctx = chunk_qinfo[chunk_num]->first_context;
 ///              ctx <= chunk_qinfo[chunk_num]->last_context;
@@ -511,7 +511,7 @@ fn context_offsets(
         .contexts
         .iter()
         .map(|&context| {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:604-626
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:604-626
             // ```c
             //             if (absolute_context == kInvalidContext ||
             //                 starting_chunk == kInvalidContext) {
@@ -556,14 +556,14 @@ fn context_offsets(
 /// that starts there is dropped, and extends every other mask by one residue (to the end of
 /// the part at most).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:278-281
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281
 /// ```c
 ///             CRef<CSeq_loc> mask_query_loc(new CSeq_loc);
 ///             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
 ///             TMaskedQueryRegions split_mask =
 ///                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/objects/seq/seqlocinfo.cpp:102-116
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seqlocinfo.cpp:102-116
 /// ```c
 ///     TSeqRange loc(location.GetFrom(), 0);
 ///     loc.SetToOpen(location.GetTo());
@@ -584,7 +584,7 @@ fn context_offsets(
 /// block then puts the masks in the part's coordinates, from the chunk's Seq-interval in
 /// the query's record:
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:1041-1047
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1047
 /// ```c
 ///    for (seqloc = *mask; seqloc; seqloc = next_loc) {
 ///       next_loc = seqloc->next;
@@ -595,7 +595,7 @@ fn context_offsets(
 ///       if (seqloc->ssr->left > seqloc->ssr->right) {
 /// ```
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:256-262
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:256-262
 /// ```c
 ///             	int q_sl_offset = 0;
 ///             	if(query_seqloc->IsInt() && (query_seqloc->GetInt().GetFrom() > 0 )) {
@@ -693,7 +693,7 @@ pub fn restrict_masks_with_letter_before(
 mod tests {
     use super::*;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
     // ```c
     //     if ((*chunk_size) > overlap_size) {
     //        num_chunks = concatenated_query_length / ((*chunk_size) - overlap_size);
@@ -722,7 +722,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:612-662
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:612-662
     // ```c
     //                     correction += prev_len - min(overlap, prev_len);
     //                     subtrahend += (curr_len - min(overlap, prev_len));
@@ -809,7 +809,7 @@ mod tests {
         assert_eq!(chunks[2].context_offsets, vec![1_999_918, 0, 0, 0]);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:256-281
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:256-281
     // ```c
     //             	s_SetSplitQuerySeqInterval(chunk, query_range, q_sl_offset, split_query_loc);
     //     ...
@@ -857,7 +857,7 @@ mod tests {
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/objects/seq/seqlocinfo.cpp:102-116
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seqlocinfo.cpp:102-116
     // ```c
     //     TSeqRange loc(location.GetFrom(), 0);
     //     loc.SetToOpen(location.GetTo());
@@ -1061,7 +1061,7 @@ mod tests {
         assert!(!SplitSizes::new(false, Some(3000), Some(-10)).negative_chunk_size());
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:392-410,604-626
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:392-410,604-626
     // ```c
     //                         if (kStrand == eNa_strand_minus) {
     //                             m_SplitBlk->AddContextToChunk(chunk_num,

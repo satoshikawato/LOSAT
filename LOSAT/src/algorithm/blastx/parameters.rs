@@ -782,7 +782,7 @@ fn word_cutoff(
     if options.gapped {
         trigger
     } else {
-        // NCBI blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
         // c++/include/algo/blast/core/blast_parameters.h:78:
         // #define CUTOFF_E_BLASTX 1.0
         cutoff_score_sum_stats(length as i32, average, decay, &p.ungapped)

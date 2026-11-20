@@ -1164,7 +1164,7 @@ mod tests {
         )
     }
 
-    // NCBI tabular.cpp:1061-1091 (frames 1, `sstrand` N/A of a protein subject), blastfmtutil.cpp
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1061-1091 (frames 1, `sstrand` N/A of a protein subject), c++/src/algo/blast/format/blastfmtutil.cpp
     // :629-640 (`qcovs`, the union of the subject's HSPs; `qcovus` is blastn's only), tabular.cpp
     // :1264-1298 (outfmt 7's lines: psiblast's round, no count for an unsearched batch) and the
     // taxonomy database's warning of each formatter (tabular.cpp:1093-1104).

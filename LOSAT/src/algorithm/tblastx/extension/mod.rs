@@ -40,13 +40,13 @@ use crate::utils::matrix::blosum62_score;
 /// NCBI aa_ungapped uses the blast core 28x28 score matrix directly; NULLB is
 /// not special-cased in the extension loops.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:847-849
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:847-849
 /// ```c
 /// for (i = 0; i < n; i++) {
 ///     score += matrix[q[i]][s[i]];
 /// ```
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1579
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1579
 /// ```c
 /// for (i = 0; i < sbp->alphabet_size; i++) {
 ///     for (j = 0; j < sbp->alphabet_size; j++) {
@@ -65,7 +65,7 @@ pub fn get_score(a: u8, b: u8) -> i32 {
 
 /// Convert amino acid coordinates to nucleotide coordinates.
 ///
-/// NCBI reference (blast_hits.c:1093-1106) + output adjustment (tabular.cpp:1037-1058):
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1093-1106 + output adjustment (c++/src/objtools/align_format/tabular.cpp:1037-1058):
 /// The C core produces 0-indexed coordinates, then C++ output layer adds +1.
 /// We combine both steps here for 1-indexed output.
 ///
@@ -86,21 +86,21 @@ pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize)
 
     if frame > 0 {
         // NCBI core: start = 3*offset + frame - 1
-        // NCBI output (tabular.cpp:1040): +1 for 1-indexed
+        // NCBI output (c++/src/objtools/align_format/tabular.cpp:1040): +1 for 1-indexed
         // Combined: start = 3*offset + shift + 1
         let start_bp = aa_start * 3 + shift + 1;
         // NCBI core: end = 3*end + frame - 2
-        // NCBI output (tabular.cpp:1041): +1 for 1-indexed
+        // NCBI output (c++/src/objtools/align_format/tabular.cpp:1041): +1 for 1-indexed
         // Combined: end = 3*end + shift - 1 + 1 = 3*end + shift
         let end_bp = aa_end * 3 + shift;
         (start_bp, end_bp)
     } else {
         // NCBI core: start = len - 3*offset + frame
-        // NCBI output (tabular.cpp:1055): +1 for 1-indexed
+        // NCBI output (c++/src/objtools/align_format/tabular.cpp:1055): +1 for 1-indexed
         // Combined: start = len - (3*offset + shift + 1) + 1 = len - 3*offset - shift
         let start_bp = dna_len - aa_start * 3 - shift;
         // NCBI core: end = len - 3*end + frame + 1
-        // NCBI output (tabular.cpp:1054): +1 for 1-indexed
+        // NCBI output (c++/src/objtools/align_format/tabular.cpp:1054): +1 for 1-indexed
         // Combined: end = len - (3*end + shift) + 1
         let end_bp = dna_len - aa_end * 3 - shift + 1;
         (start_bp, end_bp)

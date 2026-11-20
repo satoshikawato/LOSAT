@@ -95,7 +95,7 @@ pub(super) struct RedoParamsBuilder<'a> {
     pub(super) hit_cutoff_score_min: i32,
     pub(super) ideal_ungapped_lambda: f64,
     pub(super) x_drop_gapped_final: i32,
-    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
     // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
     // if (status == 0) {
@@ -143,7 +143,7 @@ impl RedoParamsBuilder<'_> {
             .get_or_init(|| {
                 build_matrix_info(
                     blastp_redo_matrix(args.scoring.matrix),
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2216-2231
                     // ```c
                     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
                     // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
@@ -157,7 +157,7 @@ impl RedoParamsBuilder<'_> {
             .map_err(|error| anyhow::anyhow!("{error}"))?
             .clone();
         Ok(BlastRedoAlignParams {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2216-2231
             // ```c
             // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
             // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
@@ -165,7 +165,7 @@ impl RedoParamsBuilder<'_> {
             //                          self->startFreqRatios, self->ungappedLambda);
             // ```
             matrix_info,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:97-106
+            // NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:97-106
             // ```c
             // typedef struct BlastCompo_GappingParams {
             //     int gap_open;
@@ -176,7 +176,7 @@ impl RedoParamsBuilder<'_> {
             // } BlastCompo_GappingParams;
             // ```
             //
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2117-2133
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2117-2133
             // ```c
             // kbp->Lambda /= scale_factor;
             // sp->gap_open = (Int4)BLAST_Nint(sp->gap_open  * scale_factor);
@@ -194,7 +194,7 @@ impl RedoParamsBuilder<'_> {
                 context: std::cell::Cell::new(None),
             },
             compo_adjust_mode: blastp_compo_adjust_mode(args.comp_based_stats.mode),
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1107-1118
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1107-1118
             // ```c
             // Blast_RedoOneMatch(..., int ** matrix, int alphsize,
             //                    ..., int compositionTestIndex, ...)
@@ -202,7 +202,7 @@ impl RedoParamsBuilder<'_> {
             alphsize: BLASTAA_SIZE as i32,
             composition_test_index: i32::from(args.comp_based_stats.unified_p),
             log_k: gapped_params.k.glibc_ln(),
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3584-3690
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3584-3690
             // ```c
             // localScalingFactor      /* i */
             // ...
@@ -229,7 +229,7 @@ impl RedoParamsBuilder<'_> {
                 local_scaling_factor,
             ),
             do_link_hsps,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:382-406
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:382-406
             // ```c
             // Nearly identical alignments are computed with exact subjects,
             // and others with segged subjects; this makes comparing end
@@ -417,7 +417,7 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let use_parallel_kappa_redo = {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3449
         // ```c
         // #pragma omp parallel ... num_threads(actual_num_threads)
         // #pragma omp for schedule(static)
@@ -458,7 +458,7 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let kappa_match_parallel_query_index = {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3449
         // ```c
         // #pragma omp parallel ... num_threads(actual_num_threads)
         // #pragma omp for schedule(static)
@@ -715,27 +715,27 @@ where
     let query_raw = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
     let query_nomask = query_nomask_sequence(ctx);
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3449
     // ```c
     // #pragma omp parallel ... num_threads(actual_num_threads)
     // #pragma omp for schedule(static)
     // for (b = 0; b < numMatches; ++b) {
     // ```
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3493-3503
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3493-3503
     // ```c
     // scoringParams = score_params_tld[tid];
     // redoneMatches = redoneMatches_tld[tid];
     // NRrecord = NRrecord_tld[tid];
     // redo_align_params = redo_align_params_tld[tid];
     // ```
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3459
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3459
     // ```c
     // #pragma omp parallel default(none) num_threads(actual_num_threads)
     // #pragma omp for schedule(static)
     // for (b = 0; b < numMatches; ++b) {
     // ```
-    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2309-2336,3493-3504
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2309-2336,3493-3504
     // query_info->seq.data = &query_data[query_info->origin];
     // query_info = query_info_tld[tid];
     // Only immutable query preparation is shared within this search.
@@ -744,7 +744,7 @@ where
     let precomputed: Vec<Result<Option<BlastpPostprocessResult>>> = pool.install(|| {
         local_matches
             .par_iter()
-            // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:3329-3334,3493-3503
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3493-3503
             // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
             // NRrecord = NRrecord_tld[tid];
             // Each Rayon work unit owns its mutable scratch. Initialization
@@ -789,7 +789,7 @@ where
                     });
                     let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new(None);
 
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3577-3585
                     // ```c
                     // *pStatusCode = s_ResultHspToDistinctAlign(...);
                     // ```
@@ -814,14 +814,14 @@ where
             .collect()
     });
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3529
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
     // ```c
     // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
     //                                 redoneMatches,
     //                                 numQueries)) {
     // ```
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3817-3849
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3817-3849
     // ```c
     // /* Reduce results from all threads and continue with business as usual */
     // local_results = SThreadLocalDataArrayConsolidateResults(thread_data);
@@ -897,7 +897,7 @@ where
         build_redo_align_params,
         ..
     } = *redo;
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3119-3128
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3119-3128
     // ```c
     // redoneMatches = calloc(numQueries, sizeof(BlastCompo_Heap));
     // for (query_index = 0;  query_index < numQueries;  query_index++) {
@@ -905,19 +905,19 @@ where
     // }
     // ```
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
     // ```c
     // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
     // status_code = Blast_CompositionWorkspaceInit(...);
     // ```
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3436-3459
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3436-3459
     // ```c
     // #pragma omp for schedule(static)
     // for (b = 0; b < numMatches; ++b) {
     //     ... redoneMatches = redoneMatches_tld[tid];
     // ```
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3459
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3459
     // ```c
     // #pragma omp parallel default(none) num_threads(actual_num_threads)
     // #pragma omp for schedule(static)
@@ -1026,7 +1026,7 @@ where
                     return Ok((q_idx, redone_match, kept_for_replay));
                 };
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:289-318
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:289-318
                 // ```c
                 // hit_list = results->hitlist_array[index];
                 // last_hsplist_index = hit_list->hsplist_count - 1;
@@ -1142,7 +1142,7 @@ where
             })
             .collect()
     });
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3817-3850
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3817-3850
     // ```c
     // /* Reduce results from all threads and continue with business as usual */
     // local_results = SThreadLocalDataArrayConsolidateResults(thread_data);
@@ -1387,7 +1387,7 @@ where
         build_redo_align_params,
         ..
     } = *redo;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
     // ```c
     // if ((int) compo_adjust_mode > 1 && !positionBased) {
     //     NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
@@ -1398,7 +1398,7 @@ where
     if args.scoring.matrix != ScoringMatrix::Blosum62 {
         blastp_use_matrix_workspace(&mut composition_workspace, args.scoring.matrix);
     }
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3656-3667
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3656-3667
     // ```c
     // s_HSPListFromDistinctAlignments(hsp_list,
     //         &alignments[context_index],
@@ -1407,13 +1407,13 @@ where
     // BlastCompo_AlignmentsFree(&incoming_aligns, NULL);
     // ```
     let mut kappa_preliminary_hits = Vec::new();
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3017-3019
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3017-3019
     // ```c
     // /* keeps track of gapped alignment params */
     // BlastGapAlignStruct* gapAlign = NULL;
     // ```
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1934-1942
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1934-1942
     // ```c
     // status =
     //     BLAST_GappedAlignmentWithTraceback(..., gapAlign,
@@ -1457,7 +1457,7 @@ where
             }
             continue;
         };
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-847
         // ```c
         // BLAST_ComputeLengthAdjustment(..., query_length, db_length,
         //                               db_num_seqs, &length_adjustment);
@@ -1465,7 +1465,7 @@ where
         // query_info->contexts[index].length_adjustment = length_adjustment;
         // ```
         //
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3244-3248
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3244-3248
         // ```c
         // query_info_tld[i] = s_GetQueryInfo(queryBlk->sequence, queryInfo, ...);
         // ```
@@ -1476,14 +1476,14 @@ where
             search_spaces[q_idx].effective_space,
         );
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:133-151
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:133-151
         // ```c
         // if (hsp_stream->sort_by_score->sort_on_read) {
         //     Blast_HSPResultsReverseSort(hsp_stream->results);
         // }
         // ```
         //
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:289-318
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:289-318
         // ```c
         // hit_list = results->hitlist_array[index];
         // last_hsplist_index = hit_list->hsplist_count - 1;
@@ -1505,7 +1505,7 @@ where
             .enumerate()
         {
             let s_idx = local_match.oid;
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3612-3619
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3612-3619
             // ```c
             // localMatch->hsp_array,  /* i */
             // localMatch->hspcnt,     /* i */
@@ -1526,7 +1526,7 @@ where
                 continue;
             }
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3528
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3528
             // ```c
             // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
             //                                 redoneMatches,

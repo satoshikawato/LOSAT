@@ -15,9 +15,9 @@ use crate::common::GapEditOp;
 // The traceback's result, which the Smith-Waterman round loop reads (one owner of the loop).
 use crate::core::composition_adjustment::smith_waterman::SwXdropTraceback;
 
-/// NCBI's `MININT` (blast_gapalign.c:58).
+/// NCBI's `MININT` (c++/src/algo/blast/core/blast_gapalign.c:58).
 const MININT: i32 = i32::MIN / 2;
-/// NCBI's `HSP_MAX_WINDOW` (blast_gapalign.h).
+/// NCBI's `HSP_MAX_WINDOW` (c++/include/algo/blast/core/blast_gapalign.h).
 const HSP_MAX_WINDOW: i32 = 11;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:368-376
 // ```c
@@ -37,7 +37,7 @@ const SCRIPT_GAP_IN_B: u8 = 6;
 const SCRIPT_OP_MASK: u8 = 0x07;
 const SCRIPT_EXTEND_GAP_A: u8 = 0x10;
 const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
-/// NCBI's `FENCE_SENTRY` (blast_gapalign.h): no protein letter has this value, so a PSSM
+/// NCBI's `FENCE_SENTRY` (c++/include/algo/blast/core/blast_gapalign.h): no protein letter has this value, so a PSSM
 /// alignment never meets it; kept for the statement order of `ALIGN_EX`.
 const FENCE_SENTRY: u8 = 201;
 

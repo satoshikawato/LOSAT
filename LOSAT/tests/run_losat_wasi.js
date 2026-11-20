@@ -8,7 +8,7 @@ const { prepareArtifact, unsignedWasiImports, blockingStdioWrite } = require("./
 const { sharedFileTable, sharedFileImports } = require("./wasi_files");
 
 // NCBI reference:
-// ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
+// c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
 // The command-Wasm certification passes the same query, subject, output,
 // genetic-code, and thread arguments as native LOSAT. This runner only supplies
 // WASI preview1; it does not rewrite output or implement BLAST behavior.
@@ -21,7 +21,7 @@ if (!wasmPath) {
 const args = [wasmPath, ...process.argv.slice(3)];
 const wasi = new WASI({
   version: "preview1",
-  // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+  // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
   // CATCH_ALL(status)
   // return status;
   returnOnExit: true,
@@ -41,7 +41,7 @@ const wasi = new WASI({
 
 (async () => {
   const bytes = fs.readFileSync(wasmPath);
-  // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+  // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
   // CATCH_ALL(status); return status;
   // Module reuse is host preparation only; preserve validation and exit status.
   const { module } = prepareArtifact(bytes, "serial-command");
@@ -52,7 +52,7 @@ const wasi = new WASI({
   // exports its memory, so the table reads it through the instance.
   let memory = null;
   const guestMemory = { get buffer() { return memory.buffer; }, grow: (pages) => memory.grow(pages) };
-  // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+  // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
   // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
   // The output to standard output and error waits for a full pipe as the native write blocks
   // (blockingStdioWrite, wasi_artifact.js): require("wasi") above prints Node's ExperimentalWarning
@@ -70,7 +70,7 @@ const wasi = new WASI({
       `${wasmPath} does not export _start; use the LOSAT command-Wasm artifact.`,
     );
   }
-  // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+  // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
   // CATCH_ALL(status)
   // return status;
   process.exitCode = wasi.start(instance);

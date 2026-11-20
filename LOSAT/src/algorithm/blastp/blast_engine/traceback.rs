@@ -11,7 +11,7 @@
 //!         BlastSeqSrcGetSeqArg seq_arg;
 //! ```
 //!
-//! NCBI's threads take the OID batches of lists in turn (`blast_traceback.c:1505-1518`), each
+//! NCBI's threads take the OID batches of lists in turn (`c++/src/algo/blast/core/blast_traceback.c:1505-1518`), each
 //! thread with its own results that are merged after the loop (`blast_traceback_mt_priv.c:139-185`).
 //! A list's traceback reads nothing another list writes, and the hit lists' order
 //! (`s_EvalueCompareHSPLists`: e-value, score, OID) is total, so LOSAT inserts every list into one

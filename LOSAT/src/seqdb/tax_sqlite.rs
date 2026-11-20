@@ -841,7 +841,7 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
         let x = i64::from(taxid);
         // The queue and the output are the same list: `nodes[head..]` still to expand.
         let mut nodes: Vec<i64> = vec![x];
-        // NCBI's `WITH RECURSIVE ... UNION ALL` (tax4blastsqlite.cpp) does not end for a start
+        // NCBI's `WITH RECURSIVE ... UNION ALL` (c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp) does not end for a start
         // taxid that lies in a parent cycle. LOSAT skips taxids it has already visited
         // (DI-8 DECISIONS 10, an approved difference of the PD-LOSAT-NCBI-DEFECTS kind).
         let mut seen: HashSet<i64> = HashSet::new();

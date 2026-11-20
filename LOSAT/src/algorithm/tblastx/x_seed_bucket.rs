@@ -1,7 +1,7 @@
 //! EXPERIMENT (SEEDBUCKET, graduated on 2026-10-22: no variable): the two-hit
 //! stage of the TBLASTX word finder with the hits grouped by diagonal range.
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:492-614
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-614
 //! (`BlastAaWordFinder_TwoHit`): the subject is scanned left to right, and
 //! every hit `(q_off, s_off)` is tested against — and updates — exactly one
 //! cell of the diagonal table, `diag_array[(q_off - s_off) & diag_mask]`.
@@ -65,7 +65,7 @@
 //!     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
 //!           sizeof(BlastInitHSP), score_compare_match);
 //! ```
-//! NCBI sorts the hit list by score after the scan (called at aa_ungapped.c:282). Equal scores
+//! NCBI sorts the hit list by score after the scan (called at c++/src/algo/blast/core/aa_ungapped.c:282). Equal scores
 //! occur, and the order of the result among them follows the order of the input, so the saved HSPs
 //! must be in scan order before the sort. `restore_flush_order` puts them back, flush by flush.
 //!

@@ -9,13 +9,13 @@ use crate::blastinput::app::{options_error, output_format};
 
 /// NCBI's default hit list size.
 ///
-/// NCBI reference: c++/include/algo/blast/core/blast_options.h:160
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:160
 /// ```c
 /// #define BLAST_HITLIST_SIZE 500 /**< Number of database sequences to save hits
 /// ```
 pub const BLAST_HITLIST_SIZE: usize = 500;
 
-/// NCBI reference: c++/src/objtools/align_format/format_flags.cpp:219,221
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:219,221
 /// ```c
 /// const size_t kDfltArgNumDescriptions = 500;
 /// const size_t kDfltArgNumAlignments = 250;
@@ -158,7 +158,7 @@ impl Default for ReportCounts {
 /// `-num_descriptions` (`nd`) and `-num_alignments` (`na`) as the command line gives them.
 /// `-max_target_seqs` excludes the other two (the argument parsers refuse both).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
 /// (`BLAST_HITLIST_SIZE` is 500, `m_DfltNumDescriptions` 500, `m_DfltNumAlignments` 250; the
 /// import search strategy branch at 2900-2908 does not exist in LOSAT)
 /// ```c
@@ -332,7 +332,7 @@ impl ReportCounts {
     /// validation of the options, with the hit saving options' checks after those of the
     /// scoring, lookup table and word options and before the e-value's.
     ///
-    /// NCBI reference: c++/src/algo/blast/core/blast_options.c:1511-1517
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1511-1517
     /// ```c
     /// 	if (options->hitlist_size < 1)
     /// 	{

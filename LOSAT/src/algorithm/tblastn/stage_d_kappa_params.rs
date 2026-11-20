@@ -16,7 +16,7 @@ use crate::stats::compute_blosum62_ideal_karlin_params;
 use crate::stats::tables::KarlinParams;
 use crate::utils::matrix::BLASTAA_SIZE;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2352-2384,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2352-2384,
 // 2433-2479,3099-3110; composition_adjustment/redo_alignment.c:1014-1050:
 // gapping_params->gap_open = scoring->gap_open;
 // gapping_params->gap_extend = scoring->gap_extend;
@@ -29,7 +29,7 @@ use crate::utils::matrix::BLASTAA_SIZE;
 //     (int)(hitParams->cutoff_score_min * context->localScalingFactor) : 1;
 // localScalingFactor = (compo_adjust_mode != eNoCompositionBasedStats)
 //                      ? SCALING_FACTOR : 1.0;
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:457-463:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463:
 // params->gap_x_dropoff = (Int4)(options->gap_x_dropoff*NCBIMATH_LN2/min_lambda);
 // params->gap_x_dropoff_final = (Int4)
 //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
@@ -128,7 +128,7 @@ pub(super) fn local_kappa_redo_params(
     } else {
         32.0
     };
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:2369-2378,2439-2448:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2369-2378,2439-2448:
     // for (i=0; i<num_queries; i++) if (kbp_gap[i] != NULL &&
     //     kbp_gap[i]->Lambda < min_lambda) min_lambda = kbp_gap[i]->Lambda;
     // for (index=first_context; index<=last_context; ++index)
@@ -144,13 +144,13 @@ pub(super) fn local_kappa_redo_params(
     let first_valid_lambda = active.map(|(p, _)| p.lambda).next().unwrap();
     let scaled_lambda = min_lambda / scale;
     let first_valid_scaled_lambda = first_valid_lambda / scale;
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:2372-2384:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2372-2384:
     // gapping_params->x_dropoff = (Int4)
     //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
     //         extendParams->gap_x_dropoff_final);
     let redo_xdrop =
         crate::core::x_drop::redo_x_dropoff(final_xdrop_bits, scaled_lambda, extension_final_xdrop);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2852;
     // blast_kappa.c:2216-2231:
     // Blast_ScoreBlkKbpIdealCalc(sbp);
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
@@ -165,7 +165,7 @@ pub(super) fn local_kappa_redo_params(
         crate::algorithm::tblastx::lookup::ideal_karlin_params_of(matrix).lambda
     };
     let matrix_info = build_matrix_info(matrix, ideal_lambda / scale)?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2438-2479;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2438-2479;
     // composition_adjustment/redo_alignment.c:1028-1043:
     // near_identical_cutoff = (1.74 * NCBIMATH_LN2) / kbp_gap[index]->Lambda;
     // cutoff_s = do_link_hsps ?
@@ -204,7 +204,7 @@ mod tests {
     use super::super::stage_d_stats::LocalLinkParameters;
     use super::*;
 
-    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2369-2382,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2369-2382,
     // 2439-2448:
     // for (i=0; i<num_queries; i++) if (kbp_gap[i] != NULL &&
     //     kbp_gap[i]->Lambda < min_lambda) min_lambda = kbp_gap[i]->Lambda;
@@ -265,7 +265,7 @@ mod tests {
         );
         assert_eq!(params.cutoff_score, 800);
         assert!(params.do_link_hsps);
-        // NCBI blast_kappa.c:2428,2450-2457: without linking parameters (`-sum_stats false`,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2428,2450-2457: without linking parameters (`-sum_stats false`,
         // or a `-max_intron_length` of 1 to 4) the redo does not link and its cutoff is 1.
         let params = local_kappa_redo_params(
             ScoringMatrix::Blosum62,
@@ -288,7 +288,7 @@ mod tests {
         assert!(!params.do_link_hsps);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:457-463:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463:
     // params->gap_x_dropoff_final = (Int4)
     //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
     //         params->gap_x_dropoff);

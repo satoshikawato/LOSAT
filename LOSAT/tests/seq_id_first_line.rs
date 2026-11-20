@@ -330,7 +330,7 @@ fn only_a_first_line_that_ncbi_takes_as_a_seq_id_is_refused() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
 // ```c
 //     // Setup some debugging features from environment variables.
 //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {

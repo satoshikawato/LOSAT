@@ -1,6 +1,6 @@
 //! Local BLAST Search
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp
 //!
 //! This module provides the main entry point for running local BLAST searches, and the
 //! output routing shared by every entry that runs through it (the CLI, web ABI v1 and
@@ -15,7 +15,7 @@ use crate::record::FastaRecord;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:106-111
 // ```c
 // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
 // 	opts_hndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
@@ -36,7 +36,7 @@ pub use crate::algorithm::tblastx::blast_engine::run_local as run_local_tblastx;
 // ```
 pub use crate::algorithm::tblastx::blast_engine::run_local_database as run_local_database_tblastx;
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:128-133
 // ```c
 // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
 // 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
@@ -62,7 +62,7 @@ pub use crate::algorithm::blastn::blast_engine::run_local_database as run_local_
 pub use crate::utils::threading::with_run_pool;
 
 // Re-export BLASTP run function
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:1196-1218
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:1196-1218
 // ```c
 // CLocalBlast::Run()
 // {
@@ -83,7 +83,7 @@ pub use crate::algorithm::blastp::blast_engine::run_local as run_local_blastp;
 pub use crate::algorithm::blastp::blast_engine::run_local_database as run_local_database_blastp;
 
 // Re-export the TBLASTN entry
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:289-301
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289-301
 // ```c
 // CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
 // lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
@@ -123,13 +123,13 @@ pub use crate::algorithm::blastx::run_local as run_local_blastx;
 // ```
 pub use crate::algorithm::blastx::run_local_database as run_local_database_blastx;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
 // ```c
 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
 //     : m_FormatType(format_type), ..., m_Outfile(outfile),
 //       m_NumSummary(num_summary), ...
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
 // ```c
 // arg_desc.AddDefaultKey(kArgOutput, "output_file",
 //                "Output file name",
@@ -160,7 +160,7 @@ pub enum OutputSink<'a> {
 }
 
 impl OutputSink<'_> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
     // ```c
     // else {
     //     m_OutputStream = &args[kArgOutput].AsOutputFile();
@@ -197,7 +197,7 @@ impl OutputSink<'_> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
 // ```c
 // else {
 //     m_OutputStream = &args[kArgOutput].AsOutputFile();
@@ -277,7 +277,7 @@ impl Write for OutFile {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 // ```c
 // if (args[kArgOutputFormat]) {
 //     string fmt_choice =
@@ -387,7 +387,7 @@ pub(crate) fn open_out(formats: &mut [FormatOutput<'_>]) -> anyhow::Result<()> {
     Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
 // ```c
 // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
 // ```
@@ -397,13 +397,13 @@ pub(crate) fn open_out(formats: &mut [FormatOutput<'_>]) -> anyhow::Result<()> {
 /// `ReportOutputs::hits` receives. It identifies the HSP in every output format.
 pub type HspIndex = usize;
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 // ```c++
 // subid=&(avRef->GetSeqId(1));
 // bool showDefLine = previousId.Empty() || !subid->Match(*previousId);
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 //     // Add tab in front of field, except for the first field.
@@ -413,7 +413,7 @@ pub type HspIndex = usize;
 // }
 // m_Ostream << "\n";
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3956-3975
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3956-3975
 // ```c++
 // void CDisplaySeqalign::x_DisplayAlnvecInfo(CNcbiOstream& out,
 //                                            SAlnInfo* aln_vec_info,
@@ -424,7 +424,7 @@ pub type HspIndex = usize;
 // 		x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
 // 	}
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3613-3632
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
 // ```c++
 // void CDisplaySeqalign::x_ShowAlnvecInfo(CNcbiOstream& out,
 //                                            SAlnInfo* aln_vec_info,
@@ -475,7 +475,7 @@ pub trait FormatObserver {
     /// `hsp`. Every byte of it has reached the sink.
     fn hsp_end(&mut self, format: usize, hsp: HspIndex);
 
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3613-3632
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
     // ```c++
     // void CDisplaySeqalign::x_ShowAlnvecInfo(CNcbiOstream& out,
     //                                            SAlnInfo* aln_vec_info,
@@ -614,7 +614,7 @@ pub trait FormatObserver {
     fn rounds_converged(&mut self, _query: usize) {}
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 // ```c++
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```
@@ -649,7 +649,7 @@ impl<'o> FormatProbe<'o> {
 /// The receiver of the final hit list (`ReportOutputs::hits`).
 pub type HitsSink<'a> = dyn FnMut(std::sync::Arc<Vec<PairwiseHit>>) + Send + 'a;
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:195-295
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:195-295
 // ```c
 // CRef<CLocalDbAdapter> db_adapter;
 // CRef<CScope> scope;
@@ -667,7 +667,7 @@ pub type HitsSink<'a> = dyn FnMut(std::sync::Arc<Vec<PairwiseHit>>) + Send + 'a;
 // }
 // formatter.PrintEpilog(opt);
 // ```
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
@@ -832,7 +832,7 @@ impl ReportOutputs<'_> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:225-226
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-226
 // ```c
 // CBlastFormat formatter(opt, *db_adapter,
 //                        fmt_args->GetFormattedOutputChoice(),

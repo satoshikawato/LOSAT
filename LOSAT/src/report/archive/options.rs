@@ -758,7 +758,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 if let Some(reward) = inputs.reward {
                     list.set("MatchReward", Integer(reward));
                 }
-                // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:681-685
+                // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:681-685
                 // ```c++
                 //     if (cmd_line_args.Exist(kArgNoGreedyExtension) &&
                 //         cmd_line_args[kArgNoGreedyExtension]) {
@@ -1157,7 +1157,7 @@ mod tests {
 
     #[test]
     fn the_matrix_suggestions_ignore_the_case_of_the_name() {
-        // NCBI compares the names with `strcasecmp` (blast_options.c:1174-1236).
+        // NCBI compares the names with `strcasecmp` (c++/src/algo/blast/core/blast_options.c:1174-1236).
         for (matrix, threshold, window) in [
             ("BLOSUM62", 11, 40),
             ("blosum62", 11, 40),

@@ -1,7 +1,7 @@
 //! BLAST Sequence Encoding
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c
-//!            ncbi-blast/c++/src/algo/blast/core/blast_util.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c
+//!            c++/src/algo/blast/core/blast_util.c
 //!
 //! This module provides the nucleotide encodings of NCBI BLAST that the engines use:
 //! - IUPAC letters to BLASTNA codes (`encode_iupac_to_blastna`,
@@ -29,7 +29,7 @@
 /// Compression ratio: 4 nucleotides per byte
 pub const COMPRESSION_RATIO: usize = 4;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:85-93
 // ```c
 // const Uint1 IUPACNA_TO_BLASTNA[128]={
 // 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
@@ -50,7 +50,7 @@ const IUPACNA_TO_BLASTNA: [u8; 128] = [
     15, 15, 15, 15, 15, 15, 15,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:85-93
 // ```c
 // const Uint1 IUPACNA_TO_BLASTNA[128]={
 // 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
@@ -78,7 +78,7 @@ const IUPACNA_TO_BLASTNA_FULL: [u8; 256] = {
 };
 
 /// Encode an ASCII sequence to BLASTNA (IUPAC) codes (one base per byte).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:85-93
 /// ```c
 /// const Uint1 IUPACNA_TO_BLASTNA[128]={
 /// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
@@ -110,7 +110,7 @@ pub fn encode_iupac_to_blastna_into(seq: &[u8], out: &mut [u8]) {
 /// The ncbi4na value of an IUPAC nucleotide letter, either case (bit 0 A, 1 C, 2 G, 3 T;
 /// a gap is 0 and `N` 15), or `None` for another byte.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:424-425
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:424-425
 /// ```c
 /// static unsigned char ctable[16] = {0xFF, 0x00, 0x01, 0xFF, 0x02, 0xFF, 0xFF, 0xFF,
 /// 		                           0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
@@ -137,7 +137,7 @@ pub fn iupacna_to_ncbi4na(letter: u8) -> Option<u8> {
     })
 }
 
-// NCBI reference: c++/src/util/random_gen.cpp:98,227-230,287-308 and
+// NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:98,227-230,287-308 and
 // c++/include/util/random_gen.hpp:224-241
 // ```c
 // static const size_t kStateOffset = 12;
@@ -191,7 +191,7 @@ impl NcbiRandom {
 /// compressed subject that the preliminary search reads: each ambiguous letter becomes a
 /// compatible base drawn from `CRandom` seeded with the length of the sequence.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
 /// ```c
 /// void s_Ncbi4naToNcbi2na(const string & ncbi4na, int base_length,
 ///                         unsigned char * ncbi2na)
@@ -224,7 +224,7 @@ pub fn resolve_ncbi4na_to_ncbi2na(ncbi4na: &[u8]) -> Vec<u8> {
 /// The ncbi2na code of one ncbi4na code, an ambiguous one drawn from `random` (the next base
 /// of `resolve_ncbi4na_to_ncbi2na`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474 (above)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474 (above)
 #[inline]
 pub(crate) fn resolve_ncbi4na_base(mask: u8, random: &mut NcbiRandom) -> u8 {
     match mask {
@@ -270,7 +270,7 @@ const UNAMBIGUOUS_NCBI2NA: [u8; 256] = {
 /// with its ambiguous letters resolved as NCBI resolves them (`resolve_ncbi4na_to_ncbi2na`).
 /// The letters have been checked (IUPAC); another byte is read as `N`.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
 /// ```c
 ///     virtual SBlastSequence GetCompressedPlusStrand() {
 ///         SBlastSequence retval(size());
@@ -280,7 +280,7 @@ const UNAMBIGUOUS_NCBI2NA: [u8; 256] = {
 ///         return retval;
 /// ```
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1167-1194
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1167-1194
 /// ```c
 ///     // Populate the compressed sequence up to the last byte
 ///     for (ci = 0, i = 0; ci < retval.length-1; ci++, i+= COMPRESSION_RATIO) {

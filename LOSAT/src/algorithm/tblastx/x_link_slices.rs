@@ -137,7 +137,7 @@ use super::{
 // Diagnostic (LOSAT_TIMING): the clock of the linking call (tblastx/x_link_timing.rs); the
 // linking reads nothing from it.
 use crate::algorithm::tblastx::x_link_timing::{KernelTimes, LinkLap, LinkStage};
-// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c
 // CMTArgs(...)
 // {

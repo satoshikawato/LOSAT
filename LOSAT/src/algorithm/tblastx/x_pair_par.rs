@@ -1587,7 +1587,7 @@ impl XGroup {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:509-511
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
     // ```c
     // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     // ```
@@ -2724,7 +2724,7 @@ impl<M: TbxScore> XPairPar<M> {
         let scan_interiors = tblastx_scan_interiors(chunk.length, None);
         for (unit, sink) in chunk_units.iter().zip(sinks.iter_mut()) {
             for table in with_entries(unit.g) {
-                // NCBI sizes the offset array from the table it scans (lookup_wrap.c:264-266).
+                // NCBI sizes the offset array from the table it scans (c++/src/algo/blast/core/lookup_wrap.c:264-266).
                 let offset_array_size: i32 = OFFSET_ARRAY_SIZE + table.lookup.longest_chain;
                 let offset_pairs_len =
                     crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);

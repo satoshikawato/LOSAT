@@ -6,11 +6,11 @@
 //! of the whole run, about 190 bytes each (tblastx `-db 18S_fungal_sequences` x 50 of its records:
 //! 3.7 GB, NCBI 0.43 GB; `blastdb-ids-20261021/R/REPORT_tbx_db_memory.md`).
 //!
-//! NCBI reference: c++/src/algo/blast/core/blast_engine.c:1554
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1554
 //! ```c
 //!          status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
 //! ```
-//! NCBI reference: c++/src/algo/blast/core/hspfilter_collector.c:143-150
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:143-150
 //! ```c
 //!       for (index = 0; index < results->num_queries; index++) {
 //!          if (hsp_list_array[index]) {
@@ -21,12 +21,12 @@
 //!             Blast_HitListUpdate(results->hitlist_array[index],
 //!                                 hsp_list_array[index]);
 //! ```
-//! NCBI reference: c++/src/algo/blast/core/hspfilter_collector.c:336-337
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:336-337
 //! ```c
 //!    retval->prelim_hitlist_size = GetPrelimHitlistSize(hit_options->hitlist_size,
 //!                                     compositionBasedStats, gapped_calculation);
 //! ```
-//! NCBI reference: c++/src/algo/blast/core/blast_hits.c:44-71 (`GetPrelimHitlistSize`): without
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:44-71 (`GetPrelimHitlistSize`): without
 //! gapping or composition-based statistics the preliminary hit list has the final size, so
 //! tblastx's lists are final when the batch's search ends; its traceback changes nothing.
 //!
@@ -57,7 +57,7 @@ use super::args::TblastxArgs;
 use super::blast_engine::TblastxHsp;
 use super::report::{self, HitFilters};
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
 // ```c
 // typedef struct BlastHSPList {
 //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
@@ -92,7 +92,7 @@ impl HitListEntry for TblastxHspList {
         self.best_evalue
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1739-1749
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1739-1749
     // ```c
     // static double
     // s_BlastGetBestEvalue(const BlastHSPList* hsp_list)
@@ -120,7 +120,7 @@ impl HitListEntry for TblastxHspList {
         self.hsps.first().map(|hsp| hsp.hit.raw_score)
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1452-1454
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1452-1454
     // ```c
     //       qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
     //             s_EvalueCompareHSPs);
@@ -237,7 +237,7 @@ pub(crate) struct HitCollector {
 impl HitCollector {
     /// The collector of a batch of `queries` searched with `args`.
     pub(crate) fn new(args: &TblastxArgs, queries: &[FastaRecord], sorts_results: bool) -> Self {
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2960-2962,2978
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2960-2962,2978
         // ```c
         //     	if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
         //     		hitlist_size = args[kArgMaxTargetSequences].AsInteger();
@@ -246,7 +246,7 @@ impl HitCollector {
         //     opt.SetHitlistSize(hitlist_size);
         // ```
         // The hit list size is `args.report_counts.hitlist_size` (`blastinput::report_counts`).
-        // NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1324
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1324
         // ```c
         // CBlastOptionsLocal::SetCullingLimit(int s)
         // {
@@ -256,7 +256,7 @@ impl HitCollector {
         // ```
         // A culling limit above 0 installs NCBI's culling writer and pipe
         // (`report::culled_hit_order`).
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:313-319
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-319
         // ```c
         //     if (args.Exist(kArgQueryCovHspPerc) && args[kArgQueryCovHspPerc]) {
         //         opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
@@ -342,7 +342,7 @@ impl HitCollector {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1988-1996
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1988-1996
     // ```c
     //    cutoff = hit_options->expect_value;
     // ...
@@ -556,7 +556,7 @@ mod tests {
         collector.finish()
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_collector.c:143-150 and blast_hits.c:3243-3297
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:143-150 and c++/src/algo/blast/core/blast_hits.c:3243-3297
     // (Blast_HitListUpdate): the subjects enter the hit lists in OID order whatever order their
     // searches end in, and the lists are those of the whole batch's HSPs ordered at once
     // (`final_hit_order`): with hit lists that never fill (sizes at and above the number of
@@ -583,7 +583,7 @@ mod tests {
         }
     }
 
-    // NCBI blast_hits.c:3078-3105 (s_EvalueCompareHSPLists) and 3266-3278: pinned by hand. Subject
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3078-3105 (s_EvalueCompareHSPLists) and 3266-3278: pinned by hand. Subject
     // 0's best e-value is on its lower-scoring HSP. Below the size the lists keep their score
     // order and subject 0 compares with 120; when the third subject fills a hit list of two, the
     // lists are sorted by e-value, subject 0 compares with 100 and is the worst, so subject 2

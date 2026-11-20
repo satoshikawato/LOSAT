@@ -1512,7 +1512,7 @@ fn open_new_database(
         // number-of-letters._type = Uint8
         // number-of-sequences._type = Int8
         // ```
-        // NCBI's `GetDBMetaData` counts in an `int num_seqs` (seqdb.cpp:1707), which a
+        // NCBI's `GetDBMetaData` counts in an `int num_seqs` (c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1707), which a
         // database of more than 2^31 - 1 sequences would overflow; LOSAT sums in `Int8`.
         number_of_sequences: totals.iter().map(|(oids, _)| i64::from(*oids)).sum(),
         last_updated: last_updated(now),

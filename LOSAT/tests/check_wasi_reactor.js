@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createThreadHost } = require("./wasi_thread_host");
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-96,770-832
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-96,770-832
 // m_Outfile(ostr); CBlastTabularInfo tabinfo(m_Outfile, ...);
 // Preserve raw API bytes, including each format's existing labels.
 function runPair(host, program, query, subject, format, args) {
@@ -24,7 +24,7 @@ function runPair(host, program, query, subject, format, args) {
   } finally { for (const [ptr, length] of allocations) api.losat_web_dealloc(ptr, length); }
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
 // (*thread)->Run(); (*thread)->Join(&result);
 // Guest joins precede the API return; host exit callbacks are awaited explicitly.
 async function checkReactor(artifact, fixtures, output) {
@@ -92,7 +92,7 @@ async function checkReactor(artifact, fixtures, output) {
         const recoveryEvents = await host.waitForWorkers(); save(`${c.id}-recovery-${failAt}`, recovery, recoveryEvents);
         assert.equal(recovery.status, 0, recovery.error); assert.deepEqual(recovery.result, reference);
       }
-      // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:770-832
+      // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-832
       // CBlastTabularInfo tabinfo(m_Outfile, ...);
       // API labels are a separate existing contract; compare unchanged bytes.
       for (const format of ["blastp", "blastx", "tblastn"].includes(c.program) ? ["0", "7", "6 qseqid sseqid score bitscore qstart qend sstart send"] : c.program === "blastn" ? ["7"] : []) {
@@ -103,7 +103,7 @@ async function checkReactor(artifact, fixtures, output) {
           assert.equal(response.status, 0, response.error);
           if (!expected) expected = response.result;
           assert.deepEqual(response.result, expected);
-          // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+          // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
           // (*thread)->Run(); (*thread)->Join(&result);
           for (const event of ["spawn_attempt", "spawned", "ready", "exited"]) {
             assert.equal(events.filter(e => e.event === event).length, n - 1);
@@ -131,7 +131,7 @@ async function checkReactor(artifact, fixtures, output) {
       assert.match(invalid.error, /doesn't look like plausible data/);
       save(`${c.id}-invalid-input`, invalid, []);
     }
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
     // (*thread)->Run(); (*thread)->Join(&result);
     // Repetition checks actual worker reclamation and bounded guest memory;
     // evidence is drained from the host after each call, not retained forever.

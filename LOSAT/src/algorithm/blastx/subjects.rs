@@ -232,7 +232,7 @@ impl<'a> Subjects<'a> {
                     sum.checked_add(i64::try_from(s.sequence.len()).ok()?)
                 })
                 .ok_or_else(|| anyhow!("BLASTX subject-set length exceeds Int8")),
-            // NCBI's `Int8` of the `Uint8` (seqsrc_seqdb.cpp:183-189): negative for an alias
+            // NCBI's `Int8` of the `Uint8` (c++/src/algo/blast/api/seqsrc_seqdb.cpp:183-189): negative for an alias
             // file's `LENGTH` of 2^63 or more, which takes the subject's own branch of the link
             // cutoffs (`linking::link_cutoffs`; line RG D1a-3).
             Subjects::Stream(stream) => Ok(stream.db.total_length() as i64),
@@ -431,7 +431,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: `search_residue` (blast_setup_cxx.cpp:894-899).
+    // NCBI reference: `search_residue` (c++/src/algo/blast/api/blast_setup_cxx.cpp:894-899).
     /// A `-subject` record's pyrrolysine (O or o) is searched as X, through every encoding; the
     /// record, whose letters the reports show, keeps the O.
     #[test]

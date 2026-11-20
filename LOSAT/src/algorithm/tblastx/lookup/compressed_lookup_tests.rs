@@ -4,7 +4,7 @@ use super::{
 };
 use crate::utils::matrix::ncbistdaa;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:782-849
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:782-849
 // ```c
 // case 5:
 //     new_cell->query_offsets[0] = backbone_cell->payload.query_offsets[2];
@@ -33,7 +33,7 @@ fn compressed_word_hit_overflow_matches_ncbi_scan_order() {
     );
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1182-1242
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1182-1242
 // ```c
 // PV_SET(pv, i, pv_array_bts);
 // longest_chain = MAX(count, longest_chain);
@@ -64,7 +64,7 @@ fn compressed_finalize_sets_pv_and_longest_chain() {
     ));
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:859-929
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:859-929
 // ```c
 // s_CompressedLookupAddEncoded(lookup, subject_word, query_offset);
 // ...
@@ -95,7 +95,7 @@ fn compressed_encoded_and_unencoded_indices_match() {
     assert_eq!(lookup.query_offsets_in_scan_order(encoded_index), vec![321]);
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1071-1176
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1071-1176
 // ```c
 // s_CompressedAddWordHits(&info, query->sequence, offset);
 // ...

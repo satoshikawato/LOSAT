@@ -32,7 +32,7 @@ fn losat_binary() -> PathBuf {
     path
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
 // ```c
 // #if _BLAST_DEBUG
 // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
@@ -189,7 +189,7 @@ fn tblastx_diagnostics_summary_is_env_gated() {
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
 // ```c
 // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
 //                                dbseq_chunk_overlap);
@@ -282,7 +282,7 @@ fn tblastx_parallel_chunks_matches_serial_on_real_chunk_boundaries() {
     let _ = fs::remove_file(out_parallel);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83-123
 // ```c
 // for (s = s_first; s <= s_last; s++) {
 //     ...
@@ -290,7 +290,7 @@ fn tblastx_parallel_chunks_matches_serial_on_real_chunk_boundaries() {
 // }
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:614
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614
 // ```c
 // /* increment the offset in the diagonal array */
 // Blast_ExtendWordExit(ewp, subject->length);
@@ -312,7 +312,7 @@ fn tblastx_serial_scan_chunks_matches_normal_on_ap027133_50k() {
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
 // ```c
 // aux_struct->WordFinder(..., init_hitlist, ...);
 // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,

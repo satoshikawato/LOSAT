@@ -23,7 +23,7 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
 # (*thread)->Run(); (*thread)->Join(&result);
 # Build identity only: the shared memory's maximum is a link argument in the target
 # rustflags (.cargo/config.toml). A build that lost it would silently declare Rust's 1 GiB.
@@ -33,7 +33,7 @@ def declared_maximum_pages(rustflags):
     return int(sizes[-1]) // 65536 if sizes else None
 
 
-# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
 # (*thread)->Run(); (*thread)->Join(&result);
 # Host compatibility only: the threaded modules are written with the shared-memory guard
 # (wasi_shared_memory.js), so that every host, browsers included, runs guarded bytes (release
@@ -48,7 +48,7 @@ def write_artifact(node, kind, built, destination):
     return None
 
 
-# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
 # Artifact identity belongs to the host ABI, not to any NCBI implementation.
 def main():
@@ -57,7 +57,7 @@ def main():
     parser.add_argument("--target-dir", type=Path, required=True)
     parser.add_argument("--node", default="node")
     parser.add_argument("--reverse-order", action="store_true")
-    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     # #ifdef NCBI_NO_THREADS
     # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
     # Serial artifacts are an explicit compatibility build, not the default.
@@ -66,7 +66,7 @@ def main():
     args = parser.parse_args()
     out, target = args.output_dir.resolve(), args.target_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
-    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     # CATCH_ALL(status); return status;
     # Do not silently mix old compatibility outputs into a threaded bundle.
     if not args.include_serial and any((out / name).exists() for name in
@@ -79,7 +79,7 @@ def main():
     sysroot = Path(subprocess.check_output(["rustc", "--print", "sysroot"], text=True).strip())
     node = subprocess.check_output([args.node, "-p", "JSON.stringify(process.versions)"], text=True)
     recorded, identities = {}, {}
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
     # (*thread)->Run(); (*thread)->Join(&result);
     kinds = [kind for kind in SPECS if args.include_serial or kind.startswith("threaded-")]
     for kind in reversed(kinds) if args.reverse_order else kinds:
@@ -117,7 +117,7 @@ def main():
         identities[kind] = identity
         print(f"{kind}: {identity['sha256']}", flush=True)
     runtime_files = {}
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
     # (*thread)->Run(); (*thread)->Join(&result);
     runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_thread_worker.js", "wasi_artifact.js", "wasi_shared_memory.js", "wasi_files.js"]
     if args.include_serial:

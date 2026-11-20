@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate fixed TBLASTN subjects and fresh, comparison-only NCBI output.
 
-NCBI c++/src/algo/blast/core/blast_engine.c:804-855:
+NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-855:
     for (context=first_context; context<=last_context; context++) {
         subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
         status = s_BlastSearchEngineOneContext(...);

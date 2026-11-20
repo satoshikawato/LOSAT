@@ -1201,7 +1201,7 @@ fn query_coverage_per_hsp(
 mod tests {
     use super::*;
 
-    // NCBI blast_seqalign.cpp:1497-1499 (a third of the query's letters), :1381-1384 and
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1497-1499 (a third of the query's letters), :1381-1384 and
     // showalign.cpp:3162-3185 with tabular.cpp:737-747 (ungapped: the query's letters, or the
     // span's nucleotides for a subject's single HSP). Values of tab.bx.cov.6 (qn2: 135 letters).
     #[test]

@@ -100,7 +100,7 @@ pub struct BlastxArgs {
     //                                 CArgDescriptions::eString);
     //     }
     // ```
-    // NCBI excludes `-subject` and `-subject_loc` with `-db` (blast_args.cpp:2364-2381). The
+    // NCBI excludes `-subject` and `-subject_loc` with `-db` (c++/src/algo/blast/blastinput/blast_args.cpp:2364-2381). The
     // exclusion is an error of the argument parser: LOSAT's parser reports it with its own text
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
     #[arg(
@@ -403,7 +403,7 @@ pub struct BlastxArgs {
         conflicts_with_all = ["num_descriptions", "num_alignments"]
     )]
     pub max_target_seqs: Option<i32>,
-    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
     #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
@@ -617,7 +617,7 @@ impl ResolvedOptions {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:184 (blastx_app.cpp:247-249
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:184 (c++/src/app/blast/blastx_app.cpp:247-249
     // hands the sorts over too, quoted at `formatting`)
     // ```c++
     //         formatter.SetLineLength(fmt_args->GetLineLength());
@@ -1866,7 +1866,7 @@ mod tests {
         );
     }
 
-    // NCBI blast_args.cpp:2894-2973 (`blastinput::report_counts`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973 (`blastinput::report_counts`).
     #[test]
     fn num_descriptions_and_num_alignments_set_the_counts() {
         let counts = |extra: &[&str]| {
@@ -1890,7 +1890,7 @@ mod tests {
         assert_eq!(error.to_string(), "No hits are being saved");
     }
 
-    // NCBI blast_args.cpp:2801-2855 and tabular.cpp:70-99: BLASTX reads -outfmt and its
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2801-2855 and c++/src/objtools/align_format/tabular.cpp:70-99: BLASTX reads -outfmt and its
     // fields as NCBI (a specification counts only for the tabular formats; unknown words are
     // dropped, `-name` removes a field). Every tabular report goes to the shared writer
     // (`tabular_report`): a list other than the `std` fields with a tab, and outfmt 10 and 20,
@@ -1907,7 +1907,7 @@ mod tests {
             });
             (resolved.outfmt, names)
         };
-        // NCBI format_flags.cpp:38-40 (`kDfltArgTabularOutputFmt`, the `std` fields).
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40 (`kDfltArgTabularOutputFmt`, the `std` fields).
         let std: Vec<String> =
             "qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore"
                 .split(' ')

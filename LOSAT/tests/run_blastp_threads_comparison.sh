@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kArgQuery("query");
 # const string kArgOutput("out");
@@ -12,7 +12,7 @@ set -uo pipefail
 # const string kArgMaxTargetSequences("max_target_seqs");
 # ```
 #
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 # ```c
 # const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
 # int num_threads = args[kArgNumThreads].AsInteger();
@@ -40,7 +40,7 @@ REF_DIR="./blast_out/blastp"
 FASTA_DIR="./fasta"
 source ./blastp_parity_options.sh
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kArgOutput("out");
 # ```

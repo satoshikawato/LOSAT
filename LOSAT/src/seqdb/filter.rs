@@ -3445,7 +3445,7 @@ mod tests {
         }
     }
 
-    /// NCBI's `x_CheckOrFindOID` (seqdbimpl.cpp:272-296, quoted at `OidFilter::check_or_find`)
+    /// NCBI's `x_CheckOrFindOID` (c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:272-296, quoted at `OidFilter::check_or_find`)
     /// over the list `listed` of `num_oids` OIDs with the range `[begin, end)` once set up.
     fn ncbi_check_or_find(
         listed: &[u32],

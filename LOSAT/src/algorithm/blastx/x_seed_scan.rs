@@ -658,7 +658,7 @@ where
         let array_size = capacity as i32;
         while range[1] <= range[2] {
             let n = match (lookup, presence) {
-                // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127
                 // (`s_BlastAaScanSubject`; tblastx/x_scan_byte.rs gives the loop): the same pairs
                 // and `scan_range` on every call.
                 (Lookup::Standard(l, _), Some(presence)) => x_scan_one_range_byte(
@@ -1468,7 +1468,7 @@ mod tests {
         out
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (the function compared
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (the function compared
     // against, as `s_blast_aa_scan_subject_one_range`). EXPERIMENT (LOSAT_X_BXSCANBYTE): on
     // blastx's tables (`Lookup::new`: six frames of a nucleotide query, threshold 12) and the
     // direct loop's subjects (residues, then the sentinel) and offset array (`Lookup::capacity`,

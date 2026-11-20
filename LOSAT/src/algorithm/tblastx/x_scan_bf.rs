@@ -106,7 +106,7 @@ pub(crate) fn x_reach_scan_byte_not_taken() {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-130 (quoted at `x_scan_subject_bf`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-130 (quoted at `x_scan_subject_bf`).
 /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): `s_blast_aa_scan_subject` with each range scanned by
 /// `x_scan_one_range_byte` on `presence` (`x_tbx_presence`). Same arguments, same result, same
 /// `s_range`; `offset_pairs` must hold `array_size + X_SCAN_BYTE_SLACK` entries.
@@ -184,7 +184,7 @@ fn x_table_sparse(lookup: &BlastAaLookupTable) -> bool {
     2 * set < lookup.backbone.len() as u64
 }
 
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:509-511
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
 // ```c
 // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
 // ```
@@ -221,7 +221,7 @@ pub(crate) fn x_scan_subject(
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-130
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-130
 // ```c
 // while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
 //     s_first=subject->sequence + s_range[1];
@@ -327,7 +327,7 @@ fn x_popcnt() -> bool {
     *ON.get_or_init(|| std::arch::is_x86_feature_detected!("popcnt"))
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-130 (as above `x_scan_subject_bf`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-130 (as above `x_scan_subject_bf`)
 /// `x_scan_subject_bf` for a table compacted by `x_compact` (`rank` is the rank it returned):
 /// the same words, the same cells, the same offset pairs and `s_range`; `offset_pairs` must hold
 /// `array_size + X_SCAN_BF_SLACK` entries.
@@ -419,7 +419,7 @@ fn x_scan_subject_compact_in(
     totalhits
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (as above `x_scan_one_range_bf`,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (as above `x_scan_one_range_bf`,
 // tblastx/x_aascan_bf.rs)
 /// `x_scan_one_range_bf` on a compacted table: the candidates are the same words (the presence
 /// vector is the table's), and the cell of a candidate's index is found through `rank`.
@@ -454,7 +454,7 @@ fn x_scan_one_range_compact(
     let s_first = s_range[1] as usize;
     let s_last = s_range[2] as usize;
 
-    // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:96-107 (ComputeTableIndex)
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:96-107 (ComputeTableIndex)
     let mut index: usize = 0;
     for i in 0..(word_length - 1) {
         // SAFETY: as in `x_scan_one_range_bf`: the scan range follows NCBI's sentinel-backed
@@ -490,7 +490,7 @@ fn x_scan_one_range_compact(
             };
             let numhits = cell.num_used;
             if numhits > array_size - totalhits {
-                // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:118-123
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:118-123
                 s_range[1] = s_off as i32;
                 return totalhits;
             }
@@ -519,7 +519,7 @@ fn x_scan_one_range_compact(
         block_first = block_last + 1;
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:125-127
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:125-127
     s_range[1] = (s_last + 1) as i32;
     totalhits
 }
@@ -571,7 +571,7 @@ mod tests {
         out
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:48-131 (the function compared
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:48-131 (the function compared
     // against, as `s_blast_aa_scan_subject`). Not a port of an NCBI unit case: the pairs and the
     // `s_range` of every call must equal the reference's, for TBLASTX tables (the six frames of
     // nucleotide queries), subjects of one or several ranges (as masked subjects have, ranges of

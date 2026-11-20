@@ -1841,7 +1841,7 @@ pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<
 //         CRef<CSeq_id> subject_id;
 //         GetSequenceLengthAndId(seqinfo_src, kOid, subject_id, &subj_length);
 // ```
-// NCBI first reads a header file (and opens it, seqdbvol.cpp:127-133) when the traceback's
+// NCBI first reads a header file (and opens it, c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:127-133) when the traceback's
 // results become Seq-aligns: after the batch's traceback, for the final hit lists only
 // (after their sort by e-value and their cut to the hit list size, before the HSPs of
 // score 0 are dropped), query by query and in the order of each hit list. A header file

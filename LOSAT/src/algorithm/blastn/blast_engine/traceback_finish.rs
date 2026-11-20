@@ -114,7 +114,7 @@ pub(super) fn traceback_post_purge(
     } = ctx;
 
     // Step 2: Endpoint purging pass 1 (trim, purge=false)
-    // NCBI reference: blast_traceback.c:637-638
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:637-638
     // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
     let hits_step1 = local_hits.len();
     let purge_pass1_start = if timing_enabled {
@@ -130,7 +130,7 @@ pub(super) fn traceback_post_purge(
             hits_step1.saturating_sub(local_hits.len()) as u64,
         );
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-647
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:633-647
     // ```c
     // Int4 extra_start =
     //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
@@ -150,7 +150,7 @@ pub(super) fn traceback_post_purge(
             ),
         );
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:640-644
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:640-644
     // ```c
     // /* Low level greedy algorithm ignores ambiguities, so the score
     //  * needs to be reevaluated. */
@@ -164,7 +164,7 @@ pub(super) fn traceback_post_purge(
     let hits_step2 = local_hits.len();
 
     // Step 3: Re-evaluate trimmed HSPs
-    // NCBI reference: blast_traceback.c:647-665
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:647-665
     // The remaining part of the hsp may be extended further
 
     for hit in local_hits.iter_mut().skip(extra_start) {
@@ -175,7 +175,7 @@ pub(super) fn traceback_post_purge(
             .copied()
             .unwrap_or_else(|| cutoff_scores.get(context_idx).copied().unwrap_or(0));
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1891
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1887-1891
         // ```c
         // hsp->evalue =
         //   BLAST_KarlinStoE_simple(score, kbp[kbp_context],
@@ -189,8 +189,8 @@ pub(super) fn traceback_post_purge(
             round_down_evalue_score,
         };
 
-        // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
-        // NCBI's `query` and `query_nomask` (blast_traceback.c:386-389): the context in the
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:653-665 (reevaluate with blastna sequences)
+        // NCBI's `query` and `query_nomask` (c++/src/algo/blast/core/blast_traceback.c:386-389): the context in the
         // concatenated query, with masks and without, read at the HSP's offsets, which lie
         // outside the context for an HSP outside it.
         let ctx = &query_contexts[context_idx];
@@ -217,7 +217,7 @@ pub(super) fn traceback_post_purge(
         if let (Some(timing), Some(reeval_start)) = (timing_ref, reeval_start) {
             BlastnTiming::record_duration(&timing.reevaluate_ambiguities_ns, reeval_start);
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:647-665
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:647-665
         // ```c
         // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
         // if (!delete_hsp)
@@ -238,7 +238,7 @@ pub(super) fn traceback_post_purge(
                 hit.query_length,
                 hit.query_frame,
             );
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:656-663
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:656-663
         // ```c
         // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
         // if (!delete_hsp)
@@ -304,7 +304,7 @@ pub(super) fn traceback_post_purge(
             }
             hit.raw_score = i32::MIN; // Mark for removal
         } else if trace_reeval {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:647-665
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:647-665
             // ```c
             // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
             // ```
@@ -337,7 +337,7 @@ pub(super) fn traceback_post_purge(
     let hits_step3 = local_hits.len();
 
     // Step 4: Endpoint purging pass 2 (delete, purge=true) - BLASTN only
-    // NCBI reference: blast_traceback.c:667-668
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:667-668
     // if(program_number == eBlastTypeBlastn) {
     //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
     // }
@@ -355,7 +355,7 @@ pub(super) fn traceback_post_purge(
             hits_step3.saturating_sub(hits_step4) as u64,
         );
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:666-668
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:666-668
     // ```c
     // Blast_HSPListPurgeNullHSPs(hsp_list);
     // if(program_number == eBlastTypeBlastn) {
@@ -404,12 +404,12 @@ pub(super) fn traceback_final_list(
         ..
     } = ctx;
     // Step 5: Re-sort by gapped score
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:671-672
     // ```c
     // /* Sort HSPs by score again, as the scores might have changed. */
     // Blast_HSPListSortByScore(hsp_list);
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353 (ScoreCompareHSPs)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353 (ScoreCompareHSPs)
     // ```c
     // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
     //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
@@ -423,7 +423,7 @@ pub(super) fn traceback_final_list(
     } else {
         None
     };
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:671-672
     // ```c
     // /* Sort HSPs by score again, as the scores might have changed. */
     // Blast_HSPListSortByScore(hsp_list);
@@ -434,10 +434,10 @@ pub(super) fn traceback_final_list(
     }
 
     // Step 6: Phase 2 - Tree reset and second containment pass
-    // NCBI reference: blast_traceback.c:678
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:678
     // Blast_IntervalTreeReset(tree);
     interval_tree.reset();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:66-70
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:66-70
     // ```c
     // if (tree->num_used == tree->num_alloc) {
     //     tree->num_alloc = 2 * tree->num_alloc;
@@ -450,7 +450,7 @@ pub(super) fn traceback_final_list(
     // are still controlled by BlastIntervalTreeContainsHSP/AddHSP.
     interval_tree.reserve_nodes_for_hsps(local_hits.len());
 
-    // NCBI reference: blast_traceback.c:679-692
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:679-692
     // Remove any HSPs that are contained within other HSPs.
     // Since the list is sorted by score already, any HSP
     // contained by a previous HSP is guaranteed to have a
@@ -460,13 +460,13 @@ pub(super) fn traceback_final_list(
     let mut kept = 0usize;
     for read in 0..local_hits.len() {
         let hit = &local_hits[read];
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:537-550
         // ```c
         // query_start = query_context_offset;
         // region_start = query_start + hsp->query.offset;
         // region_end = query_start + hsp->query.end;
         // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3908-3913
         // ```c
         // tmp_hsp.query.offset = q_start;
         // tmp_hsp.query.end = q_end;
@@ -488,7 +488,7 @@ pub(super) fn traceback_final_list(
             subject_frame_sign: 1,
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-688
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:678-688
         // ```c
         // Blast_IntervalTreeReset(tree);
         // for (index = 0; index < hsp_list->hspcnt; index++) {
@@ -571,7 +571,7 @@ pub(super) fn traceback_final_list(
     local_hits.truncate(kept);
     let mut final_hits = local_hits;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-692
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:678-692
     // ```c
     // Blast_IntervalTreeReset(tree);
     // for (index = 0; index < hsp_list->hspcnt; index++) {
@@ -585,7 +585,7 @@ pub(super) fn traceback_final_list(
     // Keep the final-containment count separate from the later E-value reap.
     let final_tree_hit_count = final_hits.len();
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:234-246
     // ```c
     // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
     //                         hsp_list, kGapped, FALSE, sbp, 0,
@@ -593,7 +593,7 @@ pub(super) fn traceback_final_list(
     // Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
     // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1983-2003
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1983-2003
     // ```c
     // cutoff = hit_options->expect_value;
     // for (index = 0; index < hsp_list->hspcnt; index++) {

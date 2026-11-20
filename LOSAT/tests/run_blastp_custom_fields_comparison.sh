@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-145
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:39-145
 # ```c
 # const char* kDfltArgTabularOutputFmtTag("std");
 # const SFormatSpec sc_FormatSpecifiers[] = {

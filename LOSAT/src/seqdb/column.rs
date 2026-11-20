@@ -2,7 +2,7 @@
 //! blobs that `makeblastdb` writes next to the sequence files, among them the mask data
 //! of `-mask_data` (the column titled `BlastDb/MaskData`).
 //!
-//! NCBI reads them with `CSeqDBColumn` (`seqdbcol.cpp`) and `CBlastDbBlob`
+//! NCBI reads them with `CSeqDBColumn` (`c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp`) and `CBlastDbBlob`
 //! (`seqdbblob.cpp`); a volume opens all its columns the first time one is asked for
 //! (`CSeqDBVol::x_OpenAllColumns`). This module does the same with positioned reads.
 //!

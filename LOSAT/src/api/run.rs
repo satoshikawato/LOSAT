@@ -5,7 +5,7 @@
 //! requested output; LOSAT's `run_local` entries do the same for records in memory, and this
 //! module hands them the caller's inputs and outputs.
 //!
-//! NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:195-295
+//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:195-295
 //! ```c
 //! CRef<CLocalDbAdapter> db_adapter;
 //! CRef<CScope> scope;
@@ -102,7 +102,7 @@ fn strand(protein: bool, start: usize, end: usize) -> Option<Strand> {
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
 // ```c
 // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
 // ```
@@ -395,7 +395,7 @@ impl Write for CountingWriter {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 //     // Add tab in front of field, except for the first field.
@@ -405,7 +405,7 @@ impl Write for CountingWriter {
 // }
 // m_Ostream << "\n";
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3613-3632
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
 // ```c++
 // void CDisplaySeqalign::x_ShowAlnvecInfo(CNcbiOstream& out,
 //                                            SAlnInfo* aln_vec_info,
@@ -613,7 +613,7 @@ fn query_loc(command: &Commands) -> Option<&str> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // ```c
 // int num_threads = args[kArgNumThreads].AsInteger();
 // if (num_threads > kMaxValue) {
@@ -667,7 +667,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
 // ```c
 //     int hitlist_size = opt.GetHitlistSize();
 //     if(m_OutputFormat <= eFlatQueryAnchoredNoIdentities) {
@@ -961,7 +961,7 @@ fn psiblast_args(
     args.into_blastp_args()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 // ```c
 // if (args[kArgOutputFormat]) {
 //     string fmt_choice =

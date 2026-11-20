@@ -9,7 +9,7 @@ use crate::config::{ProteinScoringSpec, ScoringMatrix};
 pub use crate::blastinput::value_parsers::SegSpec as BlastpSegSpec;
 use crate::blastinput::value_parsers::*;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-876
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:825-876
 // ```c
 // switch (comp_stat_string[0]) {
 // case '0': case 'F': case 'f':
@@ -41,7 +41,7 @@ pub enum BlastpCompositionMode {
     ForceFullMatrixAdjust,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:877-886
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:877-886
 // ```c
 // opt.SetCompositionBasedStats(compo_mode);
 // if (program == eBlastp &&
@@ -136,7 +136,7 @@ impl BlastpCompBasedStats {
         self.mode != BlastpCompositionMode::NoCompositionBasedStats
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-886
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:825-886
     // ```c
     // switch (comp_stat_string[0]) {
     // case '0': ... case '1': ... case '2': ... case '3': ...
@@ -161,7 +161,7 @@ impl BlastpCompBasedStats {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:838-886
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:838-886
 // ```c
 // switch (comp_stat_string[0]) {
 // ...
@@ -209,7 +209,7 @@ pub fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, Strin
     Ok(BlastpCompBasedStats { mode, unified_p })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_prot_options.cpp:55-83
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:55-83
 // ```c
 // void CBlastProteinOptionsHandle::SetWordSize(int ws) {
 //     m_Opts->SetWordSize(ws);
@@ -228,7 +228,7 @@ pub enum BlastpLookupTableType {
     CompressedAaLookupTable,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_prot_options.cpp:85-148
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:85-148
 // ```c
 // SetWordSize(BLAST_WORDSIZE_PROT);
 // SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP);
@@ -240,7 +240,7 @@ pub enum BlastpLookupTableType {
 // SetEvalueThreshold(BLAST_EXPECT_VALUE);
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_advprot_options.cpp:48-66
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_advprot_options.cpp:48-66
 // ```c
 // CBlastProteinOptionsHandle::SetGappedExtensionDefaults();
 // m_Opts->SetCompositionBasedStats(eCompositionMatrixAdjust);
@@ -255,7 +255,7 @@ pub enum BlastpLookupTableType {
 // arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
 // arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
 // The single-dash lexical translation is owned by crate::cli.
-// NCBI reference: c++/src/algo/blast/blastinput/blastp_args.cpp:44-60
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-60
 // ```c
 // CBlastpAppArgs::CBlastpAppArgs()
 // {
@@ -285,7 +285,7 @@ pub(crate) const BLASTP_TASK: TaskParser =
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct BlastpArgs {
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // ```c
     //     arg_desc.AddDefaultKey(kArgQuery, "input_file",
     //                      "Input file name",
@@ -379,7 +379,7 @@ pub struct BlastpArgs {
     // ```
     #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
-    // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:225-228
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:225-228
     // ```c
     //     if (choice == eProtProt || choice == eAll) {
     //         retval.insert("blastp");
@@ -442,7 +442,7 @@ pub struct BlastpArgs {
     // descriptions and alignments of the pairwise report (500, 250).
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
-    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
     #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
@@ -454,10 +454,10 @@ pub struct BlastpArgs {
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
-    // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-201,313-315: no filter when omitted or 0.
     #[arg(long = "qcov_hsp_perc", value_parser = blastp_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
     // ```c
     // CHspFilteringArgs::ExtractAlgorithmOptions(const CArgs& args,
     //                                            CBlastOptions& opts)
@@ -528,7 +528,7 @@ pub struct BlastpArgs {
     pub gap_open: Option<i32>,
     #[arg(long = "gapextend", value_parser = ncbi_integer, help = "Cost to extend a gap [default: 1, or the matrix's best value]")]
     pub gap_extend: Option<i32>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:796-797
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     // ```c
     //     arg_desc.AddDefaultKey(kArgCompBasedStats, "compo", legend,
     //                            CArgDescriptions::eString, m_DefaultOpt);
@@ -553,13 +553,13 @@ pub struct BlastpArgs {
     // ```
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
     // arg_desc.AddFlag(kArgUseLCaseMasking,
     //     "Use lower case filtering in query and subject sequence(s)?", true);
     // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
     #[arg(long)]
     pub lcase_masking: bool,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:803-806
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:803-806
     // ```c
     //     arg_desc.AddFlag(kArgUseSWTraceback,
     //                      "Compute locally optimal Smith-Waterman alignments?",
@@ -567,7 +567,7 @@ pub struct BlastpArgs {
     // ```
     #[arg(long)]
     pub use_sw_tback: bool,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // ```c++
     //     // query location
     //     arg_desc.AddOptionalKey(kArgQueryLocation, "range",
@@ -582,7 +582,7 @@ pub struct BlastpArgs {
         help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
     )]
     pub query_loc: Option<String>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // ```c++
     //         // subject location
     //         arg_desc.AddOptionalKey(kArgSubjectLocation, "range",
@@ -598,7 +598,7 @@ pub struct BlastpArgs {
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
-    // NCBI's argument is a string (blast_args.cpp:2657-2660), parsed before the option
+    // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
     #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 16, 18 and 20", "6, 7, 10 and 20", ""))]
     pub outfmt: String,
@@ -677,7 +677,7 @@ pub struct BlastpArgs {
     pub rps: Option<crate::algorithm::rps_search::engine::RpsSearch>,
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:381-402
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-402
 // ```c
 //     else if (!NStr::CompareNocase(task, "blastp") ||
 //              !NStr::CompareNocase(task, "blastp-short") ||
@@ -702,7 +702,7 @@ pub struct BlastpArgs {
 //          retval = opts;
 //     }
 // ```
-// NCBI reference: c++/src/algo/blast/api/blast_prot_options.cpp:56-82
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:56-82
 // ```c
 // void CBlastProteinOptionsHandle::SetWordSize(int ws) {
 //
@@ -778,7 +778,7 @@ impl BlastpTaskOptions {
         Ok(options)
     }
 
-    // NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:612-619
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:612-619
     // ```c
     // CBlastOptionsLocal::SetWordSize(int ws)
     // {
@@ -1037,7 +1037,7 @@ impl BlastpArgs {
     /// options, each argument handler in the order of `CBlastpAppArgs` (with the warnings
     /// that they post to `diagnostics`), and `Validate`, with NCBI's errors.
     ///
-    /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
     /// ```c
     ///     NON_CONST_ITERATE(TBlastCmdLineArgs, arg, m_Args) {
     ///         (*arg)->ExtractAlgorithmOptions(args, opts);
@@ -1062,7 +1062,7 @@ impl BlastpArgs {
             SuggestionProgram,
         };
         let mut options = BlastpTaskOptions::create(&self.task)?;
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:251-301
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:251-301
         // ```c
         //     if (args.Exist(kArgEvalue) && args[kArgEvalue]) {
         //         opt.SetEvalueThreshold(args[kArgEvalue].AsDouble());
@@ -1126,7 +1126,7 @@ impl BlastpArgs {
             }
             options.set_word_size(word_size);
         }
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:396-406 (the
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406 (the
         // filtering handler; `blastinput/app.rs` `parse_seg_option`)
         // ```c
         //         if (m_QueryIsProtein && args[kArgSegFiltering]) {
@@ -1146,7 +1146,7 @@ impl BlastpArgs {
         // The argument always has its default (`kDfltArgLookupTableMaskingOnlyProt`, "false"),
         // and no other handler of blastp sets `mask_at_hash`.
         let soft_masking = self.soft_masking.unwrap_or(false);
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:634-639
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:634-639
         // ```c
         // CMatrixNameArg::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
         // {
@@ -1158,7 +1158,7 @@ impl BlastpArgs {
         if let Some(matrix) = &self.matrix {
             options.matrix_name = matrix.clone();
         }
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:586-623
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623
         // ```c
         // s_IsDefaultWordThreshold(EProgram program, double threshold)
         // {
@@ -1183,7 +1183,7 @@ impl BlastpArgs {
             options.threshold =
                 suggested_threshold(SuggestionProgram::Protein, &options.matrix_name);
         }
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:485-497
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
         // ```c
         // CWindowSizeArg::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
         // {
@@ -1199,7 +1199,7 @@ impl BlastpArgs {
             Some(window) => window,
             None => suggested_window_size(&options.matrix_name),
         };
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
         // ```c++
         //     // set the sequence range
         //     if (args.Exist(kArgQueryLocation) && args[kArgQueryLocation]) {
@@ -1213,7 +1213,7 @@ impl BlastpArgs {
             self.query_loc.as_deref(),
             crate::blastinput::seq_range::RangeRole::Query,
         )?;
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
         // and its warning)
         // ```c
@@ -1237,7 +1237,7 @@ impl BlastpArgs {
             &self.formatting,
         )?;
         diagnostics.write_all(&warnings)?;
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)
         // ```c
         //     if (args[kArgCompBasedStats]) {
@@ -1455,10 +1455,10 @@ impl BlastpArgs {
                 BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
             },
             max_target_seqs_given: self.max_target_seqs.is_some(),
-            // NCBI blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
             // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
-            // NCBI blast_args.cpp:313-315: if (args[kArgQueryCovHspPerc])
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-315: if (args[kArgQueryCovHspPerc])
             // opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit_value(),
@@ -1586,7 +1586,7 @@ mod tests {
         }
     }
 
-    // NCBI blast_args.cpp:332-349: parse the same single string as the public CLI.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-349: parse the same single string as the public CLI.
     fn parse_cli<'a>(args: impl IntoIterator<Item = &'a str>) -> TestCli {
         crate::cli::try_parse_from(args).unwrap()
     }
@@ -1736,7 +1736,7 @@ mod tests {
         ]));
     }
 
-    // NCBI blast_args.cpp:2894-2973 (`blastinput::report_counts`): the hit list size and the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973 (`blastinput::report_counts`): the hit list size and the
     // counts of outfmt 0 from -num_descriptions / -num_alignments; "No hits are being saved".
     #[test]
     fn num_descriptions_and_num_alignments_set_the_counts() {
@@ -1779,7 +1779,7 @@ mod tests {
 
     #[test]
     fn test_blastp_short_task_resolves_ncbi_defaults() {
-        // NCBI api/blast_options_handle.cpp:395-399: blastp-fast sets word size 5, the
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:395-399: blastp-fast sets word size 5, the
         // compressed lookup and BLAST_WORD_THRESHOLD_BLASTP_FAST (20), which is kept
         // because (int)20 is not BLASTP's default threshold (blast_args.cpp:586-600).
         let cli = parse_cli([
@@ -1810,7 +1810,7 @@ mod tests {
 
     #[test]
     fn test_blastp_fast_task_resolves_ncbi_defaults() {
-        // NCBI api/blast_options_handle.cpp:395-399: blastp-fast sets word size 5, the
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:395-399: blastp-fast sets word size 5, the
         // compressed lookup and BLAST_WORD_THRESHOLD_BLASTP_FAST (20), which is kept
         // because (int)20 is not BLASTP's default threshold (blast_args.cpp:586-600).
         let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"]);

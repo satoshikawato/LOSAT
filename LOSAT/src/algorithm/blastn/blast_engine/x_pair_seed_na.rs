@@ -438,14 +438,14 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         // Use pre-computed cutoff score (computed once per query-subject pair)
         let cutoff_score = x.cutoff_scores[context_idx];
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-829
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-829
         // ```c
         // diag = s_off - q_off;
         // s_end = s_off + word_length;
         // ```
         let diag = kmer_start as isize - q_off0 as isize;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:833-836
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:833-836
         // ```c
         // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
         // if(!rc)  last_hit = 0;
@@ -467,7 +467,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
             (level, hit_saved)
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-672
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:656-672
         // ```c
         // s_off_pos = s_off + diag_table->offset;
         // if (s_off_pos < last_hit) return 0;
@@ -488,7 +488,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         let off_found = false;
         let query_mask = ctx.masks.as_slice();
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-489
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:459-489
         // ```c
         // static NCBI_INLINE Boolean s_IsSeedMasked(...)
         // {
@@ -510,7 +510,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
                 safe_k,
             );
             let hits = x.hits(kmer);
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1027-1034
             // ```c
             // /* Also add 1 to all indices, because lookup table indices count
             //    from 1. */
@@ -551,7 +551,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         //             /* perform ungapped extension */
         //             s_NuclUngappedExtend(query, subject, matrix, q_off, s_off, ...
         // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:268-269
         // ```c
         // Uint1 *q_start = query->sequence;
         // ```
@@ -621,7 +621,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         // ```
         if !(off_found || ungapped_score >= cutoff_score) {
             let hit_ready = false;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
             // ```c
             // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
@@ -657,7 +657,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
             out.hit_keys.push(x_key);
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
         // ```c
         // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,

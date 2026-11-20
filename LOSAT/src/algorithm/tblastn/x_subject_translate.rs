@@ -223,7 +223,7 @@ fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
 // every letter before its first draw; this loop may have drawn for the letters before the
 // byte it stops at. The error is the same one, for the first such byte of the subject, and
 // the draws made before it are dropped with the generator, which belongs to this call.
-// NCBI c++/src/algo/blast/api/blast_objmgr_tools.cpp:428-473 resolves the ambiguities during
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:428-473 resolves the ambiguities during
 // the ncbi2na encoding; c++/src/algo/blast/api/blast_setup_cxx.cpp:742-745,830-853 keeps the
 // ncbi4na sequence for the later reevaluation.
 /// `resolve_local_subject_ncbi2na` as ncbi2na values (0 A, 1 C,
@@ -457,7 +457,7 @@ fn x_table_plan(subject: &[u8], db_gencode: u8, mask_lowercase: bool) -> Result<
         .unwrap_or(0);
     let mut units = Vec::new();
     for (index, frame) in frames.iter().enumerate() {
-        // NCBI c++/src/algo/blast/core/blast_engine.c:478-500:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500:
         // SUBJECT_SPLIT_NO_RANGE skips WordFinder for this chunk.
         for (chunk, ranges) in translated_chunk_scan_ranges(
             subject,
@@ -1763,7 +1763,7 @@ mod tests {
     use crate::algorithm::tblastx::translation::generate_frames;
     use crate::config::ScoringMatrix;
 
-    // NCBI reference: c++/src/algo/blast/core/blast_encoding.c:95-103 and
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:95-103 and
     // c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474,515-520
     // static unsigned char ctable[16] = {0xFF,0,1,0xFF,2,0xFF,0xFF,0xFF,
     //                                    3,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};

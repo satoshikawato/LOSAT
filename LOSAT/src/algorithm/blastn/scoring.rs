@@ -22,7 +22,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 
 /// NCBI's checks of the options (`Validate`), before the query is read.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:881-906
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:881-906
 /// ```c
 ///            if ( ! ( options->penalty == 0 && options->reward == 0 ) )
 ///            {
@@ -40,7 +40,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///                      return BLASTERR_OPTION_VALUE_INVALID;
 ///              }
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1326-1333
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1326-1333
 /// ```c
 ///     } else if (program_number == eBlastTypeBlastn &&
 ///                options->word_size > DBSEQ_CHUNK_OVERLAP) {
@@ -48,7 +48,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///         int bytes_written = snprintf(buffer, DIM(buffer),
 ///                   "Word-size must be less than or equal to %d", DBSEQ_CHUNK_OVERLAP);
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
 /// ```c
 /// static Boolean
 /// s_DiscWordOptionsValidate(Int4 word_size, Uint1 template_length,
@@ -88,7 +88,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 /// The lookup table type of the options is the task's: megablast and dc-megablast
 /// `eMBLookupTable`, blastn and blastn-short `eNaLookupTable`
 /// (blast_nucl_options.cpp:137-150, disc_nucl_options.cpp:55-64).
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1518-1523
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1523
 /// ```c
 /// 	if (options->expect_value <= 0.0 && options->cutoff_score <= 0)
 /// 	{
@@ -97,7 +97,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 /// 		return BLASTERR_OPTION_VALUE_INVALID;
 /// 	}
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1699-1711
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1699-1711
 /// ```c
 ///     if (program_number == eBlastTypeBlastn)
 ///     {
@@ -110,16 +110,16 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///                                        kBlastMessageNoContext,
 ///                                        "Greedy extension must be used if gap existence and extension options are zero");
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1759-1776 (BLAST_ValidateOptions
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1759-1776 (BLAST_ValidateOptions
 /// runs the scoring, lookup table, hit saving and extension-scoring checks in this order)
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3636-3639
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3636-3639
 /// ```c
 ///     try { retval->Validate(); }
 ///     catch (const CBlastException& e) {
 ///         NCBI_THROW(CInputException, eInvalidInput, e.GetMsg());
 ///     }
 /// ```
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-175
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
 /// ```c
 ///     catch (const blast::CInputException& e) {                               \
 ///         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
@@ -151,7 +151,7 @@ fn check_scoring_options_with(
     let message = if !matrix_only && spec.penalty >= 0 {
         "BLASTN penalty must be negative".to_string()
     } else if !ungapped && spec.gap_open > 0 && spec.gap_extend == 0 {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:900-904
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:900-904
         // ```c
         //  if (options->gapped_calculation && options->gap_open > 0 && options->gap_extend == 0)
         //  {
@@ -213,7 +213,7 @@ fn check_scoring_options_with(
     } else if args.off_diagonal_range.is_some_and(|range| range != 0)
         && super::coordination::determine_window_size(args) == 0
     {
-        // NCBI reference: c++/src/algo/blast/core/blast_options.c:1583-1596
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1583-1596
         // (`BlastInitialWordOptionsValidate`, after the lookup table's checks and before the
         // hit saving's)
         // ```c
@@ -225,7 +225,7 @@ fn check_scoring_options_with(
         // ```
         "off_diagonal_range is only useful in 2-hit algorithm".to_string()
     } else if counts.hitlist_size < 1 {
-        // NCBI blast_options.c:1511-1517, `BlastHitSavingOptionsValidate`, whose hit list
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1511-1517, `BlastHitSavingOptionsValidate`, whose hit list
         // check comes before the e-value's (the message of `ReportCounts::validate`, which
         // is not called because this check has its place among the others).
         "No hits are being saved".to_string()
@@ -281,7 +281,7 @@ fn check_losat_limits_with(
         !ungapped,
         "BLASTN",
     )?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1506-1520
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1506-1520
     // ```c
     //     sbp->loscore = BLAST_SCORE_MAX;
     //     sbp->hiscore = BLAST_SCORE_MIN;
@@ -294,7 +294,7 @@ fn check_losat_limits_with(
     //          if (score <= BLAST_SCORE_MIN || score >= BLAST_SCORE_MAX)
     //             continue;
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2175-2179
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2175-2179
     // ```c
     //          score = matrix[index1][index2];
     //          if (score >= sbp->loscore)
@@ -332,7 +332,7 @@ pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-// NCBI reference: c++/include/algo/blast/core/blast_hits.h:192
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:192
 // ```c
 // #define DBSEQ_CHUNK_OVERLAP 100
 // ```
@@ -346,7 +346,7 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 /// and a query without letters (`true` in `empty_queries`, one item per query of the
 /// batch) keeps its set-up warning after it.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_aux_priv.cpp:94-102
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:94-102
 /// ```c
 ///             // applies to all queries
 ///             CRef<CSearchMessage> sm(new CSearchMessage(blmsg->severity,
@@ -356,7 +356,7 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 ///                 query_messages->push_back(sm);
 ///             }
 /// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:1013-1024
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1013-1024
 /// ```c
 /// TSearchMessages::ToString() const
 /// {
@@ -369,14 +369,14 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 ///             retval += (*msg)->GetMessage() + " ";
 ///         }
 /// ```
-/// NCBI reference: c++/include/algo/blast/api/blast_types.hpp:180-183
+/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:180-183
 /// ```c
 ///     string GetMessage(bool withSeverity = true) const
 ///     {
 ///     	if (withSeverity) {
 ///     		return GetSeverityString() + ": " + m_Message;
 /// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640 (the query's
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640 (the query's
 /// warning, before the score block: its id is the query's index)
 /// ```c
 ///         } catch (const CException& e) {
@@ -385,7 +385,7 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 ///                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
 ///             messages[index].push_back(m);
 /// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:1042-1052 (after the error is
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1042-1052 (after the error is
 /// added, blast_aux_priv.cpp:107-108)
 /// ```c
 /// TSearchMessages::RemoveDuplicates()
@@ -394,7 +394,7 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 ///         ...
 ///         sort(sm->begin(), sm->end(), TQueryMessagesLessComparator());
 /// ```
-/// NCBI reference: c++/include/algo/blast/api/blast_types.hpp:294-303
+/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:294-303
 /// ```c
 /// CSearchMessage::operator<(const CSearchMessage& rhs) const
 /// {
@@ -407,7 +407,7 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 /// messages, libstdc++'s insertion sort moves the second one (the error, added after the
 /// set-up warning) to the front, so the error comes first (TBLASTX's unknown matrix has the
 /// same order, `run_impl.rs`).
-/// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:170-184
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:170-184
 /// ```c
 ///     Blast_Message2TSearchMessages(blast_msg.Get(), query_info, search_messages);
 ///     if (status != 0 &&
@@ -416,7 +416,7 @@ const MAX_GREEDY_GAP_COST: i32 = 32767;
 ///     ...
 ///                 NCBI_THROW(CBlastException, eCoreBlastError, msg);
 /// ```
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:225-227
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 /// ```c
 ///             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
 ///             exit_code = BLAST_ENGINE_ERROR;                                 \
@@ -478,7 +478,7 @@ pub(crate) struct ContextKarlin {
 /// or its reverse complement); `None` for a context whose block cannot be computed, which
 /// NCBI does not search (both strands of an invalid query).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2762-2784
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2762-2784
 /// ```c
 ///    for (context = query_info->first_context;
 ///         context <= query_info->last_context; ++context) {
@@ -498,7 +498,7 @@ pub(crate) struct ContextKarlin {
 /// The two strands have the same composition in another order, so their blocks can
 /// differ in the last bits.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2771-2772
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2772
 /// ```c
 ///       if ( !contexts[context].is_valid )
 ///           continue;
@@ -527,7 +527,7 @@ pub(crate) fn context_ungapped_blocks<'a>(
 /// numbers. With no valid context, NCBI computes no gapped block and raises no error.
 /// The error is NCBI's message (`NuclValues`).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:73-107
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:73-107
 /// ```c
 ///     for (index = query_info->first_context;
 ///          index <= query_info->last_context; index++) {
@@ -572,11 +572,11 @@ pub(crate) fn context_blocks(
 /// asked for the gap costs and a pair of scores without a table row is no error: its alpha
 /// and beta stay 0 and the length adjustment is 0.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:513-529
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:513-529
 /// ```c
 ///     if (scoring_options->gapped_calculation) { ... s_BlastScoreBlkGappedFill ... }
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:701-705, 768-848
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:701-705, 768-848
 /// ```c
 ///     double alpha = 0, beta = 0; /* alpha and beta for new scoring system */
 ///     ...
@@ -586,7 +586,7 @@ pub(crate) fn context_blocks(
 ///                 scoring_options->gap_open, scoring_options->gap_extend,
 ///                 sbp->kbp_std[index], scoring_options->gapped_calculation, &alpha, &beta);
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3989-3992, 4024-4029
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3989-3992, 4024-4029
 /// ```c
 ///     if (status)
 ///        return status;       (s_GetNuclValuesArray: no table row for the pair; alpha, beta unset)
@@ -630,7 +630,7 @@ pub(crate) fn context_blocks_ungapped(
 /// The gapped X-drops of the search (raw scores of the preliminary and the final
 /// extension), from the smallest gapped Lambda of the valid contexts of a batch.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_parameters.c:92-116
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:92-116
 /// ```c
 ///     double min_lambda = (double) INT4_MAX;
 ///     ...
@@ -641,7 +641,7 @@ pub(crate) fn context_blocks_ungapped(
 ///             {
 ///                 min_lambda = kbp_in[i]->Lambda;
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_parameters.c:455-463
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-463
 /// ```c
 ///       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
 ///       params->gap_x_dropoff = (Int4)
@@ -785,7 +785,7 @@ mod tests {
             .message
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
     // ```c
     //    if (word_size != 11 && word_size != 12) {
     //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
@@ -903,7 +903,7 @@ mod tests {
         .contains("Word-size must be less than"));
     }
 
-    // NCBI blast_options.c:1518: the e-value check needs a cutoff score of 0 or below too.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518: the e-value check needs a cutoff score of 0 or below too.
     #[test]
     fn min_raw_gapped_score_above_zero_allows_an_evalue_of_zero() {
         const REFUSED: &str = "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n";
@@ -1067,7 +1067,7 @@ mod tests {
         assert!(context_blocks(&[ungapped, ungapped], &spec).is_err());
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_stat.c:3955-3963, 3989-3992, 4024-4029
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3955-3963, 3989-3992, 4024-4029
     // (oracle `-ungapped`: 2/-3 beta -2, 1/-1 beta -2, 2/-2 and 4/-6 beta 0, 1/-6 and 3/-1 no table
     // row: alpha = beta = 0 and a length adjustment of 0, effective search space 377 x 373)
     #[test]

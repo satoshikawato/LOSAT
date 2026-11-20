@@ -76,9 +76,9 @@ fn run_losat(args: &[&str]) -> Output {
         .expect("run LOSAT")
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blastn_args.cpp:48-53
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blastp_args.cpp:47-52
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:48-53
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:47-52
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
 // ```c
 // m_ClientId = string(kProgram) + " " + CBlastVersion().Print();
 // m_ClientId = kProgram + " " + CBlastVersion().Print();
@@ -157,7 +157,7 @@ fn startup_trace_needs_the_diagnostics_feature() {
     assert_eq!(String::from_utf8_lossy(&traced.stderr), expected);
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
 // ```c
 //     NON_CONST_ITERATE(TBlastCmdLineArgs, arg, m_Args) {
 //         (*arg)->ExtractAlgorithmOptions(args, opts);
@@ -214,7 +214,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
 // ```c
 // CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
 // CRef<CBlastInput> input(new CBlastInput(fasta));
@@ -235,7 +235,7 @@ fn missing_input_file_reports_ncbi_error() {
 
     assert!(!output.status.success(), "missing input should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // NCBI opens the subject first (blastn_args.cpp:63-70), with NCBI's message
+    // NCBI opens the subject first (c++/src/algo/blast/blastinput/blastn_args.cpp:63-70), with NCBI's message
     // (ncbiargs.cpp:615-619).
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
@@ -663,7 +663,7 @@ fn makeblastdb_reads_compressed_inputs_as_makeblastdb_does() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:140-152
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-152
 // ```c++
 //     while (size_read < GetBatchSize()) {
 //
@@ -766,7 +766,7 @@ fn a_failed_write_of_a_blastp_pairwise_format_exits_as_ncbi() {
     }
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
 // ```c
 // #if _BLAST_DEBUG
 // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",

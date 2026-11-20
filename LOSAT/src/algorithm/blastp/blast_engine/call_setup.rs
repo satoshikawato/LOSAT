@@ -125,7 +125,7 @@ pub(super) fn requested_reports(
     args: &ResolvedBlastpArgs,
     outputs: &ReportOutputs<'_>,
 ) -> Result<(Vec<BlastpReport>, ReportNeeds)> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
     // ```c
     // if (args[kArgOutputFormat]) {
     //     string fmt_choice =
@@ -326,7 +326,7 @@ pub(super) fn call_subjects<'a>(
         blastp_num_threads,
         ..
     } = *setup;
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
     // ```c
     // /* iterate over all subject sequences */
     // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
@@ -413,7 +413,7 @@ pub(super) struct BlastpScoring {
 ///         BlastQueryInfo* query_info, BlastExtensionParameters* *parameters)
 /// ```
 pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2852
     // ```c
     // Blast_ScoreBlkKbpIdealCalc(BlastScoreBlk* sbp)
     // {
@@ -432,14 +432,14 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     } else {
         crate::algorithm::tblastx::lookup::ideal_karlin_params_of(args.scoring.matrix).lambda
     };
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1833-1839
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1833-1839
     // ```c
     // kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
     // hsp->evalue = BLAST_KarlinStoE_simple(hsp->score, kbp[hsp->context],
     //                                       hsp_list->hspcnt ? searchsp : 1);
     // ```
     let gapped_params = lookup_protein_params(&args.scoring);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:457-463
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463
     // ```c
     // params->gap_x_dropoff = (Int4)
     //     (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
@@ -551,7 +551,7 @@ pub(super) fn call_lookup(
     } else {
         None
     };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2746-2748
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2746-2748
     // ```c
     // Boolean check_ideal =
     //    (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
@@ -588,7 +588,7 @@ pub(super) fn call_lookup(
                 None => blastp_aa_lookup(args, query_frames, query_chunk, blastp_parallel_pool),
             },
         },
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1349-1352
         // ```c
         // s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
         //                                 query, locations);
@@ -642,7 +642,7 @@ pub(super) fn call_lookup(
         };
         x_seed_fused::XContextTable::new(&frame_bases, concatenated_query.len())
     };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
     // ```c
     //     int status = m_PrelimSearch->CheckInternalData();
     //     if (status != 0)
@@ -653,7 +653,7 @@ pub(super) fn call_lookup(
     // (`is_valid`); a query batch (`GetQueryBatchSize`) of invalid queries only is not
     // searched, and its reports show -1 parameters.
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
     // ```c
     //         } catch (const CException& e) {
     //             ...
@@ -663,7 +663,7 @@ pub(super) fn call_lookup(
     //             s_InvalidateQueryContexts(qinfo, index);
     //         }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2771-2772
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2772
     // ```c
     //       if ( !contexts[context].is_valid )
     //           continue;
@@ -737,7 +737,7 @@ pub(super) fn db_extent(
     database: Option<&BlastpDatabase>,
     subjects: &[EncodedProtein],
 ) -> Result<BlastpDbExtent> {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:766-769
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:766-769
     // ```c
     // kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
     // ```
@@ -770,7 +770,7 @@ pub(super) fn db_extent(
             .sum::<i64>(),
         Some(database) => database.total_letters(),
     };
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:914-921
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:914-921
     // ```c
     // /* Set the database length for new FSC */
     // if (sbp->gbp) {
@@ -893,7 +893,7 @@ pub(super) fn db_extent(
     // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
     // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
-    // NCBI's `min_subject_length` (blast_setup.c:969-976, quoted at its check in `run_call`),
+    // NCBI's `min_subject_length` (c++/src/algo/blast/core/blast_setup.c:969-976, quoted at its check in `run_call`),
     // which the hit-saving parameters read: the shortest length with the Gumbel block, else
     // (`-searchsp`, `OLD_FSC`) the statistics' average, which only psiblast's `-sum_stats true`
     // reads (its cutoff, `sum_stats_hit_cutoff`; the cutoffs without the block read the search
@@ -992,7 +992,7 @@ pub(super) fn call_search_spaces<'s>(
     // each context's search space, which the exact computation hands them
     // (`exact_search_spaces`; `blastp_cutoff_score_max`).
     let options_searchsp = args.searchsp.unwrap_or(0);
-    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:729-732
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
     // ```c
     //    if (db_length == 0 &&
     //        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
@@ -1246,14 +1246,14 @@ pub(super) fn prelim_cutoffs(
         .ok()
         .filter(|&size| size > 0)
         .context("BLASTP preliminary hit list size is not positive")?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:1008-1018
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1008-1018
     // ```c
     // BLAST_OneSubjectUpdateParameters(..., subject_length, ...);
     // BlastHitSavingParametersUpdate(program_number, sbp, query_info,
     //                                subject_length, 0, hit_params);
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:926-940
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-940
     // ```c
     // params->prelim_evalue = evalue;  /* evalue and prelim_evalue same if no CBS. */
     // ...
@@ -1496,7 +1496,7 @@ pub(super) fn scan_shape<'a>(
         x_block_inputs,
         ..
     } = *setup;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:195-221
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:195-221
     // ```c
     // for (context = query_info->first_context;
     //                  context <= query_info->last_context; ++context) {
@@ -1509,7 +1509,7 @@ pub(super) fn scan_shape<'a>(
     // }
     // ```
     //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:318-323,417-420
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:318-323,417-420
     // ```c
     // sbp->kbp_std[index] = (Blast_KarlinBlk*)
     //     BlastMemDup(sbp->kbp_gap_std[0], sizeof(Blast_KarlinBlk));
@@ -1557,7 +1557,7 @@ pub(super) fn scan_shape<'a>(
     let query_length = blastp_concatenated_query_length(contexts);
     crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP")?;
     let (diag_array_size, diag_mask) = compute_diag_table_shape(query_length, window);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:369-372
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:369-372
     // ```c
     // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
     //                               0, (subject_length > 0 ? subject_length :

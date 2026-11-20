@@ -223,7 +223,7 @@ impl TbnScore for MatrixScore {
         scratch
     }
 
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
     // max_offset = BlastGetStartForGappedAlignment(query_tmp.sequence,
     //     subject->sequence, gap_align->sbp, q_start, length, s_start, length);
     #[inline(always)]
@@ -373,7 +373,7 @@ impl TbnScore for MatrixScore {
         extend_one_hit_for(matrix, query, subject, q_off, s_off, dropoff, word_size)
     }
 
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3953:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3953:
     // status = s_BlastProtGappedAlignment(...);
     #[inline(always)]
     fn score_only(
@@ -402,7 +402,7 @@ impl TbnScore for MatrixScore {
         )
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:436-449:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-449:
     // retval = BlastGetOffsetsForGappedAlignment(...);
     #[inline(always)]
     fn offsets(
@@ -420,7 +420,7 @@ impl TbnScore for MatrixScore {
         )
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-512
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512
     // ```c
     //            BLAST_GappedAlignmentWithTraceback(program_number, query,
     //                  adjusted_subject, gap_align, score_params, q_start, s_start,

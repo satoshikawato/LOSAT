@@ -4,7 +4,7 @@ use super::chaining::UngappedHit;
 use super::sum_stats_linking::x_hsp_inplace;
 use std::cmp::Ordering;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1381
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
 // ```c
 // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
 // {
@@ -12,7 +12,7 @@ use std::cmp::Ordering;
 //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //               ScoreCompareHSPs);
 // ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-486
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-486
 // ```c
 // for (index = 0; index < total_number_of_hsps; ++index) {
 //    link_hsp_array[index]->hsp = hsp_array[index];
@@ -20,7 +20,7 @@ use std::cmp::Ordering;
 // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //       s_RevCompareHSPsTbx);
 // ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-994
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
 // ```c
 // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //       s_RevCompareHSPsTransl);
@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn comparator_equal_hits_preserve_incoming_order_without_an_extra_key() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1355
         // ```c
         // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
         //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn index_replay_preserves_each_complete_original_record() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-486
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-486
         // ```c
         // for (index = 0; index < total_number_of_hsps; ++index) {
         //    link_hsp_array[index]->hsp = hsp_array[index];
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn index_replay_preserves_link_relation_fields() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:960-974
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:960-974
         // ```c
         // H->linked_set = linked_set;
         // H->ordering_method = ordering_method;

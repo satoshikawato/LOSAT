@@ -2,10 +2,10 @@
 """Enforce LOSAT's project-owned pure-Rust runtime boundary.
 
 NCBI references:
-- ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+- c++/src/algo/blast/core/blast_hits.c:1379-1381
   qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
         ScoreCompareHSPs);
-- ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+- c++/src/algo/blast/core/link_hsps.c:483-486
   qsort(link_hsp_array, total_number_of_hsps, sizeof(LinkHSPStruct*),
         s_RevCompareHSPsTbx);
 
@@ -35,8 +35,8 @@ TEMPORARY_DELEGATION = "temporary_production_algorithm_delegation"
 REVIEWED_NON_ALGORITHM = "reviewed_non_algorithm_integration"
 
 # NCBI references:
-# - ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
-# - ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+# - c++/src/algo/blast/core/blast_hits.c:1379-1381
+# - c++/src/algo/blast/core/link_hsps.c:483-486
 # NCBI owns the comparator behavior at these call sites. LOSAT's completed
 # migration owns sorting in Rust, so removed host-qsort adapter vocabulary is
 # now a zero-state regression signal rather than an allowlist candidate.
@@ -458,7 +458,7 @@ def _scan_manifest(manifest: Path, root: Path) -> list[Finding]:
     return findings
 
 
-# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 # (*thread)->Run(); (*thread)->Join(&result);
 # PD-PURE-RUST-RUNTIME-AUTHORITY excludes compiler/thread startup internals.
 def _is_reviewed_wasi_crt(path: Path, root: Path) -> bool:
@@ -478,7 +478,7 @@ def _scan_build_scripts(root: Path) -> list[Finding]:
     for path in sorted(build_scripts):
         text = _strip_rust_comments(path.read_text(encoding="utf-8"))
         rel = _relative(path, root)
-        # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+        # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
         # (*thread)->Run(); (*thread)->Join(&result);
         # Reviewed Rust WASI startup only: query the selected Rust sysroot and
         # link its bundled reactor CRT, with no NCBI or algorithm dependency.

@@ -1,14 +1,14 @@
 use crate::core::blast_encoding::COMPRESSION_RATIO;
 
 /// BLASTNA alphabet size.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_encoding.h:91-92
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_encoding.h:91-92
 /// ```c
 /// #define BLASTNA_SIZE 16     /**< Size of nucleic acid alphabet */
 /// ```
 const BLASTNA_SIZE: usize = 16;
 
 /// Ungapped extension results (0-based coordinates, length in bases).
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:141-147
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:141-147
 /// ```c
 /// typedef struct BlastUngappedData {
 ///    Int4 q_start;
@@ -26,7 +26,7 @@ pub struct UngappedData {
 }
 
 /// Build the nucleotide ungapped score table for 4-base blocks.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:236-259
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:236-259
 /// ```c
 /// for (i = 0; i < 256; i++) {
 ///    Int4 score = 0;
@@ -67,7 +67,7 @@ pub fn build_nucl_score_table(reward: i32, penalty: i32) -> [i32; 256] {
 }
 
 /// Extract base N from packed ncbi2na byte.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:51-55
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:51-55
 /// ```c
 /// #define NCBI2NA_UNPACK_BASE(x, N) (((x)>>(2*(N))) & NCBI2NA_MASK)
 /// ```
@@ -78,7 +78,7 @@ fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
 }
 
 /// Exact ungapped extension (per-base) for nucleotide sequences.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-242
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:148-242
 /// ```c
 /// s_NuclUngappedExtendExact(..., Int4 q_off, Int4 s_off, Int4 X, ...)
 /// {
@@ -184,7 +184,7 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
         }
         q_idx -= 1;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:188-199
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:188-199
         // ```c
         // ch = *s;
         // if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
@@ -236,7 +236,7 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
         if q_idx as usize >= q_len {
             break;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:217-229
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:217-229
         // ```c
         // ch = *s;
         // if ((sum += matrix[*q++][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
@@ -283,7 +283,7 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/na_ungapped.c:292-294,322-324
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:292-294,322-324
 // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
 // NCBI's overlapping BLASTNA bit expression of the query letters `start..start + 4`,
 // ambiguities included, computed where it is read as NCBI does (LOSAT's memory: no array
@@ -304,7 +304,7 @@ pub fn build_query_four_base_bytes(query: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-// NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294,324
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:294,324
 // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
 // C promotes each BLASTNA byte before truncating the expression to Uint1.
 #[cfg(test)]
@@ -337,7 +337,7 @@ mod four_base_tests {
 /// sentinel reads as a base), with 0 before the first and after the last letter. The
 /// returned vector holds NCBI's `new_seq[j]` at `j + 3` (`j` from -3).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:473-499
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:473-499
 /// ```c
 ///     new_seq[-1] = new_seq[-2] = new_seq[-3] = 0;
 ///     new_seq[len-3] = new_seq[len-2] = new_seq[len-1] = 0;
@@ -385,7 +385,7 @@ pub fn build_compressed_query(query: &[u8]) -> Vec<u8> {
 /// The number of matching two-bit bases at the right end (`left`) or the left end
 /// (`right`) of the XOR of a query byte and a subject byte, at most 4.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1326-1330
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1326-1330
 /// ```c
 /// /** Entry i of this list gives the number of pairs of
 ///  * bits that are zero in the bit pattern of i, looking
@@ -393,7 +393,7 @@ pub fn build_compressed_query(query: &[u8]) -> Vec<u8> {
 ///  */
 /// static const Uint1 s_ExactMatchExtendLeft[256] = {
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1349-1354
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1349-1354
 /// ```c
 /// /** Entry i of this list gives the number of pairs of
 ///  * bits that are zero in the bit pattern of i, looking
@@ -428,7 +428,7 @@ impl SmallNaWord<'_> {
         self.compressed_query[(offset + 3) as usize]
     }
 
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1514-1566
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1514-1566
     /// ```c
     ///         Int4 ext_max = MIN(MIN(word_length - lut_word_length, s_offset), q_offset - q_start);
     ///
@@ -549,7 +549,7 @@ impl SmallNaWord<'_> {
     /// The extension for a lookup width that is a multiple of 4, a scan step that is a
     /// multiple of 4 and a word at most 4 letters longer than the lookup word.
     ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1415-1435
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1415-1435
     /// ```c
     ///         if ( (s_offset > 0) && (q_offset > 0) ) {
     ///             Uint1 q_byte = q[q_offset - 4];
@@ -617,7 +617,7 @@ mod small_na_tests {
         build_compressed_query, exact_match_extend_left, exact_match_extend_right, SmallNaWord,
     };
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1330-1347
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1330-1347
     // ```c
     // static const Uint1 s_ExactMatchExtendLeft[256] = {
     // ```
@@ -632,7 +632,7 @@ mod small_na_tests {
         0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
         2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
     ];
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1353-1358
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1353-1358
     // ```c
     // static const Uint1 s_ExactMatchExtendRight[256] = {
     // ```
@@ -659,7 +659,7 @@ mod small_na_tests {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:473-499 (the loops,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:473-499 (the loops,
     // with `Int4 curr_letter` stored into `Uint1` bytes).
     fn ncbi_compress(old: &[u8]) -> Vec<u8> {
         let len = old.len() as isize;
@@ -756,7 +756,7 @@ mod small_na_tests {
 }
 
 /// Approximate ungapped extension (4-base blocks) with optional exact recomputation.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:261-349
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:261-349
 /// ```c
 /// s_NuclUngappedExtend(..., Int4 q_off, Int4 s_match_end, Int4 s_off, Int4 X, ...)
 /// {
@@ -822,14 +822,14 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
         if q_idx < 4 || s_idx == 0 {
             break;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:292-304
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:292-304
         // ```c
         // Uint1 s_byte = s[-1];
         // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
         // ```
         // SAFETY: q_idx >= 4 and s_idx > 0 are enforced by the loop guard.
         let s_byte = unsafe { *s_seq_packed.get_unchecked((s_idx - 1) as usize) };
-        // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:294
         // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
         let q_byte = query_four_base_byte(q_seq, (q_idx - 4) as usize);
         sum = sum.wrapping_add(score_table[(q_byte ^ s_byte) as usize]);
@@ -856,7 +856,7 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
     new_q = q_idx;
 
     for _ in 0..right_len {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:322-334
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:322-334
         // ```c
         // Uint1 s_byte = s[0];
         // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
@@ -864,7 +864,7 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
         // SAFETY: q_idx + 3 and s_idx stay within bounds by the loop length
         // derived from query/subject lengths (NCBI uses the same limits).
         let s_byte = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
-        // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:324
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:324
         // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
         let q_byte = query_four_base_byte(q_seq, q_idx as usize);
         sum = sum.wrapping_add(score_table[(q_byte ^ s_byte) as usize]);
@@ -1051,7 +1051,7 @@ mod approx_context_tests {
 
 /// Determine word type for two-stage lookup
 ///
-/// NCBI reference: na_ungapped.c:508-607 (s_TypeOfWord function)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:508-607 (s_TypeOfWord function)
 ///
 /// This is a FAITHFUL TRANSPILE of NCBI BLAST's s_TypeOfWord function.
 /// It does NOT perform actual sequence extension - only calculates ext_to
@@ -1090,13 +1090,13 @@ pub fn type_of_word<F>(
 where
     F: FnMut(usize, usize) -> bool,
 {
-    // NCBI reference: na_ungapped.c:508-607
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:508-607
     // FAITHFUL TRANSPILE - DO NOT ASSUME
 
     // NCBI: *extended = 0;
     let mut extended = 0;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:531
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
     // ```c
     // if (word_length == lut_word_length) return 1;
     // ```
@@ -1114,7 +1114,7 @@ where
     let mut q_off_adjusted = q_off;
     let mut s_off_adjusted = s_off;
     if has_locations {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:452-490
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:452-490
         // ```c
         // static NCBI_INLINE Boolean s_IsSeedMasked(...)
         // {
@@ -1124,7 +1124,7 @@ where
         // }
         // ```
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:540-544
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:540-544
         // ```c
         // if (s_IsSeedMasked(lookup_wrap, subject,
         //                    s_end - lut_word_length,
@@ -1136,7 +1136,7 @@ where
         }
 
         // NCBI: search for valid left end and reposition q_off
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:546-549
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:546-549
         // ```c
         // for (; TRUE; ++(*s_off), ++(*q_off)) {
         //     if (!s_IsSeedMasked(lookup_wrap, subject,
@@ -1150,7 +1150,7 @@ where
             q_off_adjusted += 1;
             s_off_adjusted += 1;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:546-549
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:546-549
         // ```c
         // for (; TRUE; ++(*s_off), ++(*q_off)) {
         //     if (!s_IsSeedMasked(lookup_wrap, subject,
@@ -1164,7 +1164,7 @@ where
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:553-554
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:553-554
     // ```c
     // ext_to = word_length - (q_end - (*q_off));
     // ext_max = MIN(q_range - q_end, s_range - s_end);
@@ -1185,7 +1185,7 @@ where
 
     // NCBI: if (ext_to || locations) {
     if ext_to > 0 || has_locations {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:559
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:559
         // ```c
         // if (ext_to > ext_max) return 0;
         // ```
@@ -1203,7 +1203,7 @@ where
         //      s_pos -= lut_word_length, q_pos -= lut_word_length) {
         //     if (s_IsSeedMasked(lookup_wrap, subject, s_pos, lut_word_length, q_pos)) return 0;
         // }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:563-569
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:563-569
         // ```c
         // for (s_pos = s_end - lut_word_length,
         //      q_pos = q_end - lut_word_length;
@@ -1233,7 +1233,7 @@ where
         extended = ext_to;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:575-576
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:575-576
     // ```c
     // if (!check_double) return 1;
     // ```
@@ -1271,7 +1271,7 @@ where
     // s_pos -= (lut_word_length - 1);
     // q_pos -= (lut_word_length - 1);
     // NCBI BLAST: Position adjustment happens UNCONDITIONALLY (before the while loop)
-    // Reference: na_ungapped.c:594-603
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:594-603
     // NCBI BLAST: s_pos -= (lut_word_length - 1) (unconditional, no bounds check)
     // Use saturating_sub to prevent underflow while maintaining NCBI behavior
     s_pos = s_pos.saturating_sub(lut_word_length - 1);
@@ -1284,9 +1284,9 @@ where
     //     ++q_pos;
     // }
     // NCBI BLAST: This loop runs regardless of locations status
-    // Reference: na_ungapped.c:597-603
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:597-603
     while extended < double_ext_max {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:597-599
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:597-599
         // ```c
         // if (s_IsSeedMasked(lookup_wrap, subject, s_pos,
         //                        lut_word_length, q_pos)) return 1;
@@ -1299,7 +1299,7 @@ where
         q_pos += 1;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:605
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:605
     // ```c
     // return ((ext_max == ext_to) ? 2 : 1);
     // ```

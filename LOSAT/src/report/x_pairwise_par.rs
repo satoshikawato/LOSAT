@@ -305,7 +305,7 @@ impl<'h> QueryGroup<'h> {
 
     /// The subjects with alignments (the first `num_alignments`).
     ///
-    /// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1014-1040
     /// (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
     pub(crate) fn aligned(&self, num_alignments: usize) -> &[u32] {
         &self.subject_order[..self.subject_order.len().min(num_alignments)]

@@ -2,12 +2,12 @@
 
 use std::sync::OnceLock;
 
-// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:588-603
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-603
 // ```c++
 // const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
 // if (kGenCode == kEmptyStr) { return retval; }
 // ```
-// NCBI reference: c++/src/objects/seqfeat/gc.prt:105-357
+// NCBI reference (598d8ae6): c++/src/objects/seqfeat/gc.prt:105-357
 // Each row below copies its pinned ncbieaa entry.
 const TABLES: &[(u8, &[u8; 64])] = &[
     // NCBI gc.prt:109: id 1, ncbieaa "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
@@ -160,7 +160,7 @@ static DISPLAY_TABLES: [OnceLock<Box<[u8; 4096]>>; TABLES.len()] =
     [const { OnceLock::new() }; TABLES.len()];
 
 impl GeneticCode {
-    // NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:588-600
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-600
     // ```c++
     // const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
     // if (kGenCode == kEmptyStr) { return retval; }
@@ -183,7 +183,7 @@ impl GeneticCode {
         self.display
     }
 
-    // NCBI reference: c++/src/algo/blast/core/gencode_singleton.c:65-69
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/gencode_singleton.c:65-69
     // ```c
     // Uint1* GenCodeSingletonFind(Uint4 gen_code_id) {
     //     return DynamicSGenCodeNodeArray_Find(g_theInstance, gen_code_id);
@@ -194,7 +194,7 @@ impl GeneticCode {
         Self::try_from_id(id).unwrap_or_else(|error| panic!("{error}"))
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_util.c:369-424
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-424
     // ```c
     // static Uint1 mapping[4] = { 8, 2, 1, 4 };
     // for (i = 0; i < 4; i++) if (codon[0] & mapping[i])
@@ -330,7 +330,7 @@ const X_BASE_INDEX: [u8; 256] = {
     table
 };
 
-// NCBI reference: c++/src/algo/blast/core/blast_encoding.c:94-103
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:94-103
 // ```c
 // const Uint1 IUPACNA_TO_NCBI4NA[128]={
 //  0, 1,14, 2,13, 0, 0, 4,11, 0, 0,12, 0, 3,15, 0,
@@ -591,7 +591,7 @@ mod tests {
         assert_eq!(code32.get(b"TAG"), b'W');
         assert_eq!(code32.get(b"TAR"), b'X');
         // Stage A comparison-only C++ API oracle uses FindGeneticCode(32).
-        // NCBI c++/src/algo/blast/api/blast_aux.cpp:588-600:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-600:
         // const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
         let oracle = include_str!(
             "../../../docs/evidence/tlosan_stage_a/api_20260923_verified/code32_fmt6.out"

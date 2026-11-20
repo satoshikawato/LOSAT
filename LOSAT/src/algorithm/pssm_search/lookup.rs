@@ -31,7 +31,7 @@ use super::rows::PssmRows;
 use crate::algorithm::tblastx::lookup::{BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL};
 use crate::core::blast_util::BLASTAA_SIZE;
 
-/// NCBI's `PV_ARRAY_BTS` (blast_lookup.h:41-44): 32 presence bits per word.
+/// NCBI's `PV_ARRAY_BTS` (c++/include/algo/blast/core/blast_lookup.h:41-44): 32 presence bits per word.
 const PV_ARRAY_BTS: usize = 5;
 const PV_ARRAY_MASK: usize = 31;
 
@@ -448,7 +448,7 @@ mod tests {
         assert!(table.backbone.iter().all(|cell| cell.num_used == 0));
     }
 
-    // NCBI blast_aalookup.c:623-658: the words of each lookup segment, none across a masked
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:623-658: the words of each lookup segment, none across a masked
     // position; a segment shorter than a word and an inverted one add nothing.
     #[test]
     fn words_come_from_the_lookup_segments_only() {

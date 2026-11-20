@@ -1,6 +1,6 @@
 //! HSP Storage and Management
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c
 //!
 //! The filters of `s_FilterBlastResults` that every program shares (`-max_hsps`,
 //! `-qcov_hsp_perc`), `Blast_HSPTest` (NCBI's `Int4` counts, widened to `i64`), and the frames
@@ -57,7 +57,7 @@ pub fn hsp_test(
 /// exclusive, in the letters of its context) over the length of its context, plus 0.5 below
 /// 99 (`Blast_HSPGetQueryCoverage`).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_hits.c:1034-1044
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1044
 /// ```c
 /// double Blast_HSPGetQueryCoverage(const BlastHSP* hsp, Int4 query_length)
 /// {
@@ -84,7 +84,7 @@ pub fn hsp_query_coverage(offset: i64, end: i64, query_length: i64) -> f64 {
 /// Whether an HSP covers less than `min_pct` percent of its query context
 /// (`Blast_HSPQueryCoverageTest`: the HSP is deleted).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_hits.c:1046-1051
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1046-1051
 /// ```c
 /// Boolean Blast_HSPQueryCoverageTest(BlastHSP* hsp,
 ///         						   double min_query_coverage_pct,
@@ -104,7 +104,7 @@ pub fn hsp_query_coverage_test(min_pct: f64, offset: i64, end: i64, query_length
 /// 0 is NCBI's unset option and removes nothing. Returns whether an HSP was removed (the
 /// caller then sets the list's best e-value again, and frees a list left empty).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_hits.c:2010-2045
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2010-2045
 /// ```c
 ///    if ((hsp_list == NULL) || (hsp_list->hspcnt == 0) || (hit_options->query_cov_hsp_perc == 0))
 ///       return 0;
@@ -149,7 +149,7 @@ pub fn reap_by_query_coverage<T>(
 /// `Blast_TrimHSPListByMaxHsps`: the first `max_hsps` HSPs of a list, in its order, are
 /// kept (0 keeps all). The list's best e-value is not set again.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_hits.c:2049-2069
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2049-2069
 /// ```c
 /// Int2 Blast_TrimHSPListByMaxHsps(BlastHSPList* hsp_list,
 ///                                 const BlastHitSavingOptions* hit_options)

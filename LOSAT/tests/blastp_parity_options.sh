@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kTask("task");
 # const string kArgMatrixName("matrix");
@@ -10,7 +10,7 @@
 # const string kArgGapExtend("gapextend");
 # ```
 #
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:101-211
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:101-211
 # ```c
 # const string kArgWindowSize("window_size");
 # const string kArgWordSize("word_size");
@@ -18,12 +18,12 @@
 # const string kArgSegFiltering("seg");
 # ```
 #
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:570-622
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:570-622
 # ```c
 # const string kArgWordThreshold("threshold");
 # ```
 #
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:190-210
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:190-210
 # ```c
 # const string kArgMaxHSPsPerSubject("max_hsps");
 # ```
@@ -40,7 +40,7 @@ BLASTP_PARITY_COMMON_OPTIONS=(
     -max_hsps 0
 )
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kArgEvalue("evalue");
 # const string kArgMaxTargetSequences("max_target_seqs");
@@ -51,7 +51,7 @@ BLASTP_PARITY_STRICT_OPTIONS=(
     -max_target_seqs 10
 )
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
 # const string kArgEvalue("evalue");
 # const string kArgMaxTargetSequences("max_target_seqs");

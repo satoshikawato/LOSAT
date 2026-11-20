@@ -21,12 +21,12 @@ pub enum RangeRole {
 }
 
 impl RangeRole {
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1996-1998
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1996-1998
     // ```c++
     //         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
     //                                      "Invalid specification of query location");
     // ```
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2541-2545
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2541-2545
     // ```c++
     //         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
     //             subj_range =
@@ -60,7 +60,7 @@ impl SequenceRange {
 
 /// NCBI's `ParseSequenceRange`: `start-stop`, 1-based and closed.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input_aux.cpp:145-179
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:145-179
 /// ```c++
 /// TSeqRange
 /// ParseSequenceRange(const string& range_str,
@@ -92,7 +92,7 @@ impl SequenceRange {
 ///     }
 ///     from--, to--;   // decrement to make range 0-based
 /// ```
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:216-227
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-227
 /// ```c++
 ///     catch (const blast::CBlastException& e) {                               \
 ///         ...
@@ -168,7 +168,7 @@ pub enum RecordInterval {
 
 /// The interval of a record of `length` letters.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_fasta_input.cpp:433-460
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:433-460
 /// ```c++
 ///     // sanity checks for the range
 ///     const TSeqPos from = m_Config.GetRange().GetFrom() == kEmptyRange.GetFrom()
@@ -257,7 +257,7 @@ impl Placements {
 /// A record whose interval starts more than one letter past its end stops NCBI, in file
 /// order, while the subjects are read.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:198-219
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:198-219
 /// ```c++
 /// CRef<CBlastQueryVector>
 /// CBlastInput::GetAllSeqs(CScope& scope)
@@ -280,7 +280,7 @@ impl Placements {
 ///     return retval;
 /// ```
 /// The range's `CInputException` is not caught here.
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-176
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176
 /// ```c++
 ///     catch (const blast::CInputException& e) {                               \
 ///         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
@@ -449,7 +449,7 @@ pub struct RangedQueries<R = crate::blastinput::fasta_reader::FastaRecord> {
 /// record whose interval starts more than one letter past its end, so that record is not
 /// searched and nothing is reported for it.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:144-155
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-155
 /// ```c++
 ///         CRef<CBlastSearchQuery> q;
 ///         try { q.Reset(m_Source->GetNextSequence(scope)); }
@@ -508,7 +508,7 @@ pub struct RangedBatch {
 /// A skipped record adds nothing to the residues read; the others add the length of the
 /// whole record, not of its interval.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:138-170
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
 /// ```c++
 ///     TSeqPos size_read = 0;
 ///
@@ -543,7 +543,7 @@ pub fn next_ranged_batch_end(
 /// reading after the last record (an `eEOF`, a reader error) comes in that batch; after a
 /// batch that reached its size it comes in the next one.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:140-146
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-146
 /// ```c++
 ///     while (size_read < GetBatchSize()) {
 ///
@@ -574,7 +574,7 @@ pub fn next_ranged_batch(
 /// coordinate of the row's start (the low end on the plus strand, the high end on the
 /// minus strand) and the length of the whole record.
 ///
-/// NCBI reference: c++/src/objtools/align_format/showalign.cpp:411-422
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-422
 /// ```c++
 /// static int s_GetFrame (int start, ENa_strand strand, const CSeq_id& id,
 ///                        CScope& sp)

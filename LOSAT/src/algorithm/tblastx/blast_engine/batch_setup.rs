@@ -63,7 +63,7 @@ pub(super) fn batch_flags<S: TbxScore>(
     args: &TblastxArgs,
     parallel_pool: &SearchPool<'_>,
 ) -> BatchFlags {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-582
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-582
     // ```c
     // score = s_BlastAaExtendTwoHit(matrix, subject, query,
     //     last_hit + wordsize, subject_offset, query_offset,
@@ -77,7 +77,7 @@ pub(super) fn batch_flags<S: TbxScore>(
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let t_total = Instant::now();
 
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
     // CMTArgs(...)
     // {
@@ -87,7 +87,7 @@ pub(super) fn batch_flags<S: TbxScore>(
     // #endif
     // }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
     // ```c
     // const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
     // ...
@@ -98,21 +98,21 @@ pub(super) fn batch_flags<S: TbxScore>(
     //     m_NumThreads = num_threads;
     // }
     // ```
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
     let num_threads = parallel_pool.threads();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
     // if (num_threads > 1) {
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
     let requested_parallel = parallel_pool.enabled();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003
     // ```c
     // status = s_BlastSetUpAuxStructures(..., aux_struct);
     // ```
@@ -154,12 +154,12 @@ pub(super) fn batch_flags<S: TbxScore>(
     // NCBI BLAST computes x_dropoff per-context using kbp[context]->Lambda:
     //   p->cutoffs[context].x_dropoff_init =
     //       (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:219-221
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:219-221
     //
     // For translated queries, NCBI computes kbp_std per context and applies check_ideal:
     //   if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
     //      Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
     // We still maintain per-context structure for parity.
     //
     // x_dropoff_per_context is populated after build_ncbi_lookup() creates the contexts.
@@ -184,7 +184,7 @@ pub(super) fn batch_flags<S: TbxScore>(
 
     // Debug: optional scan output dump around a specific subject offset.
     // The offset_pairs correspond to s_BlastAaScanSubject copy loop.
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:99-115
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:99-115
     let scan_debug_center = crate::utils::xdiag::var("LOSAT_DEBUG_SCAN_SOFF")
         .ok()
         .and_then(|v| v.parse::<i32>().ok());
@@ -257,7 +257,7 @@ pub(super) fn query_frames(
     //           SSegOptionsNew(&segOptions);
     //       ptr++;
     //   }
-    // Source: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:572-580
+    // Source: c++/src/algo/blast/core/blast_filter.c:572-580
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:576-588 (the six
     // contexts of a tblastx query, each translated with the query's genetic code)
@@ -283,7 +283,7 @@ pub(super) fn query_frames(
         .collect();
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Translate, t_translate);
 
-    // NCBI blast_args.cpp:404-406: opt.SetSegFilteringWindow(...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:404-406: opt.SetSegFilteringWindow(...);
     // opt.SetSegFilteringLocut(...); opt.SetSegFilteringHicut(...);
     if args.lcase_masking {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1239-1256 (see
@@ -397,21 +397,21 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
     // We still pass it for x_dropoff calculation (which uses ideal params for all contexts in tblastx)
     // NCBI lookup build always precomputes neighbors (no lazy mode).
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-543
     // NCBI reference (exact match indexing before neighbor expansion):
-    // ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:454-456
+    // c++/src/algo/blast/core/blast_aalookup.c:454-456
     // ```c
     // BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
     //                                   lookup->charsize, lookup->word_length,
     //                                   query, location);
     // ```
-    // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:245
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
     // ```c
     //     lookup->threshold = (Int4)opt->threshold;
     // ```
     // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
     //
-    // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
     // ```c
     //     BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
     //                              masked_ranges.size() + 1, true, eSoftSubjMasking);
@@ -498,7 +498,7 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
                 sc.word(),
             );
             if !S::BLOSUM62 {
-                // NCBI reference: c++/src/algo/blast/core/blast_setup.c:812-822 (the alpha and
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:812-822 (the alpha and
                 // beta of the length adjustment: the matrix's ungapped row,
                 // `BLAST_GetAlphaBeta`, for the Karlin block of every context)
                 // ```c
@@ -527,13 +527,13 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
     // Compute per-context x_dropoff using kbp[context]->Lambda.
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:219-221
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:219-221
     //
     // For translated queries, NCBI computes kbp_std per context and applies check_ideal:
     //   if (check_ideal && kbp->Lambda >= kbp_ideal->Lambda) Blast_KarlinBlkCopy(kbp, kbp_ideal);
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
     //
-    // NCBI BLAST dynamic x_dropoff (ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383):
+    // NCBI BLAST dynamic x_dropoff (c++/src/algo/blast/core/blast_parameters.c:380-383):
     //   if (curr_cutoffs->x_dropoff_init == 0)
     //      curr_cutoffs->x_dropoff = new_cutoff;  // x_dropoff = cutoff_score
     //   else

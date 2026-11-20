@@ -168,7 +168,7 @@
 //! `[X_STATS] LINKSORT sorts= indices= parallel_sorts= parallel_indices= composite_sorts=`.
 
 use super::{fwd_compare_hsps_transl, rev_compare_hsps_transl, UngappedHit};
-// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c
 // CMTArgs(...)
 // {

@@ -55,7 +55,7 @@ fn stage_path(dump: &StageDump, stage: &str) -> PathBuf {
 
 fn write_header_if_needed(file: &mut std::fs::File, path: &PathBuf) -> std::io::Result<()> {
     if metadata(path).map(|m| m.len()).unwrap_or(0) == 0 {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-480
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-480
         // ```c
         // link_hsp_array =
         //    (LinkHSPStruct**) malloc(total_number_of_hsps*sizeof(LinkHSPStruct*));
@@ -70,14 +70,14 @@ fn write_header_if_needed(file: &mut std::fs::File, path: &PathBuf) -> std::io::
     Ok(())
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1492-1497
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497
 // ```c
 // if (Blast_HSPListReevaluateUngapped(..., hsp_list) != 0) {
 //     Blast_HSPListFree(hsp_list);
 //     continue;
 // }
 // ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-1059
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-1059
 // ```c
 // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //       s_RevCompareHSPsTransl);
@@ -190,7 +190,7 @@ fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
     }
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1415-1434
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1415-1434
 // ```c
 // static int
 // s_EvalueCompareHSPs(const void* v1, const void* v2)
@@ -207,13 +207,13 @@ fn evalue_compare_final_pairs(a: &(Hit, UngappedHit), b: &(Hit, UngappedHit)) ->
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3194-3205
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3194-3205
 // ```c
 // Blast_HSPResultsSortByEvalue(results);
 // s_Heapify((char*)hit_list->hsplist_array, ...,
 //          sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
 // ```c
 // // Sort HSPs with e-values as first priority and scores as
 // // tie-breakers, since that is the order we want to see them in
@@ -241,7 +241,7 @@ pub(crate) fn dump_final_output_order(stage: &str, pairs: &[(Hit, UngappedHit)])
             .or_default()
             .push((hit, internal));
     }
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3391-3397
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3391-3397
     // ```c
     // for (index = 0; index < results->num_queries; ++index) {
     //    hit_list = results->hitlist_array[index];
@@ -255,7 +255,7 @@ pub(crate) fn dump_final_output_order(stage: &str, pairs: &[(Hit, UngappedHit)])
 
     let mut sorted_internal = Vec::with_capacity(pairs.len());
     for q_idx in query_order {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3331-3337
         // ```c
         // if (hit_list && hit_list->hsplist_count > 1) {
         //    qsort(hit_list->hsplist_array, hit_list->hsplist_count,
@@ -276,7 +276,7 @@ pub(crate) fn dump_final_output_order(stage: &str, pairs: &[(Hit, UngappedHit)])
             .filter_map(|s_idx| {
                 let key = (q_idx, s_idx);
                 query_subject_hits.remove(&key).map(|mut hits| {
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1437-1455
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1437-1455
                     // ```c
                     // void Blast_HSPListSortByEvalue(BlastHSPList* hsp_list)
                     // {
@@ -290,7 +290,7 @@ pub(crate) fn dump_final_output_order(stage: &str, pairs: &[(Hit, UngappedHit)])
                         .map(|(hit, _)| hit.e_value)
                         .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
                         .unwrap_or(f64::MAX);
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3098-3104
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3098-3104
                     // ```c
                     // if ((retval = s_EvalueComp(h1->best_evalue, h2->best_evalue)) != 0)
                     //    return retval;

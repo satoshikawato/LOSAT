@@ -61,7 +61,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
     let mut output_snapshot_pairs: Vec<(Hit, UngappedHit)> = Vec::new();
     let mut filtered_by_evalue = 0usize;
     for h in linked {
-        // NCBI reference (verbatim, link_hsps.c:1018-1020):
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1018-1020
         //   /* If this is not a single piece or the start of a chain, then Skip it. */
         //   if (H->linked_set == TRUE && H->start_of_chain == FALSE)
         //       continue;
@@ -99,7 +99,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
         let q0 = h.q_aa_start as usize;
         let s0 = h.s_aa_start as usize;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2708-2720
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2708-2720
         // ```c
         // Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
         //     subject_start, hsp, score_params->options, &align_length, sbp);
@@ -117,7 +117,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
             0.0
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1918-1928
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1918-1928
         // ```c
         // kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
         // hsp->bit_score =
@@ -160,7 +160,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
             );
         }
 
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
         // ```c
         // typedef struct BlastHSPList {
         //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
@@ -180,7 +180,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
             e_value: h.e_value,
             bit_score: bit,
             num_ident: matches,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1132
             // ```c
             // if (hsp->query.frame != hsp->subject.frame) {
             //    *q_end = query_length - hsp->query.offset;
@@ -192,7 +192,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
             q_idx: ctx.q_idx,
             s_idx: h.s_idx,
             raw_score: h.raw_score,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4754-4767
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4754-4767
             // ```c
             // s_AdjustInitialHSPOffsets(init_hsp,
             //                           query_info->contexts[context].query_offset);
@@ -201,12 +201,12 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
             //               context, query_info->contexts[context].frame,
             //               subject->frame, ungapped_data->score, NULL, &new_hsp);
             // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:808-812
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:808-812
             // ```c
             // subject->sequence = translation_buffer + frame_offsets[context] + 1;
             // subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
             // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1353
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353
             // ```c
             // BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)
             // BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)
@@ -228,7 +228,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
         if dump_output_stage {
             output_snapshot_pairs.push((out_hit.clone(), h.clone()));
         }
-        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:4760-4767
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4767
         // ```c
         //       Blast_HSPInit(ungapped_data->q_start,
         //                     ungapped_data->length+ungapped_data->q_start,
@@ -245,7 +245,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
         });
     }
     x_lap.lap(XStage::Convert);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1018-1059
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1018-1059
     // ```c
     // if (H->linked_set == TRUE && H->start_of_chain == FALSE)
     //     continue;

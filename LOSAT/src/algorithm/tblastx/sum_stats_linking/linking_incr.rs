@@ -1862,7 +1862,7 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             if let Some(bi) = best[0] {
                 addback(tree, 0, bi, stats);
                 addback_hsps.push(bi as u32);
-                // NCBI's Int2 count: a wrapped (negative) count is not "> 1" (link_hsps.c:918).
+                // NCBI's Int2 count: a wrapped (negative) count is not "> 1" (c++/src/algo/blast/core/link_hsps.c:918).
                 // BLAST_GapDecayDivisor takes it as an unsigned and raises the rate to the Int4
                 // `nsegs - 1`; `as usize` sign-extends and gap_decay_divisor truncates
                 // `num_segments - 1` to the same i32.

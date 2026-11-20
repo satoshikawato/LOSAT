@@ -1,6 +1,6 @@
 #!/bin/bash
 # One invocation per condition in a fresh run directory; retain familiar filenames.
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
 # const string kArgQuery("query");
 # const string kArgSubject("subject");
 # const string kArgOutput("out");
@@ -63,7 +63,7 @@ IFS=',' read -ra programs <<< "$BENCHMARK_PROGRAMS"
 for program in "${programs[@]}"; do
     case "$program" in tblastx|megablast|blastn|blastp) ;; *) echo "Unknown program: $program" >&2; exit 2;; esac
 done
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:48
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:48
 # const string kArgOutput("out");
 # Default runs advertise their location to subsequent plotting processes.
 latest_run_args=()
@@ -71,12 +71,12 @@ if [[ -z "${BENCHMARK_DIR:-}" ]]; then
     BENCHMARK_DIR="$SCRIPT_DIR/benchmark-runs/$(date -u +%Y%m%dT%H%M%S)-$$"
     latest_run_args=("$SCRIPT_DIR/benchmark-runs/latest.json")
 fi
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
 # const string kArgNumThreads("num_threads");
 # Record the effective runner selections before creating any run metadata.
 RUN_NATIVE="${RUN_NATIVE:-1}"
 RUN_NCBI="${RUN_NCBI:-1}"
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
 # const string kArgNumThreads("num_threads");
 # The threaded artifact handles both n1 and nN; serial is compatibility opt-in.
 RUN_LOSAT_WASM="${RUN_LOSAT_WASM:-0}"
@@ -86,19 +86,19 @@ BUILD_LOSAT_WASM_THREADED="${BUILD_LOSAT_WASM_THREADED:-0}"
 for setting in RUN_NATIVE RUN_NCBI RUN_LOSAT_WASM RUN_LOSAT_WASM_THREADED BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED; do
     [[ "${!setting}" == 0 || "${!setting}" == 1 ]] || { echo "$setting must be 0 or 1" >&2; exit 2; }
 done
-# NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+# NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 # CATCH_ALL(status); return status;
 [[ "$RUN_NATIVE$RUN_NCBI$RUN_LOSAT_WASM$RUN_LOSAT_WASM_THREADED" != 0000 ]] || { echo 'No runners selected' >&2; exit 2; }
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
 # const string kArgNumThreads("num_threads");
 # Record the effective runner selections before creating any run metadata.
 export RUN_NATIVE RUN_NCBI RUN_LOSAT_WASM RUN_LOSAT_WASM_THREADED
 export BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED
-# NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 # x_PrintField(*iter); ... m_Ostream << "\n";
 # Record the effective locale used for every subsequent comparison invocation.
 export LC_ALL=C
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 # const string kArgQuery("query"); const string kArgSubject("subject");
 # const string kArgNumThreads("num_threads");
 # Preserve effective settings even when they were not exported by the caller.
@@ -107,7 +107,7 @@ export BENCHMARK_PROGRAMS BENCHMARK_CASE LOSAT_THREADS
 python3 "$SCRIPT_DIR/comparison_data.py" init "$BENCHMARK_DIR" "${latest_run_args[@]}"
 BENCHMARK_DIR="$(cd "$BENCHMARK_DIR" && pwd)"
 mapfile -d '' -t NODE_ARGS < "$BENCHMARK_DIR/node-args.bin"
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
 # const string kArgQuery("query"); const string kArgSubject("subject");
 # Use the recorded program-specific host argv without changing search arguments.
 mapfile -d '' -t TBLASTX_NODE_ARGS < "$BENCHMARK_DIR/node-tblastx-args.bin"
@@ -134,7 +134,7 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
         [[ -s "$FASTA_DIR/$input" ]] || { echo "Missing FASTA: $input" >&2; exit 1; }
     done
     if [[ "$RUN_NCBI" == 1 ]]; then
-        # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51
+        # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51
         # const string kArgDb("db"); const string kArgSubject("subject");
         # Timed NCBI searches all use databases so requested threads remain active.
         require_command "${MAKEBLASTDB_BIN:-makeblastdb}"
@@ -148,7 +148,7 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
 done < "$SCRIPT_DIR/comparison_cases.tsv"
 [[ "$count" -gt 0 ]] || { echo 'No matching comparison cases' >&2; exit 2; }
 if [[ "$RUN_NATIVE" == 1 ]]; then require_command "$LOSAT_BIN"; fi
-# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
 # (*thread)->Run(); (*thread)->Join(&result);
 if [[ "$RUN_LOSAT_WASM" == 1 || "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
     require_command "$NODE_BIN"
@@ -167,7 +167,7 @@ if [[ "$RUN_LOSAT_WASM" == 1 || "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
         (cd .. && cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command)
     fi
     # Require the exact requested command artifacts; never pick a stale deps/ file.
-    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     # CATCH_ALL(status); return status;
     "$NODE_BIN" - "$LOSAT_WASM_BIN" "$LOSAT_WASM_THREADED_BIN" "$RUN_LOSAT_WASM" "$RUN_LOSAT_WASM_THREADED" "$SCRIPT_DIR/wasi_artifact.js" <<'JS'
 const fs = require('fs');
@@ -182,7 +182,7 @@ fi
 mkdir -p "$LOSAT_OUT_DIR" "$BLAST_OUT_DIR"
 TIMEFORMAT=$'real\t%3R\nuser\t%3U\nsys\t%3S'
 
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:48
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:48
 # const string kArgOutput("out");
 # Keep exit status beside timing: a failed search must never become a fast bar.
 run_timed() {
@@ -193,7 +193,7 @@ run_timed() {
     echo 'simple_benchmark=1' > "$stem.log"
     # Capture Bash's timer separately from command output so the displayed
     # seconds and the plotted wall time come from exactly the same measurement.
-    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     # CATCH_ALL(status) ... return status;
     # Wait for the command to exit and preserve its own exit status.
     if { time "$@" -out "$stem.out" >>"$stem.log" 2>&1; } 2>"$stem.time"; then
@@ -238,10 +238,10 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
             run_timed "$LOSAT_OUT_DIR/$losat_stem.n$LOSAT_THREADS" "$LOSAT_BIN" "$program" "${args[@]}" -num_threads "$LOSAT_THREADS"
         fi
     fi
-    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
     # const string kArgNumThreads("num_threads");
     if [[ "$RUN_LOSAT_WASM" == 1 || "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
-        # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
+        # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
         # const string kArgQuery("query"); const string kArgSubject("subject");
         # Select Node compilation before starting this command process; worker
         # isolates inherit the same flags. BLASTN and BLASTP use common args only.
@@ -258,7 +258,7 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
         fi
     fi
     if [[ "$RUN_NCBI" == 1 ]]; then
-        # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
+        # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
         # if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
         #     (program == eTblastn || program == eTblastx)) {
         #     opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger()); }
@@ -281,7 +281,7 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
             python3 "$SCRIPT_DIR/comparison_data.py" database "$BENCHMARK_DIR" "$db" "$FASTA_DIR/$subject" "$(command -v "${MAKEBLASTDB_BIN:-makeblastdb}")" "$dbtype"
             prepared_dbs[$db]=1
         fi
-        # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
+        # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
         # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
         #     m_NumThreads != CThreadable::kMinNumThreads) { ...
         #     ERR_POST(Warning << ... << "ignored when 'subject' is specified."); }
@@ -292,7 +292,7 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
         fi
         args[2]=-db
         args[3]="$db"
-        # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239
+        # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239
         # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
         #     m_NumThreads != CThreadable::kMinNumThreads) {
         #     m_NumThreads = CThreadable::kMinNumThreads; ... }
@@ -303,7 +303,7 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
         fi
     fi
 done < "$SCRIPT_DIR/comparison_cases.tsv"
-# NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+# NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 # CATCH_ALL(status) ... return status;
 python3 "$SCRIPT_DIR/comparison_data.py" complete "$BENCHMARK_DIR"
 echo "Finished $count pairs. Results: $BENCHMARK_DIR"

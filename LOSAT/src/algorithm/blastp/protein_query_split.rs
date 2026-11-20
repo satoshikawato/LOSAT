@@ -13,7 +13,7 @@ use crate::blastinput::app::read_query_split_variable;
 /// The query chunk size of blastp (10000) or tblastn (20000) when the environment variable
 /// `CHUNK_SIZE` is not set or blank, and the overlap (100) when `OVERLAP_CHUNK_SIZE` is not.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:74-76,91-94
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:74-76,91-94
 /// ```c
 ///         case eTblastn:
 ///             retval = 20000;
@@ -24,7 +24,7 @@ use crate::blastinput::app::read_query_split_variable;
 ///             retval = 10000;
 ///             break;
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:51-60
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:51-60
 /// ```c
 /// SplitQuery_GetOverlapChunkSize(EBlastProgramType program)
 /// {
@@ -65,7 +65,7 @@ pub struct ProteinQueryChunk {
 ///
 /// The chunk ranges on the concatenated queries:
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:145-171
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
 /// ```c
 ///     size_t chunk_start = 0;
 ///     const size_t kOverlapSize =
@@ -98,7 +98,7 @@ pub struct ProteinQueryChunk {
 /// The queries of a chunk and their parts are those of `blastn/query_split.rs`
 /// `split_query_batch` (split_query_cxx.cpp:196-247). A protein query has one context:
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:415-418
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:415-418
 /// ```c
 ///             } else if (Blast_QueryIsProtein(kProgram)) {
 ///                 m_SplitBlk->AddContextToChunk(chunk_num,
@@ -125,7 +125,7 @@ pub fn split_protein_batch(lengths: &[usize], sizes: SplitSizes) -> Option<Vec<P
             chunk_end = total_length;
         }
         *range = (chunk_start, chunk_end);
-        // NCBI's `size_t` arithmetic (split_query_cxx.cpp:166): an evened chunk size below a
+        // NCBI's `size_t` arithmetic (c++/src/algo/blast/api/split_query_cxx.cpp:166): an evened chunk size below a
         // positive overlap wraps the start past the queries' length at the first chunk (the loop
         // ends, the chunks after it keep no query); a negative overlap moves the start by the
         // chunk size plus the overlap's magnitude (gaps between the chunks), or past the length.
@@ -178,7 +178,7 @@ pub fn split_protein_batch(lengths: &[usize], sizes: SplitSizes) -> Option<Vec<P
 /// The length of a query's part in a chunk (0 when the chunk does not have the query or the
 /// chunk number is negative).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:452-466
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:452-466
 /// ```c
 /// s_GetAbsoluteContextLength(const vector<const BlastQueryInfo*>& chunk_qinfo,
 ///                            int chunk_num,
@@ -210,7 +210,7 @@ fn part_length(parts: &[Vec<ChunkQuery>], chunk_num: isize, query: usize) -> usi
 /// chunk's part of a query starts in the query. A protein context has frame 0, so NCBI takes
 /// its plus-strand branch.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:266-284
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:266-284
 /// ```c
 /// CContextTranslator::GetStartingChunk(size_t curr_chunk,
 ///                                      Int4 context_in_chunk) const
@@ -232,7 +232,7 @@ fn part_length(parts: &[Vec<ChunkQuery>], chunk_num: isize, query: usize) -> usi
 ///     return static_cast<int>(retval);
 /// }
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:630-643
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:630-643
 /// ```c
 ///             if (s_IsPlusStrand(chunk_qinfo[chunk_num], ctx)) {
 ///
@@ -279,7 +279,7 @@ fn context_offsets(parts: &[Vec<ChunkQuery>], chunk_num: usize, overlap_size: us
 /// build asserts that it does not split; the release build then skips the chunk's lookup
 /// table and stops with a null reference.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
 /// ```c
 ///     BlastSeqSrc* seqsrc =
 ///         BlastSeqSrcCopy(full_data->m_SeqSrc->GetPointer());
@@ -311,7 +311,7 @@ pub fn protein_chunk_would_be_split(chunks: &[ProteinQueryChunk], sizes: SplitSi
 /// the restriction's extra residue (`restrict_masks`, whose steps this takes in record
 /// coordinates).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:278-281
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281
 /// ```c
 ///             CRef<CSeq_loc> mask_query_loc(new CSeq_loc);
 ///             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
@@ -354,7 +354,7 @@ pub fn protein_chunk_part_in_record(record: &[u8], offset: usize, part: &ChunkQu
 /// (`protein_split_sizes`), with the environment variables
 /// `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` read as NCBI reads them.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-58
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:55-58
 /// ```c
 ///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
 ///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
@@ -375,7 +375,7 @@ pub fn protein_query_split_sizes(default_chunk_size: u32) -> anyhow::Result<Spli
 mod tests {
     use super::*;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
     // ```c
     //     if ((*chunk_size) > overlap_size) {
     //        num_chunks = concatenated_query_length / ((*chunk_size) - overlap_size);

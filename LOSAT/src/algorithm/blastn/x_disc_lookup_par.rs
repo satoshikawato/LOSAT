@@ -1765,7 +1765,7 @@ fn csr_on_pool(
 ))]
 const STEP_POSITIONS: usize = CHUNK_POSITIONS / 2;
 
-/// NCBI reference: `Fill::read`'s (blast_nalookup.c:749-767,775,793), first template only.
+/// NCBI reference: `Fill::read`'s (c++/src/algo/blast/core/blast_nalookup.c:749-767,775,793), first template only.
 /// EXPERIMENT (LOSAT_X_DCSEEDLEAN): the words that end at the stream positions `[s0, s1)`, read
 /// by `Fill::read`'s loop (the same ranges entered up to `template_length - 1` positions before
 /// `s0`, resets, `accum`, `index` and first-template index), `f(ecode1, index)` for each, in

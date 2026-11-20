@@ -2,7 +2,7 @@
 use crate::utils::seg::SegParams;
 use std::path::PathBuf;
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:410-420
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:410-420
 // ```c++
 // if (dust_opts == kDfltArgNoFiltering) { opt.SetDustFiltering(false); }
 // else if (dust_opts == kDfltArgApplyFiltering) { opt.SetDustFiltering(true); }
@@ -27,7 +27,7 @@ impl DustSpec {
         !matches!(self, Self::No)
     }
 
-    // NCBI core/blast_options.c:46-48,62-64:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:46-48,62-64:
     // const int kDustLevel = 20; const int kDustWindow = 64; const int kDustLinker = 1;
     pub fn params(&self) -> Option<(u32, usize, usize)> {
         match *self {
@@ -47,7 +47,7 @@ impl DustSpec {
 /// ranges with its defaults (`CSymDustMasker`, `utils/dust.rs`), after NCBI's conversion
 /// to `Uint4` (`as u32`).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:375-384
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:375-384
 /// ```c
 /// CFilteringArgs::x_TokenizeFilteringArgs(const string& filtering_args,
 ///                                         vector<string>& output) const
@@ -60,7 +60,7 @@ impl DustSpec {
 ///     }
 /// }
 /// ```
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:410-426
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:410-426
 /// ```c
 ///         if ( !m_QueryIsProtein && args[kArgDustFiltering]) {
 ///             const string& dust_opts = args[kArgDustFiltering].AsString();
@@ -80,7 +80,7 @@ impl DustSpec {
 ///             NCBI_THROW(CInputException, eInvalidInput,
 ///                        "Invalid input for filtering parameters");
 /// ```
-/// NCBI reference: c++/src/algo/blast/api/blast_objmgr_tools.cpp:195-198
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:195-198
 /// ```c
 ///                 Blast_FindDustFilterLoc(*m_QueryVector,
 ///                     static_cast<Uint4>(m_Options->GetDustFilteringLevel()),
@@ -116,7 +116,7 @@ pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
 /// optional sign, or else, for a value that starts with `0x` or `0X`, a hexadecimal number
 /// (no digit after the prefix reads as 0), within the range of `int`.
 ///
-/// NCBI reference: c++/src/corelib/ncbiargs.cpp:118-129
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:118-129
 /// ```c
 /// Int8 s_StringToInt8(const string& value)
 /// {
@@ -131,7 +131,7 @@ pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
 ///     }
 /// }
 /// ```
-/// NCBI reference: c++/src/corelib/ncbiargs.cpp:383-390
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:383-390
 /// ```c
 /// inline CArg_Integer::CArg_Integer(const string& name, const string& value)
 ///     : CArg_Int8(name, value)
@@ -142,7 +142,7 @@ pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
 ///     }
 /// }
 /// ```
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:788-791
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:788-791
 /// ```c
 ///     // Remove leading '0x' for hex numbers
 ///     if ( base == 16 ) {
@@ -243,14 +243,14 @@ pub fn ncbi_double(value: &str) -> Result<f64, String> {
 /// does not read a `0x` prefix without digits (the only form that `ncbi_integer` reads and
 /// `strtod` does not end at), so the value is illegal.
 ///
-/// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:110-113
+/// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:110-113
 /// ```c
 ///     /// Overloaded method from CArgAllow
 ///     virtual bool Verify(const string& value) const {
 ///         return NStr::StringToDouble(value) >= m_MinValue;
 ///     }
 /// ```
-/// NCBI reference: c++/src/corelib/ncbiargs.cpp:1231-1243
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1231-1243
 /// ```c
 ///     if ( m_Constraint ) {
 ///         bool err = false;
@@ -311,7 +311,7 @@ pub fn nonnegative_ncbi_int8(value: &str) -> Result<i64, String> {
 /// A non-negative integer argument (`CArg_Integer` with `CArgAllowValuesGreaterThanOrEqual(0)`),
 /// such as `-culling_limit`.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3296-3302
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3302
 /// ```c
 ///     arg_desc.AddOptionalKey(kArgCullingLimit, "int_value",
 ///                      "If the query range of a hit is enveloped by that of at "
@@ -328,7 +328,7 @@ pub fn nonnegative_ncbi_integer(value: &str) -> Result<i32, String> {
 /// A `-num_descriptions` or `-num_alignments` value: 0 or more, an `Int4` in NCBI's
 /// integer forms (the sign and hexadecimal forms of `nonnegative_ncbi_integer`).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685
 /// ```c
 ///     arg_desc.AddOptionalKey(kArgNumDescriptions, "int_value",
 ///                  "Number of database sequences to show one-line "
@@ -353,7 +353,7 @@ pub fn report_count(value: &str) -> Result<usize, String> {
 
 /// A discontiguous megablast template length: 16, 18 or 21.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:719-727
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:719-727
 /// ```c
 ///     arg_desc.AddOptionalKey(kArgDMBTemplateLength, "int_value",
 ///                  "Discontiguous MegaBLAST template length",
@@ -368,7 +368,7 @@ pub fn report_count(value: &str) -> Result<usize, String> {
 /// The constraint converts the value again with `NStr::StringToInt` in base 10, so a
 /// hexadecimal value that the integer argument reads fails it.
 ///
-/// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222,239
+/// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222,239
 /// ```c
 ///     virtual bool Verify(const string& value) const {                        \
 ///         DataType value2check = String2DataTypeFn(value);                    \
@@ -393,7 +393,7 @@ pub fn blastn_template_length(value: &str) -> Result<u8, String> {
 /// A BLASTN word size: 4 or more (the upper bound, 100, is an option check,
 /// `blastn/scoring.rs`).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:168-170
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:168-170
 /// ```c
 ///         arg_desc.SetConstraint(kArgWordSize, m_QueryIsProtein
 ///                                ? new CArgAllowValuesGreaterThanOrEqual(2)
@@ -403,7 +403,7 @@ pub fn blastn_word_size(value: &str) -> Result<usize, String> {
     ncbi_integer_at_least(value, 4).map(|n| n as usize)
 }
 /// A BLASTN count of 1 or more (`-num_threads`, `-max_target_seqs`, `-max_hsps`), as
-/// NCBI's arguments (blast_args.cpp:203-207,2731-2732,3162-3163).
+/// NCBI's arguments (c++/src/algo/blast/blastinput/blast_args.cpp:203-207,2731-2732,3162-3163).
 pub fn blastn_count(value: &str) -> Result<usize, String> {
     ncbi_positive_integer(value).map(|n| n as usize)
 }
@@ -437,7 +437,7 @@ pub fn blastn_evalue(value: &str) -> Result<f64, String> {
 }
 /// A BLASTN percent identity, in 0..=100 (NaN is outside).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:188-192
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:188-192
 /// ```c
 ///         arg_desc.AddOptionalKey(kArgPercentIdentity, "float_value",
 ///                                 "Percent identity",
@@ -451,7 +451,7 @@ pub fn blastn_percentage(value: &str) -> Result<f64, String> {
 /// A percentage, in 0..=100 (NaN is outside): `-perc_identity`, and
 /// `-qcov_hsp_perc` of every program (the `*_query_coverage` parsers).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:196-201
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-201
 /// ```c
 ///         arg_desc.AddOptionalKey(kArgQueryCovHspPerc, "float_value",
 ///                             "Percent query coverage per hsp",
@@ -515,7 +515,7 @@ pub fn tblastx_query_coverage(value: &str) -> Result<f64, String> {
     percentage(value)
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:995-1006
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:995-1006
 // ```c++
 // static const set<int> genetic_codes(gcs, gcs+sizeof(gcs)/sizeof(*gcs));
 // return (genetic_codes.find(val) != genetic_codes.end());
@@ -554,7 +554,7 @@ pub(crate) fn genetic_code_number(value: &str) -> Option<u8> {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-51
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-51
 // ```c++
 // const string kArgQuery("query");
 // const string kArgSubject("subject");
@@ -563,7 +563,7 @@ pub(crate) fn genetic_code_number(value: &str) -> Option<u8> {
 /// standard output, and a file that cannot be created is reported when it is opened
 /// (`blastn/blast_engine/run.rs`).
 ///
-/// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
+/// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
 /// ```c
 ///     static constexpr Uint4 kDfltMaxLength = 256;
 ///
@@ -588,7 +588,7 @@ pub fn blastn_output_path() -> impl clap::builder::TypedValueParser<Value = Path
 /// The length of NCBI's `CDirEntry::GetName` of a path: the text after the last separator
 /// once the trailing directory separators are removed (a path of one separator has none).
 ///
-/// NCBI reference: c++/src/corelib/ncbifile.cpp:298-312
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-312
 /// ```c
 /// void CDirEntry::Reset(const string& path)
 /// {
@@ -606,7 +606,7 @@ pub fn blastn_output_path() -> impl clap::builder::TypedValueParser<Value = Path
 /// #  endif
 ///     m_Path = DeleteTrailingPathSeparator(path);
 /// ```
-/// NCBI reference: c++/src/corelib/ncbifile.cpp:465-472
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:465-472
 /// ```c
 /// string CDirEntry::DeleteTrailingPathSeparator(const string& path)
 /// {
@@ -617,7 +617,7 @@ pub fn blastn_output_path() -> impl clap::builder::TypedValueParser<Value = Path
 ///     return path;
 /// }
 /// ```
-/// NCBI reference: c++/src/corelib/ncbifile.cpp:358-363
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-363
 /// ```c
 /// void CDirEntry::SplitPath(const string& path, string* dir,
 ///                           string* base, string* ext)
@@ -653,7 +653,7 @@ fn ncbi_file_name_length(path: &[u8]) -> usize {
 /// A BLASTN input file: any value, as NCBI's `eInputFile` argument; `-` is standard input
 /// and a file that cannot be opened is reported when it is opened (`blastn/blast_engine/run.rs`).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
 /// ```c
 ///     arg_desc.AddDefaultKey(kArgQuery, "input_file",
 ///                      "Input file name",
@@ -719,7 +719,7 @@ pub fn blastn_real(value: &str) -> Result<f64, String> {
 /// `StringToDoublePosix` reads, such as `1e`, makes it throw), and requires at least 0 (a NaN
 /// fails it); a value that the constraint reads is the same number as the argument's.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:578-583
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:578-583
 /// ```c
 ///     arg_desc.AddOptionalKey(kArgWordScoreThreshold, "float_value",
 ///                  "Minimum word score such that the word is added to the "
@@ -785,7 +785,7 @@ pub fn tblastx_threshold(value: &str) -> Result<f64, String> {
 /// A Boolean argument (`CArg_Boolean`, read with `NStr::StringToBool`:
 /// `ncbi_str::string_to_bool`).
 ///
-/// NCBI reference: c++/src/corelib/ncbiargs.cpp:489-497
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:489-497
 /// ```c
 /// inline CArg_Boolean::CArg_Boolean(const string& name, const string& value)
 ///     : CArg_String(name, value)
@@ -819,7 +819,7 @@ pub fn ncbi_mt_mode(value: &str) -> Result<u8, String> {
 
 /// A protein `-word_size` (`CArgAllowValuesGreaterThanOrEqual(2)` for a protein query).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-170
 /// ```c
 ///         arg_desc.AddOptionalKey(kArgWordSize, "int_value", description,
 ///                                 CArgDescriptions::eInteger);
@@ -831,7 +831,7 @@ pub fn protein_word_size(value: &str) -> Result<i32, String> {
     ncbi_integer_at_least(value, 2)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:386-407
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:386-407
 // ```c
 // if (m_QueryIsProtein && args[kArgSegFiltering]) {
 //     const string& seg_opts = args[kArgSegFiltering].AsString();
@@ -879,7 +879,7 @@ impl SegSpec {
     /// 0 keeps NCBI's default (`SegParametersNewAa`), then SEG checks the parameters
     /// (`SegParams::new`, blast_seg.c:2247-2258).
     ///
-    /// NCBI reference: c++/src/algo/blast/core/blast_filter.c:1147-1154
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1147-1154
     /// ```c
     ///         sparamsp = SegParametersNewAa();
     ///         sparamsp->overlaps = TRUE;
@@ -913,7 +913,7 @@ impl SegSpec {
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:396-407
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-407
     // ```c
     // if (seg_opts == kDfltArgNoFiltering) {
     //     opt.SetSegFiltering(false);
@@ -941,7 +941,7 @@ impl SegSpec {
 /// The errors are NCBI's messages; LOSAT also rejects a locut or hicut that is not finite.
 /// The values are used as NCBI's query filter uses them (`SegSpec::params`).
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:396-406
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406
 /// ```c
 ///         if (m_QueryIsProtein && args[kArgSegFiltering]) {
 ///             const string& seg_opts = args[kArgSegFiltering].AsString();
@@ -1255,7 +1255,7 @@ mod tests {
 /// with the given message (clap's error for a value its parser refuses, as every other
 /// option's), and any other name is clap's invalid-value error.
 ///
-/// NCBI's `-task` is a `CArgAllowStringSet` (`blast_args.cpp:105`); the rejected
+/// NCBI's `-task` is a `CArgAllowStringSet` (`c++/src/algo/blast/blastinput/blast_args.cpp:105`); the rejected
 /// names are NCBI tasks outside LOSAT's implementation.
 #[derive(Clone)]
 pub struct TaskParser {

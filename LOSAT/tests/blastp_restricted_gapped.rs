@@ -10,7 +10,7 @@
 //! `LOSAT_X_BPGAP128=0` and `=2` (the sixteen-bit rows in 128 bits, the rows of WebAssembly and of
 //! x86-64 without AVX2, also in the set; `=2` runs them in place of the AVX2 rows).
 //!
-//! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
 //! ```c
 //!           /* use approximate gapped alignment if the highest scoring ungapped
 //!              alignment scores below the reduced cutoff */
@@ -42,14 +42,14 @@
 //! psiblast's first round of a FASTA query runs the same engine but aligns exactly: NCBI sets
 //! restricted alignment for blastp's program only, and psiblast's is `eBlastTypePsiBlast`.
 //!
-//! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_parameters.c:852-855
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:852-855
 //! ```c
 //!    if (program_number == eBlastTypeBlastp && gapped_calculation &&
 //!       options->expect_value <= RESTRICTED_ALIGNMENT_WORST_EVALUE) {
 //!       params->restricted_align = TRUE;
 //!    }
 //! ```
-//! NCBI reference (2.17.0): c++/src/algo/blast/api/psiblast_options.cpp:50 and
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:50 and
 //! c++/src/algo/blast/api/blast_aux.cpp:739-741
 //! ```c++
 //!     m_Opts->SetProgram(ePSIBlast);

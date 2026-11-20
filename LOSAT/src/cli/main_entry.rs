@@ -241,7 +241,7 @@ fn run_main_entry() -> Result<()> {
             crate::blastinput::ncbi_environment::preparse(&argv[2..]),
             crate::blastinput::ncbi_environment::Preparsed::Words { dryrun: true, .. }
         );
-    // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let parsed = match &start {
         Some(start) => crate::cli::try_parse_from_start(argv, start),
         None => crate::cli::try_parse_from(argv),
@@ -391,7 +391,7 @@ fn run_main_entry() -> Result<()> {
         Commands::Blastn(mut args) => {
             // The `@PG` line of SAM (outfmt 17) shows the command line.
             args.command_line = Some(crate::cli::command_line_bytes());
-            // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
             // ```c
             //     // Setup some debugging features from environment variables.
             //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
@@ -408,7 +408,7 @@ fn run_main_entry() -> Result<()> {
             }
         }
         Commands::Blastp(args) => {
-            // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
             // ```c
             //     // Setup some debugging features from environment variables.
             //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
@@ -424,7 +424,7 @@ fn run_main_entry() -> Result<()> {
                 return Err(error);
             }
         }
-        // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:225-227,252-255
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227,252-255
         // ```c
         //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
         //             exit_code = BLAST_ENGINE_ERROR;                                 \
@@ -443,7 +443,7 @@ fn run_main_entry() -> Result<()> {
                 return Err(error);
             }
         }
-        // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288-301:
         // results = lcl_blast.Run();
         // formatter.PrintOneResultSet(**result, query);
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1322-1333

@@ -4,7 +4,7 @@
 //! functions; the engine (`blast_engine/run.rs`) calls them for its `UNGAPPED` instance of
 //! `search_query_batch`.
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1482-1541
 //! ```c
 //!     if (!score_params->options->gapped_calculation) {
 //!         status = Blast_HSPListReevaluateUngapped(program_number, hsp_list, query,
@@ -22,7 +22,7 @@
 use super::ncbi_cutoffs::compute_blastn_cutoff_score_ungapped;
 use crate::stats::KarlinParams;
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1060-1068 (BLASTNA_SIZE)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1060-1068 (BLASTNA_SIZE)
 const BLASTNA_SIZE: usize = 16;
 
 /// The range of an ungapped HSP after its re-evaluation: the best-scoring stretch of the
@@ -41,7 +41,7 @@ pub struct ReevaluatedUngapped {
 /// first letter of the HSP's context (NCBI's `query_start`); `subject` is the subject in BLASTNA.
 /// Returns `None` when the HSP is to be deleted (its best score is below `cutoff_score`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:676-735
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:676-735
 /// ```c
 ///    Int4 hsp_length = hsp->query.end - hsp->query.offset;
 ///    Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
@@ -68,7 +68,7 @@ pub struct ReevaluatedUngapped {
 ///       }
 ///    }
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:440-484 (`s_UpdateReevaluatedHSP`
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:440-484 (`s_UpdateReevaluatedHSP`
 /// with `gapped = FALSE`)
 /// ```c
 ///     hsp->score = score;
@@ -137,7 +137,7 @@ pub fn reevaluate_with_ambiguities_ungapped(
 /// The number of identities of an ungapped HSP: `*q == *s` in BLASTNA (so `N` and `N` are a
 /// match), over `query.end - query.offset` letters. `query` is the unmasked query of the context.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-790
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-790
 /// (`s_Blast_HSPGetNumIdentitiesAndPositives`, the `!hsp->gap_info` branch)
 /// ```c
 ///       align_length = q_length;
@@ -192,7 +192,7 @@ pub fn cutoff_context_length_supported(context_length: usize) -> bool {
 /// `kbp_std` the ungapped Karlin block of the context, and `cutoff_score_max` the context's
 /// `hit_params->cutoffs[context].cutoff_score_max`.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:346-374
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:346-374
 /// ```c
 ///          double cutoff_e = s_GetCutoffEvalue(program_number);
 ///          Int4 query_length = query_info->contexts[context].query_length;
@@ -238,7 +238,7 @@ pub fn word_cutoff_score(
 
 /// The average subject length of a `-subject` set: `(Uint4)(total / count)`.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266
 /// ```c
 ///     retval = (Uint4) (total / num_seqs)   (s_MultiSeqGetAvgLength)
 /// ```
@@ -252,7 +252,7 @@ mod tests {
     use super::*;
     use crate::algorithm::blastn::alignment::gapped::build_blastna_matrix;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:471-478
+    // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:471-478
     // ```c
     // const Uint1 kQuerySeq[kLength+2] = { 15, 0, 1, 2, 3, 0, 0, 1, 1, 2, 2, 3,
     //                                     3, 3, 3, 0, 1, 2, 2, 1, 1, 0, 0, 15 };

@@ -390,7 +390,7 @@ mod tests {
     use super::super::hsp::{BlastnHsp, BlastnHspList};
     use super::*;
 
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
     // ```c
     // typedef struct BlastHSP {
     //    Int4 score;

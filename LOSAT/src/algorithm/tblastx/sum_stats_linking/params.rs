@@ -1,6 +1,6 @@
 //! Linking parameters and helper functions.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c
 
 use crate::stats::KarlinParams;
 
@@ -30,7 +30,7 @@ impl LinkHspCutoffs {
     }
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1448-1455;
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455;
 /// c++/src/algo/blast/core/link_hsps.c:468-493
 /// CalculateLinkHSPCutoffs(..., db_length, subject->length);
 /// `cutoff[0] = link_hsp_params->cutoff_small_gap;`

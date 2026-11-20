@@ -38,7 +38,7 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-# NCBI reference: c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180
 # m_iTotalLength += (Int8) (*iter)->length;
 # Distinct IDs and unequal lengths exercise global statistics and stable ordering.
 def fixtures(directory):
@@ -55,7 +55,7 @@ def fixtures(directory):
     }
     for name, values in records.items():
         (directory / f"{name}.fasta").write_text("".join(f">seq{i}\n{value}\n" for i, value in enumerate(values)))
-    # NCBI reference: c++/src/objtools/align_format/tabular.cpp:415-439,1264-1283
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:415-439,1264-1283
     # Empty BLAST defline object prints N/A; every query receives its own header.
     edge_title = "a long title, with spaces and hyphens " * 5
     records["aa-query-edge"] = [aa, "W" * 85, aa]
@@ -90,7 +90,7 @@ DB_TOTAL_ROWS = ["db.cnt.l4295.bn", "db.cnt.avg2p32.bn", "db.cnt.l4295.bp.0", "d
                  "db.cnt.l4295.bp.15", "db.cnt.l4294.bp.0", "db.cnt.avg2p32.bp_c0", "db.cnt.avg2p32.tx"]
 
 
-# NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
 # x_PrintField(*iter); m_Ostream << "\n";
 # Retain exact argv, stderr and outputs. No sorting or output normalization.
 # NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1104-1105
@@ -151,7 +151,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", type=Path, required=True)
     parser.add_argument("--native-serial", type=Path)
-    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     # #ifdef NCBI_NO_THREADS
     # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
     parser.add_argument("--serial", type=Path, help="opt in to serial compatibility checks")
@@ -207,7 +207,7 @@ def main():
         "native": [args.native.resolve()],
         "threaded": [args.node, TESTS / "run_losat_wasi_threads.js", args.threaded.resolve()],
     }
-    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
     if args.serial: prefixes["serial"] = [args.node, TESTS / "run_losat_wasi.js", args.serial.resolve()]
     if args.native_serial: prefixes["native-serial"] = [args.native_serial.resolve()]
@@ -484,7 +484,7 @@ def main():
         # stdout is the same sink content as the file route.
         stdout_args = common[:-2] + ["-num_threads", "1"]
         reference, _ = execute(f"stdout/{program}-native", [*prefixes["native"], *stdout_args])
-        # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
+        # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
         # x_PrintField(*iter); m_Ostream << "\n";
         for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
             data, _ = execute(f"stdout/{program}-{kind}", [*prefixes[kind], *stdout_args])
@@ -556,7 +556,7 @@ def main():
     ]:
         for index, fmt in enumerate(formats):
             common = ["-query", inputs[query], "-subject", inputs[subject], "-outfmt", fmt, "-out", "{out}"]
-            # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:69
+            # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:69
             # const string kTask("task");
             # Exercise both nucleotide tasks through their supported formatter.
             if task: common += ["-task", task]
@@ -663,7 +663,7 @@ def main():
     for cap in ["0", "invalid", "1"]:
         execute("reactor-cap/" + cap, [args.node, TESTS / "check_wasi_api_limits.js", args.reactor.resolve(), "threaded-reactor", out / "fixtures", out / ("reactor-cap-" + cap)], {"LOSAT_WASI_THREAD_CAP": cap, "LOSAT_WASI_THREADS_DEBUG": "1"})
     # Artifact misclassification is rejected before entry/worker startup.
-    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     # CATCH_ALL(status); return status;
     wrong_artifacts = [("threaded-reactor", "run_losat_wasi_threads.js", args.reactor)]
     if args.serial:

@@ -1,6 +1,6 @@
 //! Two-hit ungapped extension algorithm
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c
 
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 // Where the context's letters lie in the query batch: NCBI's walks go on past the context's ends
@@ -225,7 +225,7 @@ pub(super) fn extend_left_ungapped<S: TbxScore>(
         not(feature = "tblastx-wasm-scalar")
     ))]
     {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:886-921
         // ```c
         // for (i = n; i >= 0; i--) {
         //    score += matrix[q[i]][s[i]];
@@ -269,7 +269,7 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
 ) -> (i32, usize, usize, Option<i32>) {
     let q_limit = q_seq.len();
 
-    // NCBI's `n = MIN(subject->length - s_off, query->length - q_off)` (aa_ungapped.c:841), on the
+    // NCBI's `n = MIN(subject->length - s_off, query->length - q_off)` (c++/src/algo/blast/core/aa_ungapped.c:841), on the
     // context's letters: one test a step. None where the walk starts past them
     // (`extend_hit_one_hit`).
     let q_rest = q_seq.get(q_start..).unwrap_or_default();
@@ -467,7 +467,7 @@ pub(super) fn extend_right_ungapped<S: TbxScore>(
         not(feature = "tblastx-wasm-scalar")
     ))]
     {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:846-866
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866
         // ```c
         // for (i = 0; i < n; i++) {
         //    score += matrix[q[i]][s[i]];
@@ -604,7 +604,7 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
 /// accepted, and `s_full` the buffer of a subject frame `x_two_hit_fast::sent_subject` accepted.
 /// The word at `q_right_off` and `s_right_off` lies in the letters (the buffers without their
 /// sentinels), as for `extend_hit_two_hit_fitting`.
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
 pub(crate) unsafe fn extend_hit_two_hit_sent(
     q_full: &[u8],
@@ -635,7 +635,7 @@ pub(crate) unsafe fn extend_hit_two_hit_sent(
 /// The calls `extend_hit_two_hit_sent` leaves to `extend_hit_two_hit_fitting` (an X-drop outside
 /// 1..=127; `two_hit_sent` also refuses a word past the letters, which a lookup hit's is not), out
 /// of the callers' code.
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
 #[cold]
 #[inline(never)]
 fn extend_hit_two_hit_sent_refused(
@@ -758,7 +758,7 @@ pub(super) fn two_hit_walks<S: TbxScore>(
     s_right_off: usize, // Position of second hit (R) in subject
     q_right_off: usize, // Position of second hit (R) in query
     x_drop: i32,
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1096
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1096
     // ```c
     // s_BlastAaExtendTwoHit(..., Int4 q_right_off, Int4 dropoff, ...)
     // ```
@@ -769,7 +769,7 @@ pub(super) fn two_hit_walks<S: TbxScore>(
     // DEBUG: Print sequence segment for tracing
     static DEBUG_PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:1104-1108 (the word length of the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108 (the word length of the
     // lookup table, `-word_size`: 3 for BLOSUM62's instance, `TbxScore::word`)
     // ```c
     //     /* find one beyond the position (up to word_size-1 letters to the right)
@@ -783,7 +783,7 @@ pub(super) fn two_hit_walks<S: TbxScore>(
     // First, find the best scoring position within the word at R
     // NCBI BLAST assumes caller provides valid coordinates within bounds.
     // The lookup table and offset generation guarantee valid positions.
-    // Reference: aa_ungapped.c does NOT have bounds checks in word scanning loop.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c does NOT have bounds checks in word scanning loop.
     let mut score = 0i32;
     let mut seed_score = 0i32;
     let mut right_d = 0usize;
@@ -806,7 +806,7 @@ pub(super) fn two_hit_walks<S: TbxScore>(
     // Extend to the left from R, trying to reach L
     // Note: NCBI BLAST does NOT explicitly check for stop codons in s_BlastAaExtendLeft.
     // Stop codons have very negative scores in BLOSUM62 (-4 to -5), so X-drop handles them.
-    // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:886-921
     let (left_score, left_disp, left_again) =
         extend_left_ungapped(sc, q_seq, qb, s_seq, q_right_off, s_right_off, 0, x_drop);
     if first && left_again.is_some() {
@@ -828,7 +828,7 @@ pub(super) fn two_hit_walks<S: TbxScore>(
     if reached_first_hit {
         // NCBI BLAST: right_extend is set to TRUE when we enter this block,
         // regardless of how many characters are actually extended.
-        // Reference: aa_ungapped.c:1140
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1140
         right_extended = true;
 
         // NCBI BLAST extends right starting from left_score as initial score
@@ -852,7 +852,7 @@ pub(super) fn two_hit_walks<S: TbxScore>(
     }
 
     // NCBI BLAST returns MAX(left_score, right_score)
-    // Reference: aa_ungapped.c:1157
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1157
     let max_score_total = left_score.max(right_score);
 
     let q_start = q_right_off - left_disp;

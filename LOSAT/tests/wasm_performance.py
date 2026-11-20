@@ -88,7 +88,7 @@ def validate_kind(kind, inspection):
         raise GateFailure("serial label on threaded artifact")
 
 
-# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
 # A stage with one job does not shrink the already constructed search pool.
 # Missing or contradictory records fail; old guessed evidence is not upgraded.
@@ -335,7 +335,7 @@ def freeze(args):
             "version": capture([args.node, "--version"]),
             "flags": [],
             "runners": runners,
-            # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
+            # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
             # x_PrintField(*iter); ... m_Ostream << "\n";
             # Freeze the memory adapter and the table of files too: they affect the executed module.
             "runner_hashes": {
@@ -433,7 +433,7 @@ def execute(argv, cwd, directory, env, timeout):
     )
     usage = directory / "usage.txt"
     measured = ["/usr/bin/time", "-f", "%U\t%S\t%M\t%e", "-o", str(usage), *argv]
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
     # (*thread)->Join(&result);
     # Independent clock evidence covers the same process-completion boundary.
     realtime_start = time.time()
@@ -458,7 +458,7 @@ def execute(argv, cwd, directory, env, timeout):
             expired = threading.Event()
 
             def expire():
-                # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+                # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
                 # (*thread)->Join(&result);
                 # Test-only deadline: CPython 3.13 parking_lot.c uses realtime
                 # sem_timedwait when HAVE_SEM_CLOCKWAIT is absent. A forward
@@ -493,7 +493,7 @@ def execute(argv, cwd, directory, env, timeout):
                 status, reason = "BAD_EXIT", f"subprocess exit {exit_code}"
         except OSError as error:
             status, reason = "BAD_EXIT", str(error)
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
     # (*thread)->Join(&result);
     # Record the exact existing elapsed-time endpoints for process overlap audits.
     monotonic_end = time.monotonic()
@@ -540,7 +540,7 @@ def execute(argv, cwd, directory, env, timeout):
         "raw_output_sha256": digest(output) if output.is_file() else None,
         "raw_output_bytes": output.stat().st_size if output.is_file() else None,
     }
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
     # (*thread)->Join(&result); ... BlastSeqSrcSetNumberOfThreads(..., 0);
     # End-to-end evidence ends after process/worker completion, including failures.
     result["started_utc"] = started_utc
@@ -898,7 +898,7 @@ def run(args):
                         > manifest["measurement"]["memory_budget_bytes"]
                     ):
                         status = "MEMORY_BUDGET_FAIL"
-                    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+                    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
                     # (*thread)->Join(&result);
                     # Clock validity gates timing, independently of canonical bytes.
                     if status == "PASS" and args.phase != "audit" and not result["monotonic_clock_agreement"]:
@@ -1098,7 +1098,7 @@ def run_warm(args, manifest, dest):
                 > manifest["measurement"]["memory_budget_bytes"]
             ):
                 sample["status"] = "MEMORY_BUDGET_FAIL"
-            # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+            # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
             # (*thread)->Join(&result);
             # Retain failed host clock evidence and suppress every affected median.
             sample["monotonic_clock_agreement"] = execution["monotonic_clock_agreement"]

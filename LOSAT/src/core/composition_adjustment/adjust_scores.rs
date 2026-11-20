@@ -1,10 +1,10 @@
 //! NCBI composition-adjustment helpers used by `blastp` redo post-processing.
 //!
-//! Reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_adjustment.h
-//! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c
-//! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c
-//! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/unified_pvalues.c
-//! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c
+//! NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/composition_adjustment.h
+//! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_mode_condition.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/unified_pvalues.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c
 
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::{bail, Result};
@@ -16,7 +16,7 @@ use crate::utils::matrix::{protein_score_direct, BLASTAA_SIZE};
 use super::matrix_tables::{self, CompoMatrixData, COMPO_MATRIX_DATA};
 use super::redo_alignment::{BlastCompoAdjustMode, EMatrixAdjustRule};
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_constants.h:39-44
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/composition_constants.h:39-44
 // ```c
 // #define COMPO_SCORE_MIN INT2_MIN
 // #define COMPO_NUM_TRUE_AA 20
@@ -26,7 +26,7 @@ const COMPO_SCORE_MIN: i32 = i16::MIN as i32;
 pub(crate) const COMPO_NUM_TRUE_AA: usize = 20;
 const COMPO_LARGEST_ALPHABET: usize = BLASTAA_SIZE;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:77-80
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:77-80
 // ```c
 // static const double kFixedReBlosum62 = 0.44;
 // static const double kMaximumXscore = -1.0;
@@ -35,7 +35,7 @@ const COMPO_LARGEST_ALPHABET: usize = BLASTAA_SIZE;
 const K_FIXED_RE_BLOSUM62: f64 = 0.44;
 const K_MAXIMUM_X_SCORE: f64 = -1.0;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:64-75
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:64-75
 // ```c
 // static const int kLambdaIterationLimit = 100;
 // static const double kLambdaErrorTolerance = 0.0000001;
@@ -49,7 +49,7 @@ const K_LAMBDA_FUNCTION_TOLERANCE: f64 = 1.0e-5;
 pub(crate) const K_COMPO_ADJUST_ERR_TOLERANCE: f64 = 1.0e-8;
 pub(crate) const K_COMPO_ADJUST_ITERATION_LIMIT: usize = 2000;
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_adjustment.h:42-45
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/composition_adjustment.h:42-45
 // ```c
 // enum { eGapChar = 0, eBchar = 2, eCchar = 3,  eDchar = 4,  eEchar = 5,
 //        eIchar = 9, eLchar = 11,  eNchar = 13, eQchar = 15, eXchar = 21,
@@ -71,13 +71,13 @@ const E_STOP_CHAR: usize = 25;
 const E_OCHAR: usize = 26;
 const E_JCHAR: usize = 27;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1097-1100
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1097-1100
 // ```c
 // #define LambdaRatioLowerBound 0.5
 // ```
 const LAMBDA_RATIO_LOWER_BOUND: f64 = 0.5;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:38-47
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:38-47
 // ```c
 // /** 180 degrees in half a circle */
 // #define HALF_CIRCLE_DEGREES 180
@@ -99,7 +99,7 @@ const ANGLE_DEGREE_THRESHOLD: f64 = 70.0;
 const HIGH_PAIR_THRESHOLD: f64 = 0.4;
 const LENGTH_LOWER_THRESHOLD: i32 = 50;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/unified_pvalues.c:37-48
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/unified_pvalues.c:37-48
 // ```c
 // #define LENGTH_MIN             40
 // #define LENGTH_MAX             4000
@@ -112,7 +112,7 @@ const LAMBDA_BIN_SIZE: f64 = 0.001;
 const LAMBDA_BIN_TOTAL: usize = 565;
 const LOW_LAMBDA_BIN_CUT: usize = 35;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:44-54
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:44-54
 // ```c
 // static int trueCharPositions[COMPO_NUM_TRUE_AA] =
 // {1,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22};
@@ -128,7 +128,7 @@ const ALPHA_CONVERT: [i32; COMPO_LARGEST_ALPHABET] = [
     -1, -1,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:383-537
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:383-537
 // ```c
 // static const double BLOSUM62_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] = { ... };
 // static const double BLOSUM62_bg[COMPO_NUM_TRUE_AA] = { ... };
@@ -142,7 +142,7 @@ const BLOSUM62_BG: [f64; COMPO_NUM_TRUE_AA] = matrix_tables::BLOSUM62_BG;
 // The composition-based statistics data of `matrix`: its frequency ratios and its joint and
 // background probabilities.
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1359-1369
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1359-1369
 // ```c
 // static Compo_FrequencyData *
 // s_LocateFrequencyData(const char * matrix)
@@ -156,7 +156,7 @@ const BLOSUM62_BG: [f64; COMPO_NUM_TRUE_AA] = matrix_tables::BLOSUM62_BG;
 //     return NULL;
 // }
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/matrix_freq_ratios.c:1734-1736
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:1734-1736
 // ```c
 //     } else {
 //         retval = _PSIMatrixFrequencyRatiosFree(retval);
@@ -166,7 +166,7 @@ const BLOSUM62_BG: [f64; COMPO_NUM_TRUE_AA] = matrix_tables::BLOSUM62_BG;
 // BLOSUM62_20, 20A and 20B, which the 2.17.0 build has no Karlin table for (`blast_stat.c:435`,
 // `BLOSUM62_20_ENABLE`), so NCBI's option validation refuses them. IDENTITY has none of the data:
 // NCBI turns composition-based statistics off for it before the search.
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/setup_factory.cpp:144-150
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:144-150
 // ```c
 //     // reset composition based statistics for the identity scoring matrix
 //     // (we do not have all necessary data to compute CBS)
@@ -191,7 +191,7 @@ pub(crate) fn compo_matrix_data(matrix: ScoringMatrix) -> Option<&'static CompoM
     Some(&COMPO_MATRIX_DATA[index])
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/unified_pvalues.c:52-205
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/unified_pvalues.c:52-205
 // ```c
 // static double P_lambda_table[LAMBDA_BIN_TOTAL] = { ... };
 // ```
@@ -763,7 +763,7 @@ const P_LAMBDA_TABLE: [f64; LAMBDA_BIN_TOTAL] = [
     9.999992e-01,
 ];
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_adjustment.h:49-58
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/composition_adjustment.h:49-58
 // ```c
 // typedef struct Blast_AminoAcidComposition {
 //     double prob[COMPO_LARGEST_ALPHABET];
@@ -785,7 +785,7 @@ impl BlastAminoAcidComposition {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_adjustment.h:76-86
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/composition_adjustment.h:76-86
 // ```c
 // typedef struct Blast_MatrixInfo {
 //     char * matrixName;
@@ -807,7 +807,7 @@ pub struct BlastMatrixInfo {
     pub start_freq_ratios: [[f64; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET],
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_adjustment.h:109-117
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/composition_adjustment.h:109-117
 // ```c
 // typedef struct Blast_CompositionWorkspace {
 //     double ** mat_b;
@@ -825,7 +825,7 @@ pub(crate) struct BlastCompositionWorkspace {
 }
 
 impl BlastCompositionWorkspace {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1271-1332
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1271-1332
     // ```c
     // Blast_CompositionWorkspace * Blast_CompositionWorkspaceNew(void)
     // int Blast_CompositionWorkspaceInit(Blast_CompositionWorkspace * NRrecord,
@@ -850,7 +850,7 @@ impl BlastCompositionWorkspace {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1316-1331
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1316-1331
     // ```c
     // int
     // Blast_CompositionWorkspaceInit(Blast_CompositionWorkspace * NRrecord,
@@ -869,7 +869,7 @@ impl BlastCompositionWorkspace {
     //     }
     // }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1406-1416
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1406-1416
     // ```c
     //     for (j = 0;  j < COMPO_NUM_TRUE_AA;  j++) {
     //         col_sums[j] = 0.0;
@@ -909,7 +909,7 @@ impl BlastCompositionWorkspace {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1025-1151
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1025-1151
 // ```c
 // s_ScalePSSM(...); s_ScaleSquareMatrix(...);
 // ```
@@ -930,7 +930,7 @@ impl AdjustedProteinMatrix {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1414-1530
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1414-1530
 // ```c
 // int Blast_AdjustScores(..., EMatrixAdjustRule *matrix_adjust_rule, ...,
 //                        double *pvalueForThisPair, int compositionTestIndex,
@@ -944,7 +944,7 @@ pub struct BlastAdjustScoresResult {
     pub lambda_ratio: f64,
 }
 
-// NCBI c++/src/algo/blast/composition_adjustment/composition_adjustment.c:61,1204-1248:
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:61,1204-1248:
 // static const int kCompositionMargin = 20;
 // left = start; for (i = left; i > 0; i--) if (subject_data[i-1] == eStopChar)
 //     { if (i + kCompositionMargin < left) left = i + kCompositionMargin; break; }
@@ -982,7 +982,7 @@ pub(crate) fn blast_get_composition_range(
     Ok((left, right))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1170-1194
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1170-1194
 // ```c
 // void Blast_ReadAaComposition(Blast_AminoAcidComposition * composition,
 //                              int alphsize, const Uint1 * sequence, int length)
@@ -1016,14 +1016,14 @@ pub fn read_aa_composition(sequence: &[u8]) -> BlastAminoAcidComposition {
     composition
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2216-2231
 // ```c
 // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
 // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
 // Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
 //                          self->startFreqRatios, self->ungappedLambda);
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:657-660
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:657-660
 // ```c
 //     stdFreqRatios = _PSIMatrixFrequencyRatiosNew(matrixName);
 //     if (stdFreqRatios == NULL) {
@@ -1057,7 +1057,7 @@ pub fn build_matrix_info(matrix: ScoringMatrix, ungapped_lambda: f64) -> Result<
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:31-48
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:31-48
 // ```c
 // double ** Nlm_DenseMatrixNew(int nrows, int ncols)
 // ```
@@ -1065,7 +1065,7 @@ fn dense_matrix_new(nrows: usize, ncols: usize) -> Vec<Vec<f64>> {
     vec![vec![0.0; ncols]; nrows]
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:52-74
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:52-74
 // ```c
 // double ** Nlm_LtriangMatrixNew(int n)
 // ```
@@ -1085,7 +1085,7 @@ const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 
 // `Nlm_FactorLtriangPosDef` with the loops interchanged.
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:120-143
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:120-143
 // ```c
 // void Nlm_FactorLtriangPosDef(double ** A, int n)
 // ...
@@ -1264,7 +1264,7 @@ fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
 
 // `Nlm_SolveLtriangPosDef`, forward substitution by columns.
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:147-171
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:147-171
 // ```c
 // void Nlm_SolveLtriangPosDef(double x[], int n, double ** L)
 // ...
@@ -1322,7 +1322,7 @@ fn x_solve_ltriang_pos_def_cols(x: &mut [f64], n: usize, l: &[Vec<f64>], wc: &[f
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:175-193
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:175-193
 // ```c
 // double Nlm_EuclideanNorm(const double v[], int n)
 // ```
@@ -1343,7 +1343,7 @@ fn euclidean_norm(v: &[f64]) -> f64 {
     scale * sum.sqrt()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:197-205
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:197-205
 // ```c
 // void Nlm_AddVectors(double y[], int n, double alpha, const double x[])
 // ```
@@ -1353,7 +1353,7 @@ fn add_vectors(y: &mut [f64], alpha: f64, x: &[f64]) {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:209-223
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:209-223
 // ```c
 // double Nlm_StepBound(const double x[], int n, const double step_x[], double max)
 // ```
@@ -1408,7 +1408,7 @@ fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     alpha
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:401-415
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:401-415
 // ```c
 // void Blast_FreqRatioToScore(double ** matrix, int rows, int cols, double Lambda)
 // ```
@@ -1429,7 +1429,7 @@ fn freq_ratio_to_score_square(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
 // ```c
 // void Blast_CalcLambdaFullPrecision(double * plambda, int *piterations,
 //                                    double **score, int alphsize,
@@ -1473,7 +1473,7 @@ fn calc_lambda_full_precision_from_scores(
 
     let mut k = 0usize;
     while k < K_LAMBDA_ITERATION_LIMIT {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:266
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:266
         // ```c
         // double fold = f;            /* previous value of f */
         // ```
@@ -1519,7 +1519,7 @@ fn calc_lambda_full_precision_from_scores(
             x = (left + right) / 2.0;
             break;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:311-330
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:311-330
         // ```c
         // if ((was_newton && fabs(f) > .9 * fabs(fold)) || slope >= 0) {
         //     x = (left + right)/2;
@@ -1560,7 +1560,7 @@ fn calc_lambda_full_precision_from_scores(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:136-147
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:136-147
 // ```c
 // double Blast_GetRelativeEntropy(const double A[], const double B[])
 // {
@@ -1591,7 +1591,7 @@ pub fn blast_get_relative_entropy(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:89-107
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:89-107
 // ```c
 // void Blast_ApplyPseudocounts(double * probs20, int number_of_observations,
 //                              const double * background_probs20, int pseudocounts)
@@ -1615,7 +1615,7 @@ fn apply_pseudocounts(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:428-441
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:428-441
 // ```c
 // static void s_GatherLetterProbs(double * outputLetterProbs,
 //                                 const double * inputLetterProbs, int alphsize)
@@ -1631,7 +1631,7 @@ fn gather_letter_probs(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:444-458
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:444-458
 // ```c
 // static void s_UnpackLetterProbs(double std_probs[], int alphsize, const double probs[])
 // ```
@@ -1648,7 +1648,7 @@ fn unpack_letter_probs(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:467-478
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:467-478
 // ```c
 // static void s_SetPairAmbigProbsToSum(double probs[], int alphsize)
 // ```
@@ -1658,7 +1658,7 @@ fn set_pair_ambig_probs_to_sum(probs: &mut [f64; COMPO_LARGEST_ALPHABET]) {
     probs[E_JCHAR] = probs[E_ICHAR] + probs[E_LCHAR];
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:538-604
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:538-604
 // ```c
 // void Blast_TrueAaToStdTargetFreqs(double ** StdFreq, int StdAlphsize, double ** freq)
 // ```
@@ -1699,7 +1699,7 @@ fn true_aa_to_std_target_freqs(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:607-639
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:607-639
 // ```c
 // static double s_CalcAvgScore(...)
 // static double s_CalcXScore(...)
@@ -1732,7 +1732,7 @@ fn calc_x_score(
     score.min(K_MAXIMUM_X_SCORE)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:708-711
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:708-711
 // ```c
 // static long Nint(double x)
 // {
@@ -1742,7 +1742,7 @@ fn nint(x: f64) -> i32 {
     (x + if x >= 0.0 { 0.5 } else { -0.5 }) as i32
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:648-690
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:648-690
 // ```c
 // static void s_SetXUOScores(double ** M, int alphsize, ...)
 // ```
@@ -1778,7 +1778,7 @@ fn set_xuo_scores(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:701-734
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:701-734
 // ```c
 // static long Nint(double x)
 // static void s_RoundScoreMatrix(int **matrix, int rows, int cols, double **floatScoreMatrix)
@@ -1799,7 +1799,7 @@ fn round_score_matrix(
     matrix
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:945-958
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:945-958
 // ```c
 // void Blast_Int4MatrixFromFreq(int **matrix, int alphsize,
 //                               double ** freq, double Lambda)
@@ -1823,7 +1823,7 @@ fn int4_matrix_from_freq(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:760-793
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:760-793
 // ```c
 // static int s_ScoresStdAlphabet(int ** Matrix, int Alphsize, double ** target_freq,
 //                                int ** StartMatrix, const double row_prob[],
@@ -1994,7 +1994,7 @@ pub fn x_adjmemo_print_stats() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:95-126
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:95-126
 // ```c
 // static void ScaledSymmetricProductA(double ** W, const double diagonal[], int alphsize)
 // ```
@@ -2020,7 +2020,7 @@ fn scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: us
 
 // `ScaledSymmetricProductA` with register accumulators.
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:108-125
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:108-125
 // ```c
 // for (i = 0;  i < alphsize;  i++) {
 //     for (j = 0;  j < alphsize;  j++) {
@@ -2093,14 +2093,14 @@ fn x_scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: 
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:138-165
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:138-165
 // ```c
 // static void MultiplyByA(double beta, double y[], int alphsize, double alpha, const double x[])
 // ```
 // The same additions per element in the same order, arranged so that independent elements
 // advance together.
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:155-164
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:155-164
 // ```c
 // for (i = 0;  i < alphsize;  i++) {
 //     for (j = 0;  j < alphsize;  j++) {
@@ -2179,14 +2179,14 @@ fn multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:176-205
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:176-205
 // ```c
 // static void MultiplyByAtranspose(double beta, double y[], int alphsize,
 //                                  double alpha, const double x[])
 // ```
 // The same two additions per element.
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:195-204
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:195-204
 // ```c
 // for (i = 0;  i < alphsize;  i++) {
 //     for (j = 0;  j < alphsize;  j++) {
@@ -2239,7 +2239,7 @@ fn multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f6
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:216-231
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:216-231
 // ```c
 // static void ResidualsLinearConstraints(...)
 // ```
@@ -2257,7 +2257,7 @@ fn residuals_linear_constraints(
     multiply_by_a(1.0, ra, alphsize, -1.0, x);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:241-262
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:241-262
 // ```c
 // static void DualResiduals(double resids_x[], int alphsize, double ** grads,
 //                           const double z[], int constrain_rel_entropy)
@@ -2282,7 +2282,7 @@ fn dual_residuals(
     multiply_by_at(1.0, resids_x, alphsize, 1.0, z);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:282-323
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:282-323
 // ```c
 // static void CalculateResiduals(...)
 // ```
@@ -2311,7 +2311,7 @@ fn calculate_residuals(
     (norm_resids_x * norm_resids_x + norm_resids_z * norm_resids_z).sqrt()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:336-344
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:336-344
 // ```c
 // typedef struct ReNewtonSystem {
 //     ...
@@ -2328,7 +2328,7 @@ struct ReNewtonSystem {
     grad_re: Vec<f64>,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:376-394
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:376-394
 // ```c
 // static ReNewtonSystem * ReNewtonSystemNew(int alphsize)
 // ```
@@ -2344,7 +2344,7 @@ fn re_newton_system_new(alphsize: usize) -> ReNewtonSystem {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:408-470
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:408-470
 // ```c
 // static void FactorReNewtonSystem(...)
 // ```
@@ -2420,7 +2420,7 @@ fn factor_re_newton_system(
     x_factor_ltriang_pos_def_cols(&mut newton_system.w, m, &mut newton_system.x_wc);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:480-524
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:480-524
 // ```c
 // static void SolveReNewtonSystem(double x[], double z[],
 //                                 const ReNewtonSystem * newton_system, double workspace[])
@@ -2478,7 +2478,7 @@ fn solve_re_newton_system(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:538-565
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:538-565
 // ```c
 // static void EvaluateReFunctions(...)
 // ```
@@ -2505,7 +2505,7 @@ fn evaluate_re_functions(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:578-598
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:578-598
 // ```c
 // static void ComputeScoresFromProbs(double scores[], int alphsize, ...)
 // ```
@@ -2524,7 +2524,7 @@ fn compute_scores_from_probs(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:602-713
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:602-713
 // ```c
 // int Blast_OptimizeTargetFrequencies(...)
 // ```
@@ -2739,7 +2739,7 @@ fn optimize_target_frequencies_reference(
             add_vectors(&mut z[..m], alpha, &resids_z[..m]);
         }
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:786-792
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:786-792
     // ```c
     // converged = 0;
     // if (its <= maxits && rnorm <= tol) {
@@ -2760,7 +2760,7 @@ fn optimize_target_frequencies_reference(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1336-1408
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1336-1408
 // ```c
 // int Blast_CompositionMatrixAdj(int ** matrix, int alphsize, ...)
 // ```
@@ -2833,7 +2833,7 @@ fn composition_matrix_adjust(
     )))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/unified_pvalues.c:208-260
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/unified_pvalues.c:208-260
 // ```c
 // double Blast_CompositionPvalue(double lambda) { ... }
 // double Blast_Overall_P_Value(double p_comp, double p_alignment) { ... }
@@ -2863,7 +2863,7 @@ pub fn blast_overall_p_value(p_comp: f64, p_alignment: f64) -> f64 {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1414-1530
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1414-1530
 // ```c
 // int Blast_AdjustScores(...);
 // ```
@@ -2878,7 +2878,7 @@ pub(crate) fn blast_adjust_scores(
     workspace: &mut BlastCompositionWorkspace,
     calc_lambda: fn(&[f64], i32, i32, f64) -> Result<f64>,
 ) -> Result<Option<BlastAdjustScoresResult>> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1433-1439
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1433-1439
     // ```c
     // if (query_composition->numTrueAminoAcids == 0 ||
     //     subject_composition->numTrueAminoAcids == 0) {
@@ -2945,7 +2945,7 @@ pub(crate) fn blast_adjust_scores(
             K_FIXED_RE_BLOSUM62,
             workspace,
         )? {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1509-1517
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1509-1517
             // ```c
             // *ratioToPassBack = 1.0;
             // if (status <= 0)
@@ -3118,7 +3118,7 @@ pub(crate) fn x_newton_input(
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1444-1481
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1444-1481
 // ```c
 // if (compositionTestIndex > 0) {
 //     ...
@@ -3151,7 +3151,7 @@ fn compute_pair_composition_pvalue(
     Ok(blast_composition_pvalue(lambda_for_pair))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1105-1155
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1105-1155
 // ```c
 // int
 // Blast_CompositionBasedStats(...,
@@ -3285,7 +3285,7 @@ fn high_pair_either_seq(
         || high_pair_frequencies(match_prob, match_length)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:200-204
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:200-204
 // ```c
 //     angle =
 //         acos((D_m_mat * D_m_mat + D_q_mat * D_q_mat -
@@ -3329,11 +3329,11 @@ fn blast_choose_matrix_adjust_rule(
             Ok(EMatrixAdjustRule::UserSpecifiedRelEntropy)
         }
         BlastCompoAdjustMode::CompositionMatrixAdjust => {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:188
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:188
             // ```c
             //     p_matrix = Blast_GetMatrixBackgroundFreq(matrix_name);
             // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1386-1390
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1386-1390
             // ```c
             //     } else {
             //         fprintf(stderr, "matrix %s is not supported "
@@ -3363,7 +3363,7 @@ fn blast_choose_matrix_adjust_rule(
             let len_large = (length1.max(length2)) as f64;
             let len_small = (length1.min(length2)) as f64;
             let _ = corr_factor;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:215-225
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:215-225
             // ```c
             //     if (s_HighPairEitherSeq(P_query, Len_query, P_match, Len_match)) {
             //         which_rule = eUserSpecifiedRelEntropy;
@@ -3393,7 +3393,7 @@ mod tests {
     use super::*;
     use crate::core::composition_adjustment::redo_alignment::redo_calc_lambda;
 
-    // NCBI composition_adjustment/composition_adjustment.c:1204-1248:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1204-1248:
     // if (i + kCompositionMargin < left) left = i + kCompositionMargin;
     // if (i - kCompositionMargin > right) right = i - kCompositionMargin;
     #[test]
@@ -3420,7 +3420,7 @@ mod tests {
         );
     }
 
-    // NCBI composition_adjustment/redo_alignment.c:1234-1254;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1234-1254;
     // composition_adjustment/composition_adjustment.c:1414-1530:
     // Blast_AdjustScores(matrix, query_composition, query.length,
     //                    &subject_composition, subject.length,
@@ -3439,7 +3439,7 @@ mod tests {
             .unwrap();
             let rows: Vec<_> = trace.lines().collect();
             assert_eq!(rows.len() % 6, 0);
-            // NCBI core/blast_kappa.c:2229-2236:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2229-2236:
             // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
             // Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
             //                          self->startFreqRatios, self->ungappedLambda);
@@ -4002,7 +4002,7 @@ mod tests {
         assert!(adjusted.is_none());
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:682-690
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:682-690
     // ```c
     // M[eBchar][eXchar] = s_CalcXScore(M[eBchar], alphsize, 1, col_probs);
     // M[eXchar][eBchar] = s_CalcXScore(&M[0][eBchar], alphsize, cols, row_probs);
@@ -4033,7 +4033,7 @@ mod tests {
     /// NCBI's `Blast_CalcLambdaFullPrecision`, statement by statement. The
     /// third value counts the Newton steps it refused because f did not fall
     /// below 0.9 of the previous iteration's f (`fold`).
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
     // ```c
     // for (k = 0;  k < max_iterations;  k++) {
     //     double fold = f;            /* previous value of f */

@@ -3766,7 +3766,7 @@ impl XFlatCompressedLookup {
 
             // index = preshift + compressed_char >= 0: both terms are (from) non-negative letters.
             if BRANCH_FREE {
-                // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+                // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
                 let ix = index as usize;
                 let bit = (pv[ix >> pv_array_bts] >> (ix & PV_ARRAY_MASK)) & 1;
                 // SAFETY: each offset tested adds at most one to `listed`, so with `s0` the offset

@@ -49,20 +49,20 @@ pub struct UngappedHit {
     pub s_aa_end: u32,
     /// NCBI `BlastHSP::query.gapped_start` copied from
     /// `init_hsp->offsets.qs_offsets.q_off`.
-    /// Reference: blast_gapalign.c:4756-4768, blast_extend.c:351-370.
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768, c++/src/algo/blast/core/blast_extend.c:351-370.
     pub q_seed_off: u32,
     /// NCBI `BlastHSP::subject.gapped_start` copied from
     /// `init_hsp->offsets.qs_offsets.s_off`.
-    /// Reference: blast_gapalign.c:4756-4768, blast_extend.c:351-370.
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768, c++/src/algo/blast/core/blast_extend.c:351-370.
     pub s_seed_off: u32,
     pub q_orig_len: u32,
     pub s_orig_len: u32,
     pub raw_score: i32,
     pub e_value: f64,
     /// Number of identical residues (for Blast_HSPTest)
-    /// Reference: blast_hits.c:Blast_HSPGetNumIdentitiesAndPositives
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:Blast_HSPGetNumIdentitiesAndPositives
     pub num_ident: u32,
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1381
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
     // ```c
     // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
     // {
@@ -75,15 +75,15 @@ pub struct UngappedHit {
     /// returns equality, so no biological tie-break absent from NCBI is added.
     pub hsp_list_order: u32,
     /// NCBI ELinkOrderingMethod: 0 = small gaps, 1 = large gaps
-    /// Reference: link_hsps.c line 973: H->ordering_method = ordering_method;
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c line 973: H->ordering_method = ordering_method;
     pub ordering_method: u8,
     /// NCBI: H->linked_set - TRUE if this HSP is part of a multi-HSP chain
-    /// Reference: link_hsps.c lines 959-962, 972
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c lines 959-962, 972
     pub linked_set: bool,
     /// NCBI: H->start_of_chain - TRUE if this HSP is the head of a chain
-    /// Reference: link_hsps.c line 955
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c line 955
     pub start_of_chain: bool,
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:63-65
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-65
     // ```c
     // typedef struct BlastHSPLink {
     //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
@@ -92,7 +92,7 @@ pub struct UngappedHit {
     /// Stable wrapper id used to preserve `hsp_link.link[ordering_method]`
     /// across the final translated-query qsort/replay phase.
     pub link_id: u32,
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1022-1028
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1022-1028
     // ```c
     // /* If the HSP has no "link" connect the "next", otherwise follow the "link"
     //    chain down, connecting them with "next" and "prev". */
@@ -101,14 +101,14 @@ pub struct UngappedHit {
     // ```
     /// Stable id of the next HSP in the selected chain, if any.
     pub chain_next_link_id: Option<u32>,
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:63-66
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-66
     // ```c
     // typedef struct BlastHSPLink {
     //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
     //                                                choice of HSP to link with */
     //    Int2 num[eOrderingMethods]; /**< number of HSP in the ordering. */
     // ```
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1044-1045
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1044-1045
     // ```c
     // 			/* The first one has the number of links correct. */
     // 			num_links = H->hsp_link.num[ordering_method];
@@ -116,7 +116,7 @@ pub struct UngappedHit {
     /// `hsp_link.num[ordering_method]` of a chain head when its chain is selected (the
     /// number of HSPs in the chain). Read only for chain heads.
     pub hsp_link_num: i16,
-    // NCBI reference: c++/include/algo/blast/core/blast_hits.h:135-138
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:135-138
     // ```c
     //    Int4 num;             /**< How many HSP's are linked together for sum
     //                               statistics evaluation? If unset (0), this HSP is

@@ -371,7 +371,7 @@ pub(super) fn write_tblastn_tabular(
             .iter()
             .map(|list| list.hsps.hsps.len())
             .sum();
-        // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208: a skipped search has a
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208: a skipped search has a
         // null alignment set, so outfmt 7 has no count line (`write_tabular`).
         table.query_header(
             &mut buf,
@@ -481,7 +481,7 @@ pub(super) fn write_tblastn_tabular(
                 }
                 let hsp = &linked.hsp;
                 let frame = i32::from(hsp.frame);
-                // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide
                 // coordinates of a translated frame, descending on a minus frame (the default
                 // row's, `write_tabular`).
                 let (s_start, s_end) = super::stage_e_report::subject_endpoints(hsp, subject_len);
@@ -639,7 +639,7 @@ pub(super) fn write_tblastn_tabular(
 mod tests {
     use super::*;
 
-    // NCBI blast_format.cpp:770-786: every tabular kind goes to `CBlastTabularInfo`; LOSAT's
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786: every tabular kind goes to `CBlastTabularInfo`; LOSAT's
     // default 6 and 7 (the `std` fields with a tab) keep `stage_e_report::write_tabular`.
     #[test]
     fn only_a_field_list_a_delimiter_and_10_and_20_take_the_shared_writer() {

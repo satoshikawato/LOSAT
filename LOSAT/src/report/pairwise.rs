@@ -2,7 +2,7 @@
 //!
 //! This module implements the traditional BLAST pairwise alignment output format.
 //!
-//! Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
+//! NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp
 
 use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, format_total_bitscore_ncbi};
 use super::serial::asn_text::itoa_i32;
@@ -247,11 +247,11 @@ pub struct PairwiseHit {
     pub subject_length: Option<usize>,
     /// Subject description/title
     pub subject_title: Option<String>,
-    // NCBI c++/src/algo/blast/core/blast_kappa.c:331-342;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:331-342;
     // c++/src/objtools/align_format/showalign.cpp:3599-3604:
     // eCompoScaleOldMatrix => Method 1; other adjusted matrices => Method 2.
     pub comp_adjust_method: Option<u8>,
-    // NCBI c++/src/objtools/align_format/showalign.cpp:3595-3598:
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3595-3598:
     // if (aln_vec_info->sum_n > 0) out << "(" << sum_n << ")";
     pub sum_n: Option<i32>,
     /// The columns (0-based) of `subject_seq` whose letter is a stored gap character (`-`,
@@ -469,7 +469,7 @@ impl From<Hit> for PairwiseHit {
 
 /// NCBI BLASTP pairwise per-query ancillary data.
 ///
-/// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_results.cpp:72-115
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115
 /// ```c
 /// CBlastAncillaryData::CBlastAncillaryData(EBlastProgramType program_type,
 ///                     int query_number,
@@ -498,7 +498,7 @@ pub struct BlastpPairwiseQuery {
 
 /// NCBI BLASTP pairwise run-level footer/header data.
 ///
-/// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:2248-2285
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2248-2285
 /// ```c
 /// if ( !m_IsBl2Seq || m_IsDbScan) {
 ///     CBlastFormatUtil::PrintDbReport(m_DbInfo, kFormatLineLength,
@@ -645,7 +645,7 @@ impl PairwiseDatabase {
 
 /// Write database/subject information header
 ///
-/// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp
 ///
 /// Format:
 /// ```text
@@ -658,7 +658,7 @@ pub fn write_subject_header<W: Write>(
     subject_title: Option<&[u8]>,
     subject_length: Option<usize>,
 ) -> io::Result<()> {
-    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2385-2388,2461-2471,340-359
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2385-2388,2461-2471,340-359
     // out << ">"; if (out.tellp() > 1L) out << " "; s_WrapOutputLine(out, alnDispParams->title);
     // `s_WrapOutputLine` counts and writes bytes (`str[i]`, `isspace((unsigned char)
     // str[i])`), so a line can end inside a UTF-8 sequence.
@@ -686,7 +686,7 @@ pub fn write_subject_header<W: Write>(
 /// and what follows it). `probe` marks the heading and each HSP without changing the
 /// written bytes.
 ///
-/// NCBI reference: c++/src/objtools/align_format/showalign.cpp:3613-3632
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
 /// ```c++
 ///     if(show_defline) {
 /// 		...
@@ -695,7 +695,7 @@ pub fn write_subject_header<W: Write>(
 /// 		...
 /// 			out << "\n";
 /// ```
-/// NCBI reference: c++/src/objtools/align_format/showalign.cpp:2273
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
 /// ```c++
 ///             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
 /// ```
@@ -706,7 +706,7 @@ pub fn write_subject_header<W: Write>(
 /// `lcl|Subject_N` is `Subject_N`, N being the subject's position in the input, which is
 /// `s_idx + 1` (every subject record keeps its index). The probe gets an empty heading.
 ///
-/// NCBI reference: c++/src/objtools/align_format/showalign.cpp:1950-1981
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1950-1981
 /// ```c++
 ///                 try{
 ///                     const CBioseq_Handle& handle = avRef->GetBioseqHandle(1);
@@ -876,7 +876,7 @@ fn write_database_subject_alignments_part<W: Write>(
     Ok(())
 }
 
-/// NCBI's line in place of an alignment whose heading it cannot make (showalign.cpp:1976-1981,
+/// NCBI's line in place of an alignment whose heading it cannot make (c++/src/objtools/align_format/showalign.cpp:1976-1981,
 /// quoted at `write_subject_alignments_part`): of a database subject (`DatabaseHeading::skipped_id`)
 /// and of a `-subject` record (`Subject_N`), `id` the Seq-id text of the Seq-align's subject.
 fn write_skipped_alignment<W: Write>(writer: &mut W, id: &[u8]) -> io::Result<()> {
@@ -956,7 +956,7 @@ impl<'a> DatabaseHeading<'a> {
             if let Some(id) = source.undecodable_id() {
                 return Ok(Some(id.to_vec()));
             }
-            // NCBI makes an empty title from the Bioseq's source (`showalign.cpp:2250-2255`,
+            // NCBI makes an empty title from the Bioseq's source (`c++/src/objtools/align_format/showalign.cpp:2250-2255`,
             // quoted at `ParsedSubject::generated_title_fetched`; LOSAT refuses a source that it
             // refuses before the report, `StoredTitle::check_shown_source`).
             let facts = super::defline::BioseqFacts::of_source(source.name().ok().flatten());
@@ -1050,7 +1050,7 @@ fn expect_label(sum_n: Option<i32>) -> String {
 
 /// Write HSP score information
 ///
-/// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp x_DisplayAlignInfo()
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp x_DisplayAlignInfo()
 ///
 /// Format:
 /// ```text
@@ -1082,7 +1082,7 @@ pub fn write_hsp_info<W: Write>(
     let expect = expect_label(hit.sum_n);
     // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
     if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
-        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3600-3603
         // ```c
         //             if (aln_vec_info->comp_adj_method == 1)
         //             out << ", Method: Composition-based stats.";
@@ -1174,7 +1174,7 @@ pub fn write_hsp_info<W: Write>(
             gap_pct
         )?;
     } else if config.program == "blastn" {
-        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1794-1805,2131-2141
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1794-1805,2131-2141
         // ```c++
         //     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
         //                        aln_vec_info->alnRowInfo->sequence[1],
@@ -1203,7 +1203,7 @@ pub fn write_hsp_info<W: Write>(
             .chain(subject_row)
             .filter(|&&residue| residue == b'-')
             .count();
-        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:310-320
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:310-320
         // ```c++
         //     out<<" Identities = "<<match<<"/"<<(aln_stop+1)<<" ("<<identity<<"%"<<")";
         //     ...
@@ -1224,7 +1224,7 @@ pub fn write_hsp_info<W: Write>(
             columns,
             ncbi_percent_match(gaps, columns)
         )?;
-        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:4011-4018
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4011-4018
         // ```c++
         //         s_DisplayIdentityInfo(out,
         //                               ...
@@ -1267,7 +1267,7 @@ pub fn write_hsp_info<W: Write>(
 
 /// Write alignment rows
 ///
-/// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp x_DisplayRowData()
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp x_DisplayRowData()
 ///
 /// Format:
 /// ```text
@@ -1332,14 +1332,14 @@ fn write_alignment_with_sequences<W: Write>(
     let q_chars: Vec<char> = query_seq.chars().collect();
     let s_chars: Vec<char> = subject_seq.chars().collect();
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/showalign.cpp:96-98
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:96-98
     // ```c
     // static const int k_IdStartMargin = 2;
     // static const int k_SeqStopMargin = 2;
     // static const int k_StartSequenceMargin = 2;
     // ```
     //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1600-1625
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1600-1625
     // ```c
     // CAlignFormatUtil::AddSpace(out, alnRoInfo->maxIdLen-alnRoInfo->seqidArray[row].size()
     //                            + k_IdStartMargin);
@@ -1350,7 +1350,7 @@ fn write_alignment_with_sequences<W: Write>(
     // out << end;
     // ```
     let max_start_len = coordinate_width(hit);
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1570-1573
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1570-1573
     // ```c++
     //     if (m_Program == "blastn" || m_Program == "megablast") {
     //         display.SetMiddleLineStyle(CDisplaySeqalign::eBar);
@@ -1362,7 +1362,7 @@ fn write_alignment_with_sequences<W: Write>(
     let [query_span, subject_span] = [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
         .map(|(row, stored)| end_gap_span(row, stored));
 
-    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2155
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2155
     // ```c++
     //         if(sequence_standard[i]==sequence[i]){
     //             if(m_AlignOption & eShowMiddleLine){
@@ -1916,7 +1916,7 @@ pub(crate) fn end_gap_span<T: Copy + PartialEq + From<u8>>(
 
 /// Check if two amino acids are a positive match (similar)
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:2122-2149
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2122-2149
 /// ```c
 /// if(sequence_standard[i]==sequence[i]){
 ///     match ++;
@@ -1960,7 +1960,7 @@ fn is_positive_match(a: char, b: char, matrix: ScoringMatrix) -> bool {
     protein_display_score(matrix, a as u8, b as u8) > 0
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:75-83
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:75-83
 // ```c
 // static const char*  kHeader = "Sequences producing significant alignments:";
 // ...
@@ -2022,7 +2022,7 @@ fn digit_count(value: usize) -> usize {
 
 /// Width of the start-coordinate column of an alignment block.
 ///
-/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1366-1367
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1366-1367
 /// ```c++
 ///         size_t maxCood=max<size_t>(m_AV->GetSeqStart(row), m_AV->GetSeqStop(row));
 ///         maxStartLen = max<size_t>(NStr::SizetToString(maxCood).size(), maxStartLen);
@@ -2057,7 +2057,7 @@ fn ensure_trailing_period(text: &str) -> String {
     }
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:584-603
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:584-603
 // ```c
 // if (gapped) {
 //     out << "Gapped" << "\n";
@@ -2151,7 +2151,7 @@ fn write_blastp_pairwise_intro<W: Write>(
     )
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blastfmtutil.cpp:125-138
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:125-138
 // ```c
 // string dbString = (html) ? "<b>Database:</b> " : "Database: ";
 // str << dbString << definition_line << endl;
@@ -2160,7 +2160,7 @@ fn write_blastp_pairwise_intro<W: Write>(
 //     << " sequences; " << NStr::UInt8ToString(nTotalLength,NStr::fWithCommas)
 //     << " total letters" << endl;
 // ```
-// NCBI reference: c++/src/corelib/ncbistr.cpp:5088-5340 (WrapIt, fWrap_FlatFile)
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5088-5340 (WrapIt, fWrap_FlatFile)
 // enum EScore { eForced, ePunct, eComma, eSpace, eNewline };
 // if (score >= best_score && score_pos > pos0) { best_pos = score_pos; best_score = score; }
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:288-293
@@ -2213,7 +2213,7 @@ pub(crate) fn write_flatfile_wrapped_with<W: Write + ?Sized>(
 ) -> io::Result<()> {
     let bytes = text;
     let mut pos = 0;
-    // NCBI reference: c++/src/corelib/ncbistr.cpp:5100,5153-5157,5137
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5100,5153-5157,5137
     // SIZE_TYPE pos=0,len=str.size(),nl_pos=0; if(nl_pos<=pos) nl_pos=str.find('\n',pos);
     // bool thisPartHasBackspace = false;
     let mut newline = 0;
@@ -2271,7 +2271,7 @@ pub(crate) fn write_flatfile_wrapped_with<W: Write + ?Sized>(
                 scan += 1;
                 column += 1;
             }
-            // NCBI reference: c++/src/corelib/ncbistr.cpp:5260-5266,5277-5300
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5260-5266,5277-5300
             // if (best_pos != len) { best_pos=len; thisPartHasBackspace=true; }
             // if (thisPartHasBackspace) { /* eat backspaces and preceding characters */ }
             if best_score != 4 && column <= width && best != bytes.len() {
@@ -2335,7 +2335,7 @@ fn last_break(bytes: &[u8], pos: usize, end: usize) -> (usize, i32) {
 }
 
 /// The outfmt 0 prolog of blastp (the version, the references and the database), which
-/// NCBI writes before it reads the first query batch (blast_format.cpp, `PrintProlog`).
+/// NCBI writes before it reads the first query batch (c++/src/algo/blast/format/blast_format.cpp, `PrintProlog`).
 pub fn write_blastp_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
@@ -2575,7 +2575,7 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
     query_title: &[u8],
     query_length: usize,
 ) -> io::Result<()> {
-    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:732-734
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
     // ```c++
     //     string all_id_str = GetSeqIdString(cbs, believe_query);
     //     all_id_str += " ";
@@ -2591,14 +2591,14 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
     crate::cli::insert(writer, b"\n")
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1510-1514
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
 // ```c
 // m_Outfile << "\n\n"
 //           << "***** " << CBlastFormatUtil::kNoHitsFound << " *****" << "\n"
 //           << "\n\n";
 // ```
 fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1510-1514
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
     // m_Outfile << "\n\n" << "***** " << kNoHitsFound << " *****\n\n\n";
     writeln!(writer)?;
     writeln!(writer)?;
@@ -2608,7 +2608,7 @@ fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
     Ok(())
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:445-477
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-477
 // ```c
 // m_Outfile << NcbiEndl;
 // if (kbp_ungap) {
@@ -2622,13 +2622,13 @@ fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
 // m_Outfile << "Effective search space used: "
 //           << summary.GetSearchSpace() << "\n";
 // ```
-// NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
 // if (status != 0) {
 //     pair<double, double> tmp_pair(-1.0, -1.0);
 //     CRef<CBlastAncillaryData> tmp_ancillary_data(
 //         new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
 // }
-// NCBI c++/src/algo/blast/format/blast_format.cpp:451-478 and
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:451-478 and
 // c++/src/objtools/align_format/align_format_util.cpp:581-613:
 // PrintKAParameters emits both -1 Karlin blocks with no Gumbel columns.
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:477-478
@@ -2666,7 +2666,7 @@ fn write_tblastn_unsearched_query_footer_spacing<W: Write>(
     Ok(())
 }
 
-// NCBI c++/src/algo/blast/format/blast_format.cpp:445-478:
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478:
 // if (kbp_ungap) CBlastFormatUtil::PrintKAParameters(..., false, gbp);
 // if (kbp_gap) CBlastFormatUtil::PrintKAParameters(..., true, gbp);
 // m_Outfile << "Effective search space used: " << summary.GetSearchSpace() << "\n";
@@ -2764,7 +2764,7 @@ fn write_matrix_line(writer: &mut impl Write, matrix_name: Option<&str>) -> io::
     writeln!(writer, "{name}")
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:503-579
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:503-579
 // ```c
 // out << "  Database: ";
 // ...
@@ -2774,7 +2774,7 @@ fn write_matrix_line(writer: &mut impl Write, matrix_name: Option<&str>) -> io::
 // out << NStr::IntToString(dbinfo->number_seqs, NStr::fWithCommas) << "\n";
 // ```
 //
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:2258-2285
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2258-2285
 // ```c
 // m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
 // ...
@@ -2830,7 +2830,7 @@ fn write_final_database_report<W: Write>(
     database_num_sequences: i64,
     database_total_letters: i64,
 ) -> io::Result<()> {
-    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:543-544
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:543-544
     // out << "  Database: "; x_WrapOutputLine(dbinfo->definition, line_length, out);
     write!(writer, "  Database: ")?;
     write_flatfile_wrapped(writer, ensure_trailing_period(database_name).as_bytes(), 68)?;
@@ -2850,7 +2850,7 @@ fn write_final_database_report<W: Write>(
     writeln!(writer)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:372-424
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424
 // ```c
 // CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML, m_Outfile);
 // ...
@@ -2859,7 +2859,7 @@ fn write_final_database_report<W: Write>(
 // CBlastFormatUtil::BlastPrintReference(..., CReference::eCompBasedStats, ...);
 // ```
 //
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1520-1589
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
 // ```c
 // if ( (!m_IsBl2Seq || m_IsDbScan) && !(m_DisableKAStats || kIsGlobal) ) {
 //     x_DisplayDeflines(aln_set, itr_num, prev_seqids);
@@ -2958,7 +2958,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c++
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // ```
@@ -3000,7 +3000,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
         warnings.after_last_query(queries.len(), writer)?;
     }
 
-    // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:294-295
     // ```c++
     //         BLAST_PROF_START( APP.POST );
     //         formatter.PrintEpilog(opt);
@@ -3453,7 +3453,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         if self.config.program == "psiblast" {
             writeln!(writer, "Results from round 1")?;
         }
-        // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491: m_Outfile << "\n\n";
         writeln!(writer)?;
         writeln!(writer)?;
         // The title's bytes by query index (`query_name` is BLASTX's).
@@ -3464,7 +3464,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         write_blastp_query_header(writer, query_title, query.query_length)?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
-            // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
             // if (m_PrelimSearch->CheckInternalData() != 0)
             //     new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0);
             // The all-invalid batch uses -1 sentinel blocks. An invalid query
@@ -3490,7 +3490,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             }
             return Ok(());
         };
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:606-611
         // ```c++
         //     CShowBlastDefline showdef(*aln_set, *m_Scope,
         //                               defline_length == -1 ? kFormatLineLength:defline_length,
@@ -3520,7 +3520,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             },
             read,
         )?;
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
         // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
         writeln!(writer)
     }
@@ -3617,7 +3617,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
 /// One BLASTN query of the pairwise report (NCBI `CBlastAncillaryData` and the query's
 /// validity).
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_results.cpp:82-104
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-104
 /// ```c++
 ///     // find the first valid context corresponding to this query
 ///     ...
@@ -3686,7 +3686,7 @@ pub struct BlastnPairwiseReport {
 // (`write_subject_summary_table_with_sum_n`), which differ only in the line that names a
 // subject (`label_of`).
 //
-// NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1004-1011
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1004-1011
 // ```c++
 // void CShowBlastDefline::DisplayBlastDefline(CNcbiOstream & out)
 // {
@@ -3694,7 +3694,7 @@ pub struct BlastnPairwiseReport {
 //     ...
 //     x_DisplayDefline(out);
 // ```
-// NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1100-1142
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1100-1142
 // ```c++
 //         if(!is_first_aln && !(subid->Match(*previous_id))) {
 //             SScoreInfo* sci = x_GetScoreInfoForTable(hit, num_align);
@@ -3722,7 +3722,7 @@ pub struct BlastnPairwiseReport {
 //             m_MaxScoreLen = sci->total_bit_string.size();
 //         }
 // ```
-// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:4285-4310
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4285-4310
 // ```c++
 //         total_bits += bits;
 //     ...
@@ -3745,13 +3745,13 @@ pub struct BlastnPairwiseReport {
 // subject's first HSP (the first by E-value) can have a lower one: sum statistics give a
 // linked set of lower scores a lower E-value than a single HSP of a higher score.
 //
-// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:4229-4230,4259
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4229-4230,4259
 // ```c++
 //     seqSetInfo->sum_n = sum_n == -1 ? 1:sum_n ;
 //     ...
 //     seqSetInfo = GetSeqAlignCalcParams(*(aln.Get().front()));
 // ```
-// NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1061,1118-1120
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1061,1118-1120
 // ```c++
 //     m_MaxSumNLen =1;
 //     ...
@@ -3856,7 +3856,7 @@ fn write_description_table<W: Write>(
     mut label_of: impl FnMut(u32) -> DescriptionLabel,
     read: super::query_warnings::SubjectReadHook<'_, W>,
 ) -> io::Result<()> {
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:513-514
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:513-514
     // ```c++
     //     if (num_descriptions_to_show == 0)
     //         flags |= CShowBlastDefline::eNoShowHeader;
@@ -3889,7 +3889,7 @@ fn write_description_table<W: Write>(
             ))
         })
         .collect();
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:1059
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1059
     // ```c
     // m_MaxScoreLen = kBits_size;
     // ```
@@ -3951,7 +3951,7 @@ fn write_description_table<W: Write>(
         "{:<69}",
         "Sequences producing significant alignments:"
     )?;
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:811-813
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:811-813
     // ```c
     // out << kBits;
     // //in case m_MaxScoreLen > kBits.size()
@@ -3962,7 +3962,7 @@ fn write_description_table<W: Write>(
         write!(writer, " {:<max_total$}  cover   ", "Score")?;
     }
     write!(writer, "Value")?;
-    // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:829-836
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:829-836
     // ```c++
     //             out << kValue;
     //             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
@@ -4032,7 +4032,7 @@ fn write_description_table<W: Write>(
             "  {:<max_evalue$}",
             format_evalue_ncbi(best.hit.e_value)
         )?;
-        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:961-965
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:961-965
         // ```c++
         //         if(m_Option & eShowSumN){
         //             out << kTwoSpaceMargin << (*iter)->sum_n;
@@ -4333,9 +4333,9 @@ fn write_blastn_description_table<W: Write>(
         show_sum_n,
         columns,
         |s_idx| {
-            // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:498
             // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
-            // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1579-1592
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1579-1592
             // ```c++
             //     sdl->defline = "Unknown";
             //     ...
@@ -4357,7 +4357,7 @@ fn write_blastn_description_table<W: Write>(
     )
 }
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:387-407
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-407
 // ```c++
 //       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
 //                                               m_Outfile);
@@ -4384,7 +4384,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
     )
 }
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:451-478
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:451-478
 // ```c++
 //     m_Outfile << NcbiEndl;
 //     if (kbp_ungap) {
@@ -4401,7 +4401,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
 //     m_Outfile << "Effective search space used: " <<
 //         summary.GetSearchSpace() << "\n";
 // ```
-// NCBI reference: c++/src/algo/blast/core/blast_setup.c:472-480
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:472-480
 // ```c
 //     if (program_number == eBlastTypeBlastn ||
 //     ...
@@ -4430,7 +4430,7 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
         writeln!(writer)?;
     }
     writeln!(writer)?;
-    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1130-1159
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1130-1159
     // ```c++
     //     if (kbp_ungap) ... PrintKAParameters(kbp_ungap->Lambda, kbp_ungap->K, kbp_ungap->H, ...,  false)
     //     if (kbp_gap) ... PrintKAParameters(..., true)   ("Gapped")
@@ -4459,7 +4459,7 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
     Ok(())
 }
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2261-2279
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2261-2279
 // ```c++
 //     if (m_Program == "blastn" || m_Program == "megablast") {
 //         m_Outfile << "\n\nMatrix: " << "blastn matrix " <<
@@ -4499,7 +4499,7 @@ fn write_blastn_final_footer<W: Write>(
         "Matrix: blastn matrix {} {}",
         report.reward, report.penalty
     )?;
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2270-2288
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2270-2288
     // ```c
     //     if (options.GetGappedMode() == true) {
     //         double gap_extension = (double) options.GetGapExtensionCost();
@@ -4545,7 +4545,7 @@ fn write_blastn_final_footer<W: Write>(
 /// and its reference, then the subjects (the subject set's name and counts, or the
 /// `Database:` lines of a database, `write_blast_database_header`).
 ///
-/// NCBI reference: c++/src/app/blast/blastn_app.cpp:258-261
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
 /// ```c
 ///         formatter.PrintProlog();
 ///
@@ -4585,7 +4585,7 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
 /// prolog comes with the first query of `queries`, the epilog with the last: the reports of
 /// consecutive ranges written in turn are the report of all of them.
 ///
-/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1589
 /// ```c++
 ///     m_Outfile << "\n\n";
 ///     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
@@ -4665,7 +4665,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
         x_pool,
     )?;
 
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:317-318
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:317-318
     // ```c
     //         BLAST_PROF_START( APP.POST );
     //         formatter.PrintEpilog(opt);
@@ -4719,7 +4719,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         read: super::query_warnings::SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1491
         // ```c++
         //     // print the preamble for this query
         //
@@ -4742,7 +4742,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             }
             return Ok(());
         };
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:606-611
         // ```c++
         //     CShowBlastDefline showdef(*aln_set, *m_Scope,
         //                               defline_length == -1 ? kFormatLineLength:defline_length,
@@ -4886,7 +4886,7 @@ fn write_anchored_section<W: Write>(
 
 /// Per-query data of the TBLASTX pairwise report.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_results.cpp:82-100
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-100
 /// ```c++
 ///     // find the first valid context corresponding to this query
 ///     for (i = 0; i < context_per_query; i++) {
@@ -4947,7 +4947,7 @@ pub struct TblastxPairwiseReport {
 /// The start of the TBLASTX report, which NCBI writes before it searches: the program and
 /// its reference, then the subjects.
 ///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:173-178
+/// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:173-178
 /// ```c
 ///         formatter.PrintProlog();
 ///
@@ -4977,7 +4977,7 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
     )
 }
 
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:3593-3606
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3593-3606
 // ```c++
 //             out<<" Score = "<<bit_score_buf<<" ";
 //             out<<"bits ("<<aln_vec_info->score<<"),"<<"  ";
@@ -4989,7 +4989,7 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
 //     ...
 //     out << "\n";
 // ```
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:310-332
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:310-332
 // ```c++
 //     out<<" Identities = "<<match<<"/"<<(aln_stop+1)<<" ("<<identity<<"%"<<")";
 //     if(aln_is_prot){
@@ -5006,7 +5006,7 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
 //     ...
 //     out<<"\n";
 // ```
-// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:4229-4230
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4229-4230
 // ```c++
 //     seqSetInfo->sum_n = sum_n == -1 ? 1:sum_n ;
 // ```
@@ -5050,7 +5050,7 @@ fn write_tblastx_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     writeln!(writer)
 }
 
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:1598-1626
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1598-1626
 // ```c++
 //     int start = alnRoInfo->seqStarts[row].front() + 1;  //+1 for 1 based
 //     int end = alnRoInfo->seqStops[row].front() + 1;
@@ -5067,7 +5067,7 @@ fn write_tblastx_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
 //     ...
 //     out<<"\n";
 // ```
-// NCBI reference: c++/src/objtools/alnmgr/alnvec.cpp:230,305,358
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:230,305,358
 // ```c++
 //     scrn_width *= width;
 //     ...
@@ -5075,12 +5075,12 @@ fn write_tblastx_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
 //     ...
 //                     scrn_rgt_seq_pos = plus ? stop : start;
 // ```
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:1776-1784
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1776-1784
 // ```c++
 //     CAlignFormatUtil:: AddSpace(out, alnRoInfo->maxIdLen + k_IdStartMargin + alnRoInfo->maxStartLen + k_StartSequenceMargin);
 //     x_OutputSeq(alnRoInfo->middleLine, no_id, j, (int)actualLineLen, 0, row, false, alnRoInfo->masked_regions[row], out);
 // ```
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2150
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2150
 // ```c++
 //         if(sequence_standard[i]==sequence[i]){
 //             if(m_AlignOption & eShowMiddleLine){
@@ -5150,7 +5150,7 @@ fn write_tblastx_alignment<W: Write>(
     )
 }
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:451-478
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:451-478
 // ```c++
 //     m_Outfile << NcbiEndl;
 //     if (kbp_ungap) {
@@ -5167,7 +5167,7 @@ fn write_tblastx_alignment<W: Write>(
 //     m_Outfile << "Effective search space used: " <<
 //                         summary.GetSearchSpace() << "\n";
 // ```
-// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:583-603
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:583-603
 // ```c++
 //     char buffer[256];
 //     if (gapped) {
@@ -5208,7 +5208,7 @@ fn write_tblastx_query_footer<W: Write>(
     )
 }
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2249,2256-2259
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2249,2256-2259
 // ```c++
 //     m_Outfile << NcbiEndl << NcbiEndl;
 //     ...
@@ -5217,7 +5217,7 @@ fn write_tblastx_query_footer<W: Write>(
 //                                         m_Outfile, false);
 //     }
 // ```
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2266-2288
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2266-2288
 // ```c++
 //         m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
 //     }
@@ -5310,7 +5310,7 @@ pub(crate) fn cpp_default_double(value: f64) -> String {
 /// consecutive ranges written in turn are the report of all of them. The probe numbers the HSPs
 /// over the whole report, so a caller with a probe passes every query (`0..queries.len()`).
 ///
-/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1589
 /// ```c++
 ///     m_Outfile << "\n\n";
 ///     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
@@ -5391,7 +5391,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
         x_pool,
     )?;
 
-    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:209
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:209
     // ```c
     //         formatter.PrintEpilog(opt);
     // ```
@@ -5444,7 +5444,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         read: super::query_warnings::SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1491
         // ```c++
         //     // print the preamble for this query
         //
@@ -5461,7 +5461,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             }
             return Ok(());
         };
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-613
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:606-613
         // ```c++
         //     CShowBlastDefline showdef(*aln_set, *m_Scope,
         //                               defline_length == -1 ? kFormatLineLength:defline_length,
@@ -5469,7 +5469,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         //     ...
         //     m_Outfile << "\n";
         // ```
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:165-167
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:165-167
         // ```c++
         //     if (use_sum_statistics && m_IsUngappedSearch) {
         //         m_ShowLinkedSetSize = true;
@@ -5510,7 +5510,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         part: std::ops::Range<usize>,
     ) -> io::Result<()> {
         let config = self.config;
-        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3971-3980
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3971-3980
         // ```c++
         // 		x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
         // 	...
@@ -6031,7 +6031,7 @@ mod tests {
     }
 
     fn make_hit() -> Hit {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
         // ```c
         // typedef struct BlastHSPList {
         //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
@@ -6054,7 +6054,7 @@ mod tests {
             e_value: 1e-50,
             bit_score: 185.5,
             num_ident: 95,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1132
             // ```c
             // if (hsp->query.frame != hsp->subject.frame) {
             //    *q_end = query_length - hsp->query.offset;
@@ -6066,7 +6066,7 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 200,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-143
             // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
             sort_query_offset: 0,
             sort_query_end: 0,
@@ -6078,7 +6078,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/corelib/ncbistr.cpp:5088-5340
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5088-5340
     // enum EScore { eForced, ePunct, eComma, eSpace, eNewline };
     #[test]
     fn flatfile_wrapping_preserves_ncbi_break_boundaries() {
@@ -6408,7 +6408,7 @@ mod tests {
         }
     }
 
-    /// NCBI's `GetWholeAlnSeqString` (alnvec.cpp:199-397, quoted at
+    /// NCBI's `GetWholeAlnSeqString` (c++/src/objtools/alnmgr/alnvec.cpp:199-397, quoted at
     /// `query_anchored::aln_vec::AlnMap::aln_seq_string`), a second transcription, for one row of
     /// `segments` (a 0-based Dense-seg start, -1 for a gap, and a length in columns), as
     /// written, unsigned arithmetic included: the first entry of `scrn_rights`.
@@ -6594,7 +6594,7 @@ mod tests {
         assert!(output_str.contains("Identities ="));
     }
 
-    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:4017-4018
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4017-4018
     // ```c++
     //                               m_AV->StrandSign(0),
     //                               m_AV->StrandSign(1),
@@ -6741,7 +6741,7 @@ mod tests {
     }
 }
 
-// NCBI c++/src/algo/blast/format/blast_format.cpp:348-445,1490-1589:
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-445,1490-1589:
 // PrintProlog(); AcknowledgeBlastQuery(...); x_DisplayDeflines(...);
 // display.DisplaySeqalign(...); x_PrintOneQueryFooter(...);
 // This uses the local-subject database header and TBLASTN translated alignment.
@@ -6795,7 +6795,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     epilog: bool,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
 ) -> io::Result<()> {
-    // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
     // its own queries, even if another batch of the input has valid contexts.
     if query_batch_skipped.len() != queries.len()
@@ -6808,7 +6808,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         ));
     }
     let mut writer = io::BufWriter::new(writer);
-    // NCBI c++/src/algo/blast/format/blast_format.cpp:372-424:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424:
     // BlastPrintVersionInfo(m_Program,...); BlastPrintReference(...);
     write_translated_pairwise_intro(&mut writer, program, &report.version)?;
     // The prolog ends with one blank line; each query's preamble starts with two
@@ -6824,7 +6824,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         )?,
     }
 
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c++
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // ```
@@ -6859,7 +6859,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         warnings,
         None,
     )?;
-    // NCBI reference: c++/src/app/blast/tblastn_app.cpp:342
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:342
     // ```c++
     //         formatter.PrintEpilog(opt);
     // ```
@@ -6931,16 +6931,16 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         read: super::query_warnings::SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
-        // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491: m_Outfile << "\n\n";
         writeln!(writer)?;
         writeln!(writer)?;
         write_blastp_query_header(writer, &self.query_titles[q_idx], query.query_length)?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
-            // NCBI blast_results.cpp:82-97 leaves both Karlin blocks null
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-97 leaves both Karlin blocks null
             // when there is no valid context. blast_format.cpp:445-477
             // writes only the blank lines and zero search space in that case.
-            // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
             // if (m_PrelimSearch->CheckInternalData() != 0)
             //     new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0);
             // The all-invalid batch uses -1 sentinel blocks. An invalid query
@@ -6964,7 +6964,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             }
             return Ok(());
         };
-        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1004-1011
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1004-1011
         // ```c++
         // void CShowBlastDefline::DisplayBlastDefline(CNcbiOstream & out)
         // {
@@ -6993,7 +6993,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         writeln!(writer)
     }
 
-    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1014-1040
     // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
     fn subject<W: Write>(
         &self,
@@ -7004,7 +7004,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         part: std::ops::Range<usize>,
     ) -> io::Result<()> {
         let config = self.config;
-        // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3650-3668:
         // display leaves an extra blank line after each translated HSP.
         let write_hsp = |writer: &mut W, hit: &PairwiseHit| {
             write_tblastn_hsp_info(writer, hit)?;
@@ -7089,7 +7089,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
     }
 }
 
-// NCBI c++/src/objtools/align_format/showalign.cpp:3578-3604,2122-2149:
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3578-3604,2122-2149:
 // out << " Score = " << bit_score << " bits (" << score << ")";
 // if (comp_adjust) out << ", Method: Compositional matrix adjust.";
 // out << " Identities = ..." << " Positives = ..." << " Gaps = ...";
@@ -7098,7 +7098,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     let h = &hit.hit;
     let bits = format_bitscore_ncbi(h.bit_score);
     let evalue = format_evalue_ncbi(h.e_value);
-    // NCBI c++/src/objtools/align_format/showalign.cpp:3599-3604:
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3599-3604:
     // if (comp_adj_method == 1) out << ", Method: Composition-based stats.";
     // else if (comp_adj_method == 2) out << ", Method: Compositional matrix adjust.";
     let method = match hit.comp_adjust_method {
@@ -7106,9 +7106,9 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
         Some(2) => ", Method: Compositional matrix adjust.",
         _ => "",
     };
-    // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182:
     // if (hsp->num > 1) scores.push_back(s_MakeScore("sum_n", ..., hsp->num));
-    // NCBI c++/src/objtools/align_format/showalign.cpp:3595-3598:
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3595-3598:
     // if (aln_vec_info->sum_n > 0) out << "(" << aln_vec_info->sum_n << ")";
     let expect = expect_label(hit.sum_n);
     writeln!(
@@ -7117,7 +7117,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
         bits, h.raw_score, expect, evalue, method
     )?;
     let length = h.length;
-    // NCBI align_format_util.cpp:3152-3161:
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161:
     // if (numerator == denominator) return 100;
     // int retval = (int)(0.5 + 100.0*numerator/denominator);
     // return min(99, retval);
@@ -7190,7 +7190,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     Ok(())
 }
 
-// NCBI c++/src/objtools/align_format/showalign.cpp:1600-1625,2122-2149:
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1600-1625,2122-2149:
 // AddSpace(out,maxStartLen-startLen+k_StartSequenceMargin); out << sequence;
 // if (sequence_standard[i]==sequence[i]) middle_line[i]=sequence[i];
 // else if (m_Matrix[...]>0) middle_line[i]='+';
@@ -7518,7 +7518,7 @@ impl BlastxSections<'_> {
         part: std::ops::Range<usize>,
     ) -> io::Result<()> {
         let config = self.config;
-        // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3650-3668:
         // display leaves an extra blank line after each translated HSP.
         let write_hsp = |writer: &mut W, hit: &PairwiseHit| {
             write_tblastn_hsp_info(writer, hit)?;
@@ -7628,7 +7628,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             writer.flush()?;
             return Err(io::Error::other(stop));
         }
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:606-611
         // ```c++
         //     CShowBlastDefline showdef(*aln_set, *m_Scope,
         //                               defline_length == -1 ? kFormatLineLength:defline_length,
@@ -8470,7 +8470,7 @@ mod tblastx_tests {
         .unwrap();
     }
 
-    // NCBI c++/src/objtools/align_format/showalign.cpp:3593-3606 and 310-332: Expect(n)
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3593-3606 and 310-332: Expect(n)
     // only for a linked set of two or more, both frames, no Strand line.
     #[test]
     fn tblastx_hsp_info_prints_the_linked_set_and_both_frames() {
@@ -8487,7 +8487,7 @@ mod tblastx_tests {
             .starts_with(" Score = 120 bits (255),  Expect = 2e-30\n"));
     }
 
-    // NCBI c++/src/objtools/alnmgr/alnvec.cpp:230,305,358 and showalign.cpp:1598-1626: 60
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:230,305,358 and c++/src/objtools/align_format/showalign.cpp:1598-1626: 60
     // residues span 180 nucleotides, each row in the direction of its frame, and the width
     // is that of the largest 0-based coordinate (199: 3 digits).
     #[test]
@@ -8508,7 +8508,7 @@ mod tblastx_tests {
         assert_eq!(lines[6], "Sbjct  183  N  185");
     }
 
-    // NCBI c++/src/objtools/align_format/showdefline.cpp:829-836,961-965: the N column of
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:829-836,961-965: the N column of
     // an ungapped sum-statistics search, from the first HSP of each subject.
     #[test]
     fn description_table_shows_the_linked_set_column() {
@@ -8548,7 +8548,7 @@ mod tblastx_tests {
         assert!(lines[4].ends_with("  30.2    0.50   1 "), "{text}");
     }
 
-    // NCBI c++/src/objtools/align_format/showdefline.cpp:771-840,930-975 (`-sorthits`): the
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:771-840,930-975 (`-sorthits`): the
     // Total score, Query cover and Max ident columns, as NCBI BLAST+ 2.17.0 `blastp -sorthits 0`
     // writes them (probe t1 `blastp.s.h0kx`): the total in the HSPs' order, the cover of the
     // union of the query ranges, the identity of the best HSP (its Seq-align's `num_ident`,
@@ -8707,7 +8707,7 @@ mod tblastx_tests {
         );
     }
 
-    // NCBI c++/src/objtools/align_format/showdefline.cpp:1133-1138,940-944 and
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1133-1138,940-944 and
     // align_format_util.cpp:932-938: a last row whose total is wider than every earlier total
     // pads the total column with a negative `size_t`, where NCBI writes spaces without end; the
     // table without `-sorthits` only widens the score column.
@@ -8760,7 +8760,7 @@ mod tblastx_tests {
         assert!(table(&[1, 1], true, columns).is_ok());
     }
 
-    // NCBI c++/src/objtools/align_format/align_format_util.cpp:4259,4299-4302: BLASTX's row
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4259,4299-4302: BLASTX's row
     // shows the subject's highest bit score and that HSP's E-value (the first of equal
     // maxima), not its first HSP by E-value, and the N column the first HSP's linked-set
     // size. NCBI BLAST+ 2.17.0 `blastx -query tests/fasta/outfmt0/bx_best_hsp_query.fna

@@ -14,7 +14,7 @@
 
 use std::sync::OnceLock;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1109-1132
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1109-1132
 // ```c
 // void Blast_HSPGetAdjustedOffsets(EBlastProgramType program, BlastHSP* hsp,
 //                                  Int4 query_length, Int4* q_start,
@@ -64,7 +64,7 @@ struct TraceBlastnConfig {
 
 static TRACE_BLASTN_CONFIG: OnceLock<TraceBlastnConfig> = OnceLock::new();
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-692
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:633-692
 // ```c
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., FALSE);
 // ...
@@ -111,7 +111,7 @@ fn config() -> &'static TraceBlastnConfig {
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4071-4076
 // ```c
 // Blast_HSPInit(...,
 //        init_hsp->offsets.qs_offsets.q_off,
@@ -176,7 +176,7 @@ pub fn enabled() -> bool {
     config().enabled
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4071-4076
 // ```c
 // status = Blast_HSPInit(gap_align->query_start, gap_align->query_stop,
 //                        gap_align->subject_start, gap_align->subject_stop,
@@ -212,7 +212,7 @@ pub fn should_trace_seed(
     usize::try_from(seed_q).is_ok_and(|seed_q| cfg.seed == Some((seed_q, seed_s)))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3918
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3908-3918
 // ```c
 // tmp_hsp.context = context;
 // tmp_hsp.query.offset = q_start;
@@ -266,7 +266,7 @@ pub fn should_trace_range(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-692
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:633-692
 // ```c
 // Int4 extra_start =
 //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
@@ -371,7 +371,7 @@ fn ranges_overlap(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> bool {
     a_lo <= b_hi && b_lo <= a_hi
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-472
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-472
 // ```c
 // BlastGetOffsetsForGappedAlignment(..., &q_start, &s_start);
 // ...

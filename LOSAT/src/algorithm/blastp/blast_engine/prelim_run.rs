@@ -222,7 +222,7 @@ where
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let use_parallel = {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1475
         // ```c
         // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
         //        != BLAST_SEQSRC_EOF) {
@@ -536,21 +536,21 @@ where
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1688
             // ```c
             // aux_arg->gap_align = BLAST_GapAlignStructNew(...);
             // aux_arg->hsp_stream = BlastHSPStreamNew(...);
             // status = Blast_RunPreliminarySearchWithInterrupt_MT(...);
             // ```
             let subject_diag_offsets = blastp_subject_diag_offsets(subjects, window);
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1688
             // ```c
             // BlastScoringParameters* score_params = NULL;
             // BlastExtensionParameters* ext_params = NULL;
             // BlastGapAlignStruct* gap_align = NULL;
             // ```
             let pool = blastp_parallel_pool;
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1554
             // ```c
             // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
             //     status = s_BlastSearchEngineCore(..., &hsp_list, ...);

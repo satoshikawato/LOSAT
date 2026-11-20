@@ -78,7 +78,7 @@ impl Inputs {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
 //     // Add tab in front of field, except for the first field.
@@ -88,7 +88,7 @@ impl Inputs {
 // }
 // m_Ostream << "\n";
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 // ```c++
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```
@@ -105,7 +105,7 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 // ```c
 // if (args[kArgOutputFormat]) {
 //     string fmt_choice =
@@ -122,7 +122,7 @@ fn unsupported_formats_fail_before_searching() {
         &inputs.subject.0,
         ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
-    // NCBI ignores a custom specification with outfmt 0 (blast_args.cpp:2845-2851); a delimiter
+    // NCBI ignores a custom specification with outfmt 0 (c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851); a delimiter
     // that a field uses between its entries is NCBI's error (blast_args.cpp:2753-2792). Outfmt 19
     // (AIRR) is igblastn's alone (BLASTN writes 1 to 4 since line RG T3b).
     for outfmt in ["19", "6 delim=; qseqid staxids", "abc"] {
@@ -154,7 +154,7 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
-// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// NCBI derives the hit list size per output format (c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973): with
 // `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
 // so formats that need different hit list sizes are refused before anything is written
 // (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
@@ -224,7 +224,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:672-674
 // ```c
 //     if (hsp->score == 0) {
 //         return CRef<CSeq_align>();
@@ -248,7 +248,7 @@ fn hsps_of_score_zero_are_not_reported() {
     assert!(run.hits.is_empty());
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:977,989
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:977,989
 // ```c
 //     sv.SetCoding(CSeq_data::e_Ncbi4na);
 //     ...
@@ -543,7 +543,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
             "Invalid discontiguous template parameters: template length must be 16, 18, or 21",
             |a| a.template_length = Some(17),
         ),
-        // NCBI's options factory reads the task in lower case (blast_options_handle.cpp:341):
+        // NCBI's options factory reads the task in lower case (c++/src/algo/blast/api/blast_options_handle.cpp:341):
         // DC-MEGABLAST is dc-megablast, whose template the next check refuses.
         (
             &["-task", "dc-megablast"],
@@ -630,7 +630,7 @@ fn native_error(result: anyhow::Result<()>) -> (i32, String) {
     (native.exit, native.message.clone())
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
 // ```c
 //     // Validate that at least one query context is valid
 //     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
@@ -667,7 +667,7 @@ fn a_batch_of_queries_without_residues_stops_after_the_prolog() {
     assert!(outputs[1].is_empty());
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux_priv.cpp:153-156
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:153-156
 // ```c
 //     // get any warning messages from instantiating the queries
 //     query_data->GetMessages(m);
@@ -707,7 +707,7 @@ fn a_query_without_residues_keeps_its_warning_in_a_table_error() {
     assert!(outputs[1].is_empty());
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:969-980
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
 // ```c
 //    if (sbp->gbp) {
 //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
@@ -759,7 +759,7 @@ fn subjects_with_fewer_letters_than_subjects_stop_the_search() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
 // ```c++
 //     // set sequence range
 //     retval->SetInt().SetFrom(from);
@@ -800,7 +800,7 @@ fn intervals_without_letters_are_records_without_residues() {
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
 // ```c++
 //         arg_desc.AddDefaultKey(kArgStrand, "strand",
 //                      "Query strand(s) to search against database/subject",

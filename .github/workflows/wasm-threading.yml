@@ -51,7 +51,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: LOSAT -> target
-      # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+      # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
       # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
       - name: Install optional serial compatibility target
         if: ${{ inputs.include_serial_compatibility }}
@@ -69,7 +69,7 @@ jobs:
           node --test LOSAT/tests/test_wasi_runners.js LOSAT/tests/test_wasi_shared_memory.js
           python3 -m unittest discover -s LOSAT/tests -p test_wasm_performance.py
           python3 -m unittest discover -s LOSAT/tests -p test_simple_comparison.py
-      # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+      # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
       # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
       # Commands and CRT-initialized reactors have distinct artifacts and gates.
       - name: Build separate artifacts in both orders
@@ -104,7 +104,7 @@ jobs:
           sha256sum --check executables.sha256
       - name: Real command and reactor matrix
         run: |
-          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+          # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
           # (*thread)->Run(); (*thread)->Join(&result);
           compat_args=()
           if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
@@ -124,7 +124,7 @@ jobs:
       # showed no slowdown of the threaded Wasm (E2g gate record), so the limit is doubled.
       - name: Frozen default and approved genetic-code regressions
         run: |
-          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+          # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
           # (*thread)->Run(); (*thread)->Join(&result);
           compat_args=()
           if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then

@@ -3,7 +3,7 @@
 
 use anyhow::{ensure, Result};
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:75-101
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:75-101
 // ```c
 // if (0 == (result = CMP(place1->bestEvalue, place2->bestEvalue)) &&
 //     0 == (result = CMP(place2->bestScore, place1->bestScore))) {
@@ -19,7 +19,7 @@ pub(super) struct CompoHeapRecord {
 }
 
 impl CompoHeapRecord {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:89-101
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:89-101
     // ```c
     // if (0 == (result = CMP(place1->bestEvalue, place2->bestEvalue)) &&
     //     0 == (result = CMP(place2->bestScore, place1->bestScore)))
@@ -43,7 +43,7 @@ impl CompoHeapRecord {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:43-54,401-419
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:43-54,401-419
 // ```c
 // #define HEAP_INITIAL_CAPACITY 100
 // self->heapThreshold = heapThreshold;
@@ -63,7 +63,7 @@ pub(super) struct CompoHeap {
 
 #[allow(dead_code)] // Source-equivalent heap is exercised by comparison fixtures.
 impl CompoHeap {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:401-419
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:401-419
     // ```c
     // self->n = 0; self->heapThreshold = heapThreshold;
     // self->ecutoff = ecutoff; self->capacity = MIN(100, heapThreshold);
@@ -84,7 +84,7 @@ impl CompoHeap {
         })
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:401-415
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:401-415
     // ```c
     // self->n = 0; self->capacity = MIN(HEAP_INITIAL_CAPACITY, heapThreshold);
     // self->worstEvalue = 0;
@@ -93,7 +93,7 @@ impl CompoHeap {
         self.records.len()
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:411-415
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:411-415
     // ```c
     // self->capacity = MIN(HEAP_INITIAL_CAPACITY, heapThreshold);
     // ```
@@ -101,7 +101,7 @@ impl CompoHeap {
         self.capacity
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:411-414
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:411-414
     // ```c
     // self->worstEvalue = 0;
     // ```
@@ -109,14 +109,14 @@ impl CompoHeap {
         self.worst_evalue
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:405-410:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:405-410:
     // return self->n >= self->heapThreshold &&
     //     self->worstEvalue <= self->ecutoff;
     pub(super) fn filled_to_cutoff(&self) -> bool {
         self.records.len() >= self.threshold && self.worst_evalue <= self.ecutoff
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:163-211,237-245
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:163-211,237-245
     // ```c
     // if (left <= n && s_CompoHeapRecordCompare(&heapArray[left], &heapArray[i]))
     //     largest = left;
@@ -145,7 +145,7 @@ impl CompoHeap {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:212-245
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:212-245
     // ```c
     // while (parent >= 1 && s_CompoHeapRecordCompare(&heapArray[i], &heapArray[parent])) {
     //     s_CompoHeapRecordSwap(&heapArray[i], &heapArray[parent]);
@@ -163,7 +163,7 @@ impl CompoHeap {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:225-245
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:225-245
     // ```c
     // self->heapArray = self->array;
     // self->array = NULL;
@@ -178,7 +178,7 @@ impl CompoHeap {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
     // ```c
     // if (self->n < self->heapThreshold || eValue <= self->ecutoff ||
     //     eValue < self->worstEvalue) return TRUE;
@@ -196,7 +196,7 @@ impl CompoHeap {
         self.records[0].worse_than(candidate)
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:292-391
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:292-391
     // ```c
     // new_capacity = MAX(HEAP_MIN_RESIZE + *capacity,
     //                    (int)(HEAP_RESIZE_FACTOR * (*capacity)));
@@ -241,7 +241,7 @@ impl CompoHeap {
         discarded
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:439-466
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:439-466
     // ```c
     // s_ConvertToHeap(self);
     // results = first->theseAlignments;
@@ -261,7 +261,7 @@ impl CompoHeap {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
 // 1560-1580:
 // #define EVALUE_STRETCH 5
 // for (i = 0; i < numQueries; i++) {
@@ -285,7 +285,7 @@ pub(super) fn compo_early_termination(evalue: f64, heaps: &[CompoHeap]) -> bool 
 mod tests {
     use super::*;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
     // 1560-1580; composition_adjustment/compo_heap.c:405-410:
     // if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
     //     if (evalue <= EVALUE_STRETCH * ecutoff) return FALSE;
@@ -332,7 +332,7 @@ mod tests {
         assert_eq!((redone, terminated), (11, 16));
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3705-3736,2500-2515;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3705-3736,2500-2515;
     // composition_adjustment/compo_heap.c:252-275,330-391,439-466
     // ```c
     // if (BlastCompo_HeapWouldInsert(...))
@@ -431,7 +431,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:89-101,252-275,330-391
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:89-101,252-275,330-391
     // ```c
     // if (self->n < self->heapThreshold || eValue <= self->ecutoff) return TRUE;
     // else return s_CompoHeapRecordCompare(&self->heapArray[1], &heapRecord);

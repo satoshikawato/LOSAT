@@ -6,7 +6,7 @@ use anyhow::Result;
 /// Whether a FASTA file has no character but white space: NCBI reads it as a file without
 /// records (an empty query, or no subject).
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:862-866
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:862-866
 /// ```c
 /// 	IOS_BASE::iostate orig_state = in.rdstate();
 /// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
@@ -24,7 +24,7 @@ pub fn is_blank(bytes: &[u8]) -> bool {
 /// standard input, and a file that does not open gets NCBI's error
 /// (`crate::cli::inaccessible`). A file named `.gz` is read through gzip (`open_file_input`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:717-735
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-735
 /// ```c
 ///     if (AsString() == "-") {
 /// #if defined(NCBI_OS_MSWIN)
@@ -416,7 +416,7 @@ fn standard_input() -> std::io::Result<InputFile> {
 /// `tellg()` of NCBI's `IsIStreamEmpty` is not negative (a pipe has none, a terminal has none,
 /// while a character device such as `/dev/null` has one).
 ///
-/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-859
 /// ```c
 /// 	char c;
 /// 	CNcbiStreampos orig_p = in.tellg();
@@ -465,7 +465,7 @@ pub fn has_stream_position(file: &std::fs::File) -> bool {
 /// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
 /// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:903-911
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:903-911
 /// ```c
 /// GetSubjectFile(const CArgs& args)
 /// {
@@ -496,7 +496,7 @@ pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -
 /// `Subject_<n>` and its title is the record's title (`FastaRecord::title`), written
 /// as bytes; a subject without a title gives `Subject_<n> : ...`.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
 /// ```c
 ///         catch(CBlastException & e ) {
 ///         	// Skip bad subject sequence
@@ -550,7 +550,7 @@ pub fn write_empty_subject_warnings_by_length(
 /// numbers of letters `records` gives, in their order: the shared reader's records and BLASTX's
 /// (`algorithm::blastx::input::FastaRecord::names`).
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788 (quoted at
 /// `write_empty_subject_warnings`)
 pub fn write_empty_subject_warnings_of<'a>(
     records: impl IntoIterator<Item = (crate::blastinput::fasta_reader::RecordNames<'a>, usize)>,
@@ -860,7 +860,7 @@ mod tests {
         drop(unsafe { OwnedFd::from_raw_fd(raw) });
     }
 
-    // NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped
     // input). A regular file has a position; a pipe has none, on Linux because `lseek`
     // fails and on Windows because `GetFileType` is not `FILE_TYPE_DISK`.
     #[test]

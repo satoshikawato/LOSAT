@@ -382,7 +382,7 @@ impl<T> Drop for XSeedStage<'_, T> {
 //     sfree(ewp);
 //     return NULL;
 // ```
-// NCBI frees the diagonal table after the subject loop (blast_engine.c:1605). The worker that
+// NCBI frees the diagonal table after the subject loop (c++/src/algo/blast/core/blast_engine.c:1605). The worker that
 // ended the last lookup stage of the batch frees its table here, before it links that subject;
 // it gets no further subject (module doc, item 7).
 /// Drops a worker's diagonal table (called when the lookup stage's `end` returned true).

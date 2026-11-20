@@ -89,7 +89,7 @@ fn cell(matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE], code: u8, base: usize) -> i
     unsafe { *matrix.get_unchecked(((code as usize) << 4) | base) }
 }
 
-/// NCBI reference: c++/src/algo/blast/core/na_ungapped.c:149-153
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:149-153
 /// ```c
 /// static void
 /// s_NuclUngappedExtendExact(BLAST_SequenceBlk * query,

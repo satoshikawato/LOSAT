@@ -1,6 +1,6 @@
 //! BLASTP alignment reconstruction helpers.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c
 
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
@@ -14,7 +14,7 @@ fn blastp_positive_score<const BLOSUM62: bool>(
     query_residue: u8,
     subject_residue: u8,
 ) -> bool {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-818
     // ```c
     // if (*q == *s)
     //    num_ident++;
@@ -28,7 +28,7 @@ fn blastp_positive_score<const BLOSUM62: bool>(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
 // ```c
 // static Int2
 // s_Blast_HSPGetNumIdentitiesAndPositives(const Uint1* query,
@@ -66,7 +66,7 @@ pub struct ProteinAlignmentView {
     pub alignment_len: usize,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
 // ```c
 // if (!hsp->gap_info) {
 //    /* Ungapped case. Check that lengths are the same in query and subject,
@@ -92,7 +92,7 @@ pub fn build_alignment_view_with_matrix(
     hit: &Hit,
     matrix: ScoringMatrix,
 ) -> Option<ProteinAlignmentView> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
     // ```c
     // if (*q == *s)
     //    num_ident++;
@@ -106,7 +106,7 @@ pub fn build_alignment_view_with_matrix(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
 // ```c
 // static Int2
 // s_Blast_HSPGetNumIdentitiesAndPositives(const Uint1* query,
@@ -238,7 +238,7 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 20,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-143
             // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
             sort_query_offset: 0,
             sort_query_end: 0,
@@ -278,7 +278,7 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 20,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-143
             // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
             sort_query_offset: 0,
             sort_query_end: 0,
@@ -293,7 +293,7 @@ mod tests {
             num_positives: 3,
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:115-121
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-121
         // ```c
         // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
         // '-','A','B','C','D','E','F','G','H','I','K','L','M',
@@ -305,7 +305,7 @@ mod tests {
         let view =
             build_alignment_view_with_matrix(&query, &subject, &hit, ScoringMatrix::Blosum62)
                 .expect("alignment");
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:45-51
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/gapinfo.h:45-51
         // ```c
         // eGapAlignDel = 0, /**< Deletion: a gap in query */
         // ...

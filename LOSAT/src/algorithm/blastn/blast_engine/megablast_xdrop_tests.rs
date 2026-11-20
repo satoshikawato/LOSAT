@@ -2,15 +2,15 @@
 //! The complete output is from the fresh NCBI 2.17.0 oracle recorded in
 //! docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/.
 
-// NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
 // m_InitWordOpts.Reset((BlastInitialWordOptions*)calloc(1, sizeof(BlastInitialWordOptions)));
-// NCBI reference: c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
 // SetInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
 // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
-// NCBI reference: c++/src/algo/blast/core/blast_parameters.c:380-383
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:380-383
 // if (curr_cutoffs->x_dropoff_init == 0) curr_cutoffs->x_dropoff = new_cutoff;
 // else curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
-// NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:4012-4031
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4031
 // init_hsp->offsets.qs_offsets.q_off =
 //     init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
 // BLAST_GreedyGappedAlignment(...);

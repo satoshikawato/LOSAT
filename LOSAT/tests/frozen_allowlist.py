@@ -28,7 +28,7 @@ class Allowlist:
         self.file_sha256 = hashlib.sha256(raw).hexdigest()
         self.entries = {(entry["program"], entry["case_id"]): entry for entry in document["entries"]}
 
-    # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
     # x_PrintField(*iter); m_Ostream << "\n";
     # Raw output bytes are compared by SHA-256 without normalization.
     def classify(self, program: str, case_id: str, expected: str, actual: str | None, executed: bool = True) -> str:

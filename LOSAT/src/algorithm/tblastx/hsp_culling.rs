@@ -1,6 +1,6 @@
 //! NCBI BLAST HSP culling (`-culling_limit`) for TBLASTX.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_culling.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c
 //!
 //! The interval tree itself is the shared `core::hspfilter_culling::CullingForest`; this
 //! module holds what is TBLASTX's own: the context of an HSP (its frame), the length of
@@ -15,7 +15,7 @@ use crate::core::hspfilter_culling::{CullKey, CullingForest};
 /// The query context of a TBLASTX HSP within its query: NCBI's contexts of a translated
 /// query are its frames 1, 2, 3, -1, -2, -3 (`BLAST_GetAllTranslations`).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_util.c:1211-1220
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1211-1220
 /// ```c
 /// Int4 BLAST_FrameToContext(Int2 frame, EBlastProgramType program)
 /// {
@@ -39,13 +39,13 @@ pub(crate) fn tblastx_context(frame: i32) -> usize {
 /// The length in residues of each frame of a query of `length` nucleotides, as NCBI's
 /// query information holds it (`contexts[context].query_length`), in context order.
 ///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:193-195
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:193-195
 /// ```c
 ///             for (unsigned int i = 0; i < kNumContexts; i++) {
 ///                 unsigned int prot_length =
 ///                     static_cast<unsigned int>(BLAST_GetTranslatedProteinLength(length, i));
 /// ```
-/// NCBI reference: c++/src/algo/blast/core/blast_util.c:922-929
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:922-929
 /// ```c
 /// size_t
 /// BLAST_GetTranslatedProteinLength(size_t nucleotide_length, unsigned int context)
@@ -86,7 +86,7 @@ impl CullingWriter {
         }
     }
 
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:602-644
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:602-644
     /// ```c
     ///    for (i=0; i<hsp_list->hspcnt; ++i) {
     ///       /* wrap the hsp with a LinkedHSP structure */
@@ -134,7 +134,7 @@ impl CullingWriter {
     /// The HSPs that the trees keep, as `s_BlastHSPCullingFinal` puts them into the hit
     /// list of the query (`CullingForest::finalize`; all six contexts are one query).
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:516-581
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581
     /// ```c
     ///    for (cid=0; cid < cull_data->num_contexts; ++cid) {
     ///       if (c_tree[cid]) {
@@ -222,7 +222,7 @@ mod tests {
             .collect()
     }
 
-    // NCBI c++/src/algo/blast/core/blast_util.c:922-929,1211-1220: frames 1, 2, 3, -1,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:922-929,1211-1220: frames 1, 2, 3, -1,
     // -2, -3 are the contexts 0..5, of (length - context % 3) / 3 residues.
     #[test]
     fn contexts_follow_ncbis_frames() {
@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(tblastx_context_lengths(0), [0; 6]);
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:136-163: an HSP never dominates
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:136-163: an HSP never dominates
     // itself (`r != y`), so a limit of 1 keeps the best HSP of overlapping ones.
     #[test]
     fn a_limit_of_one_keeps_the_dominating_hsp() {
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(kept(writer), vec![(0, 50)]);
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:79-120: with equal score and range
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:79-120: with equal score and range
     // the lower OID dominates; other contexts have their own trees.
     #[test]
     fn ties_are_broken_by_oid_and_contexts_do_not_interact() {
@@ -267,7 +267,7 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:258-299,453-458: a leaf with 20
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:258-299,453-458: a leaf with 20
     // HSPs forks; HSPs that do not overlap are all kept.
     #[test]
     fn many_disjoint_hsps_fork_and_survive() {

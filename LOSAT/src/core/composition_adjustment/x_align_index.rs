@@ -3,7 +3,7 @@
 //! index by subject start, so the two questions asked of the list for every HSP, `s_IsContained`
 //! and `s_WithDistinctEnds`, visit only the alignments whose subject range can meet the new one.
 //!
-//! NCBI walks the whole list each time (`redo_alignment.c` 385-450, 965-996); a (query, subject)
+//! NCBI walks the whole list each time (`c++/src/algo/blast/composition_adjustment/redo_alignment.c` 385-450, 965-996); a (query, subject)
 //! match with tens of thousands of HSPs (a protein against a human chromosome) spends most of its
 //! redo there. The answers are the same: `x_contains` is true when some alignment contains the HSP,
 //! `x_add_distinct` keeps the new alignment unless some alignment with a shared end scores at least

@@ -21,7 +21,7 @@ pub(crate) mod std_sort;
 // (`std::env::temp_dir()` and `std::process::id()` panic on WASI).
 #[cfg(test)]
 pub(crate) mod test_dir;
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
 // (*thread)->Run(); (*thread)->Join(&result);
 pub mod threading;
 pub mod winmask;

@@ -1,4 +1,4 @@
-//! NCBI corelib/version.cpp: what an NCBI application prints for `-version`, `-version-full`,
+//! NCBI reference (598d8ae6): c++/src/corelib/version.cpp: what an NCBI application prints for `-version`, `-version-full`,
 //! `-version-full-xml` and `-version-full-json` (`CVersionAPI::Print`, `PrintXml`, `PrintJson`),
 //! the words that its application start reads before the arguments (`ncbi_environment::preparse`).
 //!

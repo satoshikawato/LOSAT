@@ -1,6 +1,6 @@
 //! The substitution scores of one TBLASTX search: BLOSUM62, or the matrix that `-matrix` names.
 //!
-//! NCBI reference: c++/src/algo/blast/core/blast_setup.c:383-387
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:383-387
 //! ```c
 //!         sbp->read_in_matrix = TRUE;
 //!         BLAST_ScoreSetAmbigRes(sbp, 'X');
@@ -40,7 +40,7 @@ use crate::utils::matrix::{protein_score, protein_score_rows, ScoreRows, BLOSUM6
 
 /// The scores of a search's matrix, `matrix[a][b]` of NCBI's score block.
 ///
-/// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:847-849
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:847-849
 /// ```c
 ///     for (i = 0; i < n; i++) {
 ///         score += matrix[q[i]][s[i]];
@@ -57,7 +57,7 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
 
     /// The word length of the search's lookup table (`-word_size`): 3 for BLOSUM62's instance.
     ///
-    /// NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:237
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:237
     /// ```c
     ///     lookup->word_length = opt->word_size;
     /// ```
@@ -78,7 +78,7 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
     /// SAFETY: `self.x_sent_walks()`, `q_full` is a context buffer `sent_contexts` accepted and
     /// `s_full` a frame buffer `sent_subject` accepted; the word at `q_right_off` and
     /// `s_right_off` lies in the letters (`extend_hit_two_hit_fitting`).
-    // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
     #[inline(always)]
     unsafe fn sent_two_hit(
         self,
@@ -109,7 +109,7 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
     /// as `scan_unit_or_bf`, once per unit). BLOSUM62's instance has 3-letter words only.
     ///
     /// SAFETY: those of `sent_two_hit`, and `self.word() == W`.
-    // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (`word_size` W).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (`word_size` W).
     #[inline(always)]
     unsafe fn sent_two_hit_of<const W: usize>(
         self,
@@ -141,7 +141,7 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
     /// `extend_hit_two_hit_reference(self, ..)` (debug output off) from the table walks of
     /// TBXUNGAP with the matrix's byte table, or `None` when the reference has to run. BLOSUM62's
     /// instance takes `extend_hit_two_hit_with` instead.
-    // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
     #[inline(always)]
     fn table_two_hit(
         self,
@@ -209,7 +209,7 @@ impl TbxScore for Blosum62Score {
 /// scores of every two bytes as NCBI fills its score block (`protein_score`, read from
 /// `protein_score_rows`), its word length and the byte table of its two-hit walks.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:1559-1592
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1592
 /// ```c
 ///     for (i = 0; i < sbp->alphabet_size; i++) {
 ///         for (j = 0; j < sbp->alphabet_size; j++) {
@@ -418,7 +418,7 @@ impl TbxScore for MatrixScore {
     ) -> Option<TwoHit> {
         // The walks with the word loop over `self.word` letters (`TbxScore::word`); another word
         // length takes the reference.
-        // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:1104-1108 (`word_size`, the lookup
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108 (`word_size`, the lookup
         // table's word length)
         // ```c
         //     /* find one beyond the position (up to word_size-1 letters to the right)
@@ -464,7 +464,7 @@ impl TbxScore for MatrixScore {
 /// The calls `MatrixScore::sent_two_hit` leaves to `extend_hit_two_hit_with` (an X-drop outside
 /// 1..=127; a word past the letters is refused there too, which a lookup hit's is not), out of the
 /// callers' code.
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
 #[cold]
 #[inline(never)]
 fn x_matrix_sent_refused(
@@ -522,7 +522,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/util/tables/sm_pam30.c (the PAM30 scores of A/A and W/W) and
+    // NCBI reference (598d8ae6): c++/src/util/tables/sm_pam30.c (the PAM30 scores of A/A and W/W) and
     // blast_stat.c:1559-1592 (the gap letter scores BLAST_SCORE_MIN).
     #[test]
     fn the_table_of_another_matrix_holds_its_scores() {

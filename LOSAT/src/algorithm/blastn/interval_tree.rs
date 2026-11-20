@@ -1,6 +1,6 @@
 //! NCBI BLAST Interval Tree implementation for HSP containment checking
 //!
-//! NCBI reference: blast_itree.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c
 //!
 //! This module implements the interval tree data structure used by NCBI BLAST
 //! to efficiently check if an HSP is contained within existing HSPs.
@@ -12,7 +12,7 @@
 
 #![allow(dead_code)]
 
-// NCBI reference: blast_itree.h:83-89
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.h:83-89
 // typedef enum EITreeIndexMethod {
 //     eQueryOnly,
 //     eQueryAndSubject,
@@ -30,7 +30,7 @@ pub enum IndexMethod {
     StrandIndifferentQueryOnly,
 }
 
-// NCBI reference: blast_itree.c:41-45
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:41-45
 // enum EIntervalDirection {
 //     eIntervalTreeLeft,
 //     eIntervalTreeRight,
@@ -48,7 +48,7 @@ enum IntervalDirection {
 }
 
 // Result of endpoint comparison
-// NCBI reference: blast_itree.c:241-301 (s_HSPsHaveCommonEndpoint returns pointer to better HSP)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:241-301 (s_HSPsHaveCommonEndpoint returns pointer to better HSP)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum EndpointResult {
     /// Input HSP is better - keep it
@@ -58,7 +58,7 @@ enum EndpointResult {
 }
 
 /// HSP data stored in interval tree nodes
-/// NCBI reference: blast_itree.c - tree stores pointers to BlastHSP
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c - tree stores pointers to BlastHSP
 #[derive(Clone, Copy, Debug)]
 pub struct TreeHsp {
     pub query_offset: i32,
@@ -66,7 +66,7 @@ pub struct TreeHsp {
     pub subject_offset: i32,
     pub subject_end: i32,
     pub score: i32,
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:539-546
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:539-546
     // if ( index_method == eQueryOnlyStrandIndifferent &&
     //      query_info->contexts[hsp->context].frame == -1 ) {
     //     region_end = query_start - hsp->query.offset;
@@ -77,15 +77,15 @@ pub struct TreeHsp {
     pub query_frame: i32,
     pub query_length: i32,
     /// Query strand offset (for context comparison)
-    /// NCBI reference: blast_itree.c:819 - in_q_start != tree_q_start
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:819 - in_q_start != tree_q_start
     pub query_context_offset: i32,
     /// Subject frame sign (positive = forward, negative = reverse)
-    /// NCBI reference: blast_itree.c:823 - SIGN(subject.frame)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:823 - SIGN(subject.frame)
     pub subject_frame_sign: i32,
 }
 
 /// Interval tree node
-/// NCBI reference: blast_itree.c:48-58 SIntervalNode
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:48-58 SIntervalNode
 #[derive(Clone, Debug)]
 struct IntervalNode {
     /// Left boundary of this node's range
@@ -573,7 +573,7 @@ impl XTreeIndex {
 }
 
 /// Interval tree for HSP containment checking
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.h:73-80
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.h:73-80
 /// ```c
 /// typedef struct BlastIntervalTree {
 ///     SIntervalNode *nodes;
@@ -615,7 +615,7 @@ pub struct BlastIntervalTree {
 
 impl BlastIntervalTree {
     /// Initialize a new interval tree
-    /// NCBI reference: blast_itree.c:96-166 Blast_IntervalTreeInit
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:96-166 Blast_IntervalTreeInit
     ///
     /// # Arguments
     /// * `q_min` - Minimum query offset (usually 0)
@@ -624,7 +624,7 @@ impl BlastIntervalTree {
     /// * `s_max` - Maximum subject offset (subject_length + 1)
     pub fn new(q_min: i32, q_max: i32, s_min: i32, s_max: i32) -> Self {
         let mut tree = Self {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:135-153
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:135-153
             // ```c
             // Int4 size = 100;
             // tree->nodes = (SIntervalNode *)malloc(size * sizeof(SIntervalNode));
@@ -647,7 +647,7 @@ impl BlastIntervalTree {
 
     /// Reserve interval-tree node storage before a dense traceback/prune pass.
     ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:66-70
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:66-70
     /// ```c
     /// if (tree->num_used == tree->num_alloc) {
     ///     tree->num_alloc = 2 * tree->num_alloc;
@@ -668,7 +668,7 @@ impl BlastIntervalTree {
     }
 
     /// Reset the tree for reuse
-    /// NCBI reference: blast_itree.c:168-193 Blast_IntervalTreeReset
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:168-193 Blast_IntervalTreeReset
     pub fn reset(&mut self) {
         // Keep only the root node, reset its children
         if !self.nodes.is_empty() {
@@ -692,7 +692,7 @@ impl BlastIntervalTree {
 
     /// Reset the tree bounds for reuse.
     ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:146-170
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:146-170
     /// ```c
     /// Blast_IntervalTreeInit(Int4 q_start, Int4 q_end,
     ///                        Int4 s_start, Int4 s_end)
@@ -719,7 +719,7 @@ impl BlastIntervalTree {
         self.x.set_bounds(q_min, q_max, s_min, s_max);
     }
 
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:146-170
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:146-170
     /// ```c
     /// Blast_IntervalTreeInit(Int4 q_start, Int4 q_end,
     ///                        Int4 s_start, Int4 s_end)
@@ -758,20 +758,20 @@ impl BlastIntervalTree {
     }
 
     /// Allocate a new internal node
-    /// NCBI reference: blast_itree.c:57-112 s_IntervalNodeInit
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:57-112 s_IntervalNodeInit
     ///
     /// CRITICAL: Right child uses midpt + 1, not midpt!
     /// The two subregions do not overlap, may be of length one,
     /// and must completely cover the parent region.
     fn alloc_internal_node(&mut self, parent_idx: usize, which_half: IntervalDirection) -> usize {
-        // NCBI reference: blast_itree.c:89-95
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:89-95
         // parent_node = tree->nodes + parent_index;
         // new_node = tree->nodes + new_index;
         // midpt = ((Int8) parent_node->leftend + (Int8) parent_node->rightend) / 2;
         let parent = &self.nodes[parent_idx];
         let midpt = ((parent.leftend as i64 + parent.rightend as i64) / 2) as i32;
 
-        // NCBI reference: blast_itree.c:102-109
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:102-109
         // if (dir == eIntervalTreeLeft) {
         //     new_node->leftend = parent_node->leftend;
         //     new_node->rightend = (Int4) midpt;
@@ -793,7 +793,7 @@ impl BlastIntervalTree {
     }
 
     /// Allocate a new root node for subject-indexed subtree
-    /// NCBI reference: blast_itree.c:269-299 s_IntervalRootNodeInit
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:269-299 s_IntervalRootNodeInit
     fn alloc_subject_root_node(&mut self) -> usize {
         let node = IntervalNode::new_internal(self.s_min, self.s_max);
         self.nodes.push(node);
@@ -826,7 +826,7 @@ impl BlastIntervalTree {
     /// Determine whether an input HSP shares a common start- or endpoint with
     /// an HSP from an interval tree.
     ///
-    /// NCBI reference: blast_itree.c:241-301 s_HSPsHaveCommonEndpoint
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:241-301 s_HSPsHaveCommonEndpoint
     ///
     /// Returns: None if no common endpoint, Some(EndpointResult) indicating which HSP to keep
     fn hsps_have_common_endpoint(
@@ -836,19 +836,19 @@ impl BlastIntervalTree {
         tree_q_start: i32,
         which_end: IntervalDirection,
     ) -> Option<EndpointResult> {
-        // NCBI reference: blast_itree.c:250-254
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:250-254
         // check if alignments are from different query sequences or query strands
         if in_q_start != tree_q_start {
             return None;
         }
 
-        // NCBI reference: blast_itree.c:256-259
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:256-259
         // check if alignments are from different subject strands
         if in_hsp.subject_frame_sign.signum() != tree_hsp.subject_frame_sign.signum() {
             return None;
         }
 
-        // NCBI reference: blast_itree.c:261-268
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:261-268
         let match_found = match which_end {
             IntervalDirection::Left => {
                 // if (which_end == eIntervalTreeLeft) {
@@ -869,7 +869,7 @@ impl BlastIntervalTree {
         };
 
         if match_found {
-            // NCBI reference: blast_itree.c:273-278
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:273-278
             // keep the higher scoring HSP
             if in_hsp.score > tree_hsp.score {
                 return Some(EndpointResult::KeepInput);
@@ -878,7 +878,7 @@ impl BlastIntervalTree {
                 return Some(EndpointResult::KeepTree);
             }
 
-            // NCBI reference: blast_itree.c:280-286
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:280-286
             // for equal scores, pick the shorter HSP
             let in_q_length = in_hsp.query_end - in_hsp.query_offset;
             let tree_q_length = tree_hsp.query_end - tree_hsp.query_offset;
@@ -889,7 +889,7 @@ impl BlastIntervalTree {
                 return Some(EndpointResult::KeepInput);
             }
 
-            // NCBI reference: blast_itree.c:288-293
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:288-293
             let in_s_length = in_hsp.subject_end - in_hsp.subject_offset;
             let tree_s_length = tree_hsp.subject_end - tree_hsp.subject_offset;
             if in_s_length > tree_s_length {
@@ -899,7 +899,7 @@ impl BlastIntervalTree {
                 return Some(EndpointResult::KeepInput);
             }
 
-            // NCBI reference: blast_itree.c:295-297
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:295-297
             // HSPs are identical; favor the one already in the tree
             return Some(EndpointResult::KeepTree);
         }
@@ -912,7 +912,7 @@ impl BlastIntervalTree {
     /// offsets, and represents the midpoint list of a tree node that indexes
     /// query offsets.
     ///
-    /// NCBI reference: blast_itree.c:318-411 s_MidpointTreeHasHSPEndpoint
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:318-411 s_MidpointTreeHasHSPEndpoint
     ///
     /// Returns TRUE if the HSP should not be added to the tree because it shares
     /// an existing endpoint with a 'better' HSP already there.
@@ -925,7 +925,7 @@ impl BlastIntervalTree {
         in_q_start: i32,
         which_end: IntervalDirection,
     ) -> bool {
-        // NCBI reference: blast_itree.c:331-334
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:331-334
         let target_offset = match which_end {
             IntervalDirection::Left => in_hsp.subject_offset,
             IntervalDirection::Right => in_hsp.subject_end,
@@ -934,12 +934,12 @@ impl BlastIntervalTree {
 
         let mut root_idx = root_index;
 
-        // NCBI reference: blast_itree.c:338 - while (1)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:338 - while (1)
         loop {
-            // NCBI reference: blast_itree.c:343-366
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:343-366
             // First perform matching endpoint tests on all of the HSPs in the
             // midpoint list for the current node.
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:350-365
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:350-365
             // tmp_index = root_node->midptr;
             // list_node = root_node;
             // next_node = tree->nodes + tmp_index;
@@ -995,7 +995,7 @@ impl BlastIntervalTree {
                 tmp_index = next_idx;
             }
 
-            // NCBI reference: blast_itree.c:368-376
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:368-376
             // Descend to the left or right subtree, whichever one contains the
             // endpoint from in_hsp
             let node = &self.nodes[root_idx];
@@ -1009,12 +1009,12 @@ impl BlastIntervalTree {
                 0
             };
 
-            // NCBI reference: blast_itree.c:382-383
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:382-383
             if next_child_idx == 0 {
                 return false;
             }
 
-            // NCBI reference: blast_itree.c:385-406
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:385-406
             let next_node = &self.nodes[next_child_idx as usize];
             if let Some(tree_hsp) = self.leaf_hsp(next_node) {
                 // Reached a leaf; compare in_hsp with the alignment in the leaf
@@ -1031,7 +1031,7 @@ impl BlastIntervalTree {
                 match result {
                     Some(EndpointResult::KeepTree) => return true,
                     Some(EndpointResult::KeepInput) => {
-                        // NCBI reference: blast_itree.c:398-404
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:398-404
                         // leaf gets removed
                         if target_offset < midpt {
                             self.nodes[root_idx].leftptr = 0;
@@ -1055,7 +1055,7 @@ impl BlastIntervalTree {
                 return false;
             }
 
-            // NCBI reference: blast_itree.c:408
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:408
             root_idx = next_child_idx as usize;
         }
     }
@@ -1064,7 +1064,7 @@ impl BlastIntervalTree {
     /// a common endpoint with the input HSP. Remove from the tree all such HSPs
     /// that are "worse" than the input.
     ///
-    /// NCBI reference: blast_itree.c:428-506 s_IntervalTreeHasHSPEndpoint
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:428-506 s_IntervalTreeHasHSPEndpoint
     ///
     /// Returns TRUE if the HSP should not be added to the tree because it shares
     /// an existing endpoint with a 'better' HSP already there.
@@ -1074,7 +1074,7 @@ impl BlastIntervalTree {
         in_q_start: i32,
         which_end: IntervalDirection,
     ) -> bool {
-        // NCBI reference: blast_itree.c:440-443
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:440-443
         let target_offset = match which_end {
             IntervalDirection::Left => in_q_start + in_hsp.query_offset,
             IntervalDirection::Right => in_q_start + in_hsp.query_end,
@@ -1083,9 +1083,9 @@ impl BlastIntervalTree {
 
         let mut root_idx = 0usize;
 
-        // NCBI reference: blast_itree.c:447 - while (1)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:447 - while (1)
         loop {
-            // NCBI reference: blast_itree.c:455-461
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:455-461
             // First perform matching endpoint tests on all of the HSPs in the
             // midpoint tree for the current node
             let midptr = self.nodes[root_idx].midptr;
@@ -1100,7 +1100,7 @@ impl BlastIntervalTree {
                 return true;
             }
 
-            // NCBI reference: blast_itree.c:466-471
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:466-471
             // Descend to the left or right subtree
             let node = &self.nodes[root_idx];
             let midpt = ((node.leftend as i64 + node.rightend as i64) / 2) as i32;
@@ -1113,12 +1113,12 @@ impl BlastIntervalTree {
                 0
             };
 
-            // NCBI reference: blast_itree.c:477-478
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:477-478
             if next_child_idx == 0 {
                 return false;
             }
 
-            // NCBI reference: blast_itree.c:480-501
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:480-501
             let next_node = &self.nodes[next_child_idx as usize];
             if let Some(tree_hsp) = self.leaf_hsp(next_node) {
                 // Reached a leaf
@@ -1135,7 +1135,7 @@ impl BlastIntervalTree {
                 match result {
                     Some(EndpointResult::KeepTree) => return true,
                     Some(EndpointResult::KeepInput) => {
-                        // NCBI reference: blast_itree.c:493-499
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:493-499
                         // leaf gets removed
                         if target_offset < midpt {
                             self.nodes[root_idx].leftptr = 0;
@@ -1159,7 +1159,7 @@ impl BlastIntervalTree {
                 return false;
             }
 
-            // NCBI reference: blast_itree.c:503
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:503
             root_idx = next_child_idx as usize;
         }
     }
@@ -1269,13 +1269,13 @@ impl BlastIntervalTree {
     }
 
     /// Add an HSP to the tree
-    /// NCBI reference: blast_itree.c:510-795 BlastIntervalTreeAddHSP
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:510-795 BlastIntervalTreeAddHSP
     ///
     /// This is the main entry point for adding HSPs to the interval tree.
     /// For eQueryAndSubject mode, it first checks for common endpoints and
     /// removes worse HSPs before adding.
     pub fn add_hsp(&mut self, hsp: TreeHsp, query_context_offset: i32, index_method: IndexMethod) {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:537-550
         // query_start = s_GetQueryStrandOffset(query_info, hsp->context);
         // if ( index_method == eQueryOnlyStrandIndifferent &&
         //      query_info->contexts[hsp->context].frame == -1 ) {
@@ -1314,7 +1314,7 @@ impl BlastIntervalTree {
         }
         let x_on = self.x.usable;
 
-        // NCBI reference: blast_itree.c:558-585
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:558-585
         // For eQueryAndSubject, check for common endpoints before adding
         if index_method == IndexMethod::QueryAndSubject {
             // Check left endpoint
@@ -1340,7 +1340,7 @@ impl BlastIntervalTree {
             }
         }
 
-        // NCBI reference: blast_itree.c:591-599
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:591-599
         // Encapsulate the input HSP in an SIntervalNode (leaf node)
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:591-599
         // ```c
@@ -1410,7 +1410,7 @@ impl BlastIntervalTree {
     }
 
     /// Internal helper for adding HSP after leaf node has been allocated
-    /// NCBI reference: blast_itree.c:601-793
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:601-793
     fn add_hsp_internal(
         &mut self,
         new_index: usize,
@@ -1424,15 +1424,15 @@ impl BlastIntervalTree {
         let mut current_region_start = region_start;
         let mut current_region_end = region_end;
 
-        // NCBI reference: blast_itree.c:603 - while (1)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:603 - while (1)
         loop {
-            // NCBI reference: blast_itree.c:608-609
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:608-609
             let middle = {
                 let node = &self.nodes[root_index];
                 ((node.leftend as i64 + node.rightend as i64) / 2) as i32
             };
 
-            // NCBI reference: blast_itree.c:611-633
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:611-633
             if current_region_end < middle {
                 // New interval belongs in left subtree
                 let leftptr = self.nodes[root_index].leftptr;
@@ -1451,9 +1451,9 @@ impl BlastIntervalTree {
                     continue;
                 }
 
-                // NCBI reference: blast_itree.c:703-793
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:703-793
                 // Two leaves in same subtree - need to split
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:703-746
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:703-746
                 // NCBI continues the insertion loop after splitting; avoid recursion to match.
                 let mid_index = self.split_and_insert(
                     root_index,
@@ -1465,7 +1465,7 @@ impl BlastIntervalTree {
                 root_index = mid_index;
                 continue;
             }
-            // NCBI reference: blast_itree.c:635-657
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:635-657
             else if current_region_start > middle {
                 // New interval belongs in right subtree
                 let rightptr = self.nodes[root_index].rightptr;
@@ -1484,9 +1484,9 @@ impl BlastIntervalTree {
                     continue;
                 }
 
-                // NCBI reference: blast_itree.c:703-793
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:703-793
                 // Two leaves in same subtree - need to split
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:703-746
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:703-746
                 // NCBI continues the insertion loop after splitting; avoid recursion to match.
                 let mid_index = self.split_and_insert(
                     root_index,
@@ -1498,21 +1498,21 @@ impl BlastIntervalTree {
                 root_index = mid_index;
                 continue;
             }
-            // NCBI reference: blast_itree.c:659-701
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:659-701
             else {
                 // The new interval crosses the center of the node
                 if index_subject_range
                     || index_method == IndexMethod::QueryOnly
                     || index_method == IndexMethod::StrandIndifferentQueryOnly
                 {
-                    // NCBI reference: blast_itree.c:668-675
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:668-675
                     // If indexing subject offsets already, or only indexing query,
                     // prepend the new node to the list of "midpoint" nodes
                     self.nodes[new_index].midptr = self.nodes[root_index].midptr;
                     self.nodes[root_index].midptr = new_index as i32;
                     return;
                 } else {
-                    // NCBI reference: blast_itree.c:677-700
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:677-700
                     // Begin another tree at root_index, that indexes the subject range
                     index_subject_range = true;
 
@@ -1536,7 +1536,7 @@ impl BlastIntervalTree {
     /// Handle the case where two leaves collide in the same subtree.
     /// This creates a new internal node and reattaches the old leaf.
     ///
-    /// NCBI reference: blast_itree.c:703-793
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:703-793
     fn split_and_insert(
         &mut self,
         parent_root_index: usize,
@@ -1545,7 +1545,7 @@ impl BlastIntervalTree {
         index_subject_range: bool,
         index_method: IndexMethod,
     ) -> usize {
-        // NCBI reference: blast_itree.c:709-712
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:709-712
         // Allocate new internal node
         let mid_index = self.alloc_internal_node(parent_root_index, which_half);
 
@@ -1553,7 +1553,7 @@ impl BlastIntervalTree {
         let old_hsp = *self.leaf_hsp(&self.nodes[old_leaf_index]).unwrap();
         let old_q_start = self.nodes[old_leaf_index].leftptr; // leftptr stores query_start for leaves
 
-        // NCBI reference: blast_itree.c:717-720
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:717-720
         // Attach the new internal node to parent
         match which_half {
             IntervalDirection::Left => {
@@ -1565,7 +1565,7 @@ impl BlastIntervalTree {
             IntervalDirection::Neither => {}
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:726-743
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:726-743
         // if (index_subject_range) {
         //     old_region_start = old_hsp->subject.offset;
         //     old_region_end = old_hsp->subject.end;
@@ -1595,13 +1595,13 @@ impl BlastIntervalTree {
             )
         };
 
-        // NCBI reference: blast_itree.c:747-748
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:747-748
         let middle = {
             let node = &self.nodes[mid_index];
             ((node.leftend as i64 + node.rightend as i64) / 2) as i32
         };
 
-        // NCBI reference: blast_itree.c:749-791
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:749-791
         // Reattach old leaf to the new internal node
         if old_region_end < middle {
             // Old leaf belongs in left subtree of new node
@@ -1615,10 +1615,10 @@ impl BlastIntervalTree {
                 || index_method == IndexMethod::QueryOnly
                 || index_method == IndexMethod::StrandIndifferentQueryOnly
             {
-                // NCBI reference: blast_itree.c:771
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:771
                 self.nodes[mid_index].midptr = old_leaf_index as i32;
             } else {
-                // NCBI reference: blast_itree.c:773-790
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:773-790
                 // Need to create a new subject-indexed tree for the old leaf
                 let mid_index2 = self.alloc_subject_root_node();
                 self.nodes[mid_index].midptr = mid_index2 as i32;
@@ -1641,7 +1641,7 @@ impl BlastIntervalTree {
             }
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:746
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:746
         // Return the new internal node so the caller can continue the loop.
         mid_index
     }
@@ -1815,7 +1815,7 @@ impl BlastIntervalTree {
     }
 
     /// Return the tree HSP that envelops the input HSP, if any.
-    /// NCBI reference: blast_itree.c:930-995 BlastIntervalTreeContainsHSP
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:930-995 BlastIntervalTreeContainsHSP
     ///
     /// ```c
     /// while (node->hsp == NULL) {
@@ -1854,7 +1854,7 @@ impl BlastIntervalTree {
 
     /// Return the tree HSP that envelops the input HSP, if any.
     ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:930-995
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:930-995
     /// See the snippet on `contains_hsp`; this method preserves that traversal
     /// and exposes the matched tree HSP for Phase 6 parity diagnostics.
     pub fn containing_hsp(
@@ -1906,23 +1906,23 @@ impl BlastIntervalTree {
         query_context_offset: i32,
         min_diag_separation: i32,
     ) -> Option<TreeHsp> {
-        // NCBI reference: blast_itree.c:942
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:942
         if self.nodes.is_empty() {
             return None;
         }
 
-        // NCBI reference: blast_itree.c:944-948
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:944-948
         let query_start = query_context_offset;
         let region_start = query_start + hsp.query_offset;
         let region_end = query_start + hsp.query_end;
 
         let mut node_idx = 0usize;
 
-        // NCBI reference: blast_itree.c:950-994
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:950-994
         loop {
             let node = &self.nodes[node_idx];
 
-            // NCBI reference: blast_itree.c:990-994
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:990-994
             // If this is a leaf node, check containment directly
             if let Some(tree_hsp) = self.leaf_hsp(node) {
                 return Self::is_hsp_contained(
@@ -1935,7 +1935,7 @@ impl BlastIntervalTree {
                 .then_some(*tree_hsp);
             }
 
-            // NCBI reference: blast_itree.c:960-967
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:960-967
             // Check midpoint tree first (contains all HSPs straddling this node)
             if node.midptr > 0 {
                 if let Some(tree_hsp) = self.midpoint_tree_containing_hsp(
@@ -1948,7 +1948,7 @@ impl BlastIntervalTree {
                 }
             }
 
-            // NCBI reference: blast_itree.c:973-985
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:973-985
             // Descend to appropriate subtree
             let middle = ((node.leftend as i64 + node.rightend as i64) / 2) as i32;
 
@@ -1961,7 +1961,7 @@ impl BlastIntervalTree {
                 0
             };
 
-            // NCBI reference: blast_itree.c:987
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:987
             if next_idx == 0 {
                 return None;
             }
@@ -2051,7 +2051,7 @@ impl BlastIntervalTree {
     }
 
     /// Check midpoint subtree (subject-indexed).
-    /// NCBI reference: blast_itree.c:864-927 s_MidpointTreeContainsHSP
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:864-927 s_MidpointTreeContainsHSP
     ///
     /// ```c
     /// while (tmp_index != 0) {
@@ -2136,7 +2136,7 @@ impl BlastIntervalTree {
     }
 
     /// Check if one HSP is contained within another
-    /// NCBI reference: blast_itree.c:809-847 s_HSPIsContained
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:809-847 s_HSPIsContained
     ///
     /// # Arguments
     /// * `in_hsp` - The HSP being checked for containment
@@ -2151,13 +2151,13 @@ impl BlastIntervalTree {
         tree_q_start: i32,
         min_diag_separation: i32,
     ) -> bool {
-        // NCBI reference: blast_itree.c:819
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:819
         // Check if alignments are from different query sequences or query strands
         if in_q_start != tree_q_start {
             return false;
         }
 
-        // NCBI reference: blast_itree.c:822-831
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:822-831
         // All conditions must be true:
         // 1. in_hsp->score <= tree_hsp->score
         // 2. SIGN(in_hsp->subject.frame) == SIGN(tree_hsp->subject.frame)
@@ -2182,12 +2182,12 @@ impl BlastIntervalTree {
                 in_hsp.subject_end,
             )
         {
-            // NCBI reference: blast_itree.c:833-834
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:833-834
             if min_diag_separation == 0 {
                 return true;
             }
 
-            // NCBI reference: blast_itree.c:836-843
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:836-843
             // MB_HSP_CLOSE at start OR end
             if Self::mb_hsp_close(
                 tree_hsp.query_offset,
@@ -2210,7 +2210,7 @@ impl BlastIntervalTree {
     }
 
     /// CONTAINED_IN_HSP macro
-    /// NCBI reference: blast_gapalign_priv.h:120-121
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:120-121
     /// #define CONTAINED_IN_HSP(a,b,c,d,e,f) ((a <= c && b >= c) && (d <= f && e >= f))
     #[inline]
     fn contained_in_hsp(
@@ -2226,7 +2226,7 @@ impl BlastIntervalTree {
     }
 
     /// MB_HSP_CLOSE macro
-    /// NCBI reference: blast_gapalign_priv.h:123-124
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:123-124
     /// #define MB_HSP_CLOSE(q1, s1, q2, s2, c) (ABS(((q1)-(s1)) - ((q2)-(s2))) < c)
     #[inline]
     fn mb_hsp_close(q1: i32, s1: i32, q2: i32, s2: i32, separation: i32) -> bool {
@@ -2782,7 +2782,7 @@ mod tests {
         assert!(!BlastIntervalTree::mb_hsp_close(100, 200, 150, 300, 50));
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:269-301
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:269-301
     // ```c
     // if (in_hsp->score > tree_hsp->score)
     //     return in_hsp;
@@ -2803,7 +2803,7 @@ mod tests {
         assert!(!tree.contains_hsp(&long_only_candidate, 0, 0));
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:819-823
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:819-823
     // ```c
     // if (in_q_start != tree_q_start)
     //     return FALSE;
@@ -2821,7 +2821,7 @@ mod tests {
         assert!(tree.contains_hsp(&contained_hsp, 0, 0));
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:819-847
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:819-847
     // ```c
     // if (in_q_start != tree_q_start)
     //     return FALSE;
@@ -2858,7 +2858,7 @@ mod tests {
         assert!(!tree.contains_hsp(&opposite_subject_sign, 0, 0));
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:819-843
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:819-843
     // ```c
     // if (in_q_start != tree_q_start)
     //     return FALSE;

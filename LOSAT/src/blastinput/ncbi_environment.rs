@@ -20,7 +20,7 @@ use crate::report::diag_log::{Posts, CRITICAL, ERROR, WARNING};
 /// the WindowMasker files of blastn's `-window_masker_taxid` (`window_masker_path_of`), and
 /// `[NCBI] DONT_USE_NCBIRC`, which only decides whether `.ncbirc` is read.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1436-1439
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1436-1439
 /// ```c
 ///     if (app) {
 ///         const CNcbiRegistry& registry = app->GetConfig();
@@ -43,7 +43,7 @@ const HARMLESS_ENTRIES: &[(&str, &str)] = &[
 /// Environment variables, besides the `DIAG_` and `NCBI_CONFIG__` families, that the NCBI
 /// C++ Toolkit reads for every application and that change its error output or exit status.
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
 /// ```c
 ///     // Setup some debugging features from environment variables.
 ///     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
@@ -74,7 +74,7 @@ const REJECTED_VARIABLES: &[&str] = &[
     // sequence a mask of `makeblastdb -mask_data` reaches (`seqid::mask_handle`); LOSAT
     // implements the default (both on) and has its own message for them (`rejected_variable`).
     //
-    // NCBI reference: ncbi-blast/c++/src/objects/seqloc/seq_id_tree.cpp:692-707
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/seq_id_tree.cpp:692-707
     // ```c
     // NCBI_PARAM_DECL(bool, OBJECTS, PACK_TEXTID);
     // NCBI_PARAM_DEF_EX(bool, OBJECTS, PACK_TEXTID, true,
@@ -96,7 +96,7 @@ const REJECTED_VARIABLES: &[&str] = &[
 ];
 
 fn is_harmless_entry(section: &str, name: &str) -> bool {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_usage_report.cpp:209-211
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:209-211
     // ```c
     // 	CRef<CNcbiRegistry> registry(new CNcbiRegistry(empty_stream, IRegistry::fWithNcbirc));
     // 	if (registry->HasEntry("BLAST", "BLAST_USAGE_REPORT")) {
@@ -117,7 +117,7 @@ fn is_harmless_entry(section: &str, name: &str) -> bool {
 
 /// Why LOSAT rejects an environment variable, or `None`.
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/env_reg.cpp:418-469
+/// NCBI reference (598d8ae6): c++/src/corelib/env_reg.cpp:418-469
 /// ```c
 /// bool CNcbiEnvRegMapper::EnvToReg(const string& env_in, string& section,
 ///                                  string& name) const
@@ -185,7 +185,7 @@ fn rejected_variable(name: &OsStr) -> Option<String> {
 
 /// The directories where NCBI looks for its registry files, in order.
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/metareg.cpp:331-396
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:331-396
 /// ```c
 /// void CMetaRegistry::GetDefaultSearchPath(CMetaRegistry::TSearchPath& path)
 /// {
@@ -2502,7 +2502,7 @@ impl ApplicationStart {
 /// U U P on stderr and U P in the file, with `-logfile /dev/null` U U P on stderr; tblastx,
 /// rpsblast, makeblastdb and blastdbcmd U on stderr and U P U P in the file.
 ///
-/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:80 (likewise blastp_app.cpp:80,
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:80 (likewise c++/src/app/blast/blastp_app.cpp:80,
 /// blastx_app.cpp:80, tblastn_app.cpp:79, psiblast_app.cpp:122 `m_bah`)
 /// ```c++
 ///     CBlastAppDiagHandler m_Bah;
@@ -2995,13 +2995,13 @@ fn ended(mut start: ApplicationStart) -> ApplicationStart {
 /// NCBI writes about the files: the command line's entry, and each call of LOSAT's library that
 /// reads NCBI's settings (`api::start`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1254-1259
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1254-1259
 /// ```c
 ///     } else if (conf->empty()) {
 ///         entry = CMetaRegistry::Load(basename, CMetaRegistry::eName_Ini, 0,
 ///                                     reg_flags, &reg);
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbireg.cpp:1636-1648
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1636-1648
 /// ```c
 ///     if (flags & fWithNcbirc) {
 ///         flags &= ~fWithNcbirc;
@@ -3017,7 +3017,7 @@ fn ended(mut start: ApplicationStart) -> ApplicationStart {
 ///         return false;
 ///     }
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/corelib/metareg.cpp:299-303
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:299-303
 /// ```c
 ///         case eName_DotRc: {
 ///             string base, ext;
@@ -3110,7 +3110,7 @@ mod tests {
         assert!(reject("NCBI_CONFIG_LONG_SEQID__BLAST", "1").is_some());
         assert!(reject("NCBI_CONFIG_PATH", "/etc").is_none());
         assert!(reject("ABORT_ON_THROW", "1").is_some());
-        // NCBI's Seq-id matching parameters (seq_id_tree.cpp:692-707): their own message.
+        // NCBI's Seq-id matching parameters (c++/src/objects/seq/seq_id_tree.cpp:692-707): their own message.
         for name in ["OBJECTS_PACK_TEXTID", "OBJECTS_PACK_GENERAL"] {
             let message = reject(name, "0").unwrap();
             assert!(message.contains("Seq-ids are matched"), "{message}");

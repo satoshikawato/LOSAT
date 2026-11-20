@@ -4,7 +4,7 @@
 //! ARGS -num_threads 1`, run from LOSAT/ with an empty pipe as standard input). LOSAT prints them
 //! at 1, 4, 8 and 16 threads.
 //!
-//! NCBI reference: c++/src/algo/blast/core/blast_message.c:242-247 (a name without a table:
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:242-247 (a name without a table:
 //! `Blast_ScoreBlkMatrixFill` returns -1, one message per query of the batch)
 //! ```c
 //!     default:

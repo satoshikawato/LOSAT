@@ -1,7 +1,7 @@
 //! TBLASTN `-culling_limit`: NCBI's culling writer of the preliminary stage and its culling
 //! pipe after the traceback (`core::hspfilter_culling` holds the interval tree both share).
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_culling.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c
 //!
 //! This module is a child of `stage_d_results` for the private fields of
 //! `KappaResultHitList`. Nothing here runs without `-culling_limit` (a limit of 0 is NCBI's
@@ -24,7 +24,7 @@ use super::{
 use crate::core::hspfilter_culling::{CullKey, CullingForest};
 
 /// The key of an HSP for the tree: the protein range of the query and the frame-local offset
-/// of the subject. NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:612-633 (the
+/// of the subject. NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:612-633 (the
 /// non-blastn branch: `begin = query.offset`, `end = query.end`, no strand fold) and
 /// c++/src/algo/blast/core/hspfilter_culling.c:79-120 (`hsp->score`, `hsp->subject.offset`).
 fn cull_key(linked: &LinkedHsp) -> CullKey {
@@ -38,7 +38,7 @@ fn cull_key(linked: &LinkedHsp) -> CullKey {
 
 /// The hit list that `s_BlastHSPCullingFinal` makes of the lists the trees keep for one query.
 ///
-/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:516-581
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581
 /// ```c
 ///          if (!results->hitlist_array[qid]) {
 ///             results->hitlist_array[qid] = Blast_HitListNew(params->prelim_hitlist_size);
@@ -110,7 +110,7 @@ pub(in crate::algorithm::tblastn) struct PrelimCulling {
 }
 
 impl PrelimCulling {
-    /// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:318-342
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:318-342
     /// ```c
     ///         else if (filt_opts->culling_opts &&
     ///                  (filt_opts->culling_stage & ePrelimSearch))
@@ -141,7 +141,7 @@ impl PrelimCulling {
     /// `s_BlastHSPCullingRun` for the HSPs of subject `oid`: all queries and all frames, in
     /// the order of the subject's list.
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:602-644
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:602-644
     /// ```c
     ///    for (i=0; i<hsp_list->hspcnt; ++i) {
     ///       /* wrap the hsp with a LinkedHSP structure */
@@ -205,7 +205,7 @@ impl KappaResultHitList {
     /// afterwards where NCBI's `Blast_HSPResultsSortByEvalue` after the pipes does (a positive
     /// `BlastSeqSrcGetTotLen`, blast_traceback.c:1768-1772).
     ///
-    /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:699-733
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:699-733
     /// ```c
     /// static int
     /// s_BlastHSPCullingPipeRun(void* data, BlastHSPResults* results)
@@ -334,7 +334,7 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:79-120, 612-633: the frame is no key,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:79-120, 612-633: the frame is no key,
     // so an HSP on another frame over the same query range is dominated by a better one,
     // and the tree is the query's (`cid` = context), with the length of that query.
     #[test]
@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(kept.lists()[0].hsps.hsps[0].num, 11);
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:516-581: the hit list is made with
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:516-581: the hit list is made with
     // `prelim_hitlist_size` and holds more lists than that, in the rip order, with the best
     // e-value, worst e-value and low score set, and is not heapified.
     #[test]
@@ -418,7 +418,7 @@ mod tests {
         );
     }
 
-    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:100-112: the lower OID wins a tie, and
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:100-112: the lower OID wins a tie, and
     // the subjects must come in OID order for the later one to lose.
     #[test]
     fn identical_hsps_of_two_subjects_keep_the_lower_oid() {

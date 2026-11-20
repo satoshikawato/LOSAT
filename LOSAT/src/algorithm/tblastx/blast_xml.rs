@@ -71,7 +71,7 @@ const GAP_EXTEND: i32 = 1;
 
 /// The gap costs of the XML's parameters: with `-matrix`, the matrix's best costs.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:257-273
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:257-273
 /// ```c
 ///     int gap_open=0, gap_extend=0;
 ///     if (args.Exist(kArgMatrixName) && args[kArgMatrixName])
@@ -510,7 +510,7 @@ mod tests {
     use super::*;
     use crate::stats::lookup_protein_params_ungapped;
 
-    // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115: a query without a valid context has
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115: a query without a valid context has
     // the -1 blocks and zero lengths.
     #[test]
     fn a_query_without_a_valid_context_has_the_unsearched_statistics() {

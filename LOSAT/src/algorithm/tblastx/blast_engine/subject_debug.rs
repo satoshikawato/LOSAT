@@ -193,7 +193,7 @@ pub(super) fn print_output_filter(
     // #endif /* _BLAST_DEBUG */
     // ```
     // DEBUG: Print output filtering statistics.
-    // NCBI reference: link_hsps.c:1018-1020 - continue is NOT an output filter
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1018-1020 - continue is NOT an output filter
     // Chain members are included in output via link pointer traversal.
     eprintln!("[DEBUG OUTPUT_FILTER] Total linked HSPs: {}", total_linked);
     eprintln!(
@@ -253,13 +253,13 @@ pub(super) fn trace_hsp_masks<S: TbxScore>(sc: S, trace: &MaskTrace<'_>) {
         s_start,
         s_end,
     } = trace;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1379-1404
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1379-1404
     // ```c
     // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
     // query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
     // Blast_MaskTheResidues(buffer, query_length, kIsNucl, ...);
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:699-700
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:699-700
     // ```c
     // sum += matrix[*query & kResidueMask][*subject];
     // query++;
@@ -272,7 +272,7 @@ pub(super) fn trace_hsp_masks<S: TbxScore>(sc: S, trace: &MaskTrace<'_>) {
         if trace_match_target(target, q_start, q_end, s_start, s_end) {
             // NCBI uses query_nomask = query_blk->sequence_nomask + query_offset,
             // with sequence_nomask pointing past the leading NULLB.
-            // Reference: blast_filter.c:1381-1382, blast_util.c:112-116.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1381-1382, c++/src/algo/blast/core/blast_util.c:112-116.
             let q_seq_nomask_full: &[u8] = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
             let q_seq_nomask = &q_seq_nomask_full[1..q_seq_nomask_full.len() - 1];
             let s_seq = &s_frame.aa_seq[1..s_frame.aa_seq.len() - 1];

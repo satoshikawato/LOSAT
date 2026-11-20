@@ -1,5 +1,5 @@
 //! Frozen CLI v2 grammar and configuration boundary.
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-207,332-420,838-883,3158-3163
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-207,332-420,838-883,3158-3163
 // AddOptionalKey(kArgWordSize, ...); AddOptionalKey(kArgMaxHSPsPerSubject, ...);
 // x_TokenizeFilteringArgs(seg_opts, tokens); opt.SetUnifiedP(1);
 
@@ -182,7 +182,7 @@ fn canonical_options_for_every_program() {
                 assert_eq!(a.evalue, 0.001);
                 assert_eq!(a.max_target_seqs, Some(9));
             }
-            // NCBI tblastn_args.cpp:55-62: SetTask(kDefaultTask);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:55-62: SetTask(kDefaultTask);
             // blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);
             Commands::Tblastn(a) => {
                 assert_eq!(a.num_threads, 4);
@@ -494,7 +494,7 @@ fn filtering_has_exactly_one_shared_value_grammar() {
             .to_ncbi_cli_string(),
         "12 2.2 2.5"
     );
-    // NCBI blast_filter.c:1147-1154: a value that is not above 0 keeps the default
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1147-1154: a value that is not above 0 keeps the default
     // (12, 2.2, 2.5); then blast_seg.c:2253-2258 raises hicut to locut.
     for (spec, expected) in [
         ("12 -1 -2", (12, 2.2, 2.5)),
@@ -539,7 +539,7 @@ fn filtering_has_exactly_one_shared_value_grammar() {
     ] {
         assert!(parse_seg_filtering(bad).is_err(), "{bad}");
     }
-    // NCBI blast_args.cpp:375-384,410-426: single spaces separate three signed numbers;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:375-384,410-426: single spaces separate three signed numbers;
     // the masker replaces values out of range with its defaults (utils/dust.rs).
     for bad in [
         "",
@@ -594,7 +594,7 @@ fn composition_tokens_follow_ncbis_first_character_rule() {
     ] {
         assert!(parse_comp_based_stats(token).is_err(), "{token}");
     }
-    // NCBI blast_args.cpp:834-892: the CLI reads the first character (any other is mode 0)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:834-892: the CLI reads the first character (any other is mode 0)
     // and, for BLASTP, a `u` or `U` second character of an adjusting mode.
     use crate::blastinput::app::{parse_comp_based_stats as ncbi_cbs, CompositionMode};
     for (token, mode, unified) in [
@@ -659,7 +659,7 @@ fn defaults_and_task_overrides_remain_distinct() {
     assert_eq!(args.max_hsps_per_subject, None);
     assert_eq!(args.word_size, None);
     assert_eq!(args.resolve().unwrap().max_hsps_per_subject, 0);
-    // NCBI api/blast_options_handle.cpp:381-387: Create(eBlastp, locality).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-387: Create(eBlastp, locality).
     assert_eq!(args.task, "blastp");
     assert_eq!(args.resolve().unwrap().evalue, 10.0);
     let Commands::Blastp(a) = parse("blastp", &["-task", "blastp"]).unwrap().command else {
@@ -677,7 +677,7 @@ fn defaults_and_task_overrides_remain_distinct() {
         panic!()
     };
     assert_eq!(a.resolve().unwrap().evalue, 42.0);
-    // NCBI api/blast_options_handle.cpp:381-402: blastp-fast (word size 5, threshold 20) and
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-402: blastp-fast (word size 5, threshold 20) and
     // blastp-short (word size 2, PAM30 9/1 with its threshold 16 and window 15, e-value 20000)
     // run, and so does -word_size 2 of each task (item SC3).
     let Commands::Blastp(a) = parse("blastp", &["-task", "blastp-fast"]).unwrap().command else {
@@ -739,7 +739,7 @@ fn defaults_and_task_overrides_remain_distinct() {
     // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
     parse("tblastn", &["-task", "tblastn-fast"]).unwrap();
-    // NCBI api/blast_options_handle.cpp:429-433: blastx-fast is word size 5 (the compressed
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:429-433: blastx-fast is word size 5 (the compressed
     // lookup table, lookup type 4) with threshold 20; -word_size 5 sets its own threshold over
     // the task's, -word_size 3 keeps the task's on the standard table
     // (blast_args.cpp:291-297, blast_options_local_priv.hpp:612-619).
@@ -796,19 +796,19 @@ fn defaults_and_task_overrides_remain_distinct() {
     }
     // blast_args.cpp:105 (CArgAllowStringSet): the task names are case-sensitive.
     assert!(parse("blastp", &["-task", "BLASTP"]).is_err());
-    // NCBI blast_args.cpp:2800-2803: the default -outfmt is 0, which BLASTN and TBLASTX
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803: the default -outfmt is 0, which BLASTN and TBLASTX
     // implement.
     parse("blastn", &[]).unwrap();
     parse("tblastx", &[]).unwrap();
     for program in ["blastn", "tblastx"] {
         parse(program, &["-outfmt", "6"]).unwrap();
     }
-    // NCBI blast_options_handle.cpp:344-380: dc-megablast and blastn-short are tasks of
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:344-380: dc-megablast and blastn-short are tasks of
     // blastn (Session SD); rmblastn stays an explicit rejection.
     parse("blastn", &["-outfmt", "6", "-task", "dc-megablast"]).unwrap();
     parse("blastn", &["-outfmt", "6", "-task", "blastn-short"]).unwrap();
     assert!(parse("blastn", &["-outfmt", "6", "-task", "rmblastn"]).is_err());
-    // NCBI blast_args.cpp:708-730: -template_type and -template_length require each other
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:708-730: -template_type and -template_length require each other
     // and take coding/optimal/coding_and_optimal and 16/18/21.
     parse(
         "blastn",
@@ -843,7 +843,7 @@ fn defaults_and_task_overrides_remain_distinct() {
     assert!(parse("blastn", &words).is_err(), "{words:?}");
 }
 
-// NCBI blast_args.cpp:2665-2685: -num_descriptions and -num_alignments are integers of 0 or
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685: -num_descriptions and -num_alignments are integers of 0 or
 // more (`CArgAllowValuesGreaterThanOrEqual(0)`), which NCBI reads with the sign and
 // hexadecimal forms; blast_args.cpp:2732-2738: -max_target_seqs excludes both.
 #[test]
@@ -918,7 +918,7 @@ fn numeric_values_are_validated_before_io() {
     for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
         assert!(parse(program, &["-outfmt", "6", "-max_hsps", "0"]).is_err());
         parse(program, &["-outfmt", "6", "-max_hsps", "1"]).unwrap();
-        // NCBI blast_args.cpp:196-201: -qcov_hsp_perc is a real number in 0..100.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-201: -qcov_hsp_perc is a real number in 0..100.
         for value in ["0", "50.5", "1e1", "100"] {
             parse(program, &["-outfmt", "6", "-qcov_hsp_perc", value]).unwrap();
         }
@@ -929,7 +929,7 @@ fn numeric_values_are_validated_before_io() {
             );
         }
     }
-    // NCBI tblastx runs word sizes 2 to 4 (blast_options.c:1335-1362), as LOSAT's TBLASTX
+    // NCBI tblastx runs word sizes 2 to 4 (c++/src/algo/blast/core/blast_options.c:1335-1362), as LOSAT's TBLASTX
     // does (series SC, SC10); 5 or more is NCBI's error.
     for (value, message) in [
         ("2", None),
@@ -955,7 +955,7 @@ fn numeric_values_are_validated_before_io() {
             }
         }
     }
-    // NCBI blast_args.cpp:168-170: the argument is 4 or more; blast_options.c:1326-1333:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:168-170: the argument is 4 or more; c++/src/algo/blast/core/blast_options.c:1326-1333:
     // an option check rejects more than 100, with NCBI's message.
     assert!(parse("blastn", &["-outfmt", "6", "-word_size", "3"]).is_err());
     // NCBI's `CArg_Double` reads glibc's hexadecimal numbers and a final `e`
@@ -993,7 +993,7 @@ fn numeric_values_are_validated_before_io() {
             );
         }
     }
-    // NCBI's integer arguments (ncbiargs.cpp:118-129) read hexadecimal after `0x`.
+    // NCBI's integer arguments (c++/src/corelib/ncbiargs.cpp:118-129) read hexadecimal after `0x`.
     let Commands::Blastn(args) = parse(
         "blastn",
         &[
@@ -1088,7 +1088,7 @@ fn numeric_values_are_validated_before_io() {
             "{value:?}"
         );
     }
-    // NCBI blast_input_aux.hpp:79-87 (CDirEntry::GetName, ncbifile.cpp:298-312,358-363,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87 (CDirEntry::GetName, c++/src/corelib/ncbifile.cpp:298-312,358-363,
     // 465-472): the name after the trailing separators are removed.
     let dotted = format!("{}/.", "o".repeat(256));
     parse("blastn", &["-outfmt", "6", "-out", &dotted]).unwrap();
@@ -1097,7 +1097,7 @@ fn numeric_values_are_validated_before_io() {
         &["-outfmt", "6", "-out", &format!("{}/", "o".repeat(256))]
     )
     .is_err());
-    // NCBI blast_input_aux.hpp:79-87: an -out file name is shorter than 256 bytes.
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87: an -out file name is shorter than 256 bytes.
     let long = format!("dir/{}", "o".repeat(256));
     assert!(parse("blastn", &["-outfmt", "6", "-out", &long]).is_err());
     parse("blastn", &["-outfmt", "6", "-out", &long[..long.len() - 1]]).unwrap();
@@ -1228,7 +1228,7 @@ fn numeric_values_are_validated_before_io() {
 
 #[test]
 fn flags_and_value_tokens_are_not_reinterpreted() {
-    // NCBI blast_args.cpp:803-806: -use_sw_tback is a flag; LOSAT's BLASTP runs the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:803-806: -use_sw_tback is a flag; LOSAT's BLASTP runs the
     // Smith-Waterman redo with composition-based statistics (item X4) and rejects it without
     // them (`-comp_based_stats 0`, `-task blastp-short`, IDENTITY) where the search starts.
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback"]).unwrap().command else {
@@ -1291,7 +1291,7 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
         a.subject.as_deref().and_then(|path| path.to_str()),
         Some("-query")
     );
-    // NCBI's `-` is standard input (blast_args.cpp:3425-3427, ncbiargs.cpp).
+    // NCBI's `-` is standard input (c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427, c++/src/corelib/ncbiargs.cpp).
     let cli =
         try_parse_from::<Cli, _, _>(["losat", "blastp", "-query", "-", "-subject", "s"]).unwrap();
     let Commands::Blastp(a) = cli.command else {
@@ -1527,7 +1527,7 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
                 !text.contains("--query") && !text.contains("--word") && !text.contains("--num")
             );
             assert!(!text.contains("seg_window") && !text.contains("dust_window"));
-            // NCBI's BLASTP tasks and flags are options (blast_args.cpp:803-806,3158-3163).
+            // NCBI's BLASTP tasks and flags are options (c++/src/algo/blast/blastinput/blast_args.cpp:803-806,3158-3163).
             if program == "blastp" {
                 for option in ["blastp-fast", "blastp-short", "-use_sw_tback"] {
                     assert!(text.contains(option), "{text}");
@@ -1537,7 +1537,7 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3292-3333
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3292-3333
 // ```c++
 //     arg_desc.AddDefaultKey(kArgCullingLimit, "int_value",
 //                            "If the query range of a hit is enveloped by that of at least this many "
@@ -1581,7 +1581,7 @@ fn culling_limit_is_read_as_ncbi_does() {
     }
 }
 
-// NCBI blast_args.cpp:1961: -parse_deflines is a flag of every search program.
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1961: -parse_deflines is a flag of every search program.
 #[test]
 fn parse_deflines_is_a_flag_of_every_search_program() {
     for program in [
@@ -1599,7 +1599,7 @@ fn parse_deflines_is_a_flag_of_every_search_program() {
     assert!(args.parse_deflines);
 }
 
-// NCBI blast_args.cpp:2663: -show_gis is a flag of every search program.
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663: -show_gis is a flag of every search program.
 #[test]
 fn show_gis_is_a_flag_of_every_search_program() {
     for program in [
@@ -1726,7 +1726,7 @@ fn blastp_takes_a_database_and_its_size() {
     assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
-    // NCBI keeps the name without the white space at its ends (blast_args.cpp:2473).
+    // NCBI keeps the name without the white space at its ends (c++/src/algo/blast/blastinput/blast_args.cpp:2473).
     let resolved = args.resolve().unwrap();
     assert_eq!(resolved.db.as_deref(), Some("dir/name"));
     assert_eq!(resolved.dbsize, 3_000_000_000);
@@ -1808,7 +1808,7 @@ fn blastn_takes_a_database_and_its_size() {
     assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
-    // NCBI keeps the name without the white space at its ends (blast_args.cpp:2473).
+    // NCBI keeps the name without the white space at its ends (c++/src/algo/blast/blastinput/blast_args.cpp:2473).
     assert_eq!(args.database_name(), Some("dir/name"));
     assert_eq!(args.db_length(), 3_000_000_000);
     assert_eq!(blastn(&["-db", "  "]).unwrap().database_name(), Some(""));

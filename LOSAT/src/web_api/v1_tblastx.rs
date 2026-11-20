@@ -30,7 +30,7 @@ pub(super) fn run_web_pair(
     // ```
     let subjects = read_subjects(subject_fasta.as_bytes(), "TBLASTX", false)?;
     let queries = read_queries(query_fasta.as_bytes(), "TBLASTX", false)?;
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
+    // NCBI reference (598d8ae6): c++/include/algo/blast/api/local_blast.hpp:76-78
     // ```c
     // CLocalBlast(CRef<IQueryFactory> query_factory,
     //             CRef<CBlastOptionsHandle> opts_handle,

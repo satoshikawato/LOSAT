@@ -254,7 +254,7 @@ fn scan(
     }
 }
 
-// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, blast_gapalign.h:54) and the overlap of two
+// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, c++/include/algo/blast/core/blast_gapalign.h:54) and the overlap of two
 // subject chunks (`DBSEQ_CHUNK_OVERLAP`, blast_hits.h:192): the one copy of both macros.
 use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
 
@@ -412,7 +412,7 @@ pub(super) fn x_scan_two_hit_ranges<F>(
     );
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
 // ```c++
 //         // Union subject sequence ranges
 //         vector <TSeqRange> ranges;
@@ -428,7 +428,7 @@ pub(super) fn x_scan_two_hit_ranges<F>(
 //         TMaskedSubjRegions masks;
 //         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
 // ```
-// NCBI reference: c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:115-122
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:115-122
 // ```c++
 //     for (size_t ir=0; ir< target_ranges.size(); ir++) {
 //         if (target_ranges[ir] != TSeqRange::GetEmpty() &&
@@ -439,7 +439,7 @@ pub(super) fn x_scan_two_hit_ranges<F>(
 //         }
 //     }
 // ```
-// NCBI reference: c++/src/objtools/align_format/showalign.cpp:2518-2521
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2518-2521
 // ```c++
 //                     } else if (m_SeqLocChar==eLowerCase){
 //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);

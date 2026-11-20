@@ -1,8 +1,8 @@
 //! SEG filter implementation
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1625-1638
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1625-1638
 // ```c
 // if ( !(KAPPA_BLASTP_NO_SEG_SEQUENCE) ) {
 //     if (compo_adjust_mode
@@ -14,7 +14,7 @@
 // }
 // ```
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2282-2325
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2282-2325
 // ```c
 // BlastSeqLocFromSeqLoc(..., SegParameters* sparamsp, BlastSeqLoc** seg_locs)
 // {

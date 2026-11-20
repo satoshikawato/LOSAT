@@ -672,7 +672,7 @@ impl<M: TbxScore> XPairPar<M> {
             if sub.longest_chain <= 0 {
                 continue;
             }
-            // NCBI sizes the offset array from the table it scans (lookup_wrap.c:264-266).
+            // NCBI sizes the offset array from the table it scans (c++/src/algo/blast/core/lookup_wrap.c:264-266).
             let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain;
             // EXPERIMENT (LOSAT_X_TBXHITBF): with `BF` and `PF`, X_PREFETCH_AHEAD entries more, as
             // in `scan_unit_hits`.

@@ -2084,42 +2084,73 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
     write!(writer, "{:>8} ", format_ncbi_ka_value(value))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-395
-// ```c++
-//       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
-//                                               m_Outfile);
-//     }
-//
-//     if (m_IsBl2Seq && !m_IsDbScan) {
-//         return;
-//     }
-//
-//     m_Outfile << NcbiEndl << NcbiEndl;
-// ```
-/// The prolog of blastp's, psiblast's and rpsblast's pairwise reports before the database: the
-/// version line (`reference::write_version_line`), two newlines and the references of
-/// `PrintProlog` (`reference::write_prolog_references`: the Gapped BLAST reference, psiblast's
-/// compositionally adjusted matrices and the composition-based statistics of psiblast and
-/// blastp). `program` is `psiblast`, `rpsblast`, or blastp's for any other.
-fn write_blastp_pairwise_intro<W: Write>(
+/// `CBlastFormat::PrintProlog` of the reports of formats 0-4 of every program (the one place of
+/// the start of their output): the version line (`reference::write_version_line`), the `NcbiEndl`
+/// pair and the references (`reference::write_prolog_references`: the Gapped BLAST or, for
+/// `megablast`, the megablast reference, psiblast's compositionally adjusted matrices and the
+/// composition-based statistics of psiblast and blastp). `program` is NCBI's `m_Program` (any
+/// case; `blastp_family_program` for blastp's driver).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-395
+/// ```c++
+///     // no header for some output types
+///     if (m_FormatType >= CFormattingArgs::eXml) {
+///         ...
+///         return;
+///     }
+///
+///     if (m_IsHTML) {
+///         m_Outfile << kHTML_Prefix << "\n";
+///     }
+///     ...
+///       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
+///                                               m_Outfile);
+///     }
+///
+///     if (m_IsBl2Seq && !m_IsDbScan) {
+///         return;
+///     }
+///
+///     m_Outfile << NcbiEndl << NcbiEndl;
+/// ```
+/// (The callers are those of formats 0-4 that write the references; the RMBlast branch needs
+/// `m_DisableKAStats`, which no LOSAT program sets.) `NcbiEndl` is `std::endl`, which flushes
+/// in every NCBI program. `endl_flushes` keeps each program's flushes of dev: the reports that
+/// share the translated programs' prolog (blastx, rpstblastn, tblastn, tblastx and the blastn
+/// tasks other than megablast) flush there, blastp's driver (blastp, psiblast, rpsblast) and
+/// megablast do not and flush later. A flush moves the point where these bytes reach the output
+/// and where a write failure shows, so the difference stays data here, not a change of this
+/// groundwork.
+pub(crate) fn write_prolog<W: Write + ?Sized>(
     writer: &mut W,
-    version: &str,
     program: &str,
+    version: &str,
+    megablast: bool,
+    endl_flushes: bool,
 ) -> io::Result<()> {
-    let program = match program {
-        "psiblast" | "rpsblast" => program,
-        _ => "blastp",
-    };
     super::reference::write_version_line(writer, false, program, version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    for _ in 0..2 {
+        writeln!(writer)?;
+        if endl_flushes {
+            writer.flush()?;
+        }
+    }
     super::reference::write_prolog_references(
         writer,
         false,
         super::reference::DEFAULT_PROTOCOL,
         program,
-        false,
+        megablast,
     )
+}
+
+/// NCBI's `m_Program` of a report of blastp's driver: `psiblast`, `rpsblast`, or `blastp` for
+/// any other name (its tasks).
+pub(crate) fn blastp_family_program(program: &str) -> &str {
+    match program {
+        "psiblast" | "rpsblast" => program,
+        _ => "blastp",
+    }
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blastfmtutil.cpp:125-138
@@ -2316,7 +2347,13 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    write_blastp_pairwise_intro(writer, version, program)?;
+    write_prolog(
+        writer,
+        blastp_family_program(program),
+        version,
+        false,
+        false,
+    )?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -2790,16 +2827,43 @@ fn write_blastp_final_footer<W: Write>(
         "Gap Penalties: Existence: {}, Extension: {}",
         report.gap_open, report.gap_extend
     )?;
-    if report.word_threshold != 0.0 {
-        // `GetWordThreshold()` is a double, written with the stream's default format.
+    write_epilog_end(writer, report.word_threshold, report.window_size as i64)
+}
+
+/// The end of `CBlastFormat::PrintEpilog` of formats 0-4, the one place of the end of their output
+/// for every program: the word threshold's and the window's lines, each when it is not 0
+/// (BLASTN's threshold is 0 for every task, BLAST_WORD_THRESHOLD_BLASTN and
+/// BLAST_WORD_THRESHOLD_MEGABLAST, blast_options.h). `GetWordThreshold()` is a double, written
+/// with the stream's default format (`cpp_default_double`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2281-2292
+/// ```c++
+///     if (options.GetWordThreshold()) {
+///         m_Outfile << "Neighboring words threshold: " <<
+///                         options.GetWordThreshold() << "\n";
+///     }
+///     if (options.GetWindowSize()) {
+///         m_Outfile << "Window for multiple hits: " <<
+///                         options.GetWindowSize() << "\n";
+///     }
+///     if (m_IsHTML) {
+///         m_Outfile << kHTML_Suffix << "\n";
+///     }
+/// ```
+fn write_epilog_end<W: Write + ?Sized>(
+    writer: &mut W,
+    word_threshold: f64,
+    window_size: i64,
+) -> io::Result<()> {
+    if word_threshold != 0.0 {
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            cpp_default_double(report.word_threshold)
+            cpp_default_double(word_threshold)
         )?;
     }
-    if report.window_size != 0 {
-        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
+    if window_size != 0 {
+        writeln!(writer, "Window for multiple hits: {window_size}")?;
     }
     Ok(())
 }
@@ -2926,7 +2990,13 @@ pub fn write_blastp_pairwise_window<W: Write>(
     let writer = &mut buffered;
 
     if prolog && query_range.start == 0 {
-        write_blastp_pairwise_intro(writer, &report.version, &config.program)?;
+        write_prolog(
+            writer,
+            blastp_family_program(&config.program),
+            &report.version,
+            false,
+            false,
+        )?;
         // The prolog ends with one blank line; each query's preamble starts with two
         // (blast_format.cpp:1491), after the query's warnings.
         match database {
@@ -4340,33 +4410,6 @@ fn write_blastn_description_table<W: Write>(
     )
 }
 
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:387-407
-// ```c++
-//       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
-//                                               m_Outfile);
-//     ...
-//     m_Outfile << NcbiEndl << NcbiEndl;
-//     ...
-//     if (m_Megablast)
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                                           m_Outfile, CReference::eMegaBlast);
-// ```
-// The prolog of a megablast search: the reference is the megablast one
-// (`reference::write_prolog_references`); the layout is that of
-// `write_translated_pairwise_intro`.
-fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io::Result<()> {
-    super::reference::write_version_line(writer, false, "blastn", version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    super::reference::write_prolog_references(
-        writer,
-        false,
-        super::reference::DEFAULT_PROTOCOL,
-        "blastn",
-        true,
-    )
-}
-
 // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:451-478
 // ```c++
 //     m_Outfile << NcbiEndl;
@@ -4504,8 +4547,6 @@ fn write_blastn_final_footer<W: Write>(
     //                         options.GetWindowSize() << "\n";
     //     }
     // ```
-    // BLASTN's word threshold is 0 for every task (BLAST_WORD_THRESHOLD_BLASTN and
-    // BLAST_WORD_THRESHOLD_MEGABLAST, blast_options.h).
     let gap_extension = if report.zero_gap_extension_formula && report.gap_extend == 0 {
         f64::from(-2 * report.penalty + report.reward) / 2.0
     } else {
@@ -4518,10 +4559,7 @@ fn write_blastn_final_footer<W: Write>(
             report.gap_open, gap_extension
         )?;
     }
-    if report.window_size != 0 {
-        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
-    }
-    Ok(())
+    write_epilog_end(writer, 0.0, report.window_size as i64)
 }
 
 /// The start of the BLASTN report, which NCBI writes before it searches: the program
@@ -4545,9 +4583,9 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     if megablast {
-        write_megablast_pairwise_intro(writer, version)?;
+        write_prolog(writer, "blastn", version, true, false)?;
     } else {
-        write_translated_pairwise_intro(writer, "BLASTN", version)?;
+        write_prolog(writer, "blastn", version, false, true)?;
     }
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
@@ -4944,7 +4982,7 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    write_translated_pairwise_intro(writer, "TBLASTX", version)?;
+    write_prolog(writer, "tblastx", version, false, true)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -5221,18 +5259,7 @@ fn write_tblastx_epilog<W: Write>(
         )?,
     }
     write_matrix_line(writer, Some(&report.matrix_name))?;
-    if report.word_threshold != 0.0 {
-        // `GetWordThreshold()` is a double, written with the stream's default format.
-        writeln!(
-            writer,
-            "Neighboring words threshold: {}",
-            cpp_default_double(report.word_threshold)
-        )?;
-    }
-    if report.window_size != 0 {
-        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
-    }
-    Ok(())
+    write_epilog_end(writer, report.word_threshold, report.window_size as i64)
 }
 
 /// A `double` written to a C++ stream with the default flags: `%g` with precision 6
@@ -6700,7 +6727,7 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    write_translated_pairwise_intro(writer, program, version)?;
+    write_prolog(writer, program, version, false, true)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -6752,7 +6779,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     let mut writer = io::BufWriter::new(writer);
     // NCBI c++/src/algo/blast/format/blast_format.cpp:372-424:
     // BlastPrintVersionInfo(m_Program,...); BlastPrintReference(...);
-    write_translated_pairwise_intro(&mut writer, program, &report.version)?;
+    write_prolog(&mut writer, program, &report.version, false, true)?;
     // The prolog ends with one blank line; each query's preamble starts with two
     // (blast_format.cpp:1491), after the query's warnings.
     match database {
@@ -7167,68 +7194,6 @@ fn write_tblastn_alignment<W: Write>(
         width,
         |writer, row, columns| writer.write_all(&[q, s][row][columns]),
         |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, false),
-    )
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-407
-// ```c++
-//       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
-//                                               m_Outfile);
-//     }
-//
-//     if (m_IsBl2Seq && !m_IsDbScan) {
-//         return;
-//     }
-//
-//     m_Outfile << NcbiEndl << NcbiEndl;
-//     if (m_Program == "deltablast") {
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                               m_Outfile, CReference::eDeltaBlast);
-//         m_Outfile << "\n";
-//     }
-//
-//     if (m_Megablast)
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                                           m_Outfile, CReference::eMegaBlast);
-//     else
-//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
-//                                           m_Outfile);
-// ```
-fn write_translated_pairwise_intro(
-    writer: &mut impl Write,
-    program: &str,
-    version: &str,
-) -> io::Result<()> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:66-73
-    // ```c++
-    // void CBlastFormatUtil::BlastPrintVersionInfo(const string program, bool html,
-    //                                              CNcbiOstream& out)
-    // {
-    //     if (html)
-    //         out << "<b>" << BlastGetVersion(program) << "</b>" << "\n";
-    //     else
-    //         out << BlastGetVersion(program) << "\n";
-    // }
-    // ```
-    super::reference::write_version_line(writer, false, program, version)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
-    // ```c++
-    //     m_Outfile << NcbiEndl << NcbiEndl;
-    // ```
-    writeln!(writer)?;
-    writer.flush()?;
-    writeln!(writer)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
-    // ```c++
-    //     m_Outfile << NcbiEndl << NcbiEndl;
-    // ```
-    writer.flush()?;
-    super::reference::write_prolog_references(
-        writer,
-        false,
-        super::reference::DEFAULT_PROTOCOL,
-        program,
-        false,
     )
 }
 
@@ -7688,14 +7653,14 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
 //                                           m_Outfile);
 // ```
 /// `program` is the program line's name: `BLASTX`, or `RPSTBLASTN`, whose prolog is BLASTX's (the
-/// Gapped BLAST reference only, blast_format.cpp:416-426 quoted at `write_translated_pairwise_intro`).
+/// Gapped BLAST reference only, blast_format.cpp:416-426, `write_prolog`).
 pub fn write_blastx_prolog(
     writer: &mut impl Write,
     program: &str,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    write_translated_pairwise_intro(writer, program, &report.version)?;
+    write_prolog(writer, program, &report.version, false, true)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -7807,18 +7772,7 @@ pub fn write_blastx_epilog(
             report.gap_open, report.gap_extend
         )?;
     }
-    if options.word_threshold != 0.0 {
-        // `GetWordThreshold()` is a double, written with the stream's default format.
-        writeln!(
-            writer,
-            "Neighboring words threshold: {}",
-            cpp_default_double(options.word_threshold)
-        )?;
-    }
-    if report.window_size != 0 {
-        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
-    }
-    Ok(())
+    write_epilog_end(writer, options.word_threshold, report.window_size as i64)
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
 // ```c++

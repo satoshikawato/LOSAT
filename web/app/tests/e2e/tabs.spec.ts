@@ -6,6 +6,7 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { focused } from './support/live';
+import { BUILD_HAS_ENGINE } from './support/browser';
 import { chooseRun, openSearch, paste, program, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
@@ -101,4 +102,54 @@ test('Search and Results, the results views and the output formats are tabs that
   await page.keyboard.press('Space');
   await expect(output).toHaveAttribute('data-shown', '1:7');
   await expectTabs(page, 'Output format', FORMATS, 'format-7');
+});
+
+// Line WQA, W-2 (2026-11-20): in the random walk at 320 px, WebKit's press on the Search tab came
+// as the run on the Results tab ended, and the tab stayed unchosen. While the results were read,
+// "Reading the results…" stood for the run's status, the page became shorter than where it was
+// scrolled to, and the browser moved it up by as much (106 px there): the release came on what had
+// been under the tab, so the press was no click (a click goes where the press and the release both
+// were). Chromium and Firefox lost it the same way.
+test('the page does not move while a run’s results are read: a press on the Search tab then is a click', async ({ page }) => {
+  test.skip(BUILD_HAS_ENGINE, "the FakeEngine's runs wait on the page's timers, which the test holds");
+  await page.setViewportSize({ width: 320, height: 480 });
+  await page.clock.install();
+  await openSearch(page);
+  await program(page, 'blastp');
+  await paste(page, 'query', `>q1\n${PROTEIN}\n`);
+  await paste(page, 'subject', `>s1\n${PROTEIN}\n>s2\n${PROTEIN}\n`);
+  // The run stays in progress until the clock goes on.
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+  await submit(page);
+  await expect(page.getByTestId('run-status')).toBeVisible();
+  // A window in which the page, scrolled to its end (the run's status), still shows the tabs: it
+  // is scrolled half as far as the tabs are from the top.
+  const status = await page.evaluate(() => ({
+    height: document.documentElement.scrollHeight,
+    tab: document.querySelector('[data-testid="tab-search"]')!.getBoundingClientRect().top + window.scrollY,
+  }));
+  await page.setViewportSize({ width: 320, height: status.height - Math.round(status.tab / 2) });
+  const scrolled = await page.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    // The page is laid out after each change, as a browser may do between any two of them: a
+    // state that lasts only until the next change moves the page all the same.
+    const seen = new Set<number>();
+    (window as unknown as { seenScroll: Set<number> }).seenScroll = seen;
+    new MutationObserver(() => {
+      void document.documentElement.scrollHeight;
+      seen.add(window.scrollY);
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+    return window.scrollY;
+  });
+  expect(scrolled).toBeGreaterThan(0);
+  const tab = page.getByTestId('tab-search');
+  const box = (await tab.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.clock.resume();
+  await waitStatus(page, 1, 'completed');
+  await expect(page.getByTestId('results-view-hits')).toBeVisible();
+  expect(await page.evaluate(() => [...(window as unknown as { seenScroll: Set<number> }).seenScroll])).toEqual([scrolled]);
+  await page.mouse.up();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
 });

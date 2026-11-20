@@ -147,6 +147,25 @@ function showHeading(): void {
 }
 defineExpose({ showHeading });
 
+/**
+ * While the results of a run are read (its search has just ended, or another run was chosen), the
+ * panel keeps the height that it had: "Reading the results…" is shorter than the status or the
+ * results that it stands between, and a page made shorter than where it is scrolled to moves up
+ * by as much, under the pointer (line WQA, W-2, 2026-11-20: a press on the Search tab, released
+ * after the move, was no click). What is read replaces the kept height in the same update.
+ */
+const root = ref<HTMLElement>();
+const kept = ref<number>();
+watch(
+  () => state.value.phase,
+  (phase, before) => {
+    // Before the update: the panel still shows what it had.
+    if (phase !== 'loading') kept.value = undefined;
+    else if (before !== 'loading') kept.value = root.value?.getBoundingClientRect().height;
+  },
+  { flush: 'pre' },
+);
+
 /** Every run of the working session, newest first: a run without results says why. */
 const choices = computed(() => [...props.runs].reverse());
 const selected = computed(() => props.runs.find((run) => run.snapshot.runId === state.value.runId));
@@ -208,7 +227,12 @@ async function toAlignments(id: HspId): Promise<void> {
 </script>
 
 <template>
-  <section class="results" data-testid="results-panel">
+  <section
+    ref="root"
+    class="results"
+    :style="kept === undefined ? undefined : { minHeight: `${kept}px`, boxSizing: 'border-box' }"
+    data-testid="results-panel"
+  >
     <h2 ref="heading" tabindex="-1" data-testid="results-heading">Results</h2>
     <p v-if="runs.length === 0" data-testid="results-empty">
       <button type="button" class="primary-action" data-testid="results-run-a-search" @click="emit('search')">Run a search</button>

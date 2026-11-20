@@ -27,8 +27,43 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
 - `kind ncbi` with `ncbi-stack: unlimited` in covers: `freeze` runs NCBI with no stack limit, where its default 8 MiB
   stack overflows on a PSSM's values nested thousands of levels deep (PD-LOSAT-NCBI-DEFECTS exception 15); `check`
   runs LOSAT as for any row.
+- `kind ncbi` with `ncbi-copies: PATH [NAME=VALUE ...]` in covers (a copy row; up to a ` | ` or the end): the
+  expectation is made from NCBI's run on the oracle query file PATH (relative to LOSAT/) in place of the row's query
+  file. With unified P-values (`blastp -comp_based_stats 1u`, `2u`, `3u`) NCBI BLAST+ 2.17.0 adjusts a query's E-values
+  with the values of the next query of its batch and, for a batch's last query, with bytes past its array that change
+  from run to run. In PATH each query that ends a query batch of LOSAT's run is followed by a copy of itself (its
+  residues under an id that starts with `COPY`: `>COPY`, `>COPY2`), and only the copies end the oracle run's batches
+  (a batch takes queries while the sum of their lengths is below BATCH_SIZE, 10000 for BLASTP; the query that brings it
+  there ends it); so each original's report is NCBI's with its own values. The `NAME=VALUE` words set the oracle run's
+  environment in place of the row's words of those names (BATCH_SIZE). The loader checks both files
+  (`copy_oracle_problems`). `freeze` runs NCBI `-num_threads 1` on PATH (exit 0 and an empty stderr, or it stops), keeps
+  the whole stdout unchanged as `<row_id>.copies.out` and writes as `<row_id>.out` (and the row's cells; rc 0, no
+  stderr) the cut of it by a fixed rule (`cut_copies`):
+  - outfmt 6: the lines whose first field (the query id) starts with `COPY` are left out;
+  - outfmt 7: each copy's block (its `# BLASTP 2.17.0+` line up to the next such line or the final line) is left out,
+    and the final line `# BLAST processed N queries` gets N lowered by the number of copies: **the one place where a
+    byte of NCBI's output is rewritten**;
+  - outfmt 0: each copy's report (its `Query= COPY` line up to the next `Query= ` line or, for the last query, up to
+    the final `  Database: ` block) is left out;
+  - outfmt 5: the copy's `<Iteration>` element is left out; the one copy must be the oracle file's last query (the
+    iteration numbers of later queries would change);
+  - any other outfmt, a custom field list, another program or kind: the loader refuses the row.
+
+  The copies' own reports are those of a batch's last query and change from run to run; a later `freeze` keeps the
+  frozen `<row_id>.copies.out` when its cut is the new run's cut (so a freeze of an unchanged expectation leaves the
+  files as they are).
+
+  A copy row must not be used where a query's hit list can fill: once every list of a batch is full, NCBI's
+  composition-based redo may stop early by a test over all the batch's lists (`BlastCompo_EarlyTermination`), the
+  copies' lists with their undefined values included. A copy row takes no `-max_target_seqs`, `-num_descriptions` or
+  `-num_alignments`, and `freeze` stops when a query of the oracle output has 500 subjects (the default hit list) or
+  more. `check` cuts `<row_id>.copies.out` again and fails the row when that is not `<row_id>.out`, then compares LOSAT's
+  run of the row's own query file with `<row_id>.out` as for any `ncbi` row.
 - `kind losat-rejection`: LOSAT exits with rc, stdout is empty, stderr contains the text after `expect: ` in covers
-  (to a ` | ` or the end); the hash columns are empty.
+  (to a ` | ` or the end); the hash columns are empty. A rejection that comes after reports has a non-empty
+  `stdout_bytes`: its stdout is NCBI's of the same command (`<row_id>.out`), or, with `ncbi-near: ROW_ID` in covers,
+  the frozen stdout of the `ncbi` row ROW_ID of the same outfmt (for example the copy row of the batches that LOSAT
+  writes before it refuses); `freeze` copies ROW_ID's stdout cells and the row has no frozen file.
 - `db`: path relative to LOSAT/ (an empty cell is `-db ""`; `subject:PATH` runs `-subject PATH` in place of `-db`, for a
   psiblast losat-rejection row of a subject set); `extra_args` is split like a shell line; `outfmt` is one argument;
   `stdout_sha256`, `stdout_bytes` and `stderr_sha256` are written by `freeze`.

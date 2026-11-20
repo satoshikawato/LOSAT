@@ -173,7 +173,21 @@ class DbSearchFixtureTests(unittest.TestCase):
         for r in rows:
             if r["kind"] != "ncbi":
                 self.assertFalse(db_fixtures.under_valgrind(r), r["row_id"])
+                self.assertIsNone(db_fixtures.copies_cell(r), r["row_id"])
+                # A rejection row whose stdout is an ncbi row's (`ncbi-near:`) has that row's stdout cells, no file.
+                near = db_fixtures.near_row_id(r)
+                if near:
+                    source = by_id[near]
+                    self.assertEqual((source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
+                                     ("ncbi", None, r["outfmt"]), r["row_id"])
+                    self.assertEqual([source[k] for k in ("stdout_sha256", "stdout_bytes")],
+                                     [r[k] for k in ("stdout_sha256", "stdout_bytes")], r["row_id"])
+                    self.assertFalse((db_fixtures.FROZEN / f"{r['row_id']}.out").exists(), r["row_id"])
                 continue
+            # A copy row's expectation is the cut of its whole NCBI output (`ncbi-copies:`).
+            if db_fixtures.copies_cell(r) is not None:
+                self.assertEqual(db_fixtures.copy_row_problems(r), [], r["row_id"])
+                self.assertEqual((r["rc"], r["stderr_sha256"]), ("0", ""), r["row_id"])
             # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
             near = db_fixtures.near_row_id(r)
             # A row frozen from NCBI under valgrind (`ncbi-valgrind`) has frozen files of its own run.
@@ -267,6 +281,201 @@ class DbSearchFixtureTests(unittest.TestCase):
             for row in (plain, rps, rejection):
                 self.assertEqual((frozen / f"{row['row_id']}.out").read_bytes(), b"false", row["row_id"])
             self.assertEqual(len(written), 1)
+
+
+def pairwise_report(query: str, hits: list[str]) -> str:
+    """A query's report of NCBI's outfmt 0 (the shape of BLASTP 2.17.0's), with one alignment per hit."""
+    table = "".join(f"{hit} a protein                                                   19.6    3.2  \n" for hit in hits)
+    body = ("Sequences producing significant alignments:                          (Bits)  Value\n\n"
+            f"{table}\n\n" + "".join(f">{hit} a protein\nLength=40\n\n Score = 19.6 bits (39),  Expect = 3.2\n\n"
+                                       "Query  1  MKV  3\n           MKV\nSbjct  1  MKV  3\n\n\n" for hit in hits)
+            if hits else "\n\n***** No hits found *****\n\n")
+    return (f"Query= {query}\n\nLength=82\n" + body + "\n"
+            "Lambda      K        H        a         alpha\n   0.318    0.136    0.374    0.792     4.96 \n\n"
+            "Effective search space used: 1998016\n\n\n")
+
+
+PAIRWISE_HEAD = ("BLASTP 2.17.0+\n\n\nReference: ...\n\n\n\nDatabase: PajaWSV proteins\n"
+                 "           86 sequences; 66,738 total letters\n\n\n\n")
+PAIRWISE_TAIL = ("  Database: PajaWSV proteins\n    Posted date:  Oct 13, 2026  1:44 PM\n"
+                 "  Number of letters in database: 66,738\n  Number of sequences in database:  86\n\n\n\n"
+                 "Matrix: BLOSUM62\nGap Penalties: Existence: 11, Extension: 1\n")
+
+
+def tabular_block(query: str, rows: list[str]) -> str:
+    """A query's block of NCBI's outfmt 7."""
+    fields = "# Fields: query acc.ver, subject acc.ver, evalue\n" if rows else ""
+    return (f"# BLASTP 2.17.0+\n# Query: {query}\n# Database: tests/db_search/paja\n{fields}# {len(rows)} hits found\n"
+            + "".join(f"{query.split()[0]}\t{row}\n" for row in rows))
+
+
+def xml_iteration(number: int, query: str, hits: list[str]) -> str:
+    """A query's `<Iteration>` element of NCBI's outfmt 5."""
+    return (f"<Iteration>\n  <Iteration_iter-num>{number}</Iteration_iter-num>\n"
+            f"  <Iteration_query-ID>Query_{number}</Iteration_query-ID>\n  <Iteration_query-def>{query}</Iteration_query-def>\n"
+            "  <Iteration_hits>\n" + "".join(f"<Hit>\n  <Hit_id>{hit}</Hit_id>\n</Hit>\n" for hit in hits)
+            + "  </Iteration_hits>\n</Iteration>\n")
+
+
+XML_HEAD = "<?xml version=\"1.0\"?>\n<BlastOutput>\n  <BlastOutput_query-def>A a protein</BlastOutput_query-def>\n<BlastOutput_iterations>\n"
+XML_TAIL = "</BlastOutput_iterations>\n</BlastOutput>\n\n"
+
+
+class CopyRowTests(unittest.TestCase):
+    """Copy rows (`ncbi-copies:`): the cut of NCBI's output on a query file with copies, NCBI's query batches and
+    the checks of the oracle file."""
+
+    def test_query_batches_take_queries_until_the_batch_size_is_reached(self):
+        self.assertEqual(db_fixtures.query_batches([250, 310, 200, 60], 260), [[0, 1], [2, 3]])
+        self.assertEqual(db_fixtures.query_batches([250, 250, 200, 200], 300), [[0, 1], [2, 3]])
+        self.assertEqual(db_fixtures.query_batches([100, 100], 10000), [[0, 1]])
+        self.assertEqual(db_fixtures.query_batches([100, 100], 1), [[0], [1]])
+        self.assertEqual(db_fixtures.query_batches([100, 100, 5], 200), [[0, 1], [2]])
+        self.assertEqual(db_fixtures.query_batches([], 10), [])
+        self.assertEqual(db_fixtures.batch_size({}), 10000)
+        self.assertEqual(db_fixtures.batch_size({"BATCH_SIZE": "260"}), 260)
+
+    def test_outfmt_6_drops_the_copies_rows(self):
+        whole = b"A\ts1\t1e-5\nA\ts2\t3.2\nB\ts1\t0.1\nCOPY\ts1\t0.2\nCOPY2\ts3\t9\n"
+        self.assertEqual(db_fixtures.cut_copies(whole, "6", 2), b"A\ts1\t1e-5\nA\ts2\t3.2\nB\ts1\t0.1\n")
+        self.assertEqual(db_fixtures.cut_copies(b"", "6", 1), b"")
+        self.assertEqual(db_fixtures.subjects_per_query(whole, "6"), [2, 1, 1, 1])
+
+    def test_outfmt_7_drops_the_copies_blocks_and_counts_the_queries_kept(self):
+        a, b = tabular_block("A a protein", ["s1\t1e-5", "s2\t3.2"]), tabular_block("B", [])
+        copy, copy2 = tabular_block("COPY", ["s1\t0.2"]), tabular_block("COPY2", [])
+        whole = (a + copy + b + copy2 + "# BLAST processed 4 queries\n").encode()
+        self.assertEqual(db_fixtures.cut_copies(whole, "7", 2), (a + b + "# BLAST processed 2 queries\n").encode())
+        trailing = (a + b + copy + "# BLAST processed 3 queries\n").encode()
+        self.assertEqual(db_fixtures.cut_copies(trailing, "7", 1), (a + b + "# BLAST processed 2 queries\n").encode())
+        self.assertEqual(db_fixtures.subjects_per_query(whole, "7"), [2, 1])
+        for wrong in (whole.replace(b"4 queries", b"3 queries"), whole[:-len(b"# BLAST processed 4 queries\n")]):
+            with self.assertRaises(ValueError):
+                db_fixtures.cut_copies(wrong, "7", 2)
+        with self.assertRaises(ValueError):
+            db_fixtures.cut_copies(whole, "7", 1)
+
+    def test_outfmt_0_drops_the_copies_reports_up_to_the_next_query_or_the_footer(self):
+        a, b = pairwise_report("A a protein", ["s1", "s2"]), pairwise_report("B", [])
+        copy, copy2 = pairwise_report("COPY", ["s1"]), pairwise_report("COPY2", [])
+        whole = (PAIRWISE_HEAD + a + copy + b + copy2 + PAIRWISE_TAIL).encode()
+        self.assertEqual(db_fixtures.cut_copies(whole, "0", 2), (PAIRWISE_HEAD + a + b + PAIRWISE_TAIL).encode())
+        self.assertEqual(db_fixtures.subjects_per_query(whole, "0"), [2, 1, 0, 0])
+        with self.assertRaises(ValueError):
+            db_fixtures.cut_copies(whole, "0", 1)
+        with self.assertRaises(ValueError):
+            db_fixtures.cut_copies((PAIRWISE_HEAD + a + copy).encode(), "0", 1)
+
+    def test_outfmt_5_drops_a_last_copy_only(self):
+        a, b = xml_iteration(1, "A a protein", ["s1", "s2"]), xml_iteration(2, "B", [])
+        whole = (XML_HEAD + a + b + xml_iteration(3, "COPY", ["s1"]) + XML_TAIL).encode()
+        self.assertEqual(db_fixtures.cut_copies(whole, "5", 1), (XML_HEAD + a + b + XML_TAIL).encode())
+        self.assertEqual(db_fixtures.subjects_per_query(whole, "5"), [2, 0, 1])
+        middle = (XML_HEAD + a + xml_iteration(2, "COPY", []) + xml_iteration(3, "B", []) + XML_TAIL).encode()
+        two = (XML_HEAD + a + xml_iteration(2, "COPY", []) + xml_iteration(3, "COPY2", []) + XML_TAIL).encode()
+        for wrong, copies in ((middle, 1), (two, 2), (whole, 2)):
+            with self.assertRaises(ValueError):
+                db_fixtures.cut_copies(wrong, "5", copies)
+
+    def test_other_formats_have_no_rule(self):
+        for outfmt in ("11", "10", "6 qseqid sseqid", "17"):
+            with self.assertRaises(ValueError):
+                db_fixtures.cut_copies(b"A\ts1\n", outfmt, 1)
+
+    def oracle_row(self, tmp: Path, query: list[str], oracle: list[str], **cells: str) -> dict[str, str]:
+        (tmp / "q.faa").write_text("".join(query))
+        (tmp / "o.faa").write_text("".join(oracle))
+        words = cells.pop("words", "")
+        row = {"row_id": "db.x.c.6", "program": "blastp", "kind": "ncbi", "query": str(tmp / "q.faa"),
+               "extra_args": "-comp_based_stats 2u", "outfmt": "6",
+               "covers": f"a copy row | ncbi-copies: {tmp / 'o.faa'}{words}"}
+        return {**row, **cells}
+
+    def test_the_oracle_file_is_checked_against_the_query_file_and_the_batches(self):
+        a, b = ">A a protein\nMKVLA\nGG\n", ">B\nWWWW\n"
+        copy_a, copy_b, copy2_b = ">COPY\nMKVLAGG\n", ">COPY\nWWWW\n", ">COPY2\nWWWW\n"
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name)
+            self.assertEqual(db_fixtures.copy_oracle_problems(self.oracle_row(tmp, [a, b], [a, b, copy_b])), [])
+            self.assertEqual(db_fixtures.copy_count(self.oracle_row(tmp, [a, b], [a, b, copy_b])), 1)
+            for outfmt in ("0", "5", "7"):
+                self.assertEqual(db_fixtures.copy_oracle_problems(
+                    self.oracle_row(tmp, [a, b], [a, b, copy_b], outfmt=outfmt)), [], outfmt)
+            # Two batches of LOSAT's run (BATCH_SIZE=1): each query is followed by its copy, and the oracle's
+            # BATCH_SIZE (8: 7 + 7 and 4 + 4) makes each copy end a batch.
+            two = self.oracle_row(tmp, [a, b], [a, copy_a, b, copy2_b], extra_args="BATCH_SIZE=1 -comp_based_stats 2u",
+                                  words=" BATCH_SIZE=8")
+            self.assertEqual(db_fixtures.copies_cell(two)[1], {"BATCH_SIZE": "8"})
+            self.assertEqual(db_fixtures.copy_oracle_problems(two), [])
+            # Without the oracle's own BATCH_SIZE each query is alone in its batch, and the copies too.
+            self.assertTrue(db_fixtures.copy_oracle_problems({**two, "covers": f"ncbi-copies: {tmp / 'o.faa'}"}))
+            # A batch-ending query without its copy, a copy of other residues or before its query, a copy row of
+            # outfmt 5 whose copy is not last, another program, format, kind or a hit-list limit.
+            wrong = [
+                self.oracle_row(tmp, [a, b], [a, b]),
+                self.oracle_row(tmp, [a, b], [a, b, copy_a]),
+                self.oracle_row(tmp, [a, b], [copy_b, a, b]),
+                self.oracle_row(tmp, [a, b], [a, copy_a, b, copy2_b]),
+                self.oracle_row(tmp, [a, b], [a, copy_a, b, copy2_b], extra_args="BATCH_SIZE=1", words=" BATCH_SIZE=8",
+                                outfmt="5"),
+                self.oracle_row(tmp, [a, b], [a, b, copy_b], program="psiblast"),
+                self.oracle_row(tmp, [a, b], [a, b, copy_b], outfmt="6 qseqid sseqid"),
+                self.oracle_row(tmp, [a, b], [a, b, copy_b], outfmt="11"),
+                self.oracle_row(tmp, [a, b], [a, b, copy_b], extra_args="-max_target_seqs 5"),
+                self.oracle_row(tmp, [a, ">B other\nWWWW\n"], [a, b, copy_b]),
+                self.oracle_row(tmp, [a, copy_b], [a, copy_b, ">COPY2\nWWWW\n"]),
+            ]
+            for row in wrong:
+                self.assertTrue(db_fixtures.copy_oracle_problems(row), (row["query"], row["outfmt"], row["program"]))
+            with self.assertRaises(SystemExit):
+                db_fixtures.copies_cell({**two, "covers": f"ncbi-copies: {tmp / 'o.faa'} -evalue 1"})
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI program is a shell script")
+    def test_freeze_keeps_the_whole_output_and_writes_its_cut(self):
+        # A stand-in NCBI that prints the query file it was given as outfmt 6 rows: the oracle's, never the row's.
+        a, b, copy_b = ">A\nMKV\n", ">B\nWW\n", ">COPY\nWW\n"
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name)
+            row = {**self.oracle_row(tmp, [a, b], [a, b, copy_b]), "rc": "", "stdout_sha256": "",
+                   "stdout_bytes": "", "stderr_sha256": "", "db": "d"}
+            bin_dir, frozen = tmp / "bin", tmp / "frozen"
+            bin_dir.mkdir()
+            frozen.mkdir()
+            script = bin_dir / "blastp"
+            script.write_text('#!/bin/sh\nwhile [ "$1" != -query ]; do shift; done\n'
+                              'grep ">" "$2" | sed "s/>//; s/$/\ts1\t${BATCH_SIZE-none}/"\n')
+            script.chmod(0o755)
+            written = []
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                    unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: written.append(a)), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="")), 0)
+                self.assertEqual(db_fixtures.copy_row_problems(row), [])
+                (frozen / "db.x.c.6.out").write_bytes(b"A\ts1\tnone\n")
+                self.assertEqual(db_fixtures.copy_row_problems(row), ["the cut of db.x.c.6.copies.out is not db.x.c.6.out"])
+            self.assertEqual((frozen / "db.x.c.6.copies.out").read_bytes(), b"A\ts1\tnone\nB\ts1\tnone\nCOPY\ts1\tnone\n")
+            self.assertEqual(row["stdout_bytes"], str(len(b"A\ts1\tnone\nB\ts1\tnone\n")))
+            self.assertEqual((row["rc"], row["stderr_sha256"]), ("0", ""))
+            # The copy's own report changes from run to run (NCBI reads past its array): a whole output whose cut is
+            # the new run's is kept; one whose cut differs is replaced.
+            (frozen / "db.x.c.6.copies.out").write_bytes(b"A\ts1\tnone\nB\ts1\tnone\nCOPY\ts9\tother\n")
+            for whole, kept in ((b"A\ts1\tnone\nB\ts1\tnone\nCOPY\ts9\tother\n", True), (b"A\ts2\tnone\n", False)):
+                (frozen / "db.x.c.6.copies.out").write_bytes(whole)
+                with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                        unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: None), \
+                        unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only=""))
+                self.assertEqual((frozen / "db.x.c.6.copies.out").read_bytes(),
+                                 whole if kept else b"A\ts1\tnone\nB\ts1\tnone\nCOPY\ts1\tnone\n")
+            # NCBI's oracle run must exit 0 with an empty stderr.
+            script.write_text("#!/bin/sh\necho warning >&2\n")
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                    unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: None), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only=""))
 
 
 def fake_search(directory: Path, master: bytes, sides: list[bytes], stdout: bytes = b"", extra: str = "") -> list[str]:

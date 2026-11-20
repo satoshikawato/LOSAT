@@ -46,7 +46,10 @@ fn every_format_of_ncbi_s_list_is_read() {
     // `NStr::StringToInt` after `TruncateSpaces` (P2.171, P2.173, P2.185, P2.187).
     for text in [" 6", "6 ", "06", "+6"] {
         assert_eq!(
-            extract_formatting(&options(text), 500).unwrap().choice.number,
+            extract_formatting(&options(text), 500)
+                .unwrap()
+                .choice
+                .number,
             6,
             "{text:?}"
         );
@@ -86,9 +89,7 @@ fn the_errors_of_outfmt_are_ncbi_s() {
     // P2.181, P2.163, P2.167: the delimiter.
     assert_eq!(
         error_of("6 delim"),
-        options_error_text(
-            "Delimiter format is invalid. Valid format is delim=<delimiter value>"
-        )
+        options_error_text("Delimiter format is invalid. Valid format is delim=<delimiter value>")
     );
     for (outfmt, delim, field) in [
         ("6 delim=; staxids", ";", "staxids"),
@@ -115,7 +116,11 @@ fn the_custom_specifications_are_the_search_programs() {
     assert_eq!(choice("6 qseqid foo").spec, "qseqid foo");
     let custom = choice("7 delim=, qseqid");
     assert_eq!(
-        (custom.number, custom.spec.as_str(), custom.delimiter.as_str()),
+        (
+            custom.number,
+            custom.spec.as_str(),
+            custom.delimiter.as_str()
+        ),
         (7, "qseqid", ",")
     );
     assert_eq!(choice("6 delim=: qseqid sseqid").delimiter, ":");

@@ -93,16 +93,11 @@ fn the_arguments_are_read_into_the_options() {
             parse_deflines: true,
         }
     );
-    let args = crate::ncbi_app::args::parse(
-        &TOOL,
-        &["-max_target_seqs".to_string(), "7".to_string()],
-    )
-    .unwrap();
+    let args =
+        crate::ncbi_app::args::parse(&TOOL, &["-max_target_seqs".to_string(), "7".to_string()])
+            .unwrap();
     let options = Options::of(&args);
-    assert_eq!(
-        (options.outfmt.as_str(), options.out.as_str()),
-        ("0", "-")
-    );
+    assert_eq!((options.outfmt.as_str(), options.out.as_str()), ("0", "-"));
     assert_eq!(options.max_target_seqs, Some(7));
     assert!(!options.show_gis && !options.html && !options.parse_deflines);
 }
@@ -220,6 +215,9 @@ fn the_run_s_errors_go_to_the_logfile() {
     // LOSAT's refusals stay on the standard error stream.
     let (status, _, err) = run_words(&["-logfile", &log_name, "-rid", "X"], b"");
     assert_eq!(status, 2);
-    assert!(err.starts_with("error: the NCBI BLAST+ option -rid"), "{err}");
+    assert!(
+        err.starts_with("error: the NCBI BLAST+ option -rid"),
+        "{err}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }

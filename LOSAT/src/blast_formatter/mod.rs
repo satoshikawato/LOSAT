@@ -17,8 +17,7 @@ use crate::ncbi_app::args::{flag, key, Args, Constraint, Dep, Desc, Kind};
 use crate::ncbi_app::files::{self, Cin};
 use crate::ncbi_app::{Diag, Tool};
 
-pub(crate) use formatting::{extract_formatting, sam_check, Formatting};
-pub(crate) use refusals::Refusal;
+use refusals::Refusal;
 
 /// The name in LOSAT's refusals.
 const PROGRAM: &str = "BLAST_FORMATTER";
@@ -118,11 +117,31 @@ const DESCS: &[Desc] = &[
         None,
         Some(Constraint::AtLeast(0)),
     ),
-    key("num_alignments", Kind::Integer, None, Some(Constraint::AtLeast(0))),
-    key("line_length", Kind::Integer, None, Some(Constraint::AtLeast(1))),
+    key(
+        "num_alignments",
+        Kind::Integer,
+        None,
+        Some(Constraint::AtLeast(0)),
+    ),
+    key(
+        "line_length",
+        Kind::Integer,
+        None,
+        Some(Constraint::AtLeast(1)),
+    ),
     flag("html"),
-    key("sorthits", Kind::Integer, None, Some(Constraint::Between(0, 4))),
-    key("sorthsps", Kind::Integer, None, Some(Constraint::Between(0, 4))),
+    key(
+        "sorthits",
+        Kind::Integer,
+        None,
+        Some(Constraint::Between(0, 4)),
+    ),
+    key(
+        "sorthsps",
+        Kind::Integer,
+        None,
+        Some(Constraint::Between(0, 4)),
+    ),
     key(
         "max_target_seqs",
         Kind::Integer,
@@ -227,7 +246,10 @@ impl Options {
             args.integer(name)
                 .and_then(|number| usize::try_from(number).ok())
         };
-        let sort = |name: &str| args.integer(name).and_then(|number| u8::try_from(number).ok());
+        let sort = |name: &str| {
+            args.integer(name)
+                .and_then(|number| u8::try_from(number).ok())
+        };
         Options {
             outfmt: args.value("outfmt").unwrap_or("0").to_string(),
             show_gis: args.flag("show_gis"),
@@ -321,10 +343,11 @@ fn run_body(
 /// `-out` (`out` is the standard output, for `-out -`), its errors and warnings on `diag`; the exit
 /// status. NCBI's loop over the archive's objects (blast_formatter.cpp:507-531): each object read
 /// (`CRemoteBlast::LoadFromArchive`), then, unless it is the error object, its formatting options
-/// (`extract_formatting` with the object's hit list size, `sam_check` with its program) and its
-/// report (`PrintFormattedOutput`, which opens `-out` at the first one); a read error is NCBI's
-/// `Invalid input format for BLAST Archive.` What LOSAT does not write is refused by name
-/// (`Refusal`). The reader of the archive is not part of this build: every run is refused.
+/// (`formatting::extract_formatting` with the object's hit list size, `formatting::sam_check`
+/// with its program) and its report (`PrintFormattedOutput`, which opens `-out` at the first
+/// one); a read error is NCBI's `Invalid input format for BLAST Archive.` What LOSAT does not
+/// write is refused by name (`Refusal`). The reader of the archive is not part of this build:
+/// every run is refused.
 pub(crate) fn format_archive(
     options: &Options,
     archive: &mut dyn Read,

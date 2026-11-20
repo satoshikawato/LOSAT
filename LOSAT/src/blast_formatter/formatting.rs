@@ -76,7 +76,10 @@ pub(crate) struct Formatting {
 /// none): NCBI's errors of `-outfmt` (`'x' is not a valid output format`, the delimiter's, the
 /// formats of other programs; `Formatting choice is out of range` with exit status 255), or the
 /// formatting and its warnings.
-pub(crate) fn extract_formatting(options: &Options, hitlist_size: usize) -> anyhow::Result<Formatting> {
+pub(crate) fn extract_formatting(
+    options: &Options,
+    hitlist_size: usize,
+) -> anyhow::Result<Formatting> {
     let choice = parse_formatting_string(&options.outfmt)?;
     formatting_handler_check_with(&choice, true)?;
     let outfmt = choice.number;
@@ -116,7 +119,9 @@ pub(crate) fn extract_formatting(options: &Options, hitlist_size: usize) -> anyh
         formatting: FormattingArgs {
             line_length: given.line_length.filter(|_| pairwise_family),
             sort_hits: given.sort_hits.filter(|_| pairwise_family),
-            sort_hsps: given.sort_hsps.filter(|_| outfmt == output_format::PAIRWISE),
+            sort_hsps: given
+                .sort_hsps
+                .filter(|_| outfmt == output_format::PAIRWISE),
         },
         show_gis,
         html,

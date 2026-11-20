@@ -370,20 +370,20 @@ impl ReportCounts {
         num_descriptions_given: bool,
         formatting: &FormattingArgs,
     ) -> Vec<u8> {
-        use crate::report::query_warnings::{few_matches_warning, warning_line};
+        use crate::report::query_warnings::{few_matches_warning, formatting_warning};
         let mut text = Vec::new();
         if outfmt > output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES {
             if num_descriptions_given {
-                text.extend(warning_line(prefix, "The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output"));
+                text.extend(formatting_warning(prefix, "The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output"));
             }
             if formatting.line_length.is_some() {
-                text.extend(warning_line(
+                text.extend(formatting_warning(
                     prefix,
                     "The parameter -line_length is not applicable for output formats > 4 .",
                 ));
             }
             if formatting.sort_hits.is_some() {
-                text.extend(warning_line(
+                text.extend(formatting_warning(
                     prefix,
                     "The parameter -sorthits is ignored for output formats > 4.",
                 ));
@@ -393,7 +393,7 @@ impl ReportCounts {
             text.extend(few_matches_warning(prefix));
         }
         if formatting.sort_hsps.is_some() && outfmt != output_format::PAIRWISE {
-            text.extend(warning_line(
+            text.extend(formatting_warning(
                 prefix,
                 "The parameter -sorthsps is ignored for output formats != 0.",
             ));

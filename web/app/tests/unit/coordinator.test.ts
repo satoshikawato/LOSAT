@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RunOutputWriter, sha256Hex } from 'losat';
-import { CUSTOM_OUTPUT, type MessagePlace, type RegistryFile, type RunFile, type ShownIds } from 'losat/domain';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type MessagePlace, type OutputFormat, type RegistryFile, type RunFile, type ShownIds } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
   runOutputFailedOf,
@@ -153,13 +153,18 @@ class ManualEngine implements EngineGateway {
    * engine fails a run that began to write: it writes them to stream 3 and ends its output with `fail`,
    * then rejects (with `late`, it rejects first, as a slow port might deliver them after the rejection).
    */
-  fail(runId: string, message: string, runFiles?: readonly RunFile[], diagnostics?: string, late = false) {
+  fail(runId: string, message: string, runFiles?: readonly RunFile[], diagnostics?: string, late = false, kept?: { readonly output: OutputFormat; readonly text: string }) {
     const pending = this.pending.get(runId);
     if (pending === undefined) return;
     const error = new Error(message);
     const failed = diagnostics === undefined ? error : withRunOutputFailed(error);
     const write = () => {
       const writer = new RunOutputWriter(pending.output);
+      // The output that the CLI leaves before its error, and the others dropped (line WQA's sweep, D15, 2026-11-20).
+      if (kept !== undefined) {
+        writer.write(kept.output, new TextEncoder().encode(kept.text));
+        for (const format of OUTPUT_FORMATS) if (format !== kept.output) writer.discard(format, 'run');
+      }
       if (diagnostics !== '') writer.write(DIAGNOSTICS_STREAM, new TextEncoder().encode(diagnostics));
       writer.fail();
     };
@@ -705,9 +710,10 @@ describe('Coordinator', () => {
     await waitFor(coordinator, failed, 'failed');
     expect(viewOf(coordinator, failed)!.record).toMatchObject({ error: 'BLAST engine error: The average subject length is too short', diagnostics: warning });
     expect('runFiles' in viewOf(coordinator, failed)!.record).toBe(false);
-    // The staged run is discarded, as before: the record keeps the text.
-    await expect(data.readDiagnostics(failed)).rejects.toThrow();
-    await expect(data.discardFailedRun(failed)).resolves.toBe('');
+    // The run is committed as a completed run is, with no output but the warnings (line WQA's sweep, D15, 2026-11-20); it is kept once.
+    await expect(data.readDiagnostics(failed)).resolves.toBe(warning);
+    await expect(data.keepFailedRun(failed)).resolves.toBeUndefined();
+    expect(viewOf(coordinator, failed)!.result).toMatchObject({ byteLengths: { 0: 0, 6: 0, 7: 0 }, hitCount: 0 });
 
     // The rejection before the chunks and the `fail`: the data layer waits for them.
     const late = (await coordinator.enqueue(request)).runId!;
@@ -735,6 +741,38 @@ describe('Coordinator', () => {
     engine.fail(cancelled, 'cancelled', undefined, warning);
     await waitFor(coordinator, cancelled, 'cancelled');
     expect('diagnostics' in viewOf(coordinator, cancelled)!.record).toBe(false);
+  });
+
+  // Line WQA's sweep, D15 (2026-11-20): a failed run keeps the output that the CLI leaves before its error, the bytes
+  // written to the output of the argv, and the engine drops the other outputs (stream 9, place `run`); the data layer
+  // commits the run as a completed run's, so that the output is read and exported as a completed run's is. A
+  // cancelled run keeps nothing.
+  it('keeps the output that a failed run wrote before its error, reads and exports it', async () => {
+    const engine = new ManualEngine();
+    const { coordinator, data, saved } = setup(engine);
+    const failed = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, failed, 'running');
+    engine.fail(failed, 'BLAST engine error: The average subject length is too short', undefined, 'Warning: one\n', false, { output: 0, text: 'BLASTN 2.17.0+\n\nDatabase: x\n' });
+    await waitFor(coordinator, failed, 'failed');
+    const view = viewOf(coordinator, failed)!;
+    expect(view.result).toMatchObject({ byteLengths: { 0: 28, 6: 0, 7: 0 }, hitCount: 0 });
+    expect(view.result!.failed).toEqual([
+      { output: 6, error: 'run' },
+      { output: 7, error: 'run' },
+    ]);
+    expect(await coordinator.readOutput(failed, 0)).toBe('BLASTN 2.17.0+\n\nDatabase: x\n');
+    expect(new TextDecoder().decode(await data.readOutput(failed, 6))).toBe('');
+    await coordinator.exportOutput(failed, 0);
+    expect(saved.at(-1)!.text).toBe('BLASTN 2.17.0+\n\nDatabase: x\n');
+    await expect(coordinator.readHits(failed)).rejects.toThrow('run is not completed');
+
+    const cancelled = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, cancelled, 'running');
+    coordinator.cancel(cancelled);
+    engine.fail(cancelled, 'cancelled', undefined, 'Warning: one\n', false, { output: 0, text: 'kept?' });
+    await waitFor(coordinator, cancelled, 'cancelled');
+    expect(viewOf(coordinator, cancelled)!.result).toBeUndefined();
+    await expect(coordinator.readOutput(cancelled, 0)).rejects.toThrow('run has no outputs');
   });
 
   it('gives the FakeEngine\'s failed run its marked warning', async () => {

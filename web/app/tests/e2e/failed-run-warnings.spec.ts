@@ -72,7 +72,8 @@ test('a failed run shows the warnings written before its error, as the command l
   await pickRun(page, 1);
   const status = page.getByTestId('results-status');
   await expect(status).toHaveAttribute('data-run-status', 'failed');
-  await expect(status).toContainText('A failed run keeps no results. It keeps the warnings written before the error.');
+  // The command line's outfmt 0 (the run's own) holds its prolog before the error (D15, 2026-11-20).
+  await expect(status).toContainText('It keeps the outputs written before the error. It keeps the warnings written before the error.');
   const warnings = page.getByTestId('results-failed-diagnostics');
   await expect(page.getByTestId('results-failed-warnings').getByRole('heading', { name: 'Warnings' })).toBeVisible();
   if (!BUILD_HAS_ENGINE) {

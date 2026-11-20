@@ -228,31 +228,46 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
     },
   },
   {
-    // Line WQA's sweep, D3 review (2026-11-19): a run that the engine failed after it began to write
-    // ends with `fail`; the data layer reads its stream 3 once `fail` arrived, then holds nothing.
-    name: "a failed run's warnings are read from its staged stream 3 after its fail, and the run is dropped",
+    // Line WQA's sweep, D3 review (2026-11-19) and D15 (2026-11-20): a run that the engine failed after it began to
+    // write ends with `fail`; the data layer waits for it, then commits the run with the outputs that the engine did
+    // not discard (the bytes that the CLI leaves before its error) and reads its stream 3.
+    name: "a failed run is kept with the outputs that the engine did not discard, and its warnings are read after its fail",
     async run(env) {
-      const baseline = await env.usage();
       const writer = await openWriter(env, 'run-q');
       const warnings = [bytes('Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n'), bytes('Warning: caf\u00e9\n')];
       await writer.write(6, pattern(MiB, 4));
+      await writer.write(6, bytes('last row\n'));
+      // What the engine wrote of an output that it then drops stays in the totals of `fail`, and is dropped.
+      await writer.write(0, bytes('dropped\n'));
+      await writer.post({ type: 'discard', stream: 0, error: 'run' });
+      await writer.post({ type: 'discard', stream: 7, error: 'run' });
       await writer.write(DIAGNOSTICS_STREAM, warnings[0]!);
       // Its UTF-8 split across two chunks.
       await writer.write(DIAGNOSTICS_STREAM, warnings[1]!.subarray(0, 13));
       await writer.write(DIAGNOSTICS_STREAM, warnings[1]!.subarray(13));
-      const read = env.data.discardFailedRun('run-q');
-      check(!(await settlesWithin(read, 300)), 'the read must wait for fail');
-      await writer.post({ type: 'fail', chunks: 4, bytes: MiB + warnings[0]!.length + warnings[1]!.length });
-      same(await read, 'Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\nWarning: caf\u00e9\n', 'warnings');
-      same(await env.usage(), baseline, 'bytes held after the read');
-      await rejects(env.data.commitRun('run-q'), /not staged/, 'commit after the read');
-      same(await env.data.discardFailedRun('run-q'), '', 'a second read');
+      const kept = env.data.keepFailedRun('run-q');
+      check(!(await settlesWithin(kept, 300)), 'the keep must wait for fail');
+      await writer.post({ type: 'fail', chunks: 6, bytes: MiB + 9 + 8 + warnings[0]!.length + warnings[1]!.length });
+      const run = await kept;
+      check(run !== undefined, 'the failed run is kept');
+      same(run!.diagnostics, 'Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\nWarning: caf\u00e9\n', 'warnings');
+      same(JSON.stringify(run!.result.byteLengths), JSON.stringify({ 0: 0, 6: MiB + 9, 7: 0 }), 'byte lengths');
+      same(run!.result.hitCount, 0, 'no HSP records');
+      same(JSON.stringify(run!.result.failed), JSON.stringify([{ output: 0, error: 'run' }, { output: 7, error: 'run' }]), 'dropped outputs');
+      sameBytes(await env.data.readOutput('run-q', 6), concatBytes([pattern(MiB, 4), bytes('last row\n')]), 'its output');
+      same((await env.data.readOutput('run-q', 0)).length, 0, 'a dropped output is empty');
+      same(await env.data.readDiagnostics('run-q'), run!.diagnostics, 'diagnostics as a completed run reads them');
+      await rejects(env.data.commitRun('run-q'), /not staged/, 'commit after the keep');
+      same(await env.data.keepFailedRun('run-q'), undefined, 'a second keep');
+      await env.data.deleteRun('run-q');
+      await rejects(env.data.readOutput('run-q', 6), /no committed result/, 'read after delete');
 
-      // A fail whose totals disagree gives no warnings; a commit of a failed run fails.
+      // A fail whose totals disagree keeps nothing; a commit of a failed run fails.
+      const baseline = await env.usage();
       const broken = await openWriter(env, 'run-r');
       await broken.write(DIAGNOSTICS_STREAM, bytes('Warning: one\n'));
       await broken.post({ type: 'fail', chunks: 2, bytes: 99 });
-      same(await env.data.discardFailedRun('run-r'), '', 'incomplete');
+      same(await env.data.keepFailedRun('run-r'), undefined, 'incomplete');
       const failed = await openWriter(env, 'run-s');
       await failed.write(6, bytes('row\n'));
       await failed.post({ type: 'fail', chunks: 1, bytes: 4 });

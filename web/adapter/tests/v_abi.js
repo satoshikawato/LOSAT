@@ -168,7 +168,8 @@ function nativeFiles(directory, outfmt) {
   for (let n = 1; fs.existsSync(path.join(directory, `results_${n}.${extension}`)); n++) {
     files.push([`results_${n}.${extension}`, fs.readFileSync(path.join(directory, `results_${n}.${extension}`))]);
   }
-  files.push([`results.${extension}`, fs.readFileSync(path.join(directory, "results"))]);
+  // A run that failed leaves no master file, which comes after the last side file.
+  if (fs.existsSync(path.join(directory, "results"))) files.push([`results.${extension}`, fs.readFileSync(path.join(directory, "results"))]);
   return files;
 }
 
@@ -457,7 +458,10 @@ function nativeOutputs(native, search, scratch) {
     if ((result.status !== 0) !== failure) {
       throw new Error(`native ${argv.join(" ")} ${failure ? "succeeded" : "failed"} (exit ${result.status}): ${result.error ?? result.stderr}`);
     }
-    if (!failure) outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : fs.readFileSync(out));
+    // The file of a CLI run that failed holds what it wrote before the error (line WQA's sweep, D15, 2026-11-20).
+    if (!failure || fs.existsSync(out) || search.files) {
+      outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : (fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0)));
+    }
     fs.rmSync(directory, { recursive: true, force: true });
     [own, status] = [result.stderr, result.status];
   }
@@ -506,11 +510,14 @@ function cliError(error) {
 // error, and the warnings that the CLI writes before it are stream 3, which a failed run sends
 // (abi_v2.md §5): stream 3 then the error are the CLI's standard error for the run's argv, byte
 // for byte (line WQA's sweep, D3, 2026-11-19), also in a run of two searches, whose outcome is
-// that of the argv's own search (§7). Whatever the run sent of an output before it failed is the
-// start of the CLI's file. A search with `"prolog": false` fails before any output (an error of
-// the options or of their files), so the CLI's outfmt 0 file is empty; the others fail after the
-// CLI wrote the outfmt 0 prolog, or the CLI's outfmt 0 completes (the other search of a run whose
-// own -outfmt is a tabular one).
+// that of the argv's own search (§7). The output of the argv's own -outfmt (stream 4 for one of its
+// own, else the stream of its format, 0 without one) is exactly the CLI's file for the argv: what
+// it wrote before the error (version 7; line WQA's sweep, D15, 2026-11-20). Every other output of
+// the run is dropped, each with a signal of stream 9 whose place is 0xFFFFFFFE, the error that ended
+// the run (the run failed before its search made them: none, and then they are empty). A search with
+// `"prolog": false` fails before any output (an error of the options or of their files), so the CLI's
+// outfmt 0 file is empty; the others fail after the CLI wrote the outfmt 0 prolog, or the CLI's
+// outfmt 0 completes (the other search of a run whose own -outfmt is a tabular one).
 function checkFailure(run, expected, search, label) {
   const program = search.program;
   assert.equal(run.status, -1, `${label}: the run fails as the CLI (exit ${expected.status})`);
@@ -518,10 +525,30 @@ function checkFailure(run, expected, search, label) {
   const diagnostics = run.streams.get(3) || Buffer.alloc(0);
   assert.equal(diagnostics.toString() + cliError(run.error), expected.own.toString(),
                `${label}: stream 3 and the error are the CLI's standard error`);
-  for (const format of FORMATS[program]) {
-    const sent = run.streams.get(format) || Buffer.alloc(0);
-    assert.ok(expected.outputs.get(format).subarray(0, sent.length).equals(sent), `${label}: outfmt ${format} before the failure`);
+  const outfmt = search.outfmt === undefined ? "0" : search.outfmt.trim();
+  const own = customStream(search) ? CUSTOM_STREAM : Number(outfmt);
+  const sent = run.streams.get(own) || Buffer.alloc(0);
+  const cli = expected.outputs.get(own);
+  if (search.files) {
+    // The side files written before the error, with a central directory, and no master file.
+    const entries = sent.length === 0 ? [] : storedZipEntries(sent);
+    assert.deepEqual(entries.map(([name]) => name), cli.map(([name]) => name), `${label}: -outfmt ${search.outfmt} files before the failure`);
+    for (const [index, [name, bytes]] of entries.entries()) assert.equal(sha256(bytes), sha256(cli[index][1]), `${label}: ${name}`);
+  } else if (search.sam) {
+    assert.equal(sha256(withoutCl(sent)), sha256(withoutCl(cli)), `${label}: -outfmt ${search.outfmt} before the failure`);
+  } else {
+    assert.equal(sha256(sent), sha256(cli), `${label}: the bytes of ${customStream(search) ? `-outfmt ${search.outfmt}` : `outfmt ${own}`} are the CLI's file (${sent.length} of ${cli.length} bytes)`);
   }
+  const signals = run.streams.get(9) || Buffer.alloc(0);
+  assert.equal(signals.length % 8, 0, `${label}: signals of 8 bytes (stream 9)`);
+  const dropped = Array.from({ length: signals.length / 8 }, (_, i) => {
+    assert.equal(signals.readUInt32LE(8 * i + 4), 0xfffffffe, `${label}: the place of the error of a dropped output is the run's`);
+    return signals.readUInt32LE(8 * i);
+  }).sort((a, b) => a - b);
+  const others = FORMATS[program].filter((format) => format !== own);
+  if (dropped.length > 0) assert.deepEqual(dropped, others, `${label}: the outputs that the failed run drops (stream 9)`);
+  for (const format of others) assert.ok(!run.streams.has(format), `${label}: nothing of the dropped outfmt ${format}`);
+  assert.ok(!run.streams.has(1), `${label}: no HSP records`);
   if (search.prolog === false) {
     assert.equal(expected.outputs.get(0).length, 0, `${label}: the CLI writes no outfmt 0 before the failure`);
   } else {
@@ -798,7 +825,7 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor, close, waitForWorkers } = await engine.open();
-    assert.equal(reactor.exports.losat_web2_abi_version(), 4);
+    assert.equal(reactor.exports.losat_web2_abi_version(), 7);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const subjects = new Map(); // "program subject" -> handle, kept across runs

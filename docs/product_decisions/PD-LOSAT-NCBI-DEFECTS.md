@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.52
+- Version: 1.53
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -186,6 +186,10 @@
   element of a mask's list stated as `NULL` that makeblastdb dereferences, whose report holds the
   run's memory addresses, rule 3; Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.51, line RG item X-short-tbx)
+  1.53 2026-11-20 (BLASTN, line RG item X6: reward 0 and penalty 0, NCBI's matrix-only scoring
+  of `-task rmblastn`, now runs; the explicit rejection of it with the greedy extension of
+  `-task megablast`, where NCBI divides by zero or does not finish, rule 3; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.52, line NP item M4a-1c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:

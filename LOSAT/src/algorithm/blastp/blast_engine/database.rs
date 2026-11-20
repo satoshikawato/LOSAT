@@ -1140,6 +1140,9 @@ fn exclude_fetched(
 /// (`shared::FetchMarks`), in their order, each removed list leaving its mark in `marks` (where
 /// the redo reads this list) with the number of kept lists before it; nothing changes where
 /// none is excluded.
+///
+/// No NCBI counterpart: NCBI keeps these lists in the redo's stream, and its fetch excludes each
+/// subject when the redo reaches it (the reference lines are at `exclude_fetched`).
 fn leave_fetched<H>(
     excluded: Option<&shared::FetchExcluded<'_>>,
     query: usize,

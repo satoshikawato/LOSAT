@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.57
+- Version: 1.58
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -229,7 +229,11 @@
   D1a-3 Q1, 「A 正しい数を書く (推奨)」: a database length or `-dbsize` of exactly -2^63, which NCBI's
   serial writer prints as `-0`, written as `-9223372036854775808`; the rule-3 refusal of that one
   value removed; numbered after the D1a-4 entry at each of its merges of dev; exception 16 until
-  dev's exception 16 of line RG item X5, version 1.54, came first)
+  dev's exception 16 of line RG item X5, version 1.54, came first);
+  1.58 2026-11-21 (BLASTP `-use_sw_tback`, line RG item X4-excl: a match whose subject NCBI's
+  fetch excludes sets the batch's status back to 0 unless NCBI's early termination skips it, so a
+  failed Smith-Waterman redo before it neither fails the batch nor crashes NCBI, reproduced, rule 2;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.57)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1666,10 +1670,12 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   `db.x4.sw.fail.h_anchor.*`; `db.x4.sw.fail.f.6` and `db.x4.sw.fail.g.6`, whose first query holds
   none, end in `Traceback failed`). The batch's status is that of the last match the redo reaches: a
   match whose subject NCBI's fetch excludes (a subject that a `-negative_seqidlist` keeps without
-  any of its lines) sets it back to 0, unless the redo skips that match because the batch's heaps
-  are full (`blast_kappa.c:3525-3575`), so a failure before such a match neither fails the batch
-  nor crashes NCBI, and LOSAT reproduces that (rule 2; 2026-11-20, line RG item X4-excl, rows
-  `db.x4excl.*`).
+  any of its lines) sets it back to 0, unless the redo skips that match by early termination: by
+  then every query of the batch already holds `-max_target_seqs` alignments whose worst e-value is
+  0.002 or less, and the match's preliminary e-value is above 0.01 (`blast_kappa.c:3525-3575`,
+  `redo_alignment.c:1560-1580`). A failure before such a match therefore neither fails the batch
+  nor crashes NCBI, and LOSAT reproduces that (rule 2; version 1.58; 2026-11-21, line RG item
+  X4-excl, rows `db.x4excl.*`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

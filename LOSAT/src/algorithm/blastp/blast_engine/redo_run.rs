@@ -1395,6 +1395,30 @@ fn fetch_excluded_reached(
     }
 }
 
+/// NCBI's Smith-Waterman redo at the lists of one query whose subjects its fetch excludes
+/// (`marks`, in stream order), read after the query's loop. `status_position` is the place of
+/// the query's last kept list whose redo set the status (`None` where no redo of the query did).
+/// A list before that place changes nothing, since that redo sets the status again. After it no
+/// list of the query enters a heap (each one ends early), so each later excluded list meets the
+/// heaps as they are after the loop (`batch_heaps`) and goes through `fetch_excluded_reached`.
+/// With no such redo the query changed no heap, and every excluded list goes through it.
+///
+/// No NCBI counterpart: NCBI tests each list in stream order in its loop. The status this gives
+/// is NCBI's one-thread status of the batch.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3779
+fn query_fetch_excluded_reached(
+    marks: &[super::database::FetchExcludedMatch],
+    status_position: Option<usize>,
+    batch_heaps: &[BlastCompoHeap],
+    sw_last_failed: &mut bool,
+) {
+    let after_status = status_position.map_or(0, |at| at + 1);
+    for mark in marks.iter().filter(|mark| mark.position >= after_status) {
+        fetch_excluded_reached(mark, batch_heaps, sw_last_failed);
+    }
+}
+
 /// The one-thread loop: the queries redone in order on the calling thread, each query's matches
 /// in stream order, each query's compact list expanded when the loop reaches it and its preliminary
 /// list freed after its redo (counted in `x_prelim_freed`). It is the only path of a build without
@@ -1722,16 +1746,13 @@ where
             }
         }
         // The excluded lists of the query, read after its loop (none without `-use_sw_tback`, so
-        // the loop above has no test of them): one before the last list whose redo set the status
-        // changes nothing, and after that list no list of the query enters a heap, so each later
-        // one meets the heaps as they are now.
-        let after_status = x_status_position.map_or(0, |at| at + 1);
-        for mark in excluded_here
-            .iter()
-            .filter(|mark| mark.position >= after_status)
-        {
-            fetch_excluded_reached(mark, &redone_matches[batch.clone()], &mut sw_last_failed);
-        }
+        // the loop above has no test of them).
+        query_fetch_excluded_reached(
+            excluded_here,
+            x_status_position,
+            &redone_matches[batch.clone()],
+            &mut sw_last_failed,
+        );
         // Nothing reads this query's preliminary list after its redo; it is freed here as NCBI
         // frees each list it has redone (`x_prelim_free.rs`).
         preliminary_hit_lists[q_idx] = None;
@@ -1811,6 +1832,60 @@ mod tests {
                 fetch_excluded_reached(&mark(best_evalue), heaps, &mut failed);
                 let expected = failed_before && !cleared;
                 assert_eq!(failed, expected, "{best_evalue} {}", heaps.len());
+            }
+        }
+    }
+
+    #[test]
+    fn only_excluded_lists_after_the_last_status_count() {
+        let mark = |position, best_evalue| super::super::database::FetchExcludedMatch {
+            query: 0,
+            position,
+            best_evalue,
+        };
+        let empty = [BlastCompoHeap::new(1, 0.002)];
+        let mut filled = BlastCompoHeap::new(1, 0.002);
+        let list = BlastpHspList {
+            oid: 0,
+            query_index: 0,
+            hsps: Vec::new(),
+            best_evalue: 1e-40,
+        };
+        filled.insert(list, 1e-40, 400, 0);
+        let filled = [filled];
+        // `position` counts the kept lists before an excluded one: 2 is after the kept list at
+        // place 1 and before the one at place 2.
+        for (marks, status_position, heaps, cleared) in [
+            // Before, at and after the place of the last status: only after it clears.
+            (vec![mark(0, 0.04)], Some(1), &empty[..], false),
+            (vec![mark(1, 0.04)], Some(1), &empty[..], false),
+            (vec![mark(2, 0.04)], Some(1), &empty[..], true),
+            (
+                vec![mark(0, 0.04), mark(2, 0.04)],
+                Some(1),
+                &empty[..],
+                true,
+            ),
+            // After it, but the early termination holds: nothing changes.
+            (vec![mark(2, 0.04)], Some(1), &filled[..], false),
+            (
+                vec![mark(2, 0.04), mark(2, 0.005)],
+                Some(1),
+                &filled[..],
+                true,
+            ),
+            // No redo of the query set the status (a failure of an earlier query of the batch
+            // stands): every excluded list counts.
+            (vec![mark(0, 0.04)], None, &empty[..], true),
+            (vec![mark(0, 0.04)], None, &filled[..], false),
+            (vec![mark(0, 0.04), mark(0, 1e-30)], None, &filled[..], true),
+            (Vec::new(), None, &empty[..], false),
+        ] {
+            for failed_before in [true, false] {
+                let mut failed = failed_before;
+                query_fetch_excluded_reached(&marks, status_position, heaps, &mut failed);
+                let expected = failed_before && !cleared;
+                assert_eq!(failed, expected, "{status_position:?} {}", marks.len());
             }
         }
     }

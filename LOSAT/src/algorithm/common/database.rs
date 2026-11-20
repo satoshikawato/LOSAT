@@ -1186,9 +1186,9 @@ impl<'a> LineCheck<'a> {
 /// preliminary hit lists hold it (it took its place there), and its hits leave the search
 /// before the final hit lists are made, so they take no place in them. A program removes
 /// such subjects from the preliminary hit lists right before its traceback (`retain`), after
-/// their cut and trim (`ADAPTIVE_CBS`); the composition-based redo keeps their lists in its
-/// stream as markers (`marks`, `FetchMarks`), whose place in the stream changes NCBI's status
-/// of the batch; an ungapped search of a nucleotide database drops a subject's HSPs before they
+/// their cut and trim (`ADAPTIVE_CBS`); for the composition-based redo the places of their
+/// lists in its stream count (`marks`, `FetchMarks`), since they change NCBI's status of the
+/// batch; an ungapped search of a nucleotide database drops a subject's HSPs before they
 /// reach the preliminary hit lists. Shared by the threads of a search (`Sync`); each subject's
 /// header is read once.
 ///
@@ -1273,18 +1273,18 @@ impl<'a> FetchExcluded<'a> {
     }
 }
 
-/// The lists of a composition-based redo's stream on a subject that NCBI's fetch excludes
-/// (`FetchExcluded::marks`; none without a negative seqid list with ids, `FetchMarks::default`),
-/// by their place in the stream: the redo keeps them there as markers. NCBI's redo loop tests
-/// such a list's early termination first, like any other's; where the test passes, the fetch
-/// (`s_MatchingSequenceInitialize`) excludes the subject, and NCBI sets the status of the
-/// thread back to 0 and goes on with the next list, with no redo and no heap insert: a failed
-/// Smith-Waterman redo before it no longer fails the batch (`SwBatchStatus::excluded_at_fetch`).
-/// Where the test stops the list, nothing changes. The X-drop redo has no status, so a marker
-/// there is a list skipped. One owner of the question "was this list excluded at fetch" for
-/// every program's redo loop (TBLASTN's `stage_d_pipeline`; BLASTP's and BLASTX's loops read it
-/// the same way).
+/// Which lists of a composition-based redo's stream, by their place in it, are on a subject
+/// that NCBI's fetch excludes (`FetchExcluded::marks`; none without a negative seqid list with
+/// ids, `FetchMarks::default`). NCBI's redo loop tests such a list's early termination first,
+/// like any other's; where the test does not stop the list, the fetch excludes the subject and
+/// NCBI sets the status of the thread back to 0 and goes on with the next list, with no redo and
+/// no heap insert, so a failed Smith-Waterman redo before it no longer fails the batch; where
+/// the test stops the list, nothing changes. BLASTP's `exclude_fetched` reads them: it removes
+/// those lists and keeps their places for the Smith-Waterman redo's status
+/// (`blastp::blast_engine::database::FetchExcludedMatch`). The other programs remove such lists
+/// with `FetchExcluded::retain`.
 ///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
 #[derive(Debug, Default)]

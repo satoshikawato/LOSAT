@@ -16,7 +16,7 @@ use std::io::{Read as IoRead, Seek, SeekFrom};
 use super::read::{read_object, Read};
 use super::Value;
 use crate::ncbi_exception::NcbiException;
-use crate::report::serial::asn_text_reader::{AsnSource, Reader, StreamSource};
+use crate::report::serial::asn_text_reader::{Reader, StreamSource};
 use crate::utils::format_guess::{Format, FormatGuess, Stop};
 
 /// The encoding of a serial stream, as the readers of NCBI's archives and strategies take
@@ -135,7 +135,9 @@ impl<R: IoRead> ObjectStream<R> {
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
     // (`m_Input.EndOfData()` and `HasMore()` of `CIStreamBuffer` ask whether a byte follows,
     // reading the stream for one: the end of the input here.)
+    #[cfg(test)]
     pub(crate) fn end_of_data(&mut self) -> bool {
+        use crate::report::serial::asn_text_reader::AsnSource;
         if self.failed || self.r.src.byte_at(self.r.pos).is_none() {
             return true;
         }

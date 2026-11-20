@@ -250,7 +250,7 @@ pub(crate) fn recover(command: &Command<'_>) -> std::result::Result<Imported, Im
     }
     .map_err(|e| fail(&warnings, e))?;
     let request =
-        Request::from_strategy(value).map_err(|stop| fail(&warnings, stop_error(stop, program)))?;
+        Request::from_strategy(value).map_err(|exception| fail(&warnings, caught(&exception)))?;
     let options = import_request(&request).map_err(|e| fail(&warnings, caught(&e)))?;
     let subject = if command.override_subject {
         warnings.push("Overriding database/subject in saved strategy".into());
@@ -278,17 +278,6 @@ pub(crate) struct ImportFailure {
     pub(crate) error: anyhow::Error,
 }
 
-/// The error of a request that `CImportStrategy` does not take.
-fn stop_error(stop: super::Stop, program: &str) -> anyhow::Error {
-    match stop {
-        super::Stop::Exception(exception) => caught(&exception),
-        other => unported(
-            &format!("a search strategy that NCBI stops on ({other:?})"),
-            program,
-        ),
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:452-465
 /// `s_ImportDatabase` and `s_ImportSubjects`: the strategy's subject.
 fn import_subject(
@@ -313,7 +302,7 @@ fn import_subject(
             ))
         }
         Subject::Sequences(bioseqs) => Ok(ImportedSubject::Sequences(bioseqs)),
-        Subject::SeqLocList(_) => Err(unported(
+        Subject::SeqLocList => Err(unported(
             "a search strategy whose subject is a list of sequence locations",
             program,
         )),
@@ -325,7 +314,7 @@ fn import_subject(
 /// (`ImportRun::queries_input` makes the file where a run reads one).
 fn import_queries(queries: &Queries, options: &ImportedOptions, program: &str) -> Result<Vec<u8>> {
     match queries {
-        Queries::Pssm(_) => {
+        Queries::Pssm => {
             if matches!(program, "BLASTN" | "BLASTP" | "BLASTX" | "TBLASTX") {
                 Err(crate::blastinput::app::engine_error(&format!(
                     "PSSM found in saved strategy, but not supported for {}",
@@ -335,7 +324,7 @@ fn import_queries(queries: &Queries, options: &ImportedOptions, program: &str) -
                 Err(unported("a search strategy whose query is a PSSM", program))
             }
         }
-        Queries::SeqLocList(_) => Err(unported(
+        Queries::SeqLocList => Err(unported(
             "a search strategy whose queries are a list of sequence locations",
             program,
         )),

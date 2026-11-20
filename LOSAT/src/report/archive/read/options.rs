@@ -21,19 +21,6 @@ use crate::report::serial::asn_types::Value;
 
 use super::request::{ParamSet, Request};
 
-/// `CBlastOptions::EAPILocality` of the builder's caller: the import builds with `eBoth`
-/// (search_strategy.cpp:85-88), `blast_formatter`'s archive path with `eRemote`
-/// (remote_blast.cpp:2024). No caller that LOSAT ports builds with `eLocal`.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:299-312
-/// Options made for `eRemote` are those of `eBoth` (`GetLocality()` too says `eBoth`): both keep
-/// the Blast4 parameter list that `-outfmt 11` and `-export_search_strategy` write.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Locality {
-    Remote,
-    Both,
-}
-
 /// NCBI's `EProgram` (blast_types.hpp), the values that the builder can give.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EProgram {
@@ -389,13 +376,6 @@ pub struct BuiltOptions {
     pub query_masks: Option<Vec<Value>>,
     /// `GetRestrictedQueryRange()`: `RequiredStart` sets `from`, `RequiredEnd` `to_open`.
     pub query_range: SeqRange,
-}
-
-impl BuiltOptions {
-    /// `EProgramToTaskName(program)`.
-    pub fn task(&self) -> &'static str {
-        self.program.task_name()
-    }
 }
 
 // The throws of the builder. NCBI's applications print only their message (`GetMsg()`, the
@@ -1022,7 +1002,6 @@ pub fn build(
     program: &[u8],
     service: &[u8],
     lists: OptionLists<'_>,
-    locality: Locality,
 ) -> Result<BuiltOptions, NcbiException> {
     let computed = compute_program(program, service)?;
     let all: Vec<RawParam<'_>> = [lists.algorithm, lists.program, lists.format]
@@ -1032,11 +1011,9 @@ pub fn build(
         .copied()
         .collect();
     let adjusted = adjust_program(&all, computed, program)?;
-    // `CBlastOptionsFactory::Create(program, m_Locality)`: the options of both localities have
-    // the local and the remote part (`Locality`), so the calls that follow are the same.
-    match locality {
-        Locality::Remote | Locality::Both => {}
-    }
+    // `CBlastOptionsFactory::Create(program, eBoth)` (search_strategy.cpp:85-88): the options
+    // have the local and the remote part (blast_options_cxx.cpp:299-312), so the Blast4
+    // parameter list that `-outfmt 11` and `-export_search_strategy` write is kept.
     let mut builder = Builder::new(adjusted);
     builder.ignore_query_masks = false;
     builder.process_options(lists.algorithm.unwrap_or_default())?;
@@ -1086,7 +1063,7 @@ pub fn import_options(
             };
         }
     }
-    let options = build(program, service, lists, Locality::Both)?;
+    let options = build(program, service, lists)?;
     Ok(ImportedOptions {
         filtering_id: options.db_filtering_algorithm_id.unwrap_or(-1),
         filtering_key: options

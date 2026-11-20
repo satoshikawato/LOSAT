@@ -55,7 +55,7 @@ use crate::report::serial::{write_query_to, SerialFormat};
 
 /// The subjects of a BLASTX search as the Seq-aligns name them: the records of `-subject`
 /// (`Subject_N`), or a database's reported sequences by rank with the database's title.
-pub(super) enum SeqalignSubjects<'a> {
+pub(crate) enum SeqalignSubjects<'a> {
     Records,
     Database {
         reported: &'a ReportedSubjects,

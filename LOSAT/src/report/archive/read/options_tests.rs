@@ -166,7 +166,7 @@ fn ncbis_own_exports_build_their_programs_options() {
         .import()
         .unwrap();
     assert_eq!(blastn.options.program, EProgram::Megablast);
-    assert_eq!(blastn.options.task(), "megablast");
+    assert_eq!(blastn.options.program.task_name(), "megablast");
     assert_eq!(
         blastn.options.setters,
         [
@@ -186,7 +186,7 @@ fn ncbis_own_exports_build_their_programs_options() {
         .import()
         .unwrap();
     assert_eq!(blastp.options.program, EProgram::Blastp);
-    assert_eq!(blastp.options.task(), "blastp");
+    assert_eq!(blastp.options.program.task_name(), "blastp");
     assert_eq!(
         blastp.options.setters,
         [
@@ -401,7 +401,7 @@ fn a_phi_pattern_makes_phi_blast() {
         .import()
         .unwrap();
     assert_eq!(built.options.program, EProgram::PhiBlastp);
-    assert_eq!(built.options.task(), "phiblastp");
+    assert_eq!(built.options.program.task_name(), "phiblastp");
     assert_eq!(
         built.options.setters[0],
         Setter::PhiPattern {
@@ -449,7 +449,7 @@ fn web_step_number_makes_psiblast_and_its_iterations() {
             .import()
             .unwrap();
         assert_eq!(built.options.program, EProgram::PsiBlast);
-        assert_eq!(built.options.task(), "psiblast");
+        assert_eq!(built.options.program.task_name(), "psiblast");
         assert_eq!(built.psi_num_of_iterations, 3);
     }
     // The web's string form, a string that is no number (0), a negative count (`unsigned int`),
@@ -499,7 +499,7 @@ fn web_step_number_makes_psiblast_and_its_iterations() {
     .import()
     .unwrap();
     assert_eq!(built.options.program, EProgram::DiscMegablast);
-    assert_eq!(built.options.task(), "dc-megablast");
+    assert_eq!(built.options.program.task_name(), "dc-megablast");
     assert_eq!(built.options.setters[0], Setter::MbTemplateLength(18));
 }
 
@@ -745,20 +745,9 @@ fn every_setter_of_the_switch() {
     );
 }
 
-/// `blast_formatter`'s locality (`eRemote`) builds the same calls.
+/// `Web_StepNumber` is `FetchData`'s, not the builder's.
 #[test]
-fn the_locality_is_the_callers() {
-    let options = blastn_options(Vec::new());
-    let list = raw(&options);
-    let lists = OptionLists {
-        algorithm: Some(&list),
-        program: None,
-        format: None,
-    };
-    let remote = build(b"blastn", b"megablast", lists, Locality::Remote).unwrap();
-    let both = build(b"blastn", b"megablast", lists, Locality::Both).unwrap();
-    assert_eq!(remote, both);
-    // `Web_StepNumber` is `FetchData`'s, not the builder's.
+fn the_step_number_is_the_fetchs() {
     let step = vec![("Web_StepNumber", string("x"))];
     let format = raw(&step);
     let built = build(
@@ -769,7 +758,6 @@ fn the_locality_is_the_callers() {
             program: None,
             format: Some(&format),
         },
-        Locality::Remote,
     )
     .unwrap();
     assert_eq!(built.program, EProgram::Blastp);

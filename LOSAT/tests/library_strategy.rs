@@ -108,7 +108,7 @@ fn the_argv_cannot_import_a_file() {
             error,
             Error::Argv(
                 "-import_search_strategy is not accepted by the library API: a search strategy is given as bytes (Search::read_strategy, Inputs::strategy)"
-                    .to_string()
+                    .into()
             )
         );
     }
@@ -119,7 +119,7 @@ fn a_file_that_is_not_a_strategy_is_the_command_lines_error() {
     let search = validate(Program::Blastp, &[]).unwrap();
     let error = search.read_strategy(b"not a strategy").unwrap_err();
     assert!(
-        matches!(&error, Error::Input(message) if message.contains("Failed to read search strategy")),
+        matches!(&error, Error::Input(message) if String::from_utf8_lossy(message).contains("Failed to read search strategy")),
         "{error:?}"
     );
 }
@@ -132,7 +132,7 @@ fn a_strategy_belongs_to_the_search_that_read_it() {
     let other = validate(Program::Blastp, &["-line_length", "40"]).unwrap();
     let error = run_collect(&other, Inputs::strategy(&strategy), &["6"]).unwrap_err();
     assert!(
-        error.message().contains("read for another search"),
+        error.to_string_lossy().contains("read for another search"),
         "{error}"
     );
 }

@@ -160,13 +160,10 @@ fn every_ncbi_strategy_file_builds_the_setters_it_records() {
             rendered += 1;
         }
         let imported = import_request(&request);
-        if request
-            .param(
-                ParamSet::Algorithm,
-                fields::WINDOW_MASKER_DATABASE.name().as_bytes(),
-            )
-            .is_some()
-        {
+        if request.params().iter().any(|param| {
+            param.set == ParamSet::Algorithm
+                && param.name == fields::WINDOW_MASKER_DATABASE.name().as_bytes()
+        }) {
             let error = imported.expect_err(&case);
             assert_eq!(
                 error.get_msg(),

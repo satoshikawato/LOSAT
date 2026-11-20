@@ -20,6 +20,14 @@ use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::tabular::SubjectFetch;
 
+/// Whether `error` may fail one batch, after the reports of the batches before, rather than the
+/// run: the errors `batch_failure` reads (a read of the database, the batch's setup, LOSAT's
+/// refusal of the setup where NCBI's crashes). The batches searched ahead are then searched again
+/// one at a time, so that the batch that fails does in its place (`batch_failure` decides).
+fn fails_one_batch(error: &anyhow::Error) -> bool {
+    error.is::<XReadError>() || error.is::<SetupEngineError>() || error.is::<SetupRefusal>()
+}
+
 /// The failure of a batch whose search failed where NCBI's fails it with its engine error: a
 /// read of the database (`common::x_db_stream::XReadError`), as the check's error fails the first
 /// batch with a valid context, when the reader's error is NCBI's own, and the batch's setup
@@ -1978,13 +1986,7 @@ fn search(
         );
         let mut x_searched = match x_searched_ahead {
             Ok(searched) => searched.map(Vec::into_iter),
-            Err(error)
-                if error.is::<XReadError>()
-                    || error.is::<SetupEngineError>()
-                    || error.is::<SetupRefusal>() =>
-            {
-                None
-            }
+            Err(error) if fails_one_batch(&error) => None,
             Err(error) => return Err(error),
         };
         for range in query_input

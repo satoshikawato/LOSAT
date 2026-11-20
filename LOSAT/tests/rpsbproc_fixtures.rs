@@ -291,8 +291,9 @@ fn rpsbproc_gives_ncbis_bytes() {
 }
 
 // The rows where LOSAT's order of hits is its own (PD-LOSAT-NCBI-DEFECTS 1.54, the Owner's decision
-// of 2026-11-20): hits equal in E-value and bit score keep their input order, and a NaN E-value or
-// bit score sorts after every number, where NCBI's `std::sort` leaves an order of its own.
+// of 2026-11-20): hits equal in E-value and bit score keep their input order, where NCBI's
+// `std::sort` leaves an order of its own; a NaN E-value or bit score sorts after every number of
+// its key (Owner-delegated, 2026-11-20).
 #[test]
 fn rpsbproc_orders_tied_hits_by_its_rule() {
     assert_eq!(compare_rows("tied", "tied", "tied"), 9);
@@ -306,10 +307,29 @@ struct TiedDifference {
     tie_blocks: usize,
     /// Query blocks that hold a hit with a NaN E-value or bit score.
     nan_blocks: usize,
-    /// NCBI's lines that are not at their place in LOSAT's output.
+    /// NCBI's lines of the differing blocks that a longest common subsequence of the two blocks
+    /// leaves out: the lines a diff removes.
     ncbi_lines: usize,
-    /// LOSAT's lines that are not at their place in NCBI's output.
+    /// LOSAT's lines of the differing blocks that the common subsequence leaves out: the lines a
+    /// diff adds.
     losat_lines: usize,
+}
+
+/// The length of a longest common subsequence of two blocks' lines.
+fn common_lines(a: &[&[u8]], b: &[&[u8]]) -> usize {
+    let mut previous = vec![0; b.len() + 1];
+    for line in a {
+        let mut current = vec![0; b.len() + 1];
+        for (j, other) in b.iter().enumerate() {
+            current[j + 1] = if line == other {
+                previous[j] + 1
+            } else {
+                previous[j + 1].max(current[j])
+            };
+        }
+        previous = current;
+    }
+    previous[b.len()]
 }
 
 /// A line outside the query blocks, or a query block (`QUERY` to `ENDQUERY`).
@@ -387,7 +407,8 @@ fn hit_types<'a>(lines: &[&'a [u8]]) -> Vec<&'a [u8]> {
 /// outside the query blocks, the blocks in pairs with the same `QUERY` line, and each block that
 /// differs either a block with a NaN key, or one of the same length whose runs of differing lines
 /// are DOMAINS lines of one query, E-value and bit score (fields 2, 7 and 8) with the same hit types
-/// (field 3) on both sides.
+/// (field 3) on both sides. The lines of the differing blocks are counted as a diff counts them
+/// (`common_lines`).
 fn tied_difference(ncbi: &[u8], losat: &[u8]) -> Result<TiedDifference, String> {
     let (ncbi, losat) = (segments(ncbi), segments(losat));
     if ncbi.len() != losat.len() {
@@ -411,8 +432,9 @@ fn tied_difference(ncbi: &[u8], losat: &[u8]) -> Result<TiedDifference, String> 
         }
         let differs = |i: usize| a.get(i) != b.get(i);
         let longer = a.len().max(b.len());
-        found.ncbi_lines += (0..a.len()).filter(|&i| differs(i)).count();
-        found.losat_lines += (0..b.len()).filter(|&i| differs(i)).count();
+        let common = common_lines(a, b);
+        found.ncbi_lines += a.len() - common;
+        found.losat_lines += b.len() - common;
         if holds_nan(a) || holds_nan(b) {
             found.nan_blocks += 1;
             continue;
@@ -538,7 +560,7 @@ fn the_tied_check_takes_only_the_order_of_tied_hits() {
         })
     };
     assert_eq!(check(&[a, b, c], site), counts(0, 0, 0, 0));
-    assert_eq!(check(&[b, a, c], site), counts(1, 0, 2, 2));
+    assert_eq!(check(&[b, a, c], site), counts(1, 0, 1, 1));
     assert_eq!(check(&[b_specific, a_non, c], site), counts(1, 0, 2, 2));
     assert_eq!(check(&[b_specific, b, c], site), counts(1, 0, 1, 1));
     assert!(check(&[a, c, b], site).is_err());
@@ -547,7 +569,10 @@ fn the_tied_check_takes_only_the_order_of_tied_hits() {
     assert!(check(&[a, b], site).is_err());
     let with_nan = report(&[a, n, b, c], site);
     let nan_check = |domains: &[&str]| tied_difference(&with_nan, &report(domains, ""));
-    assert_eq!(nan_check(&[a, b, c, n]), counts(0, 1, 4, 4));
+    assert_eq!(nan_check(&[a, b, c, n]), counts(0, 1, 2, 2));
+    // A line changed after a moved one counts as well.
+    let c_moved = "1 Query_1 Non-specific 3 3 8 0.001 40 C c - -";
+    assert_eq!(nan_check(&[a, b, c_moved, n]), counts(0, 1, 3, 3));
     let mut header = ncbi.clone();
     header[1] = b'd';
     assert!(tied_difference(&ncbi, &header).is_err());

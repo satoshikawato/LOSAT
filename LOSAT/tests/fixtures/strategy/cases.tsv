@@ -6,6 +6,7 @@
 # (fixtures/strategy/<name>.ss, .out, .err; an absent .out or .err is empty; the run folder's path in NCBI's
 # messages is written as {ENGINE}); parser = LOSAT's argument parser refuses (rc 2, nothing on standard
 # output) and the file is as NCBI left it (.ss); refuse = LOSAT refuses (rc, standard error contains expect).
+# Cases rpsblast.3v.l2p63.q40, rpstblastn.3v.l2p63.nq.b2000 and blastp.db.dbsize.min (line RG D1a-4 fix round 2, item 7): removed. They were LOSAT's refusals of a request whose DbLength is exactly -2^63, which NCBI BLAST+ 2.17.0 writes as big-integer -0; LOSAT writes big-integer -9223372036854775808 (PD-LOSAT-NCBI-DEFECTS approved exception 17 (Int8 -2^63 written as digits), the Owner's Q1 = A of 2026-11-17). The check kinds compare NCBI's bytes or a refusal; the writer's unit tests pin the digits, and probe minus0 of fix round 2 compared the rest of each file with NCBI's.
 name	program	env	args	check	rc	pre	expect
 blastn.sub	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
@@ -478,6 +479,16 @@ tblastn.db.list.f11.batches	tblastn	BATCH_SIZE=1	-query tests/db_search/seqidlis
 tblastn.db.list.none.f11	tblastn	BATCH_SIZE=1	-query tests/db_search/seqidlist/q_multi.faa -db tests/db_search/taxfilter/tfn -seqidlist tests/db_search/seqidlist/sl_none.txt -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.db.list.f11.batches	tblastx	BATCH_SIZE=1	-query tests/db_search/seqidlist/q_multi.fna -db tests/db_search/taxfilter/tfn -negative_taxidlist tests/db_search/taxfilter/tl_neg.txt -no_taxid_expansion -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.db.list.none.f11	tblastx	BATCH_SIZE=1	-query tests/db_search/seqidlist/q_multi.fna -db tests/db_search/taxfilter/tfn -seqidlist tests/db_search/seqidlist/sl_none.txt -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.l2p63p1.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l2p63p1rps3v.pal}	-query tests/fasta/rps/q40.faa -db l2p63p1rps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.l0.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l0rps3v.pal}	-query tests/fasta/rps/q40.faa -db l0rps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.2v.l0.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l0rps2v.pal}	-query tests/fasta/rps/q40.faa -db l0rps2v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.st5k.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/db_search/rps/st5krps3v.pal}	-query tests/fasta/rps/q40.faa -db st5krps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.n0.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/db_search/rps/n0rps3v.pal}	-query tests/fasta/rps/q40.faa -db n0rps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.3v.l0.nq.b2000	rpstblastn	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l0rps3v.pal},BATCH_SIZE=2000	-query tests/fasta/rps/nq.fna -db l0rps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.3v.st5k.nq.b2000	rpstblastn	BLASTDB={rps:rps_mini3v+tests/db_search/rps/st5krps3v.pal},BATCH_SIZE=2000	-query tests/fasta/rps/nq.fna -db st5krps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.l2p63.q649	rpsblast	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l2p63rps3v.pal}	-query tests/fasta/rps/q649.faa -db l2p63rps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.3v.l2p63.tk	rpstblastn	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l2p63rps3v.pal}	-query tests/fasta/rps/tkcut570.fna -db l2p63rps3v -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.l0.dbsize.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/db_search/rps/l0rps3v.pal}	-query tests/fasta/rps/q40.faa -db l0rps3v -comp_based_stats 0 -dbsize 100000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.sub.sumf	tblastx	-	-query tests/fasta/outfmt0/x3_q20.fna -subject tests/fasta/outfmt0/x3_s20.fna -sum_stats false -evalue 1e-30 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastx.sub.intron100	tblastx	-	-query tests/fasta/outfmt0/x3_q20.fna -subject tests/fasta/outfmt0/x3_s20.fna -max_intron_length 100 -evalue 1e-30 -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
 tblastx.db.sumf	tblastx	-	-query tests/db_search/xslice_q.fna -db tests/db_search/xslice -sum_stats false -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-

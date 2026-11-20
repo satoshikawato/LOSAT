@@ -66,14 +66,19 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   oracle output. `check` cuts `<row_id>.copies.out` again and fails the row when that is not `<row_id>.out`, then compares LOSAT's
   run of the row's own query file with `<row_id>.out` as for any `ncbi` row.
 - `kind losat-rejection`: LOSAT exits with rc, stdout is empty, stderr contains the text after `expect: ` in covers
-  (to a ` | ` or the end); the hash columns are empty. A rejection that comes after reports has a non-empty
-  `stdout_bytes`: its stdout is NCBI's of the same command (`<row_id>.out`), or, with `ncbi-near: ROW_ID` in covers,
-  the frozen stdout of the `ncbi` row ROW_ID of the same outfmt (for example the copy row of the batches that LOSAT
-  writes before it refuses); `freeze` copies ROW_ID's stdout cells and the row has no frozen file.
+  (to a ` | ` or the end); the hash columns are empty. A refusal after reports that NCBI writes too has stdout
+  cells: NCBI's stdout of the same command, or with `ncbi-near: ROW_ID` that of the `ncbi` row ROW_ID of the same
+  outfmt (a near input that NCBI runs to its end, for example the copy row of the batches that LOSAT writes before it
+  refuses), and with `ncbi-near: ROW_ID first N bytes` its first N bytes. Where NCBI crashes on the row's own command,
+  its stdout depends on where the crash cuts it: `freeze` stops on such a run, and the row takes a near row (or has
+  empty stdout cells where LOSAT writes nothing before it refuses).
 - `db`: path relative to LOSAT/ (an empty cell is `-db ""`; `subject:PATH` runs `-subject PATH` in place of `-db`, for a
   psiblast losat-rejection row of a subject set); `extra_args` is split like a shell line; `outfmt` is one argument;
   `stdout_sha256`, `stdout_bytes` and `stderr_sha256` are written by `freeze`.
 - A row runs `LOSAT PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT` from `LOSAT/`.
-- `query`: a path relative to LOSAT/; `pssm-gz:PATH` or `pssm:PATH` is a PSSM query (`-in_pssm`); `stdin:pipe:PATH`,
+- `query`: a path relative to LOSAT/; `pssm-gz:PATH` or `pssm:PATH` is a PSSM query (`-in_pssm`), and a psiblast query `msa:PATH` is an alignment query (`-in_msa PATH`, line PS item PS6; the library API takes none, so such a row is `library-skip`); `stdin:pipe:PATH`,
   `stdin:file:PATH` or `stdin:empty` is `-query -` with PATH's bytes through a pipe, the file PATH itself, or an empty pipe
   as standard input (`db_search_fixtures.query_stdin`; such a row has no PSSM or XInclude files and the library skips it).
+  psiblast's `stdin-msa:pipe:PATH`, `stdin-msa:file:PATH` and `stdin-msa:empty` are the same with `-in_msa -`; `none:` gives no query argument
+  at all (a row that tests an option that needs `-in_msa`, `-msa_master_idx` or `-ignore_msa_master` without it). A row whose arguments hold one of
+  the three alignment options is `library-skip` (`xinclude_fixtures.ALIGNMENT_OPTIONS`).

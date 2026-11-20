@@ -24,7 +24,7 @@
 //! The lookups are NCBI's `CPtrMap`: the rows sorted with NCBI's comparison and searched by
 //! NCBI's binary search. The sort is Rust's standard sort with the row's place in the file as
 //! the last key (`sort_ties_in_input_order`), so rows of one key stay in the order of the file
-//! (NCBI's `std::sort` may leave them in another order; PD-LOSAT-NCBI-DEFECTS 1.56, the order of
+//! (NCBI's `std::sort` may leave them in another order; PD-LOSAT-NCBI-DEFECTS 1.58, the order of
 //! tied hits).
 
 use std::io::{BufRead, BufReader};
@@ -790,7 +790,7 @@ impl CddData {
         // that the lookups search with, `int_order` and `compare_bytes`, which order every pair of
         // keys, then the row's index: rows of one key keep the order of the file, where NCBI's
         // `sort` may leave them in another. No CDD v3.22 file has two rows of one key.
-        // PD-LOSAT-NCBI-DEFECTS 1.56, the order of tied hits.)
+        // PD-LOSAT-NCBI-DEFECTS 1.58, the order of tied hits.)
         let mut by_pssm: Vec<u32> = (0..domains.len() as u32).collect();
         sort_ties_in_input_order(
             &mut by_pssm,
@@ -1499,7 +1499,7 @@ fn int_order(a: i32, b: i32) -> i32 {
 
 /// Sorts `items` by `order`, and items that `order` leaves equal by `position`, their place in the
 /// input, which must increase strictly over `items` as given: the order of a stable sort. LOSAT's
-/// sorts of rpsbproc's hits and data rows (PD-LOSAT-NCBI-DEFECTS 1.56, the order of tied hits). It
+/// sorts of rpsbproc's hits and data rows (PD-LOSAT-NCBI-DEFECTS 1.58, the order of tied hits). It
 /// uses Rust's `sort_unstable_by`, which sorts in place, because `slice::sort_by` allocates a
 /// buffer of up to the slice's length beyond its short slices; with `position` as the last key no
 /// two items are equal, so the two give the same order.

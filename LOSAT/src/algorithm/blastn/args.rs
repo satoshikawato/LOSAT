@@ -4,9 +4,10 @@ use clap::Args;
 use std::path::PathBuf;
 
 /// The BLASTN tasks that LOSAT runs (case-sensitive): NCBI's nucleotide-nucleotide tasks but
-/// rmblastn (matrix scoring and masklevel, `RMBLASTN_UNSUPPORTED`) and vecscreen (a program of
-/// its own). `-task` accepts these and `describe` lists them, in the order of NCBI's BLASTN
-/// page (megablast, dc-megablast, blastn; the Web form's task list) with blastn-short last.
+/// vecscreen (a program of its own). `-task` accepts these and `describe` lists them, in the
+/// order of NCBI's BLASTN page (megablast, dc-megablast, blastn; the Web form's task list), then
+/// blastn-short and rmblastn (blastn's defaults with reward 0 and penalty 0: matrix-only scoring,
+/// `coordination::engine_scoring_pair`).
 ///
 /// NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:211-222
 /// ```c
@@ -28,17 +29,16 @@ use std::path::PathBuf;
 ///         (CBlastOptionsFactory::GetTasks(CBlastOptionsFactory::eNuclNucl));
 ///     tasks.erase("vecscreen"); // vecscreen has its own program
 /// ```
-const BLASTN_TASKS: &[&str] = &["megablast", "dc-megablast", "blastn", "blastn-short"];
-
-/// The message for `-task rmblastn`, the NCBI task that LOSAT's BLASTN does not implement.
-const RMBLASTN_UNSUPPORTED: &str = "the task rmblastn is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)";
+const BLASTN_TASKS: &[&str] = &[
+    "megablast",
+    "dc-megablast",
+    "blastn",
+    "blastn-short",
+    "rmblastn",
+];
 
 /// BLASTN's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
-pub(crate) const BLASTN_TASK: TaskParser = task_parser(
-    "BLASTN",
-    BLASTN_TASKS,
-    &[("rmblastn", RMBLASTN_UNSUPPORTED)],
-);
+pub(crate) const BLASTN_TASK: TaskParser = task_parser("BLASTN", BLASTN_TASKS, &[]);
 
 /// The strand(s) of the query that a search covers (`-strand`): the strand of the query's
 /// Seq-loc. A strand that is not searched has a context of length 0 and, in a split search, a
@@ -224,7 +224,7 @@ pub struct BlastnArgs {
     pub searchsp: Option<i64>,
     // The help texts name the tasks (the Web form shows the short one), so the help does not
     // repeat clap's list of them; `describe` and the parse errors list `BLASTN_TASKS`.
-    #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = BLASTN_TASK, hide_possible_values = true)]
+    #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn", long_help = "Implemented tasks: megablast, blastn, dc-megablast, blastn-short and rmblastn. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST; rmblastn is blastn with reward 0 and penalty 0 (matrix-only scoring: X-drops as raw scores, a preliminary cutoff by raw score, and a pairwise report with raw scores only). An omitted option takes the default of the task.", value_parser = BLASTN_TASK, hide_possible_values = true)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:708-730
     // ```c
@@ -430,11 +430,12 @@ pub struct BlastnArgs {
     // ```
     // An omitted option keeps the default of the task (`coordination.rs`); a given one is
     // checked as NCBI checks it (`scoring.rs`). NCBI keeps the reward and the penalty in 16
-    // bits; a reward of 0 or less (NCBI's rmblastn matrix scoring, or no valid query) is
-    // not implemented and is rejected after NCBI's checks (`scoring.rs`).
-    #[arg(long, value_parser = blastn_reward, help = "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast; LOSAT does not support 0)")]
+    // bits; reward 0 with penalty 0 is NCBI's matrix-only scoring (`-task rmblastn`), a reward
+    // of 0 or less with another penalty (no valid query) is rejected after NCBI's checks
+    // (`scoring.rs`).
+    #[arg(long, value_parser = blastn_reward, help = "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast, 0 for rmblastn; 0 needs penalty 0)")]
     pub reward: Option<i32>,
-    #[arg(long, value_parser = blastn_penalty, help = "Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for the other tasks)")]
+    #[arg(long, value_parser = blastn_penalty, help = "Penalty for a nucleotide mismatch (default: -2 for megablast, 0 for rmblastn, -3 for the other tasks)")]
     pub penalty: Option<i32>,
     #[arg(
         long = "gapopen",
@@ -1105,8 +1106,8 @@ mod tests {
     }
 
     // blastn_args.cpp:57-59: -task takes NCBI's nucleotide tasks; LOSAT runs those of
-    // `BLASTN_TASKS`, refuses rmblastn with its own message and lists its tasks for any other
-    // name, as for the other programs' -task (`task_parser`).
+    // `BLASTN_TASKS` (rmblastn among them) and lists its tasks for any other name, as for the
+    // other programs' -task (`task_parser`).
     #[test]
     fn task_accepts_the_task_table_and_lists_it() {
         let parse = |task: &str| {
@@ -1142,15 +1143,8 @@ mod tests {
                 assert!(help.contains(task), "{help}");
             }
         }
-        // rmblastn: clap's error for a value its parser refuses, with the usage hint.
-        let rmblastn = parse("rmblastn").err().unwrap();
-        assert_eq!(rmblastn.kind(), clap::error::ErrorKind::ValueValidation);
-        let rmblastn = rmblastn.to_string();
-        assert!(
-            rmblastn.starts_with("error: invalid value 'rmblastn' for '--task <TASK>': the task rmblastn is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)\n")
-                && rmblastn.ends_with("For more information, try '--help'.\n"),
-            "{rmblastn}"
-        );
+        // rmblastn: NCBI's matrix-only task (blast_options_handle.cpp:365-370).
+        assert_eq!(parse("rmblastn").unwrap().args.task, "rmblastn");
         for other in ["vecscreen", "MEGABLAST", "blastn-fast"] {
             let error = parse(other).err().unwrap();
             assert_eq!(
@@ -1159,9 +1153,9 @@ mod tests {
                 "{other}"
             );
             assert!(
-                error
-                    .to_string()
-                    .contains("[possible values: megablast, dc-megablast, blastn, blastn-short]"),
+                error.to_string().contains(
+                    "[possible values: megablast, dc-megablast, blastn, blastn-short, rmblastn]"
+                ),
                 "{error}"
             );
         }

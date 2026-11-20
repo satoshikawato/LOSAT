@@ -86,7 +86,8 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
   - A real number whose exponent does not fit in a 32-bit integer, such as `1.55e-2147483647`, is read with its exact exponent: the smallest normal double. NCBI's reader overflows the exponent and reads the largest double.
   - `psiblast` and `tblastn` read a PSSM (`-in_pssm`) whose values nest to any depth, and `psiblast -out_pssm` writes it back. NCBI reads and writes such values by recursion and can crash (exit status 139, no output) with its default 8 MiB stack; with a stack large enough it writes LOSAT's output.
   - When `psiblast` writes a PSSM (`-out_pssm`) that holds -2147483648 or -9223372036854775808, LOSAT writes the number. NCBI's writer overflows on these two numbers and prints `-8` or `-0`.
-- **When.** Only with a file that holds such a number or nest (a PSSM given to `-in_pssm`, an archive or XML given to `rpsbproc`). A PSSM that `psiblast` makes from a FASTA query does not nest this way, and NCBI's writers do not write such exponents.
+  - A database length of -9223372036854775808 is written as that number in BLAST XML and XML2 (`-outfmt` 5, 14 and 16), in the search strategy (`-export_search_strategy`) and in the BLAST archive. NCBI's writer prints `-0` there.
+- **When.** Only with a file that holds such a number or nest (a PSSM given to `-in_pssm`, an archive or XML given to `rpsbproc`). A PSSM that `psiblast` makes from a FASTA query does not nest this way, and NCBI's writers do not write such exponents. A database has that length only with an alias file's `LENGTH` of 9223372036854775808 or with `-dbsize -9223372036854775808`.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### `rpsbproc`: ids and positions past 2^31

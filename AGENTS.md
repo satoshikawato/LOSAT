@@ -134,7 +134,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      with `-db`; the other places accepted on 2026-11-02, PD-LOSAT-NCBI-DEFECTS 1.10).
      Approved difference: `losat rpsbproc` sorts with Rust's standard sort, so hits equal in
      E-value and bit score, and data rows of one key, keep their input order, where NCBI's
-     `std::sort` leaves an order of its own (Owner, 2026-11-20, PD-LOSAT-NCBI-DEFECTS 1.56); a
+     `std::sort` leaves an order of its own (Owner, 2026-11-20, PD-LOSAT-NCBI-DEFECTS 1.58); a
      NaN E-value or bit score sorts after every number of its key (Owner-delegated, 2026-11-20).
 
 4. NCBI code comments are mandatory for modifications.

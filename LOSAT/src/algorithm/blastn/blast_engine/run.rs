@@ -99,7 +99,7 @@ use crate::blastinput::seq_range::{
 };
 use crate::report::diag_log::Posts;
 use crate::report::pairwise::{
-    write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
+    write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnIntro, BlastnPairwiseQuery,
     BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
 use crate::report::query_warnings::{query_warning, QueryReads};
@@ -515,6 +515,80 @@ fn calculate_blastn_context_statistics(
 #[allow(clippy::neg_cmp_op_on_partial_ord)]
 fn hsp_survives_evalue_reap(evalue: f64, cutoff: f64) -> bool {
     !(evalue > cutoff)
+}
+
+/// The reap of a subject's preliminary HSP list after its e-values are computed (and kept in the
+/// HSPs), chosen once for the batch: by the e-value threshold, or, under matrix-only scoring, by
+/// the raw score.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:891-899 (the same at
+/// 1527-1535 for an ungapped search's finish)
+/// ```c
+///    /* Use score threshold rather than evalue if
+///     * matrix_only_scoring is used.  -RMH-
+///     */
+///     if ( sbp->matrix_only_scoring )
+///     {
+///         status = Blast_HSPListReapByRawScore(hsp_list_out, hit_options);
+///     }else {
+///        /* Discard HSPs that don't pass the e-value test. */
+///         status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+///     }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum PrelimReap {
+    /// `s_Blast_HSPListReapByPrelimEvalue`: an HSP whose e-value is above the threshold
+    /// (`hit_params->prelim_evalue`, the e-value option) is dropped (`hsp_survives_evalue_reap`).
+    Evalue(f64),
+    /// `Blast_HSPListReapByRawScore`: an HSP whose raw score is below the hit-saving option's
+    /// cutoff score (`-min_raw_gapped_score`, 0 when not given) is dropped.
+    RawScore(i32),
+}
+
+impl PrelimReap {
+    /// The reap of a search: by raw score under matrix-only scoring, else by e-value.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2087-2097
+    /// (`Blast_HSPListReapByRawScore`)
+    /// ```c
+    ///    for (index = 0; index < hsp_list->hspcnt; index++) {
+    ///       hsp = hsp_array[index];
+    ///
+    ///       ASSERT(hsp != NULL);
+    ///
+    ///       if ( hsp->score < hit_options->cutoff_score ) {
+    ///          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+    ///       } else {
+    /// ```
+    /// `min_raw_gapped_score` is `TaskConfig::min_raw_gapped_score` (the option above 0): a cutoff
+    /// of 0 or less keeps every HSP, whose scores are positive.
+    pub(super) fn new(
+        matrix_only: bool,
+        min_raw_gapped_score: Option<i32>,
+        evalue_threshold: f64,
+    ) -> Self {
+        if matrix_only {
+            PrelimReap::RawScore(min_raw_gapped_score.unwrap_or(0))
+        } else {
+            PrelimReap::Evalue(evalue_threshold)
+        }
+    }
+
+    /// Each HSP's e-value (`evalue_of`) kept in it, and the HSPs that the reap drops removed, in
+    /// place and in order. The choice is made outside the loop over the HSPs.
+    #[inline]
+    fn reap(self, hits: &mut Vec<PrelimHit>, evalue_of: impl Fn(&PrelimHit) -> f64) {
+        match self {
+            PrelimReap::Evalue(threshold) => hits.retain_mut(|hit| {
+                hit.prelim_evalue = evalue_of(hit);
+                hsp_survives_evalue_reap(hit.prelim_evalue, threshold)
+            }),
+            PrelimReap::RawScore(cutoff) => hits.retain_mut(|hit| {
+                hit.prelim_evalue = evalue_of(hit);
+                hit.prelim_score >= cutoff
+            }),
+        }
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4155-4160
@@ -6448,6 +6522,9 @@ struct BlastnReportInputs<'a> {
     /// `-strand minus`, else 0 (`context 2 * q + first_context`).
     first_context: usize,
     megablast: bool,
+    /// Matrix-only scoring (reward 0 and penalty 0, `TaskConfig::matrix_only`): the outfmt 0
+    /// report shows raw scores only (`BlastnIntro`).
+    matrix_only: bool,
     reward: i32,
     penalty: i32,
     gap_open: i32,
@@ -6644,7 +6721,10 @@ fn blastn_pairwise_report(
     let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
         version: crate::NCBI_BLAST_VERSION.to_string(),
-        megablast: report.megablast,
+        intro: BlastnIntro {
+            megablast: report.megablast,
+            matrix_only: report.matrix_only,
+        },
         database_name: subject_title.as_bytes().to_vec(),
         database_num_sequences: report.shown_num_seqs(),
         database_total_letters: report.shown_total_letters(),
@@ -9629,7 +9709,7 @@ fn database_search_error(
     error: anyhow::Error,
     first_batch: bool,
     outputs: BatchOutputs<'_, '_>,
-    megablast: bool,
+    intro: BlastnIntro,
     shown: &ShownSubjects,
 ) -> anyhow::Error {
     let error = match error.downcast::<database::PreliminaryReadError>() {
@@ -9643,7 +9723,7 @@ fn database_search_error(
         return ErrorAfterInvalidBatches(error).into();
     }
     let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
-    match write_pairwise_prologs(outputs, output_formats, megablast, shown, false) {
+    match write_pairwise_prologs(outputs, output_formats, intro, shown, false) {
         Ok(()) => error,
         Err(write_error) => write_error,
     }
@@ -9923,7 +10003,7 @@ fn ungapped_subject_stage(
     word_cutoffs: &[i32],
     percent_identity: f64,
     evalue_of: impl Fn(&PrelimHit) -> f64,
-    evalue_threshold: f64,
+    reap: PrelimReap,
 ) {
     hits.retain_mut(|hit| {
         let context_idx = hit.context_idx as usize;
@@ -9972,10 +10052,7 @@ fn ungapped_subject_stage(
         )
     });
     sort_prelim_hits_by_score(hits);
-    hits.retain_mut(|hit| {
-        hit.prelim_evalue = evalue_of(hit);
-        hsp_survives_evalue_reap(hit.prelim_evalue, evalue_threshold)
-    });
+    reap.reap(hits, evalue_of);
 }
 
 /// LOSAT's refusal of an HSP that NCBI keeps outside its query context
@@ -10020,6 +10097,7 @@ fn ungapped_reap_query_coverage(
 
 /// LOSAT's refusal of a word cutoff whose arithmetic NCBI does in a way that overflows (memory
 /// "no NCBI UB / overflow"): a context of 2^30 letters or more, or a search space beyond `Int8`.
+/// The word cutoff of an ungapped search and of matrix-only scoring (`batch_setup::batch_cutoffs`).
 fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
     let what = match limit {
         ungapped::CutoffLimit::QueryLength => {
@@ -10029,7 +10107,9 @@ fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
             "an average subject length whose ungapped word cutoff search space overflows NCBI BLAST+'s 64-bit int"
         }
     };
-    anyhow::anyhow!("{what} is not supported by LOSAT's BLASTN with -ungapped")
+    anyhow::anyhow!(
+        "{what} is not supported by LOSAT's BLASTN with -ungapped or with reward 0 and penalty 0 (matrix-only scoring)"
+    )
 }
 
 /// What the query batches search (`search_query_batch`): the prepared subject set, or the
@@ -10419,7 +10499,7 @@ fn run_in_pool(
         }
         _ => scopes,
     });
-    let megablast = args.task == "megablast";
+    let intro = blastn_intro(&args);
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:258-261
     // ```c
     //         formatter.PrintProlog();
@@ -10430,14 +10510,14 @@ fn run_in_pool(
     // NCBI writes the outfmt 0 prolog before it reads the first query batch, and its stream
     // throws at the prolog's first flush when the write fails (blast_format.cpp:118-119),
     // before any query is read or searched.
-    write_pairwise_prologs(outputs, &output_formats, megablast, &shown, true)?;
+    write_pairwise_prologs(outputs, &output_formats, intro, &shown, true)?;
     // The mixer's `CHUNK_SIZE` and then `BATCH_SIZE` are read here, after the prolog and before
     // the first batch: a value that NCBI cannot convert stops the run with its exception
     // (`query_batching_from_environment`), as a batch size of 0 does below.
     let (mut batching, mut overlap_error) = match batching {
         Ok(batching) => batching,
         Err(error) => {
-            write_pairwise_prologs(outputs, &output_formats, megablast, &shown, false)?;
+            write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
             return Err(error);
         }
     };
@@ -10508,7 +10588,7 @@ fn run_in_pool(
     // A batch size of 0 (`CHUNK_SIZE` 1000 without `BATCH_SIZE`: the mixer's maximum is
     // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
     if batching.batch_size == 0 {
-        write_pairwise_prologs(outputs, &output_formats, megablast, &shown, false)?;
+        write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
         return Err(crate::cli::NativeError {
             exit: 3,
             message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
@@ -11898,13 +11978,24 @@ fn prolog_with_report(format: &FormatOutput<'_>, output_format: BlastnOutputForm
     }
 }
 
+/// What the outfmt 0 report of the search introduces (`BlastnIntro`, with its NCBI reference):
+/// megablast's reference, and matrix-only scoring from the option values of reward and penalty
+/// (NCBI's `m_DisableKAStats`, set for every task of the BLASTN application).
+fn blastn_intro(args: &BlastnArgs) -> BlastnIntro {
+    let (reward, penalty, _, _) = super::super::coordination::determine_scoring_params(args);
+    BlastnIntro {
+        megablast: args.task == "megablast",
+        matrix_only: super::super::coordination::matrix_only_scoring(reward, penalty),
+    }
+}
+
 /// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink whose prolog comes before the
 /// search (`before_search`) or, for a run that stops before any report, the prolog of the
 /// others (`prolog_with_report`: the file sinks of outfmt 0 and every sink of outfmt 15 and 16).
 fn write_pairwise_prologs(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
-    megablast: bool,
+    intro: BlastnIntro,
     shown: &ShownSubjects,
     before_search: bool,
 ) -> Result<()> {
@@ -11935,7 +12026,7 @@ fn write_pairwise_prologs(
             _ => false,
         };
         if writes_prolog {
-            write_format_prolog(format, output_format, megablast, shown)?;
+            write_format_prolog(format, output_format, intro, shown)?;
         }
     }
     Ok(())
@@ -11946,7 +12037,7 @@ fn write_pairwise_prologs(
 fn write_format_prolog(
     format: &mut FormatOutput<'_>,
     output_format: BlastnOutputFormat,
-    megablast: bool,
+    intro: BlastnIntro,
     shown: &ShownSubjects,
 ) -> Result<()> {
     if output_format.is_pairwise() {
@@ -11954,7 +12045,7 @@ fn write_format_prolog(
         write_blastn_pairwise_prolog(
             &mut writer,
             crate::NCBI_BLAST_VERSION,
-            megablast,
+            intro,
             shown.name.as_bytes(),
             // Printed for a subject set only (a database prints `database`).
             i64::from(shown.num_seqs),
@@ -12016,7 +12107,7 @@ fn write_before_failed_batch(
         write_pairwise_prologs(
             outputs,
             output_formats,
-            args.task == "megablast",
+            blastn_intro(args),
             subjects.shown,
             false,
         )
@@ -12324,6 +12415,7 @@ fn write_reports_untimed(
         query_eff_searchsp: results.query_eff_searchsp,
         first_context: QueryStrand::from_option(&args.strand).first_context(),
         megablast,
+        matrix_only: config.matrix_only,
         reward: config.reward,
         penalty: config.penalty,
         gap_open: config.gap_open,
@@ -12883,9 +12975,21 @@ fn search_query_batch<const UNGAPPED: bool>(
     //    }
     // ```
     let discontig_template = config.mb_template_length > 0;
+    // The Karlin-Altschul blocks, alpha/beta and the gap-cost table check score with the engine
+    // pair (`TaskConfig::score_reward`: 1/-3 under matrix-only scoring).
+    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:89-96
+    // ```c
+    //             if ( scoring_options->reward == 0 &&  scoring_options->penalty == 0 )
+    //             {
+    //               retval =
+    //                 Blast_KarlinBlkNuclGappedCalc(sbp->kbp_gap_std[index],
+    //                     scoring_options->gap_open, scoring_options->gap_extend,
+    //                     BLAST_REWARD, BLAST_PENALTY,
+    //                     sbp->kbp_std[index], &(sbp->round_down), error_return);
+    // ```
     let scoring_spec = NuclScoringSpec {
-        reward: config.reward,
-        penalty: config.penalty,
+        reward: config.score_reward,
+        penalty: config.score_penalty,
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
     };
@@ -12991,7 +13095,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     };
     let diag_mask = diag_array_length - 1;
 
-    let megablast = args.task == "megablast";
+    let intro = blastn_intro(args);
     // Whether NCBI searches the batch chunk by chunk when it has a valid context (a gapped
     // search, `search_query_chunks`): each chunk's set-up then checks the subjects
     // (`ContextInputs::split`).
@@ -13025,7 +13129,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             split,
             subjects,
             seq_data: &seq_data,
-            megablast,
+            intro,
             shown: &shown,
         },
         reborrow_outputs(&mut outputs),
@@ -13240,6 +13344,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         search_karlin: search_karlin_ref,
         x_dropoff_init: &x_dropoff_init,
         min_raw_gapped_score: config.min_raw_gapped_score,
+        matrix_only: config.matrix_only,
         evalue_threshold,
         subject_length: None,
     };
@@ -13372,8 +13477,13 @@ fn search_query_batch<const UNGAPPED: bool>(
         encoded_query_concat_nomask,
         search_karlin_ref,
         round_down_evalue_score,
-        evalue_threshold,
+        prelim_reap: PrelimReap::new(
+            config.matrix_only,
+            config.min_raw_gapped_score,
+            evalue_threshold,
+        ),
         percent_identity,
+        matrix_only: config.matrix_only,
         debug_mode,
         blastn_debug,
         blastn_trace_enabled,
@@ -13475,7 +13585,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 error,
                 first_batch,
                 reborrow_outputs(&mut outputs),
-                megablast,
+                intro,
                 &shown,
             )
         })?;
@@ -13490,7 +13600,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             error,
             first_batch,
             reborrow_outputs(&mut outputs),
-            megablast,
+            intro,
             &shown,
         ));
     }
@@ -13544,7 +13654,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             error,
             first_batch,
             reborrow_outputs(&mut outputs),
-            megablast,
+            intro,
             &shown,
         )
     })?;
@@ -16089,7 +16199,7 @@ mod tests {
                 &[10, 10],
                 percent_identity,
                 |_| 0.0,
-                10.0,
+                PrelimReap::Evalue(10.0),
             );
             hits.iter()
                 .map(|h| {

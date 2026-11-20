@@ -692,6 +692,33 @@ fn check_for_excessive_prot_data(id: &ParsedSeqId, warn: ReaderWarn<'_>) {
     }
 }
 
+/// Whether `CFastaIdValidate(0)` (the alignment reader's `CDefaultIdValidate`, flags 0: neither
+/// `fAssumeProt` nor `fAssumeNuc`, no `fQuickIDCheck`) reports anything for `ids`: an id that ends
+/// in more than 20 nucleotide letters or more than 50 letters (warnings, or an error from 25
+/// nucleotide letters), a local id with a byte that `CheckLocalID` rejects, an id over the length
+/// limits. The alignment reader has no message listener, so every report, a warning too,
+/// throws (`CAlnErrorReporter::Report`, quoted at `blastinput::aln_reader`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:162-168
+/// ```c++
+/// void CDefaultIdValidate::operator()(
+///         const TIds& ids,
+///         int lineNum,
+///         CAlnErrorReporter* pErrorReporter)
+/// {
+///     m_FastaIdValidate(ids, lineNum, CDefaultIdErrorReporter(pErrorReporter));
+/// }
+/// ```
+pub(crate) fn alignment_ids_are_reported(ids: &[ParsedSeqId]) -> bool {
+    let mut reported = false;
+    let mut warn = |_: ReaderWarning<'_>| reported = true;
+    // The nucleotide check and the protein check of `CFastaIdValidate::operator()` are the two
+    // `validate_ids` calls (the checks of the local ids and of the lengths are the same in both).
+    let nuc = validate_ids(ids, false, false, 0, &mut warn);
+    let prot = validate_ids(ids, true, false, 0, &mut warn);
+    nuc.is_err() || prot.is_err() || reported
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -21,11 +21,11 @@ export type FormValues = Readonly<Record<string, FieldValue>>;
 
 /**
  * Field values that one choice clears (S12 instructions, item 8): BLASTN's templates
- * belong to the discontiguous lookup, which NCBI refuses for the blastn and blastn-short
- * tasks, so choosing those tasks empties the template fields.
+ * belong to the discontiguous lookup, which NCBI refuses for the blastn, blastn-short and
+ * rmblastn tasks, so choosing those tasks empties the template fields.
  */
 const CLEARED_BY: ReadonlyArray<{ readonly flag: string; readonly values: readonly string[]; readonly clears: readonly string[] }> = [
-  { flag: '-task', values: ['blastn', 'blastn-short'], clears: ['-template_type', '-template_length'] },
+  { flag: '-task', values: ['blastn', 'blastn-short', 'rmblastn'], clears: ['-template_type', '-template_length'] },
 ];
 
 /** The sections and fields that the engine describes (all of them while `options` is unknown). */

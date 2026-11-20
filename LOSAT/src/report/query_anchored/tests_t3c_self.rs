@@ -1408,7 +1408,7 @@ fn tblastx_self_record_merge_throws() {
     );
     assert_eq!(
         exception.get_msg(),
-        "CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists for seq2."
+        b"CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists for seq2."
     );
 }
 
@@ -1466,6 +1466,6 @@ fn tblastx_self_record_build_throws() {
     );
     assert_eq!(
         exception.get_msg(),
-        "CAlnMixSegments::Build(): Internal error: Infinite loop detected."
+        b"CAlnMixSegments::Build(): Internal error: Infinite loop detected."
     );
 }

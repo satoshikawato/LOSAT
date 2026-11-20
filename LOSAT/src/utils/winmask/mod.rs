@@ -71,7 +71,7 @@ pub struct MaskerParams {
 pub enum WinMaskError {
     /// `CSeqMaskerIstatFactory::eOpen`: "could not open `<name>`"
     /// (`seq_masker_istat_factory.cpp:171`).
-    Open { name: String },
+    Open { name: Vec<u8> },
     /// An exception of a reader (`eFormat`, `eBadParam`, `eBadHashParam`) at `site`; the
     /// factory rethrows it as "could not create a unit counts container"
     /// (`seq_masker_istat_factory.cpp:358-359`). `warnings` are the warnings NCBI posted
@@ -129,10 +129,12 @@ impl WinMaskError {
 impl fmt::Display for WinMaskError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Open { name } => write!(f, "could not open {name}"),
+            Self::Open { name } => write!(f, "could not open {}", String::from_utf8_lossy(name)),
             Self::Format { site, .. } => f.write_str(site.message()),
             Self::CreateFail { message } => f.write_str(message),
-            Self::Exception { exception, .. } => f.write_str(exception.get_msg()),
+            Self::Exception { exception, .. } => {
+                f.write_str(&String::from_utf8_lossy(exception.get_msg()))
+            }
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:121-125
             // ```c
             //         os << "window size (" << (int)window_size << ") "

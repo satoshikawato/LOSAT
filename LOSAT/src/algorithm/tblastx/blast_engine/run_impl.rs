@@ -3770,12 +3770,9 @@ fn run_batch_loop(
     // ```
     // A structured format (outfmt 5, 8, 9, 12) writes none of a query's own warnings
     // (`ReportFormat::writes_query_warnings`; outfmt 5 puts them in the Iteration's message,
-    // `blast_xml`); the warnings go with the first format.
-    let result_warnings = outputs
-        .formats
-        .first()
-        .and_then(crate::api::local_blast::FormatOutput::report_format)
-        .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
+    // `blast_xml`); the warnings go with the first format, or, where it is structured, to the
+    // caller's receiver of a later format's (`ReportOutputs::later_query_warnings`).
+    let result_warnings = outputs.first_writes_query_warnings();
     // Whether the batches' prefetch of a `-db` search writes the taxonomy database's messages
     // with the query warnings: the first format is outfmt 0, 5, 6 or 7, or with
     // `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12 (`TblastxOutputFormat::prefetches_subjects`;
@@ -4553,7 +4550,12 @@ fn run_batch_loop(
         // (above); a translated query has no Karlin-Altschul message of its own, and the
         // queries of a batch that is not searched (no valid context) all get the message of
         // the batch.
-        for (offset, query) in batch_queries.iter().enumerate().filter(|_| result_warnings) {
+        let later = outputs.later_query_warnings().is_some();
+        for (offset, query) in batch_queries
+            .iter()
+            .enumerate()
+            .filter(|_| result_warnings || later)
+        {
             let index = start + offset;
             let mut messages = Vec::new();
             if !batch.searched {
@@ -4565,12 +4567,16 @@ fn run_batch_loop(
             if reports.filtered_empty && batch.searched {
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
-            warnings[index].lines(&crate::report::query_warnings::query_warning(
+            let text = crate::report::query_warnings::query_warning(
                 "tblastx",
                 reports.args.first_query_ordinal + input.ordinal(index),
                 query,
                 &messages,
-            ));
+            );
+            match outputs.later_query_warnings() {
+                Some(later) => later.write_all(&text)?,
+                None => warnings[index].lines(&text),
+            }
         }
         for (offset, messages) in query_fetches.into_iter().enumerate() {
             warnings[start + offset].lines(&messages);

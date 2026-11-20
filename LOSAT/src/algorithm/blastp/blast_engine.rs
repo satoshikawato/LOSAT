@@ -7709,6 +7709,7 @@ fn search(
         let ReportOutputs {
             formats,
             diagnostics,
+            later_warnings,
             hits,
             observer,
         } = &mut *outputs;
@@ -7920,6 +7921,9 @@ fn search(
                             })
                             .collect(),
                         diagnostics: &mut **diagnostics,
+                        later_warnings: later_warnings
+                            .as_mut()
+                            .map(|later| &mut **later as &mut (dyn std::io::Write + Send)),
                         hits: x_want_records.then_some(
                             &mut x_collect as &mut crate::api::local_blast::HitsSink<'_>,
                         ),
@@ -11840,7 +11844,7 @@ fn run_call(
         pssm_made,
         pssm_reads: &pssm_reads,
     };
-    let mut query_warning_lines = report_prep::query_warning_lines(&prep);
+    let (mut query_warning_lines, later_warnings) = report_prep::query_warning_lines(&prep);
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
@@ -11880,6 +11884,9 @@ fn run_call(
         )?;
     }
     unreportable?;
+    // The queries' warnings that a later format writes, where the first does not
+    // (`ReportOutputs::later_query_warnings`).
+    outputs.write_later_query_warnings(&later_warnings)?;
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks (`x_subject_meta`).

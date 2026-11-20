@@ -178,6 +178,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -222,6 +223,7 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -247,6 +249,7 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
                 sink: OutputSink::Writer(&mut report),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -280,6 +283,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -362,6 +366,7 @@ fn run_local_outputs(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -741,6 +746,7 @@ fn several_file_outputs_are_written_one_after_the_other() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -812,6 +818,7 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: Some(&mut on_hits),
             observer: None,
         };
@@ -892,6 +899,7 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -913,4 +921,79 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
             assert!(format!("{error:#}").contains(refusal), "{error:#}");
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452 (quoted at
+// `ReportFormat::writes_query_warnings`): a structured report returns before the query's result
+// warnings.
+// The receiver of a later format's query warnings (`ReportOutputs::later_warnings`) takes them
+// where a format after a structured first one writes them and is still written. Outfmt 0 that
+// failed alone before its reports (LOSAT's refusal of the masks of a query that is also a subject,
+// above) gives none: the command line's run of it stops at the refusal, before the warnings.
+// Outfmt 6 after it gives them, as its command line writes them.
+#[test]
+fn a_later_format_that_failed_alone_gives_no_query_warnings() {
+    use crate::api::local_blast::FormatRefusal;
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
+    let first = read_records(&fixture.join("SicyWSV.faa")).remove(0);
+    let mut masked = first.seq().to_vec();
+    masked[..20].make_ascii_lowercase();
+    let query = TempFasta::new(
+        "later_refused_query.faa",
+        &[("qempty", &[][..]), ("q1", first.seq())],
+    );
+    let subject = TempFasta::new("later_refused_subject.faa", &[("q1", &masked)]);
+    let extra = ["-parse_deflines", "-lcase_masking", "-evalue", "0.001"];
+    let args = || blastp_args(&query.0, &subject.0, &extra);
+    let (queries, subjects) = crate::api::input::read_search_inputs(
+        crate::api::Program::Blastp,
+        &Commands::Blastp(args()),
+        Some(false),
+        &std::fs::read(&query.0).unwrap(),
+        &std::fs::read(&subject.0).unwrap(),
+    )
+    .map_err(|error| error.to_string())
+    .unwrap();
+    // The later receiver's text of a run of `formats` (those after the first fail alone), and
+    // which formats were refused.
+    let run = |formats: &[&str]| -> (String, Vec<bool>) {
+        let mut sinks = vec![Vec::new(); formats.len()];
+        let (mut diagnostics, mut later) = (Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: formats
+                .iter()
+                .zip(sinks.iter_mut())
+                .enumerate()
+                .map(|(index, (outfmt, sink))| FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(sink),
+                    refusal: match index {
+                        0 => FormatRefusal::FailsCall,
+                        _ => FormatRefusal::FailsAlone,
+                    },
+                })
+                .collect(),
+            diagnostics: &mut diagnostics,
+            later_warnings: Some(&mut later),
+            hits: None,
+            observer: None,
+        };
+        run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs).expect("run_local");
+        let refused = outputs
+            .formats
+            .iter_mut()
+            .map(|format| format.refusal.take_refused().is_some())
+            .collect();
+        drop(outputs);
+        (String::from_utf8(later).expect("UTF-8"), refused)
+    };
+    assert_eq!(run(&["5", "0"]), (String::new(), vec![false, true]));
+    let (later, refused) = run(&["5", "0", "6"]);
+    assert_eq!(refused, [false, true, false]);
+    assert!(
+        later.starts_with("Warning: [blastp] ")
+            && later.ends_with(": Sequence contains no data \n")
+            && later.lines().count() == 1,
+        "{later:?}"
+    );
 }

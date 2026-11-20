@@ -2051,6 +2051,7 @@ mod tests {
                     })
                     .collect(),
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };

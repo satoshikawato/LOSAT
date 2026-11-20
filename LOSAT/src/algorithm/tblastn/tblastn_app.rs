@@ -2362,12 +2362,12 @@ fn search(
         //     }
         // ```
         // A structured format (outfmt 8, 12) writes none of a query's own warnings
-        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
-        let result_warnings = outputs
-            .formats
-            .first()
-            .and_then(crate::api::local_blast::FormatOutput::report_format)
-            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
+        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format, or, where
+        // it is structured, to the caller's receiver of a later format's (`later`,
+        // `ReportOutputs::later_query_warnings`), in the order of the queries.
+        let result_warnings = outputs.first_writes_query_warnings();
+        let later = outputs.takes_later_query_warnings();
+        let mut later_text = Vec::new();
         let filtered_empty = database.is_some_and(|database| database.filtered_empty());
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
         // off read one by one, by query, where the first format places them (`places_reads`).
@@ -2402,7 +2402,7 @@ fn search(
             .enumerate()
             .map(|(index, (query, valid))| {
                 let mut lines = batches.warnings[index].clone();
-                if !result_warnings {
+                if !result_warnings && !later {
                     return lines;
                 }
                 let messages = crate::report::query_warnings::query_messages(
@@ -2411,7 +2411,7 @@ fn search(
                     index < identity_warned,
                     filtered_empty && !query_batch_skipped[index],
                 );
-                lines.extend(match pssm.as_deref() {
+                let text = match pssm.as_deref() {
                     // A PSSM query's label is its Seq-id and the title of NCBI's query source of
                     // the PSSM's Bioseq (`PsiSearch::warning_title`), as psiblast's
                     // (`blastp::blast_engine::pssm_hooks::pssm_query_warning`).
@@ -2427,10 +2427,15 @@ fn search(
                         query,
                         &messages,
                     ),
-                });
+                };
+                match result_warnings {
+                    true => lines.extend(text),
+                    false => later_text.extend(text),
+                }
                 lines
             })
             .collect();
+        outputs.write_later_query_warnings(&later_text)?;
         // The query batches that were read and searched, by their searched queries (the batches
         // before a database failure or a reader stop): each is reported.
         let batch_spans: Vec<std::ops::Range<usize>> = query_input

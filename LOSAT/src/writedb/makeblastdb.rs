@@ -130,13 +130,14 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 //     arg_desc->SetDependency("gi_mask_name", CArgDescriptions::eRequires, "mask_data");
 //     arg_desc->SetDependency("gi_mask_name", CArgDescriptions::eRequires, "gi_mask");
 // ```
-// LOSAT's parser checks the range of `-taxid`, the exclusions and the requirements (`-taxid_map`
-// needs `-parse_seqids`, `-mask_id` needs `-mask_data`, `-mask_desc` needs `-mask_id`, `-gi_mask`
-// needs `-parse_seqids` and excludes `-mask_id`, `-gi_mask_name` needs `-mask_data` and
-// `-gi_mask`); its errors are the parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES)
-// where NCBI's argument reader prints its usage (exit status 1). `check_arguments` repeats the
-// dependencies for the library, in NCBI's order and words. The options of makeblastdb that LOSAT
-// does not support are not registered; `crate::cli` names them in its error.
+// LOSAT's parser checks the range of `-taxid`; after the parse it checks the exclusions and the
+// requirements (`-taxid_map` needs `-parse_seqids`, `-mask_id` needs `-mask_data`, `-mask_desc`
+// needs `-mask_id`, `-gi_mask` needs `-parse_seqids` and excludes `-mask_id`, `-gi_mask_name`
+// needs `-mask_data` and `-gi_mask`) with `dependency_error`, in NCBI's order and words. Its
+// errors are the parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES) where NCBI's
+// argument reader prints its usage (exit status 1); `check_arguments` makes the same check for
+// the library (exit status 1). The options of makeblastdb that LOSAT does not support are not
+// registered; `crate::cli` names them in its error.
 /// Arguments of `losat makeblastdb`, under makeblastdb's names.
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
@@ -174,28 +175,27 @@ pub struct MakedbArgs {
     // NCBI's integer and its constraint (`nonnegative_ncbi_integer`): `0x10` is 16 (NCBI BLAST+
     // 2.17.0, line RG item E1b probe `makeblastdb.k.taxid.12`: rc 0 with `-dryrun`).
     #[arg(long, value_name = "TaxID",
-          value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_integer,
-          conflicts_with = "taxid_map")]
+          value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_integer)]
     pub taxid: Option<i32>,
     /// Text file mapping sequence IDs to taxonomy IDs. Format:<SequenceId> <TaxonomyId><newline>
     #[allow(rustdoc::invalid_html_tags, reason = "NCBI's help, printed by clap")]
-    #[arg(long, value_name = "TaxIDMapFile", requires = "parse_seqids")]
+    #[arg(long, value_name = "TaxIDMapFile")]
     pub taxid_map: Option<String>,
     /// Comma-separated list of input files containing masking data as produced by NCBI masking
     /// applications (e.g. dustmasker, segmasker, windowmasker)
     #[arg(long, value_name = "mask_data_files")]
     pub mask_data: Option<String>,
     /// Comma-separated list of strings to uniquely identify the masking algorithm
-    #[arg(long, value_name = "mask_algo_ids", requires = "mask_data")]
+    #[arg(long, value_name = "mask_algo_ids")]
     pub mask_id: Option<String>,
     /// Comma-separated list of free form strings to describe the masking algorithm details
-    #[arg(long, value_name = "mask_algo_descriptions", requires = "mask_id")]
+    #[arg(long, value_name = "mask_algo_descriptions")]
     pub mask_desc: Option<String>,
     /// Create GI indexed masking data.
-    #[arg(long, requires = "parse_seqids", conflicts_with = "mask_id")]
+    #[arg(long)]
     pub gi_mask: bool,
     /// Comma-separated list of masking data output files.
-    #[arg(long, value_name = "gi_based_mask_names", requires_all = ["mask_data", "gi_mask"])]
+    #[arg(long, value_name = "gi_based_mask_names")]
     pub gi_mask_name: Option<String>,
     /// Option to parse seqid for FASTA input if set, for all other input types seqids are
     /// parsed automatically
@@ -331,7 +331,10 @@ impl std::fmt::Display for MakedbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MakedbError::Build(error) => error.fmt(f),
-            MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
+            MakedbError::Database(error) => match error.ncbi_message() {
+                Some(message) => write!(f, "BLAST Database error: {message}"),
+                None => write!(f, "BLAST Database error: {error}"),
+            },
             MakedbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
             MakedbError::Output(message) => write!(f, "BLAST failed to write output: {message}"),
             MakedbError::Argument(message) => write!(f, "Command line argument error: {message}"),
@@ -651,13 +654,14 @@ fn given(args: &MakedbArgs, name: &str) -> bool {
 // check; else the first missing argument in the order of declaration names the first
 // dependency that required it (`map::insert` keeps the first). `-taxid` with `-taxid_map` meets
 // the dependency of `taxid` first: `Argument "taxid_map". Incompatible with argument:  `taxid'`.
-/// The dependencies of the arguments, checked as NCBI's argument reader checks them after the
-/// parse (`CArgDescriptions::x_PostCheck`), with its sentences. LOSAT's own parser checks them
-/// on the command line; this check serves the library's callers.
-fn check_dependencies(args: &MakedbArgs) -> Result<(), MakedbError> {
+/// The first dependency of makeblastdb's arguments that the arguments `given` break, checked as
+/// NCBI's argument reader checks them after the parse (`CArgDescriptions::x_PostCheck`), with
+/// its sentence. The one check of the dependencies: LOSAT's parser calls it on the command line
+/// (`crate::cli`, exit status 2) and `check_arguments` for the library's callers.
+pub(crate) fn dependency_error(given: &dyn Fn(&str) -> bool) -> Option<String> {
     let mut require: Vec<(&str, &str)> = Vec::new();
     for (first, dep, second) in dependency_multimap(makeblastdb_dependencies()) {
-        if !given(args, first) {
+        if !given(first) {
             continue;
         }
         match dep {
@@ -667,29 +671,31 @@ fn check_dependencies(args: &MakedbArgs) -> Result<(), MakedbError> {
                 }
             }
             Dep::Excludes => {
-                if given(args, second) {
-                    return Err(MakedbError::Argument(arg_message(
-                        second,
-                        "Incompatible with argument",
-                        first,
-                    )));
+                if given(second) {
+                    return Some(arg_message(second, "Incompatible with argument", first));
                 }
             }
         }
     }
-    for name in REQUIRED_IN_ORDER {
-        if given(args, name) {
-            continue;
-        }
-        if let Some(&(_, requester)) = require.iter().find(|&&(required, _)| required == name) {
-            return Err(MakedbError::Argument(arg_message(
+    REQUIRED_IN_ORDER
+        .into_iter()
+        .filter(|name| !given(name))
+        .find_map(|name| {
+            let &(_, requester) = require.iter().find(|&&(required, _)| required == name)?;
+            Some(arg_message(
                 name,
                 "Must be specified, as it is required by argument",
                 requester,
-            )));
-        }
+            ))
+        })
+}
+
+/// `dependency_error` of the arguments of a library call.
+fn check_dependencies(args: &MakedbArgs) -> Result<(), MakedbError> {
+    match dependency_error(&|name| given(args, name)) {
+        Some(message) => Err(MakedbError::Argument(message)),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// The checks of the arguments that LOSAT makes first: what LOSAT does not

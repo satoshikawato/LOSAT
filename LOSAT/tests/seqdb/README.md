@@ -158,7 +158,8 @@ cut by `-max_file_sz`, and descriptions that pad the index header. Each run's ex
 changes (GI-mask files, alias, metadata, mask column, log) and, for six cases, the volume files too.
 `tests/makeblastdb_gi_mask.rs` runs every case through the `losat` binary and compares them;
 `src/writedb/gi_mask_tests.rs` writes every GI mask of `db/` again from the records, GIs, description and dates it
-holds and compares the six files byte for byte. A rerun changes the dates of the `.gmi`/`.gni` and alias files.
+holds and compares the six files byte for byte. A rerun changes the dates of the `.gmi`/`.gni`, mask column and
+alias files.
 
 ## Masks ordered by address, and the errors that come first (`mask_order/`)
 

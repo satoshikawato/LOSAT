@@ -9,9 +9,10 @@
 //! the command line relative to it, as the fixtures ran makeblastdb. The run directory is `<C>`
 //! in the messages and in the alias, metadata and log files; the time of "Building a new DB" is
 //! `<T>` and the seconds of "Adding sequences" `<S>`. The bytes that hold the run's date are
-//! masked: the date of a `.gmi` or `.gni` file (its length is compared), the line "Alias file
-//! created" of an alias file, and "last-updated" and "bytes-total" (the size of the index files,
-//! which hold the date) of a metadata file.
+//! masked: the date of a `.gmi` or `.gni` file (its length is compared), the creation time of a
+//! mask column file (`.naa`, `.paa`), the line "Alias file created" of an alias file, and
+//! "last-updated" and "bytes-total" (the size of the index files, which hold the date) of a
+//! metadata file.
 //!
 //! The cases of the column `losat` other than `same`: `refuse` (two algorithms with the files of
 //! one name, which LOSAT refuses before it writes anything: exit status 1, no file) and `parser`
@@ -153,6 +154,26 @@ fn masked_file(rel: &str, bytes: Vec<u8>, c: &str) -> Vec<u8> {
         at += desc;
         let date = read_var_int(&bytes, &mut at);
         bytes[at..at + date].fill(b'#');
+        return bytes;
+    }
+    if rel.ends_with(".naa") || rel.ends_with(".paa") {
+        // The column's creation time (`CTime::AsString`, `MM/DD/YYYY hh:mm:ss`).
+        let mut bytes = bytes;
+        let pattern = b"00/00/0000 00:00:00";
+        let mut at = 0;
+        while at + pattern.len() <= bytes.len() {
+            let window = &bytes[at..at + pattern.len()];
+            let date = window.iter().zip(pattern).all(|(&b, &p)| match p {
+                b'0' => b.is_ascii_digit(),
+                _ => b == p,
+            });
+            if date {
+                bytes[at..at + pattern.len()].fill(b'#');
+                at += pattern.len();
+            } else {
+                at += 1;
+            }
+        }
         return bytes;
     }
     let text = [".nal", ".pal", ".njs", ".pjs"]

@@ -679,6 +679,16 @@ where
         },
         matches => matches?,
     };
+    // makeblastdb's dependencies are checked after the parse, as NCBI's argument reader checks
+    // them (`x_PostCheck`), in its order and words (`dependency_error`); the error is the
+    // parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
+    if let Some(("makeblastdb", words)) = matches.subcommand() {
+        let given =
+            |id: &str| words.value_source(id) == Some(clap::parser::ValueSource::CommandLine);
+        if let Some(message) = crate::writedb::makeblastdb::dependency_error(&given) {
+            return Err(clap::Error::raw(ErrorKind::ArgumentConflict, message));
+        }
+    }
     let parsed = T::from_arg_matches_mut(&mut matches)
         .map_err(|error| error.format(&mut command.clone()))?;
     match non_utf8_value {

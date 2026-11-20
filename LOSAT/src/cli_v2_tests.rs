@@ -449,6 +449,54 @@ fn makedb_takes_makeblastdb_s_option_names() {
             "{words:?}: {err}"
         );
     }
+    // The parser checks the dependencies after the parse and names the first that NCBI's
+    // `x_PostCheck` meets, in its words, also where an argument that one requires is excluded
+    // by another (NCBI BLAST+ 2.17.0: `tests/seqdb/gi_mask/expected/e03.stderr`, `e04.stderr`).
+    for (words, sentence) in [
+        (
+            &[
+                "-dbtype",
+                "nucl",
+                "-parse_seqids",
+                "-mask_data",
+                "a",
+                "-gi_mask",
+                "-mask_desc",
+                "d",
+            ][..],
+            "Argument \"mask_id\". Must be specified, as it is required by argument:  `mask_desc'",
+        ),
+        (
+            &[
+                "-dbtype",
+                "nucl",
+                "-mask_data",
+                "a",
+                "-mask_id",
+                "y",
+                "-gi_mask_name",
+                "x",
+            ],
+            "Argument \"gi_mask\". Must be specified, as it is required by argument:  \
+             `gi_mask_name'",
+        ),
+        (
+            &[
+                "-dbtype",
+                "prot",
+                "-taxid",
+                "1",
+                "-taxid_map",
+                "m",
+                "-parse_seqids",
+            ],
+            "Argument \"taxid_map\". Incompatible with argument:  `taxid'",
+        ),
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
+        assert!(err.to_string().contains(sentence), "{words:?}: {err}");
+    }
 
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).

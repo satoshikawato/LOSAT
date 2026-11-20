@@ -1708,4 +1708,25 @@ mod tests {
             );
         }
     }
+
+    /// A format NCBI cannot read is left to the formatting handler when a strategy file is asked
+    /// for (`early_format_choice`), which reads it again and fails there; a readable one is as it
+    /// was read, and without a strategy file the error comes at once.
+    #[test]
+    fn an_unreadable_format_is_deferred_with_a_strategy_file() {
+        for outfmt in ["99", "abc", "6 delimx", " -1"] {
+            let message = |error: anyhow::Error| error.to_string();
+            assert!(early_format_choice(outfmt, false).is_err(), "{outfmt}");
+            let choice = early_format_choice(outfmt, true).unwrap();
+            assert!(choice.is_deferred(), "{outfmt}");
+            assert_eq!(
+                message(choice.at_formatting_handler(outfmt).unwrap_err()),
+                message(parse_formatting_string(outfmt).unwrap_err()),
+                "{outfmt}"
+            );
+        }
+        let choice = early_format_choice("6 qseqid", true).unwrap();
+        assert!(!choice.is_deferred());
+        assert_eq!(choice.at_formatting_handler("99").unwrap(), choice);
+    }
 }

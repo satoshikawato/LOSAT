@@ -732,11 +732,22 @@ fn run_inner(
             || !query_file.metadata().is_ok_and(|m| m.is_file())
             || !crate::blastinput::input_files::has_stream_position(&query_file)
         {
-            bail!(
-                "unsupported {} query input for -outfmt {}: use a regular file",
-                program.upper,
-                choice.number
-            );
+            // RPSTBLASTN reads such a query into an unnamed temporary file first and reads it
+            // from there (twice); BLASTX keeps DECISIONS 22's refusal. The copy is read as
+            // the stream is read (`InputFile::into_seekable_copy`).
+            let copy = args
+                .rpstblastn
+                .is_some()
+                .then(|| query_file.into_seekable_copy())
+                .flatten();
+            query_file = match copy {
+                Some(copy) => copy,
+                None => bail!(
+                    "unsupported {} query input for -outfmt {}: use a regular file",
+                    program.upper,
+                    choice.number
+                ),
+            };
         }
         // The read before the search reads the open file itself (a `.gz` query is an unnamed
         // inflated file, `input_files::open_file_input`, which no path reaches) and gives it back

@@ -437,7 +437,6 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number 
 | :--- | :--- |
 | `-outfmt` other than 0 to 7, 10 and 11 | Refused: not yet supported. `-outfmt 17`, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-use_sw_tback` with composition-based statistics | Refused. |
-| `-outfmt 5` (also 13 to 16) with a query that is not a regular file (`-query -`, a pipe) | Refused, as in `blastx`: the XML title of each query is read before the search, which a stream cannot be read twice for. |
 | `-ungapped` without composition-based statistics | Refused. NCBI's `rpstblastn` crashes after the search. With composition-based statistics it gets NCBI's own error. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |

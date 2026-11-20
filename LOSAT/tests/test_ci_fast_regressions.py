@@ -465,6 +465,11 @@ class CopyRowTests(unittest.TestCase):
                 self.assertTrue(db_fixtures.copy_oracle_problems(row), (row["query"], row["outfmt"], row["program"]))
             with self.assertRaises(SystemExit):
                 db_fixtures.copies_cell({**two, "covers": f"ncbi-copies: {tmp / 'o.faa'} -evalue 1"})
+            # Only the variables that place the queries in batches and chunks may differ in the oracle run.
+            with self.assertRaises(SystemExit):
+                db_fixtures.copies_cell({**two, "covers": f"ncbi-copies: {tmp / 'o.faa'} ADAPTIVE_CBS=1"})
+            self.assertEqual(db_fixtures.copies_cell({**two, "covers": "ncbi-copies: o.faa OVERLAP_CHUNK_SIZE=50"}),
+                             ("o.faa", {"OVERLAP_CHUNK_SIZE": "50"}))
 
     def test_query_chunks_follow_ncbis_split(self):
         self.assertEqual(db_fixtures.query_chunks(19799, {}), 1)

@@ -8177,26 +8177,40 @@ fn search(
             // batch's first query holds a redone match, a query chunk split again or without a
             // query in `search_split_query_batches`), as TBLASTX's and TBLASTN's
             // (`blastinput::app::ErrorAfterBatchReports`). LOSAT searches all batches together: the
-            // batches before are searched again alone.
-            let failure = match result {
-                Err(error) if error.is::<database::HeaderReadError>() => error
+            // batches before are searched again alone. A failure that the first search meets
+            // before its redo (unified P-values refused for a batch,
+            // `redo_run::evalue_adjust_contexts`) may come after a batch whose failure only the
+            // redo finds (`-use_sw_tback`): the search again then fails at that earlier batch,
+            // which NCBI reached first, and the batches before it are searched again in turn
+            // (review R3 of line RG item X5, M1).
+            let as_failure = |result: Result<()>| match result {
+                Err(error) if error.is::<database::HeaderReadError>() => Ok(error
                     .downcast::<database::HeaderReadError>()
-                    .expect("the error was checked to be a HeaderReadError"),
-                other => return other,
+                    .expect("the error was checked to be a HeaderReadError")),
+                other => Err(other),
             };
-            let (input_start, searched_start) = batches.start_of(failure.query);
-            // The failed batch's search strategy request, which NCBI writes before its search:
-            // after the requests of the batches before, which their search again releases with it
-            // (`NextRequest`), or alone, before any output.
-            let span = batches.searched_span(failure.query);
-            if searched_start > 0 {
+            let mut failure = match as_failure(result) {
+                Ok(failure) => failure,
+                Err(other) => return other,
+            };
+            let searched_start = loop {
+                let (input_start, searched_start) = batches.start_of(failure.query);
+                // The failed batch's search strategy request, which NCBI writes before its
+                // search: after the requests of the batches before, which their search again
+                // releases with it (`NextRequest`), or alone, before any output.
+                let span = batches.searched_span(failure.query);
+                if searched_start == 0 {
+                    write_alone(span)?;
+                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+                    break searched_start;
+                }
                 // The first search looked the taxonomy up for the batches before (their
                 // prefetch and reports): the search again writes those texts again, from the
                 // state of a run that has looked nothing up (review 1 of line DBID mixdb2, H1).
                 if let Some(database) = database {
                     database.restart_taxonomy();
                 }
-                search_batches(
+                match as_failure(search_batches(
                     args.clone(),
                     outputs,
                     pool,
@@ -8204,11 +8218,12 @@ fn search(
                     searched_start,
                     false,
                     Some(next_request(span)),
-                )?;
-            } else {
-                write_alone(span)?;
-                write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
-            }
+                )) {
+                    Ok(earlier) => failure = earlier,
+                    Err(Ok(())) => break searched_start,
+                    Err(other) => return other,
+                }
+            };
             outputs
                 .diagnostics
                 .write_all(&batches.warnings[searched_start])?;

@@ -45,5 +45,6 @@ bash docs/evidence/unified_p_last_query/probe.sh <NCBI BLAST+ 2.17.0 bin> <this 
 
 Every run is capped (`prlimit --core=1 --as=4000000000 timeout 300`). The fixture rows `db.x5u.*`
 (`LOSAT/tests/db_search_manifest/blastp.x5u.tsv`, `psiblast.tsv`) and `x5u.*`
-(`LOSAT/tests/outfmt0_manifest.tsv`) hold NCBI's frozen outputs of these searches and more (outfmt 0,
-5, 6, 7 and 11; `-max_target_seqs`; `BATCH_SIZE`; `-searchsp`; `-dbsize`; the refusals).
+(`LOSAT/tests/outfmt0_manifest.tsv`) hold NCBI's frozen outputs of searches of the same kinds (case
+G's search is `db.x5u.cp.c.mts1.2u.6`; outfmt 0, 5, 6, 7 and 11; `-max_target_seqs`; `BATCH_SIZE`;
+`-searchsp`; `-dbsize`; `-use_sw_tback`; the refusals).

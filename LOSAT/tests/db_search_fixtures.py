@@ -54,9 +54,10 @@ LOSAT/tests/db_search (README.md there says how they were built).
   1u`, `2u`, `3u`) NCBI BLAST+ 2.17.0 adjusts a query's E-values with the values of the next query of its batch and,
   for a batch's last query, with bytes past its array that change from run to run; in the oracle run each original
   query's next query is itself or its copy, so its report is NCBI's with its own values where LOSAT's run has no next
-  query. The `NAME=VALUE` words (names of `ENV_NAMES`, BATCH_SIZE in practice) are the oracle run's environment in
-  place of the row's own words of those names. Each batch of both runs is searched in one chunk (`query_chunks`: the
-  copy would move the split of a longer batch, and the split can change the preliminary hits). `freeze` runs NCBI
+  query. The `NAME=VALUE` words (BATCH_SIZE, CHUNK_SIZE or OVERLAP_CHUNK_SIZE: `COPY_ENV_NAMES`) are the oracle
+  run's environment in place of the row's own words of those names. Each batch of both runs is searched in one
+  chunk (`query_chunks`: the copy would move the split of a longer batch, and the split can change the preliminary
+  hits). `freeze` runs NCBI
   `-num_threads 1` on PATH, which must exit 0 with a stderr that names no copy (`COPY`: a warning of the arguments,
   such as NCBI's advice to examine 5 or more matches under a smaller hit list, is the row's own and is frozen as
   <row_id>.err), keeps its whole stdout unchanged as <row_id>.copies.out (the evidence) and writes as <row_id>.out
@@ -539,6 +540,9 @@ BLASTP_BATCH_SIZE = 10000
 #         retval = NStr::StringToInt(overlap_sz_str);
 BLASTP_CHUNK_SIZE = 10000
 QUERY_CHUNK_OVERLAP = 100
+# The variables that a copy row's oracle run may set in place of the row's own: only those that place the queries in
+# batches and chunks (another variable would give the oracle conditions that the row's LOSAT run does not have).
+COPY_ENV_NAMES = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE")
 
 
 def copies_cell(row: dict[str, str]) -> tuple[str, dict[str, str]] | None:
@@ -549,8 +553,8 @@ def copies_cell(row: dict[str, str]) -> tuple[str, dict[str, str]] | None:
     if not marker:
         return None
     words = rest.split(" | ")[0].split()
-    if not words or not all(is_env_token(word) for word in words[1:]):
-        raise SystemExit(f"{row['row_id']}: ncbi-copies takes a path and NAME=VALUE words of {', '.join(ENV_NAMES)}")
+    if not words or not all(is_env_token(word) and word.split("=", 1)[0] in COPY_ENV_NAMES for word in words[1:]):
+        raise SystemExit(f"{row['row_id']}: ncbi-copies takes a path and NAME=VALUE words of {', '.join(COPY_ENV_NAMES)}")
     return words[0], dict(word.split("=", 1) for word in words[1:])
 
 

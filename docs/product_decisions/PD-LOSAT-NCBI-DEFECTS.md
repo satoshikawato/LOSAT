@@ -201,10 +201,9 @@
   the e-value adjustment with the values of the next query of the batch reproduced, rule 2;
   exception 16 for the last query of a batch, whose values NCBI reads past its array of query
   contexts: the Owner's decision of 2026-11-20 on question Q-X5 (「Q1=A」, Q1 of that day's batch of
-  questions = Q-X5); the rule-2
-  rejection of a batch in which a query is followed by a query without a search space,
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.53, line
-  RG item X4)
+  questions = Q-X5); the rule-2 rejection of a batch in which a query is followed by a query
+  without a search space, Owner-delegated (standing instruction 2026-09-29, restated 2026-10-07)
+  and part of the option A that the Owner chose; numbered after 1.53, line RG item X4)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -922,7 +921,10 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     the copy stays in the query's batch (a batch closes at `BATCH_SIZE` letters, 10,000 by
     default, so the search with a copy may need a larger value) and NCBI searches that batch in
     the same chunks (a batch above `CHUNK_SIZE` is split, the copy moves the split, and the split
-    can change the preliminary hits; the frozen rows search one chunk).
+    can change the preliminary hits; the frozen rows search one chunk). With `-use_sw_tback` the
+    failure of a batch's traceback follows the batch's last redone match (version 1.53, X4): in
+    NCBI's search with a copy that match is the copy's, which NCBI may end early where the copy's
+    hit list fills; where it does not, LOSAT's batch fails where NCBI's search with the copy does.
     The redo's early termination (`BlastCompo_EarlyTermination`, `redo_alignment.c:1560-1580`)
     belongs to the same result. NCBI redoes the matches in the order of their queries
     (`BlastHSPStreamRead`, `blast_hspstream.c:288-319`), and the test needs the heap of every
@@ -1963,10 +1965,9 @@ decided on
   not valid (all `X`, empty, or masked whole) when `-searchsp` is not given or is 0. NCBI's next
   context then holds an effective search space of 0 (`blast_setup.c:773-784`, `:846-847`), the
   scale of the adjustment is infinite, and NCBI reports every e-value of the query before it as
-  0 (more rows pass `-evalue`: 71 against 43 in one probe); an alignment whose e-value was 0
-  before the step gets a NaN, which NCBI's sorts and cut-offs then compare (a match of NaNs alone
-  is dropped; in a match with other alignments it prints `0.0` in the tabular formats and `-1` in
-  XML). NCBI's bytes are deterministic, but the result has no use, and the order of a list with
+  0 (case F of `docs/evidence/unified_p_last_query/`: all 805 rows of the query, `-evalue 1000`);
+  an alignment whose e-value was 0 before the step gets a NaN, which NCBI's sorts and cut-offs
+  then compare. NCBI's bytes are deterministic, but the result has no use, and the order of a list with
   NaNs follows the C library's sort. LOSAT refuses the batch (exit 1, "unified P-values ... are
   not supported by LOSAT's BLASTP for query ..., which is followed in its query batch by a query
   without a search space ...", naming both queries), whether or not the query has a match. It

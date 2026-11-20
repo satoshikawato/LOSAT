@@ -215,8 +215,9 @@ impl RedoParamsBuilder<'_> {
             //     Boolean smithWaterman =
             //         (Boolean) (extendParams->options->eTbackExt == eSmithWatermanTbck);
             // ```
-            // `-use_sw_tback` (item X4): the one-thread loop redoes each match with NCBI's
-            // Smith-Waterman redo (`one_thread_redo`).
+            // `-use_sw_tback` (item X4): each match is redone with NCBI's Smith-Waterman redo, by
+            // the one-thread loop (`one_thread_redo`) or, at more than one thread, by the windows
+            // of `x_redo_par` (item X4-mt).
             smith_waterman: args.use_sw_tback,
             near_identical_cutoff: blastp_redo_near_identical_cutoff(scaled_gapped_lambda),
             position_based: false,

@@ -1,5 +1,6 @@
 //! BLASTP `-use_sw_tback` (line RG item X4): what LOSAT decides of the status of NCBI's
-//! Smith-Waterman redo (`blast_engine::redo_run::one_thread_redo`), on crafted inputs in
+//! Smith-Waterman redo (`blast_engine::redo_run::one_thread_redo`, and at more than one thread
+//! the windows of `x_redo_par`, which replay its heap tests and batch status), on crafted inputs in
 //! `tests/fasta/x4`. With `-searchsp 1000 -evalue 1e4` the e-value of a score of 0 passes the
 //! threshold, so the redo of a match with two or more preliminary HSPs fails when the first query
 //! letter scores the subject's first letter 0 or less (`smith_waterman_redo_window`): `tks_W`

@@ -3309,9 +3309,10 @@ mod tests {
             if batch.start == q_idx {
                 failed = false;
             }
-            if let Some(list) = lists[q_idx].as_ref() {
-                for (position, local_match) in
-                    list.hsplist_array[..list.hsplist_count].iter().enumerate()
+            if let Some(hit_list) = lists[q_idx].as_ref() {
+                for (position, local_match) in hit_list.hsplist_array[..hit_list.hsplist_count]
+                    .iter()
+                    .enumerate()
                 {
                     if local_match.hsps.is_empty()
                         || blast_compo_early_termination(

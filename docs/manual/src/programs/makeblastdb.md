@@ -76,10 +76,12 @@ A mask file that is damaged stops with makeblastdb's own error and exit status. 
 
 `-gi_mask` writes the masks of each mask file into six files of their own instead of the mask column: `NAME.gmd` and `NAME.gnd` (the masked ranges), `NAME.gmo` and `NAME.gno` (the GIs of the masked sequences) and `NAME.gmi` and `NAME.gni` (their index). `NAME` is the mask file's entry of `-gi_mask_name`, or the mask file's name as you typed it; it is a path from the current directory, not from the database. The database gets an alias file (`.nal` or `.pal`) whose `MASKLIST` line names these files. Only sequences with a GI get masks: the masks of other sequences are left out without a message, and a mask file that reached no sequence with a GI writes no files and is left out of `MASKLIST`.
 
-The files, messages and exit status are those of NCBI's `makeblastdb` 2.17.0, also where NCBI's result is unusable:
+The files, messages and exit status are those of NCBI's `makeblastdb` 2.17.0, with one difference:
 
-- A database in one volume cannot be opened, by NCBI's programs or LOSAT's: its alias file names the database itself. The build writes its files and then ends with `BLAST Database error: Illegal configuration: DB alias files are mutually recursive.` and exit status 2. A database in several volumes (a smaller `-max_file_sz`) does not have this problem, and NCBI's programs read its masks.
-- A rebuild without `-gi_mask` in the same place keeps the alias file of the earlier build, so it ends the same way. Delete the `.nal` or `.pal` file first.
+- A database in one volume opens. NCBI's `makeblastdb` writes an alias file that names the database by its full path, which NCBI's programs take for another alias file: no program can open that database, and the build ends with `BLAST Database error: Illegal configuration: DB alias files are mutually recursive.` and exit status 2. LOSAT's alias file names the volume by its file name (`DBLIST db` for `-out db`), as the alias file of a database in several volumes names its volumes. The build then ends as one of several volumes does, with the metadata file (`.njs`, `.pjs`) and exit status 0, and NCBI's programs read the database and its masks. Every other file is NCBI's.
+- An alias file that NCBI's `makeblastdb` left from such a build cannot be read when the old database is removed, by NCBI or by LOSAT. A new build with `-gi_mask` writes its own alias file over it. A build without `-gi_mask` keeps it and ends with the error above, as NCBI's does: delete the `.nal` or `.pal` file first.
+
+NCBI's programs look for the GI-mask files from the current directory and the `BLASTDB` path, not from the database's directory, so they find them when they run where the build ran (or with `BLASTDB` set to that directory, or with an absolute `-gi_mask_name`).
 
 LOSAT's own programs do not read GI-indexed masks yet: `blastn`, `blastdbcmd` and the other readers refuse a database whose alias file has `MASKLIST` (see [What LOSAT refuses](../refusals.md)).
 
@@ -108,11 +110,12 @@ LOSAT's own programs do not read GI-indexed masks yet: `blastn`, `blastdbcmd` an
 | `.naa` `.nab` `.nac` (nucleotide), `.paa` `.pab` `.pac` (protein) | With `-mask_data`: the mask column. |
 | `.gmd` `.gnd` `.gmo` `.gno` `.gmi` `.gni` | With `-gi_mask`: the GI-indexed masks, named after `-gi_mask_name` (see [GI-indexed masks](#gi-indexed-masks)). Data files of more than one volume are numbered (`NAME.00.gmd`, ...). |
 
-The sequence and header files have the same bytes as NCBI's. The index and metadata files differ only in the creation date they record. So do the GI-mask index files (`.gmi`, `.gni`) and the alias files, which also record the database's full path when it has one volume.
+The sequence and header files have the same bytes as NCBI's. The index and metadata files differ only in the creation date they record. So do the GI-mask index files (`.gmi`, `.gni`) and the alias files. The alias file of a database in one volume built with `-gi_mask` names the volume where NCBI's names the database's full path (see [GI-indexed masks](#gi-indexed-masks)).
 
 ## Differences from NCBI BLAST+
 
 - A `-in` file made of several bzip2 streams or zstd frames is read to the end. NCBI's `makeblastdb` stops after the first stream and drops the rest without a message. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- `-gi_mask` on a database in one volume: LOSAT's alias file names the volume by its file name, so the database opens and the build ends normally (exit status 0, with the metadata file). NCBI's names the database by its full path, which no program can open, and ends with exit status 2. See [GI-indexed masks](#gi-indexed-masks) and [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - When the database path (`-out`) contains a space or a double quote, or when an old database of the same name has to be replaced, LOSAT removes and replaces the old files as one database, where `makeblastdb` treats the path as a list of names. Normal names are not affected. See [the decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
 - Database files are compared with `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform (the LMDB page size, the size of a `long`); those files have not been compared with NCBI's builds there.
 

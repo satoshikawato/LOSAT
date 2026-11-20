@@ -19,6 +19,11 @@
 //! (an argument rule that LOSAT's parser checks: exit status 2 and no file, where makeblastdb
 //! prints its usage).
 //!
+//! The expectations of a single-volume database built with `-gi_mask` are NCBI's run with the one
+//! change of PD-LOSAT-NCBI-DEFECTS approved exception 16 (`single_volume_exception` of the
+//! script): the alias file's `DBLIST` names the volume by its file name, and the run ends as a
+//! successful one, with the metadata file of NCBI's `blastdbcmd -metadata` for that database.
+//!
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp (the files),
 //! c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:338-342, 405-438 (their close and the
 //! alias file), c++/src/app/blastdb/makeblastdb.cpp:1205, 1231-1241 (`-gi_mask_name`).
@@ -60,11 +65,11 @@ fn cases(dir: &Path) -> Vec<Case> {
 struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new() -> Self {
+    fn new(label: &str) -> Self {
         // The run directories as `getcwd` names them in the messages (`<C>`).
         let dir = std::fs::canonicalize(std::env::temp_dir())
             .unwrap()
-            .join(format!("losat-mkdb-gimask-{}", std::process::id()));
+            .join(format!("losat-mkdb-gimask-{label}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         TempDir(dir)
@@ -78,13 +83,21 @@ impl Drop for TempDir {
 }
 
 /// The setup of a case in `case_dir`: `D/` makes a directory, `F` copies the input `F`, `F>G`
-/// copies it to `G`, `F^N>G` writes its first `N` FASTA records to `G`. Returns the paths of the
-/// inputs put there.
+/// copies it to `G`, `F^N>G` writes its first `N` FASTA records to `G`, `F=>G` copies it to `G`
+/// with `{C}` replaced by `case_dir` (a file of a database that an earlier run left, not an
+/// input: it is listed and compared as the run leaves it). Returns the paths of the inputs put
+/// there.
 fn setup(case_dir: &Path, tokens: &[&str], inputs: &Path) -> Vec<String> {
     let mut put = Vec::new();
     for token in tokens {
         if token.ends_with('/') {
             std::fs::create_dir_all(case_dir.join(token)).unwrap();
+            continue;
+        }
+        if let Some((source, target)) = token.split_once("=>") {
+            let text = std::fs::read_to_string(inputs.join(source)).unwrap();
+            let text = text.replace("{C}", case_dir.to_str().unwrap());
+            std::fs::write(case_dir.join(target), text).unwrap();
             continue;
         }
         let (source, target) = token.split_once('>').unwrap_or((token, token));
@@ -339,7 +352,7 @@ fn compare(
 fn gi_mask_builds_end_as_makeblastdb_s() {
     let dir = fixtures();
     let inputs = dir.join("in");
-    let tmp = TempDir::new();
+    let tmp = TempDir::new("cases");
     let mut failures = Vec::new();
     let mut case_dir = PathBuf::new();
     let mut put = Vec::new();
@@ -407,4 +420,55 @@ fn gi_mask_builds_end_as_makeblastdb_s() {
         counts[0] >= 60 && counts[1] >= 2 && counts[2] >= 7,
         "{counts:?}"
     );
+}
+
+/// `losat <command>` in `dir` (`command`: the program and its words, separated by single spaces),
+/// with the environment of `run`: exit status, standard output and error.
+fn losat(dir: &Path, command: &str) -> (i32, String, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .current_dir(dir)
+        .env("HOME", dir)
+        .env_remove("BLASTDB")
+        .args(command.split(' '))
+        .output()
+        .expect("run losat");
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// The database of one volume that `losat makeblastdb -gi_mask` writes opens (its alias file
+/// names the volume by its file name, PD-LOSAT-NCBI-DEFECTS approved exception 16), and LOSAT's
+/// programs that read sequences stop on its `MASKLIST` with LOSAT's refusal, before they print
+/// anything: they do not read GI masks yet (line NP item M4c-2).
+#[test]
+fn readers_refuse_the_gi_masks_of_a_single_volume_database() {
+    let inputs = fixtures().join("in");
+    let tmp = TempDir::new("readers");
+    for name in ["nucl.fa", "dust_nucl.asnb"] {
+        std::fs::copy(inputs.join(name), tmp.0.join(name)).unwrap();
+    }
+    let build = losat(
+        &tmp.0,
+        "makeblastdb -in nucl.fa -dbtype nucl -parse_seqids -out db -title t \
+         -mask_data dust_nucl.asnb -gi_mask -gi_mask_name gm1",
+    );
+    assert_eq!((build.0, build.2.as_str()), (0, ""), "{build:?}");
+    let alias = std::fs::read_to_string(tmp.0.join("db.nal")).unwrap();
+    assert!(alias.ends_with("\nDBLIST db\nMASKLIST gm1 \n"), "{alias:?}");
+    assert!(tmp.0.join("db.njs").is_file());
+    let refusal = "unsupported database: alias file key MASKLIST is not supported";
+    for command in [
+        "blastdbcmd -db db -info",
+        "blastdbcmd -db db -entry all -outfmt %m0",
+        "blastn -query nucl.fa -db db -db_soft_mask 0 -outfmt 6",
+    ] {
+        let got = losat(&tmp.0, command);
+        assert!(
+            got.0 == 1 && got.1.is_empty() && got.2.contains(refusal),
+            "{command}: {got:?}"
+        );
+    }
 }

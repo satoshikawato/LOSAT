@@ -186,11 +186,13 @@
   element of a mask's list stated as `NULL` that makeblastdb dereferences, whose report holds the
   run's memory addresses, rule 3; Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.51, line RG item X-short-tbx)
-  1.53 2026-11-20 (makeblastdb `-gi_mask`, line NP item M4c-1: the explicit rejection of two
-  masking algorithms whose GI-mask files are the same files, which NCBI writes through two streams
-  whose flushing decides the bytes, rule 3; the GI-mask writer's defects reproduced under rule 2;
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.52, line
-  NP item M4a-1c)
+  1.53 2026-11-20 (makeblastdb `-gi_mask`, line NP item M4c-1: exception 16, the alias file of a
+  database of one volume, which names the volume where NCBI's names the database itself, the
+  Owner's decision of 2026-11-20 (Q6=B); the explicit rejection of two masking algorithms whose
+  GI-mask files are the same files, which NCBI writes through two streams whose flushing decides
+  the bytes, rule 3; the GI-mask writer's other defects reproduced under rule 2; the form of
+  exception 16 and the rejection Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.52, line NP item M4a-1c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -852,6 +854,53 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
     (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
 
+## Approved exception (makeblastdb `-gi_mask`, a database of one volume, version 1.53)
+
+Version 1.53, line NP item M4c-1. The Owner answered on 2026-11-20 「Q1=A Q2=B Q3=A Q4=A Q5=A Q6=B Q7=A
+Q8=OK」. Q6 was the question Q-GIMASK 「makeblastdb -gi_mask が 1 volume の DB を作る時、NCBI と同じにしますか」
+(when `makeblastdb -gi_mask` builds a database of one volume, should LOSAT do as NCBI does?), and its option
+B read 「LOSAT だけが 1 volume でも読める DB を書く。NCBI と違う file になり、新しい例外が 1 つ増える。」 (LOSAT
+alone writes a database of one volume that can be read; the files differ from NCBI's, and one more exception
+is added). Not taken: option A, NCBI's files and its exit status 2 under rule 2. The form below (which bytes
+differ, and how) is Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07. Not taken there:
+naming the volume `<name>.00` as a database of several volumes does (the name of every volume file would
+differ from NCBI's), and keeping NCBI's alias file while only LOSAT's reader takes it for the volume (no
+file would differ, and NCBI's programs still could not open the database).
+
+16. **The alias file of a database of one volume built with `-gi_mask`.** With `-gi_mask` NCBI's
+    writer gives every database an alias file (`writedb_impl.cpp:378-380`); its `DBLIST` is the list
+    of the volumes' file names when there are several, and the database's own name `m_Dbname`, an
+    absolute path, when there is one (`CWriteDB_Impl::x_MakeAlias`, `writedb_impl.cpp:403-416`).
+    NCBI's reader takes a `DBLIST` entry with a directory for another alias file or volume to look
+    up; this one names the alias file itself, so every reader of the database stops with `BLAST
+    Database error: Illegal configuration: DB alias files are mutually recursive.`
+    (`CSeqDBAliasNode::x_ExpandAliases`, `seqdbalias.cpp:735-813`). makeblastdb opens the new
+    database for its metadata file (`makeblastdb.cpp:1296-1317`) and ends there with that message
+    and exit status 2, after every other file is written; no NCBI program can open the database.
+    LOSAT writes the database's file name without a directory in that line
+    (`CDirEntry(m_Dbname).GetName()`, the form of the list of several volumes), which NCBI's reader
+    takes for the volume of the alias file's own name (`seqdbalias.cpp:773-797`): the database
+    opens, and the build goes on as a build of several volumes does, with the metadata file and
+    exit status 0. Every other file, the messages and the log are NCBI's. The metadata file is the
+    one NCBI's own code gives for that database (`CSeqDB::GetDBMetaData`, `seqdb.cpp:1610-1749`;
+    NCBI BLAST+ 2.17.0 `blastdbcmd -metadata` on NCBI's database with that one line changed): it
+    lists the alias file twice, as the alias file and as a file of the volume (the extensions of
+    `SeqDB_GetFileExtensions` begin with the alias file's, `seqdbcommon.cpp:2629`), and counts its
+    bytes twice. An alias file that NCBI's makeblastdb left from such a build is not LOSAT's: the
+    removal of the old database cannot read it (`seqdb.cpp:1542, 1573-1574`), a build with
+    `-gi_mask` writes its own alias file over it, and a build without `-gi_mask` keeps it and ends
+    with the message above, as NCBI's does (rule 2).
+    Evidence: `docs/evidence/gi_mask_single_volume/` (NCBI BLAST+ 2.17.0 opens such databases,
+    version 5 and 4, nucleotide and protein, `-out` in a subdirectory, the default GI-mask name:
+    `blastdbcmd -info`, `%m0`, `-mask_sequence_with 0`, `-metadata`, `blastn -db_soft_mask 0` and
+    `-db_hard_mask 0`, `blastp -db_soft_mask 0`; the masks are those of the mask column but for the
+    sequences without a GI, as for a database of several volumes; from another directory NCBI does
+    not find the GI-mask files, as for a database of several volumes). Fixtures: the rows of one
+    volume of `LOSAT/tests/seqdb/gi_mask` (`make_gi_mask_fixtures.py`, `single_volume_exception`:
+    NCBI's run with that one line changed, taken as the successful run where NCBI ended on the
+    message above), among them `x01_*` (a rebuild over LOSAT's alias file) and `x10_*` (builds
+    beside NCBI's alias file). Tests `LOSAT/tests/makeblastdb_gi_mask.rs`.
+
 ## Reproduced as NCBI (rule 2)
 
 - TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.39, 2026-11-15, line RG item T3c,
@@ -1061,13 +1110,12 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
 - makeblastdb `-gi_mask` (version 1.53, 2026-11-20, line NP item M4c-1): the GI-mask writer
   (`seqdb_writer/writedb_gimask.cpp`, `writedb_impl.cpp:338-342, 405-438, 1453-1456`) is ported
-  with its defects, which give deterministic files, messages and exit statuses. A database of one
-  volume gets an alias file whose `DBLIST` is the database's own absolute path, so the metadata
-  step after the build (`CSeqDB`) reads the alias as itself: every file but the `.njs`/`.pjs` is
-  written and the run ends with `BLAST Database error: Illegal configuration: DB alias files are
-  mutually recursive.`, exit status 2; a later build into the same `-out`, with or without
-  `-gi_mask`, keeps that alias file (the removal of the old database cannot read it and ignores
-  the error, `seqdb.cpp:1542, 1573-1574`) and ends the same way. The masks
+  with its defects, which give deterministic files, messages and exit statuses, but for the alias
+  file of a database of one volume (approved exception 16). An alias file of that kind that NCBI's
+  makeblastdb left in the directory is kept by a later build into the same `-out` (the removal of
+  the old database cannot read it and ignores the error, `seqdb.cpp:1542, 1573-1574`); a build
+  without `-gi_mask` then ends at its metadata step with `BLAST Database error: Illegal
+  configuration: DB alias files are mutually recursive.`, exit status 2, as NCBI's does. The masks
   of a sequence without a GI are dropped before their ranges are checked (a range past such a
   sequence's end is no error), and an algorithm that reached no sequence with a GI writes no files
   and is left out of `MASKLIST`. A data volume takes its first record

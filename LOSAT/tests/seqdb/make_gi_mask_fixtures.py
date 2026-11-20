@@ -14,11 +14,27 @@ Every case runs makeblastdb in a directory of its own (a case whose setup starts
 the directory of the case before it), with the input files copied in first, so that the names on
 the command line, in the log and in the files are relative as a user types them.
 
+One expectation leaves NCBI's bytes, in one place: `single_volume_exception` (PD-LOSAT-NCBI-DEFECTS
+approved exception 16, the Owner's decision of 2026-11-20). NCBI's makeblastdb gives a
+single-volume database built with `-gi_mask` an alias file whose DBLIST is the database's own
+absolute path; no program can open that database, and makeblastdb itself ends with "BLAST Database
+error: Illegal configuration: DB alias files are mutually recursive." (exit status 2, no metadata
+file). LOSAT writes the database's file name without a directory there, which NCBI's reader takes
+as the volume, and goes on as a build of several volumes does. So after each such run of NCBI this
+script rewrites that one line in the run directory (before the next case of a `^` chain runs) and,
+where NCBI ended on that error, takes the run as the successful run it then is: the line goes from
+the standard error (or the `-logfile` file), the exit status is 0, and the metadata file is the
+one NCBI's `blastdbcmd -metadata` writes for the database (the same `CSeqDB::GetDBMetaData` and
+JSON writer that makeblastdb's own metadata step runs). Everything else is NCBI's run as it was.
+
 Output files:
   in/                         the inputs: FASTA files (deterministic, from fixed seeds) and the mask
                               files that dustmasker, segmasker and convert2blastmask 2.17.0 wrote
                               for them (`-parse_seqids`, ASN.1 binary or text); `acc_dup.asnt` is
-                              written by hand
+                              written by hand; `ncbi_single.nal` is the alias file that makeblastdb
+                              wrote for a single-volume database with `-gi_mask` (`{C}` for its
+                              directory), which LOSAT never writes: the cases x10 put it beside
+                              a database as an earlier run of NCBI's would have left it
   cases.tsv                   one row per case: name, losat, setup, then the words after
                               `makeblastdb`, one per field. `losat`: `same` (LOSAT does as NCBI),
                               `refuse` (LOSAT refuses the input: two algorithms with one name, whose
@@ -26,10 +42,13 @@ Output files:
                               argument rule: LOSAT's parser refuses the words, exit status 2, where
                               NCBI's prints its usage). `setup`: space separated, `-` for none:
                               `F` copies in/F, `F>G` copies in/F to G, `F^N>G` writes the first N
-                              FASTA records of in/F to G, `D/` makes the directory D, `^` (first)
-                              keeps the directory of the case before. `{C}` in a word is the
-                              absolute path of the case directory.
-  expected/<case>.rc          makeblastdb's exit status
+                              FASTA records of in/F to G, `F=>G` copies in/F to G with `{C}`
+                              replaced by the case directory (a file of a database, not an input:
+                              it is listed and compared like the files of the run), `D/` makes the
+                              directory D, `^` (first) keeps the directory of the case before.
+                              `{C}` in a word is the absolute path of the case directory.
+  expected/<case>.rc          makeblastdb's exit status (after `single_volume_exception`, as are
+                              the other expectations)
   expected/<case>.stdout      its standard output, `.stderr` its standard error, with the case
                               directory as <C>, the time of "Building a new DB" as <T> and the
                               seconds of "Adding sequences" as <S>
@@ -54,6 +73,7 @@ import random
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 DATE_SIZED = (".nin", ".pin", ".njs", ".pjs", ".nal", ".pal")
@@ -306,6 +326,14 @@ CASES = [
       "-mask_data", "dust_nolc.asnb", "-gi_mask", "-gi_mask_name", "e"]),
     ("x09", "same", "nucl.fa dust_nucl_noparse.asnb",
      N + ["-mask_data", "dust_nucl_noparse.asnb", "-gi_mask", "-gi_mask_name", "np"]),
+    # A database beside the alias file that an earlier run of NCBI's makeblastdb wrote for a
+    # single-volume database with -gi_mask (survey D2): the removal of the old database cannot
+    # read it; a build with -gi_mask writes its own alias file over it, a build without -gi_mask
+    # leaves it and ends on it as NCBI's makeblastdb does.
+    ("x10_1", "same", DN, N + ["-mask_data", "dust_nucl.asnb"]),
+    ("x10_2", "same", "^ ncbi_single.nal=>db.nal",
+     N + ["-mask_data", "dust_nucl.asnb", "-gi_mask", "-gi_mask_name", "gm1"]),
+    ("x10_3", "same", "^ ncbi_single.nal=>db.nal", N + ["-mask_data", "dust_nucl.asnb"]),
     ("m01", "same", DN2, NM + ["-mask_data", "dust_nucl.asnb,dust10_nucl.asnb", "-gi_mask",
                                "-gi_mask_name", "m1,m2"]),
     ("m03", "same", DN, NM + GM),
@@ -361,6 +389,11 @@ def setup(case_dir, tokens, inputs):
         if token.endswith("/"):
             (case_dir / token).mkdir(parents=True, exist_ok=True)
             continue
+        if "=>" in token:
+            src, _, dst = token.partition("=>")
+            text = (inputs / src).read_bytes().replace(b"{C}", str(case_dir).encode())
+            (case_dir / dst).write_bytes(text)
+            continue
         src, _, dst = token.partition(">")
         dst = dst or src
         src, _, count = src.partition("^")
@@ -371,6 +404,73 @@ def setup(case_dir, tokens, inputs):
             shutil.copyfile(inputs / src, case_dir / dst)
         put.append(dst)
     return put
+
+
+RECURSION = b"BLAST Database error: Illegal configuration: DB alias files are mutually recursive.\n"
+
+
+def write_ncbi_single_alias(bin_dir, inputs, work, env):
+    """`in/ncbi_single.nal`: the alias file that NCBI's makeblastdb writes for a single-volume
+    database built with `-gi_mask` (DBLIST = the database's absolute path, `{C}/db` here), as an
+    earlier run of NCBI's leaves it in a directory."""
+    run_dir = work / "ncbi_single"
+    run_dir.mkdir()
+    for name in ("nucl.fa", "dust_nucl.asnb"):
+        shutil.copyfile(inputs / name, run_dir / name)
+    words = N + ["-mask_data", "dust_nucl.asnb", "-gi_mask", "-gi_mask_name", "gm1"]
+    result = subprocess.run([str(bin_dir / "makeblastdb")] + words, cwd=run_dir,
+                            capture_output=True, env=env)
+    if result.returncode != 2 or result.stderr != RECURSION:
+        raise SystemExit(f"ncbi_single: {result.returncode} {result.stderr!r}")
+    alias = (run_dir / "db.nal").read_bytes()
+    (inputs / "ncbi_single.nal").write_bytes(alias.replace(str(run_dir).encode(), b"{C}"))
+
+
+def single_volume_exception(bin_dir, case_dir, argv, rc, stderr, stamp, env):
+    """The one place where an expectation leaves NCBI's bytes (PD-LOSAT-NCBI-DEFECTS approved
+    exception 16; the module's docstring). Where this run of makeblastdb with `-gi_mask` wrote the
+    alias file of a single-volume database (DBLIST = the database's absolute path), that line
+    becomes the database's file name without a directory; where the run then ended on "DB alias
+    files are mutually recursive" (exit status 2), the line goes from the standard error or the
+    `-logfile` file, the exit status is 0, and the metadata file is NCBI's `blastdbcmd -metadata`
+    of the database. `stamp` is a file touched before the run. Returns the exit status and the
+    standard error."""
+    if "-gi_mask" not in argv:
+        return rc, stderr
+    out = argv[argv.index("-out") + 1]
+    dbtype = argv[argv.index("-dbtype") + 1]
+    alias = case_dir / (out + (".pal" if dbtype == "prot" else ".nal"))
+    # An alias file that this run did not write (one that was there before) stays as it is.
+    if not alias.exists() or alias.stat().st_mtime_ns <= stamp.stat().st_mtime_ns:
+        return rc, stderr
+    lines = alias.read_bytes().split(b"\n")
+    at = next(i for i, line in enumerate(lines) if line.startswith(b"DBLIST "))
+    path = lines[at][len(b"DBLIST "):]
+    if not os.path.isabs(path):
+        # Several volumes: NCBI's list of their file names, which NCBI's reader opens.
+        return rc, stderr
+    lines[at] = b"DBLIST " + os.path.basename(path)
+    alias.write_bytes(b"\n".join(lines))
+    if rc != 2:
+        # The run failed before its metadata step (a duplicate GI, a range past a sequence's end):
+        # only the alias file differs.
+        return rc, stderr
+    if "-logfile" in argv:
+        log = case_dir / argv[argv.index("-logfile") + 1]
+        text = log.read_bytes()
+        if RECURSION not in text:
+            raise SystemExit(f"{case_dir}: exit status 2 without the alias error in {log}")
+        log.write_bytes(text.replace(RECURSION, b"", 1))
+    else:
+        if RECURSION not in stderr:
+            raise SystemExit(f"{case_dir}: exit status 2 without the alias error: {stderr!r}")
+        stderr = stderr.replace(RECURSION, b"", 1)
+    meta = subprocess.run([str(bin_dir / "blastdbcmd"), "-db", out, "-dbtype", dbtype, "-metadata"],
+                          cwd=case_dir, capture_output=True, env=env)
+    if meta.returncode != 0 or meta.stderr:
+        raise SystemExit(f"{case_dir}: blastdbcmd -metadata: {meta.returncode} {meta.stderr!r}")
+    (case_dir / (out + (".pjs" if dbtype == "prot" else ".njs"))).write_bytes(meta.stdout)
+    return 0, stderr
 
 
 def masked_text(text, case_dir):
@@ -396,8 +496,10 @@ def main():
         raise SystemExit(f"{work} exists; give a new work directory")
     inputs = work / "in"
     inputs.mkdir(parents=True)
+    env = dict(os.environ, BLAST_USAGE_REPORT="false")
     write_inputs(inputs)
     write_masks(bin_dir, inputs)
+    write_ncbi_single_alias(bin_dir, inputs, work, env)
     if out.exists():
         shutil.rmtree(out)
     for sub in ("in", "expected", "db"):
@@ -405,10 +507,10 @@ def main():
     for f in sorted(inputs.iterdir()):
         shutil.copyfile(f, out / "in" / f.name)
 
-    env = dict(os.environ, BLAST_USAGE_REPORT="false")
     rows = []
     case_dir = None
     put = []
+    stamp = work / "stamp"
     for name, losat, setup_text, words in CASES:
         tokens = setup_text.split()
         if tokens and tokens[0] == "^":
@@ -419,14 +521,18 @@ def main():
             put = []
         put += setup(case_dir, tokens, inputs)
         argv = [w.replace("{C}", str(case_dir)) for w in words]
+        stamp.touch()
+        time.sleep(0.05)
         result = subprocess.run([str(bin_dir / "makeblastdb")] + argv, cwd=case_dir,
                                 capture_output=True, env=env)
+        rc, stderr = single_volume_exception(bin_dir, case_dir, argv, result.returncode,
+                                             result.stderr, stamp, env)
         rows.append("\t".join([name, losat, setup_text] + words))
         exp = out / "expected"
-        (exp / f"{name}.rc").write_text(f"{result.returncode}\n")
+        (exp / f"{name}.rc").write_text(f"{rc}\n")
         (exp / f"{name}.stdout").write_text(masked_text(result.stdout.decode("latin-1"), case_dir),
                                            encoding="latin-1")
-        (exp / f"{name}.stderr").write_text(masked_text(result.stderr.decode("latin-1"), case_dir),
+        (exp / f"{name}.stderr").write_text(masked_text(stderr.decode("latin-1"), case_dir),
                                            encoding="latin-1")
         files = []
         keep_dir = out / "db" / name

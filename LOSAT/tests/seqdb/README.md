@@ -156,6 +156,15 @@ cut by `-max_file_sz`, and descriptions that pad the index header. Each run's ex
 (the run directory, time and seconds masked as `<C>`, `<T>`, `<S>`) and its files with their sizes are in
 `gi_mask/expected/<case>.{rc,stdout,stderr,files}`; `gi_mask/db/<case>/` keeps the files that `-gi_mask` writes or
 changes (GI-mask files, alias, metadata, mask column, log) and, for six cases, the volume files too.
+These are NCBI's bytes but in one place, the script's `single_volume_exception` (PD-LOSAT-NCBI-DEFECTS approved
+exception 16, the Owner's decision of 2026-11-20): for a database of one volume NCBI's alias file names the database
+itself by its absolute path (`DBLIST <C>/db`), which no program can open, and makeblastdb ends with `DB alias files
+are mutually recursive` (exit status 2, no metadata file). LOSAT names the volume by its file name (`DBLIST db`). So
+after each such run the script changes that line in the run directory (before the next case of a chain runs) and,
+where NCBI ended on that error, takes the run as the successful run it then is: the line leaves the standard error
+(or the `-logfile` file), the exit status is 0, and the metadata file is NCBI's `blastdbcmd -metadata` of the
+database. `gi_mask/in/ncbi_single.nal` is NCBI's own alias file of that kind (`{C}` for its directory), which the
+cases `x10_*` put beside a database (setup `F=>G`) as an earlier run of NCBI's leaves it.
 `tests/makeblastdb_gi_mask.rs` runs every case through the `losat` binary and compares them;
 `src/writedb/gi_mask_tests.rs` writes every GI mask of `db/` again from the records, GIs, description and dates it
 holds and compares the six files byte for byte. A rerun changes the dates of the `.gmi`/`.gni`, mask column and

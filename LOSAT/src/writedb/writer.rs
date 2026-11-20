@@ -1133,10 +1133,17 @@ impl WriteDb {
     // written leaves the build going on, and the new database cannot be opened afterwards. The
     // stream writes the file when it is destroyed.
     //
-    // With `-gi_mask` a database of one volume gets an alias file too, whose `DBLIST` is the
-    // database's own absolute name (`m_Dbname`): the alias file names itself, and NCBI's reader
-    // ends on it with "DB alias files are mutually recursive" (survey D1; the `.njs` step of
-    // makeblastdb, `makeblastdb::open_new_database`). `MASKLIST` names the GI masks that got
+    // With `-gi_mask` a database of one volume gets an alias file too. NCBI's `DBLIST` there is
+    // the database's own absolute name (`m_Dbname`): the alias file names itself through a
+    // directory, which NCBI's reader takes as another alias file, and every read of the database
+    // ends with "DB alias files are mutually recursive" (NCBI's own makeblastdb too, at its `.njs`
+    // step: exit status 2). LOSAT writes the database's file name without a directory there,
+    // as the list of several volumes names each volume: NCBI's reader takes a `DBLIST` entry
+    // without a directory and with the alias file's own name as the volume
+    // (`CSeqDBAliasNode::x_ExpandAliases`, seqdbalias.cpp:764-797), so the database opens and
+    // the build goes on as a build of several volumes does (approved exception 16 of
+    // PD-LOSAT-NCBI-DEFECTS, the Owner's decision of 2026-11-20; NCBI BLAST+ 2.17.0 reads such a
+    // database: `docs/evidence/gi_mask_single_volume/`). `MASKLIST` names the GI masks that got
     // GIs, each followed by a space.
     /// `x_MakeAlias`: the alias file of a database of several volumes, or of a database with GI
     /// masks.
@@ -1150,7 +1157,7 @@ impl WriteDb {
                 dblist.extend_from_slice(file_name(volume.volume_name()).as_bytes());
             }
         } else {
-            dblist.extend_from_slice(self.dbname.as_bytes());
+            dblist.extend_from_slice(file_name(&self.dbname).as_bytes());
         }
         let mut masklist = Vec::new();
         for name in self.mask.gi_mask_names().filter(|name| !name.is_empty()) {

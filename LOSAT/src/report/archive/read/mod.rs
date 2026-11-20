@@ -35,6 +35,8 @@ pub(crate) mod results;
 
 #[cfg(test)]
 mod read_tests;
+#[cfg(test)]
+mod strategy_tests;
 
 use std::io::Read;
 

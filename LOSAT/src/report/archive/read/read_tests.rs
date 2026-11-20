@@ -1195,3 +1195,21 @@ fn an_alignment_row_has_the_id_of_its_segments() {
         ))
     );
 }
+
+/// A strategy's request needs no `ident` (`CImportStrategy` never asks for it); an error
+/// archive's request is no search there (`No body in CBlast4_request`).
+#[test]
+fn a_strategy_request_needs_no_ident() {
+    let text = "Blast4-request ::= { body queue-search { program \"blastn\", service \"plain\", \
+                queries seq-loc-list { whole local str \"q\" }, subject database \"db\" } }";
+    let request = Request::from_strategy(value(named::BLAST4_REQUEST, text)).unwrap();
+    assert_eq!(
+        (request.ident.len(), &request.program[..]),
+        (0, &b"blastn"[..])
+    );
+    let error = "Blast4-request ::= { body get-request-info { request-id \"Error\" } }";
+    match Request::from_strategy(value(named::BLAST4_REQUEST, error)) {
+        Err(Stop::Exception(e)) => assert_eq!(e.get_msg(), "No body in CBlast4_request"),
+        other => panic!("{other:?}"),
+    }
+}

@@ -13,12 +13,19 @@ d_pdb	same
 d_set_dup	same	
 d_two_ids	same	
 dl_8na	same	
+dl_cut_2na	same	
+dl_cut_one	same	
+dl_cut_short	same	
+dl_empty	same	
+dl_empty0	same	
 dl_lit_short	same	
 dl_mixed	same	
 dl_noext	same	
 dl_nolen	same	
 dl_sum_long	same	
+dl_sum_long_gap	same	
 dl_sum_short	same	
+dl_zero_lit	same	
 l_2na_over	same	
 l_2na_partial	refused	NCBI reads the byte past the data
 l_4na_over	same	
@@ -27,6 +34,14 @@ l_iupacna_2000	same
 l_iupacna_3000	same	
 l_stdaa_over	same	
 l_zero	same	
+m_const_nodata	same	
+m_data_over_ext	same	
+m_ext_map	same	
+m_map_nodata	same	
+m_notset_len0_nodata	same	
+m_notset_len4_nodata	same	
+m_raw_len0_nodata	same	
+m_virtual_len0_aa	same	
 n_2na_all	same	
 n_2na_len10	same	
 n_4na_all	same	

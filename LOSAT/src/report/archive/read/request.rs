@@ -44,7 +44,8 @@ use crate::seqid::ParsedSeqId;
 #[derive(Debug)]
 pub(crate) struct Request {
     /// `ident` (`GetCreatedBy`): the version of the program that wrote the archive (set: NCBI's
-    /// archive reader stops on a search request without it, [`Request::from_value`]).
+    /// archive reader stops on a search request without it, [`Request::from_value`]; empty for a
+    /// strategy without it, [`Request::from_strategy`]).
     pub(crate) ident: Vec<u8>,
     /// `program` and `service` (`GetProgram`, `GetService`), as stored.
     pub(crate) program: Vec<u8>,
@@ -78,6 +79,14 @@ pub(crate) enum Subject {
     /// `SetSequences()` makes the subject an empty list of sequences, in the request it keeps
     /// too, so blast_formatter has no subject.
     SeqLocList(Vec<Value>),
+}
+
+/// The NCBI code that reads a request: the archive reader (`CRemoteBlast::LoadFromArchive`,
+/// then `x_GetRequestInfoFromFile`) or the strategy import (`CImportStrategy`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reader {
+    Archive,
+    Strategy,
 }
 
 /// The list of options a parameter comes from.
@@ -191,12 +200,26 @@ impl Request {
     // }
     // ```
     // (`GetProgram` and `GetService` read mandatory members of the `queue-search`.)
-    pub(crate) fn from_value(mut request: Value) -> Result<Option<Request>, Stop> {
+    pub(crate) fn from_value(request: Value) -> Result<Option<Request>, Stop> {
+        Request::read(request, Reader::Archive)
+    }
+
+    /// The request of a search strategy (`-import_search_strategy`): `CImportStrategy` over the
+    /// `Blast4-request` the program read. A body that is not a `queue-search` stops it (an error
+    /// archive's `get-request-info` too); its import never asks for `ident` (NCBI's exports
+    /// write none; `E.*.ident` of line F2's probes: ignored), which is empty when the file has
+    /// none.
+    pub(crate) fn from_strategy(request: Value) -> Result<Request, Stop> {
+        Request::read(request, Reader::Strategy)
+            .map(|request| request.expect("a strategy's request is a search"))
+    }
+
+    fn read(mut request: Value, reader: Reader) -> Result<Option<Request>, Stop> {
         let ty = named::BLAST4_REQUEST;
         let ident = take(&mut request, ty, "ident").map(|mut ident| take_str(&mut ident));
         let mut body = take(&mut request, ty, "body").expect("the mandatory body");
         let (variant, mut search) = take_variant(&mut body, named::BLAST4_REQUEST_BODY);
-        if variant == "get-request-info" {
+        if reader == Reader::Archive && variant == "get-request-info" {
             let id = V::new(named::BLAST4_GET_REQUEST_INFO_REQUEST, &search).field("request-id");
             if id.str() == b"Error" {
                 return Ok(None);
@@ -213,11 +236,15 @@ impl Request {
                 "No body in CBlast4_request",
             )));
         }
-        let Some(ident) = ident else {
-            return Err(Stop::Unassigned {
-                type_name: "Blast4-request",
-                member: "ident",
-            });
+        let ident = match (ident, reader) {
+            (Some(ident), _) => ident,
+            (None, Reader::Strategy) => Vec::new(),
+            (None, Reader::Archive) => {
+                return Err(Stop::Unassigned {
+                    type_name: "Blast4-request",
+                    member: "ident",
+                })
+            }
         };
         let ty = named::BLAST4_QUEUE_SEARCH_REQUEST;
         let mut text = |name: &str| {

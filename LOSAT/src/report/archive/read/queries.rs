@@ -647,8 +647,9 @@ const NO_SEGMENT: ThrowSite = ThrowSite {
 /// `eCoding_Iupac`, `Ncbieaa` for a protein (sequence.cpp:3322-3361), read through
 /// `CSeqVector_CI` up to the Bioseq's length, which is the vector's size (`GetBioseqLength`); gaps
 /// instantiated as `N` (`X` for a protein: `n_raw_nodata`, `p_virtual`, `p_delta_gap`). A segment
-/// that passes the length is read up to it (`dl_sum_short`); segments that end before it throw
-/// where they end.
+/// that passes the length is read up to it, as if it ended there (`dl_sum_short`, `dl_cut_*`);
+/// segments that end before it throw where they end (`dl_sum_long`, `dl_sum_long_gap`,
+/// `dl_empty`).
 fn letters(inst: V<'_>, length: u32, protein: bool) -> Result<Vec<u8>, RenderError> {
     let pieces = sequence_map(inst, length)?;
     let target = if protein { NCBIEAA } else { IUPACNA };
@@ -669,9 +670,7 @@ fn letters(inst: V<'_>, length: u32, protein: bool) -> Result<Vec<u8>, RenderErr
                 out.len() + needed as usize,
                 if protein { b'X' } else { b'N' },
             ),
-            Piece::Data(data, piece_length) => {
-                data_letters(data, piece_length, needed, target, &mut out)?
-            }
+            Piece::Data(data, _) => data_letters(data, needed, target, &mut out)?,
         }
         position = end;
     }
@@ -805,7 +804,8 @@ fn sequence_map(inst: V<'_>, length: u32) -> Result<Vec<Piece<'_>>, RenderError>
 }
 
 /// The throw of `CSeqMap(const CSeq_inst&)` for a Bioseq without data whose representation or
-/// length says it has some (`m_raw_len0_nodata`, `m_notset_len4_nodata`).
+/// length says it has some (`m_raw_len0_nodata`, `m_notset_len4_nodata`). NCBI's kind is
+/// `eSeqDataError`, the text of `eDataError`.
 fn seq_map_error(message: &str) -> RenderError {
     let line = if message.ends_with("not_set") {
         281
@@ -816,7 +816,7 @@ fn seq_map_error(message: &str) -> RenderError {
         ThrowSite {
             file: "src/objmgr/seq_map.cpp",
             line,
-            kind: "CSeqMapException::eDataError",
+            kind: "CSeqMapException::eSeqDataError",
             function: Some("ncbi::objects::CSeqMap::CSeqMap"),
         },
         message,
@@ -892,24 +892,23 @@ const NA2_TO_IUPACNA: &[u8; 4] = b"ACGT";
 //     TSeqPos cache_size = min(kCacheSize, segEnd - pos);
 //     x_FillCache(pos, cache_size);
 // ```
-/// The first `needed` letters of a segment of `length` letters of a Seq-data, filled as
-/// `CSeqVector_CI` fills its cache: from the start of the segment, 1024 letters at a time
-/// (`kCacheSize`) but not past the segment's end, while a fill starts before `needed` (the
-/// iterator's end: a fill of a segment that passes the Bioseq's length can pass it). The fill converts the
-/// coding or throws (`Incompatible sequence codings`: a coding of the other molecule, NCBI8na,
-/// NCBIpna, NCBI8aa, NCBIpaa; probes `n_8na`, `n_pna`, `p_8aa`, `p_paa`, `n_mol_*`, `p_mol_*`); each
-/// fill checks its end against the data (`copy_8bit_any`, `copy_4bit_any`, `copy_2bit_any` of
+/// The letters of a segment of a Seq-data up to `length` letters (the segment's, cut at the
+/// Bioseq's length: `dl_cut_short` writes `ACGTA` where its second literal holds 2 of its 5
+/// letters), filled as `CSeqVector_CI` fills its cache: from the start of the segment, 1024
+/// letters at a time (`kCacheSize`). The fill converts the coding or throws (`Incompatible
+/// sequence codings`: a coding of the other molecule, NCBI8na, NCBIpna, NCBI8aa, NCBIpaa; probes
+/// `n_8na`, `n_pna`, `p_8aa`, `p_paa`, `n_mol_*`, `p_mol_*`); each fill checks its end against the
+/// data (`copy_8bit_any`, `copy_4bit_any`, `copy_2bit_any` of
 /// include/objmgr/impl/seq_vector_cvt.hpp:47-105: the end `e` of the fill throws when `e`, `e / 2`
 /// or `e / 4` passes the data's bytes). A packed coding's fill that ends inside the byte past the
 /// data reads memory the input does not decide: refused.
 fn data_letters(
     data: V<'_>,
     length: u32,
-    needed: u32,
     target: u32,
     out: &mut Vec<u8>,
 ) -> Result<(), RenderError> {
-    if needed == 0 {
+    if length == 0 {
         return Ok(());
     }
     let (variant, value) = data.choice();
@@ -934,11 +933,10 @@ fn data_letters(
         _ => 1,
     };
     let held = bytes.len() as u64 * per_byte;
-    // The fill that holds the first letter past the data, if it is made: it throws, or reads past
-    // the data's end.
-    let start = held / KCACHE_SIZE * KCACHE_SIZE;
-    if u64::from(length) > held && start < u64::from(needed) {
-        let end = (start + KCACHE_SIZE).min(u64::from(length));
+    if u64::from(length) > held {
+        // The fill that holds the first letter past the data: it throws, or reads past the data's
+        // end.
+        let end = (held / KCACHE_SIZE * KCACHE_SIZE + KCACHE_SIZE).min(u64::from(length));
         if end / per_byte > bytes.len() as u64 {
             return Err(RenderError::Exception(NcbiException::new(
                 OUT_OF_RANGE,
@@ -950,7 +948,7 @@ fn data_letters(
                 .into(),
         ));
     }
-    let length = needed as usize;
+    let length = length as usize;
     match source {
         IUPACNA | IUPACAA | NCBIEAA => out.extend_from_slice(&bytes[..length]),
         NCBISTDAA => out.extend(protein_fasta_letters(&bytes[..length])),

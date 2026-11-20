@@ -50,6 +50,8 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::archive::fields::{self, Field, ValueType};
 use crate::report::serial::asn_types::Value;
 
+use super::request::{ParamSet, Request};
+
 /// `CBlastOptions::EAPILocality` of the builder's caller: the import builds with `eBoth`
 /// (search_strategy.cpp:85-88), `blast_formatter`'s archive path with `eRemote`
 /// (remote_blast.cpp:2024). No caller that LOSAT ports builds with `eLocal`.
@@ -1364,6 +1366,37 @@ pub fn import_options(
         psi_num_of_iterations,
         options,
     })
+}
+
+/// [`import_options`] of a strategy's request as the archive model read it ([`Request::params`]:
+/// each list in the file's order, a name as often as it is stored). An absent list is given as
+/// an empty one: NCBI's builder and `FetchData` take nothing from either.
+pub(crate) fn import_request(request: &Request) -> Result<ImportedOptions, NcbiException> {
+    let list = |set: ParamSet| -> Vec<RawParam<'_>> {
+        request
+            .params()
+            .iter()
+            .filter(|param| param.set == set)
+            .map(|param| RawParam {
+                name: &param.name,
+                value: param.value().value,
+            })
+            .collect()
+    };
+    let (algorithm, program, format) = (
+        list(ParamSet::Algorithm),
+        list(ParamSet::Program),
+        list(ParamSet::Format),
+    );
+    import_options(
+        &request.program,
+        &request.service,
+        OptionLists {
+            algorithm: Some(&algorithm),
+            program: Some(&program),
+            format: Some(&format),
+        },
+    )
 }
 
 #[cfg(test)]

@@ -87,3 +87,26 @@ fn fills_of_a_long_seq_data_end_at_1024_letter_steps() {
         }
     }
 }
+
+#[test]
+fn a_segment_that_passes_the_length_is_filled_up_to_it() {
+    // A literal of 3000 letters that holds 1500, in a Bioseq of `length` letters: its fills end at
+    // 1024 and at `length` (`dl_cut_short`); only a fill past the 1500 letters throws.
+    let text = |length: u32| {
+        format!(
+            "Bioseq-set ::= {{ seq-set {{ seq {{ id {{ local str \"q\" }}, inst {{ repr delta, mol na, length {length}, ext delta {{ literal {{ length 3000, seq-data iupacna \"{}\" }} }} }} }} }} }}",
+            "ACGT".repeat(375)
+        )
+    };
+    for length in [1024, 1500] {
+        let fasta = render(text(length).as_bytes()).unwrap();
+        let letters = fasta.iter().filter(|b| b"ACGT".contains(b)).count();
+        assert_eq!(letters, length as usize);
+    }
+    match render(text(1600).as_bytes()) {
+        Err(RenderError::Exception(e)) => {
+            assert_eq!(e.get_msg(), "reference out of range of Seq-inst data: 1600")
+        }
+        other => panic!("{other:?}"),
+    }
+}

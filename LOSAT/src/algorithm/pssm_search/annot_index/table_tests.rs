@@ -35,7 +35,9 @@ fn values(text: &str, want: Want, rows: std::ops::Range<u64>) -> Vec<String> {
     rows.map(|row| match ix.column_try_get(column, row, want) {
         Ok(Some(v)) => v.to_string(),
         Ok(None) => "-".to_string(),
-        Err(Stop::Exception(e)) => format!("E:{}", e.get_msg()),
+        Err(Stop::Exception(e)) => {
+            format!("E:{}", String::from_utf8(e.get_msg().to_vec()).unwrap())
+        }
         Err(Stop::Std(what)) => format!("S:{what}"),
         Err(Stop::Refuse(r)) => format!("R:{r:?}"),
         Err(other) => format!("{other:?}"),

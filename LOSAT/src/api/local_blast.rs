@@ -750,15 +750,6 @@ impl ReportOutputs<'_> {
         }
     }
 
-    /// Writes `text`, the queries' warnings that a later format writes, to the receiver of
-    /// `later_query_warnings`; nothing where there is none.
-    pub(crate) fn write_later_query_warnings(&mut self, text: &[u8]) -> std::io::Result<()> {
-        match self.later_query_warnings() {
-            Some(later) => later.write_all(text),
-            None => Ok(()),
-        }
-    }
-
     /// Makes the `-out` file of `run_to_file` (`OutputSink::Out`) where the command line opens its
     /// `-out`: each program's entry calls it after reading the subjects (or the taxid or seqid list
     /// of `-db`) and before processing the options. The other sinks are not opened here.

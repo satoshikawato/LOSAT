@@ -11830,7 +11830,9 @@ fn run_call(
     report_prep::refuse_unreportable(&prep, &rows_of)?;
     // The queries' warnings that a later format writes, where the first does not
     // (`ReportOutputs::later_query_warnings`).
-    outputs.write_later_query_warnings(&later_warnings)?;
+    if let Some(later) = outputs.later_query_warnings() {
+        later.write_all(&later_warnings)?;
+    }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks (`x_subject_meta`).

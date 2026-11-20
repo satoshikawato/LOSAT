@@ -110,7 +110,7 @@ class ManualEngine implements EngineGateway {
   }
   async validate(_argv?: readonly string[], registry?: RegistryFile): Promise<ValidationResult> {
     this.registries.push(registry);
-    return { ok: true };
+    return { ok: true, dataLoaders: true };
   }
   run(req: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     this.started.push(req.runId);
@@ -339,10 +339,9 @@ describe('Coordinator', () => {
 
   it('does not queue an input that the index scan cannot read', async () => {
     const { coordinator } = setup(new ManualEngine());
-    expect(await coordinator.enqueue({ ...request, query: { text: '>q\nACGT\n>?10\n' } })).toEqual({
+    expect(await coordinator.enqueue({ ...request, query: { text: '>q\n$$$$$$\n' } })).toEqual({
       ok: false,
-      message:
-        "Query FASTA: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
+      message: "Query FASTA: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
@@ -850,7 +849,7 @@ describe('Coordinator', () => {
   it('queues nothing of a group when one request is invalid, and keeps the numbering', async () => {
     const engine = new ManualEngine();
     engine.validate = async (argv?: readonly string[]): Promise<ValidationResult> =>
-      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true };
+      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true, dataLoaders: true };
     const { coordinator } = setup(engine);
     const bad = { ...request, parameters: [['-word_size', '1']] as const };
     expect(await coordinator.enqueueAll([request, bad])).toEqual({ ok: false, message: 'bad word size' });
@@ -875,7 +874,7 @@ describe('Coordinator', () => {
     const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
     const runInputs = (coordinator as unknown as { runInputs: Map<string, unknown> }).runInputs;
     const source = await data.addSource(new File(['>q\nACGT\n'], 'q.fa'));
-    const query = (await data.indexSource(source.sourceId, 1)).revisionId;
+    const query = (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
     const result = await coordinator.enqueueAll([
       { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { text: '$$$$\n' } },
     ]);
@@ -889,7 +888,7 @@ describe('Coordinator', () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {
       const source = await data.addSource(new File([text], name));
-      return (await data.indexSource(source.sourceId, 1)).revisionId;
+      return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
     };
     const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
     const query = await add('q.fa', '>q\nACGT\n');

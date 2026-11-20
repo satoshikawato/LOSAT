@@ -179,7 +179,10 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; trap
     losat_web2_validate: (ptr: number, len: number) => {
       log.push(`validate ${text(ptr, len).split('\0').join(' ')}`);
       if (options.trapValidate) throw new WebAssembly.RuntimeError('unreachable');
-      if (options.validate === undefined) return 0;
+      if (options.validate === undefined) {
+        respond('{"data_loaders":true}');
+        return 0;
+      }
       error = options.validate;
       return -1;
     },
@@ -319,7 +322,10 @@ function fakeInstance(label: string, log: string[]): ReactorAbi {
     },
     fileRelease: (file: number) => void held.delete(loading.get(file)!),
     freeChunkBuffer: () => undefined,
-    validate: (argv: readonly string[]) => void log.push(`${label} validate ${argv.join(' ')} held=[${[...held].join(',')}]`),
+    validate: (argv: readonly string[]) => {
+      log.push(`${label} validate ${argv.join(' ')} held=[${[...held].join(',')}]`);
+      return { ok: true, dataLoaders: true };
+    },
     describe: () => {
       log.push(`${label} describe held=[${[...held].join(',')}]`);
       return { program: 'blastn', formats: [0, 6, 7], parameters: [] };
@@ -337,8 +343,8 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
     const shared = fakeInstance('shared', log);
     let opened = 0;
     const control = reactorControl(async () => shared, async () => fakeInstance(`own${++opened}`, log));
-    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
-    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
+    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true, dataLoaders: true });
+    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true, dataLoaders: true });
     // Without a file, the shared instance validates.
     await control.validate(['blastp']);
     expect(log).toEqual([
@@ -382,7 +388,7 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
       control.validate(['blastn', '-conffile', '.ncbirc'], { name: '.ncbirc', file }),
       control.validate(['blastn']),
     ]);
-    expect(results.filter((result) => 'ok' in result)).toEqual([{ ok: true }, { ok: true }, { ok: true }, { ok: true }, { ok: true }]);
+    expect(results.filter((result) => 'ok' in result)).toEqual(Array(5).fill({ ok: true, dataLoaders: true }));
     const of = (label: string) => log.filter((line) => line.startsWith(`${label} `)).sort();
     expect(of('shared')).toEqual(['shared describe held=[]', 'shared validate blastn held=[]', 'shared validate blastn held=[]']);
     expect([of('own1'), of('own2'), of('own3')].flat().sort()).toEqual(
@@ -480,7 +486,7 @@ function fakeAbi(
     freeChunkBuffer: () => void calls.push('free buffer'),
     validate: (argv: readonly string[]) => {
       calls.push(`validate ${argv.join(' ')}`);
-      return undefined;
+      return { ok: true, dataLoaders: true };
     },
     // The start of an argv: -parse_deflines reads the inputs of the run together (line WQA's sweep, D7, 2026-11-19).
     start: (argv: readonly string[]) => ({
@@ -488,7 +494,7 @@ function fakeAbi(
       start: { conffile: null, logFile: null, dryRun: false, registerInputs: argv.includes('-parse_deflines') },
     }),
     memoryBytes: () => 1,
-    register: (_program: string, role: number, bytes: Uint8Array) => {
+    register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
       return { handle: ++handle, records: [{ id: role === ROLE_SUBJECT ? 's' : 'q', length: bytes.length }] };
     },
@@ -927,8 +933,8 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
 
   /** The streams of a TBLASTX run of `words` on the inputs of the adapter's tests (run_start_tests.rs). */
   function run(abi: ReactorAbi, words: readonly string[], subject = fasta('arch_tbx_s.fna')) {
-    const q = abi.register('tblastx', ROLE_QUERY, fasta('arch_tbx_q.fna'));
-    const s = abi.register('tblastx', ROLE_SUBJECT, subject);
+    const q = abi.register('tblastx', ROLE_QUERY, true, fasta('arch_tbx_q.fna'));
+    const s = abi.register('tblastx', ROLE_SUBJECT, true, subject);
     const streams = new Map<number, Uint8Array[]>();
     let error: unknown;
     try {
@@ -995,12 +1001,14 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const missing = { ok: false, message: 'Critical: (106.23) Registry file "settings.ini" not found, aborting.' };
     expect(await control.validate(argv)).toEqual(missing);
     const before = shared.memoryBytes();
-    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
+    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true, dataLoaders: true });
+    // The registry's `[BLAST] DATA_LOADERS=none` turns the data loaders off, as the CLI reads it (line WQA's D16, 2026-11-20).
+    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\nDATA_LOADERS=none\n']) })).toEqual({ ok: true, dataLoaders: false });
     expect((await control.validate(argv, { name: 'settings.ini', file: new Blob(['[x\n']) })).ok).toBe(false);
     // A file of 24 MiB and 26 bytes (four chunks, the last of 26 bytes): a section and comment lines.
     const large = new Blob(['[BLAST]\n', '; a comment line of the registry file\n'.repeat(Math.ceil((24 * 1024 * 1024) / 38))]);
     expect(large.size).toBe(3 * FILE_CHUNK_BYTES + 26);
-    expect(await control.validate(argv, { name: 'settings.ini', file: large })).toEqual({ ok: true });
+    expect(await control.validate(argv, { name: 'settings.ini', file: large })).toEqual({ ok: true, dataLoaders: true });
     expect(shared.memoryBytes()).toBe(before);
     expect(await control.validate(argv)).toEqual(missing);
   }, 120_000);

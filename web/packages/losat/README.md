@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 4, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 5, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 4 |
+| 0.2.0 | 0.2.0 | 5 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -129,11 +129,15 @@ import { compileReactor, discardedStream, DISCARD_STREAM, instantiateSerial, ROL
 
 const { module } = await compileReactor(serialBytes);
 const { abi } = await instantiateSerial(module);
-const query = abi.register('blastp', ROLE_QUERY, queryFasta);
-const subject = abi.register('blastp', ROLE_SUBJECT, subjectFasta);
+const argv = ['blastp', '-query', 'query.faa', '-subject', 'subject.faa', '-num_threads', '1'];
+// The verdict on the argv says whether its run reads the inputs with NCBI's data loaders on.
+const validation = abi.validate(argv);
+if (!validation.ok) throw new Error(validation.message);
+const query = abi.register('blastp', ROLE_QUERY, validation.dataLoaders, queryFasta);
+const subject = abi.register('blastp', ROLE_SUBJECT, validation.dataLoaders, subjectFasta);
 let outfmt6: Uint8Array[] = [];
 // -query and -subject name the inputs in the outputs; the sequences come from the handles.
-abi.run(['blastp', '-query', 'query.faa', '-subject', 'subject.faa', '-num_threads', '1'], query.handle, subject.handle, (stream, bytes) => {
+abi.run(argv, query.handle, subject.handle, (stream, bytes) => {
   if (stream === 6) outfmt6.push(bytes.slice());
   // Stream 9: the engine could not write the output that it names; if it is outfmt 6, drop what arrived.
   else if (stream === DISCARD_STREAM && discardedStream(bytes) === 6) outfmt6 = [];

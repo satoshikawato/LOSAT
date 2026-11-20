@@ -29,7 +29,13 @@ export interface ProgramDescription {
   readonly subjectGencodes?: readonly number[];
 }
 
-export type ValidationResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
+/**
+ * The verdict of `validate`. A valid argv also says whether its run reads the inputs with NCBI's
+ * data loaders on (`dataLoaders`, ABI v2 *validation*, version 5): off under `[BLAST]
+ * DATA_LOADERS=none` of its `-conffile`, where the reader reads a first line that may be a Seq-id as
+ * data, as the CLI does (line WQA's D16, 2026-11-20).
+ */
+export type ValidationResult = { readonly ok: true; readonly dataLoaders: boolean } | { readonly ok: false; readonly message: string };
 
 /**
  * What NCBI's application reads of an argv before its arguments (docs/web/abi_v2.md §4

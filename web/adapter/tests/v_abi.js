@@ -267,6 +267,23 @@ function registerFile(reactor, name, file, chunkSize = 1 << 20) {
   return { handle: begun.status, response };
 }
 
+// The registry file of a search's -conffile (`start`'s `conffile`), which the host registers as kind 2
+// before it validates and registers the inputs (abi_v2.md §4): the file of that name in the search's
+// directory, read as the CLI reads it; none where there is no such file, whose run fails as the CLI's
+// (`Registry file "x.ini" not found`). Returns its handle, or null.
+function registerRegistry(reactor, search, name) {
+  const file = path.resolve(search.cwd, name);
+  if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) return null;
+  const bytes = fs.readFileSync(file);
+  const begun = reactor.call("losat_web2_file_begin", 2, name, bytes.length);
+  assert.ok(begun.status > 0, `file_begin ${name}: ${begun.error}`);
+  assert.equal(reactor.call("losat_web2_file_chunk", begun.status, bytes).status, 0);
+  const ended = reactor.call("losat_web2_file_end", begun.status);
+  assert.equal(ended.status, 0, `file_end ${name}: ${ended.error}`);
+  assert.equal(JSON.parse(ended.streams.get(2).toString()).kind, "registry");
+  return begun.status;
+}
+
 // The counts files of the searches: the argv's `-window_masker_db` value -> its handle and path.
 // A search that names a registered value with another file releases it first.
 function registerCounts(reactor, counts, search) {
@@ -473,13 +490,15 @@ function nativeOutputs(native, search, scratch) {
     const same = searchOrder(others.filter((format) => hitListSize(search.argv, format) === size));
     const other = searchOrder(others.filter((format) => hitListSize(search.argv, format) !== size));
     const held = new Map();
-    let text = linesAfter(held, own.toString());
+    // The CLI's standard error as bytes (latin1 keeps each byte): a reader warning may hold bytes that are not
+    // UTF-8 (`Unknown gap-type: caf\xe9`, a `>?` gap line's mods; line WQA's D13, 2026-11-20).
+    let text = linesAfter(held, own.toString("latin1"));
     for (const format of same) {
       const keep = structured ? (line) => HANDLER.test(line) || (failed.get(format) && !line.startsWith("Warning: ")) : undefined;
-      text += linesAfter(held, stderrs.get(format).toString(), keep);
+      text += linesAfter(held, stderrs.get(format).toString("latin1"), keep);
     }
-    for (const format of other) text += linesAfter(held, stderrs.get(format).toString());
-    stderr = Buffer.from(text);
+    for (const format of other) text += linesAfter(held, stderrs.get(format).toString("latin1"));
+    stderr = Buffer.from(text, "latin1");
     failedStreams = others.filter((format) => failed.get(format)).sort((a, b) => a - b);
   }
   return { outputs, stderr, status, own, failedStreams };
@@ -601,8 +620,11 @@ function checkSurface(reactor, native) {
       assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short"), "blastn: tasks in -task's help");
     }
   }
-  // validate: accepted argv, and CLI errors with the CLI's words.
-  assert.equal(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0")).status, 0);
+  // validate: accepted argv, and CLI errors with the CLI's words. An accepted argv says whether its run reads the inputs
+  // with NCBI's data loaders on (the *validation* JSON, abi_v2.md §9; line WQA's D16, 2026-11-20).
+  const accepted = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0"));
+  assert.equal(accepted.status, 0);
+  assert.deepEqual(JSON.parse(accepted.streams.get(2).toString()), { data_loaders: true });
   // NCBI's application start (abi_v2.md §4 `losat_web2_start`, line RG E1w-3a): the *start* JSON, the
   // file of -conffile as a registry file (kind 2), and -dryrun.
   const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
@@ -620,6 +642,15 @@ function checkSurface(reactor, native) {
   assert.equal(JSON.parse(endedRegistry.streams.get(2).toString()).kind, "registry");
   assert.equal(reactor.call("losat_web2_validate", conffile).status, 0, "a dry run reads no -outfmt");
   assert.equal(reactor.call("losat_web2_file_release", begunRegistry.status).status, 0);
+  // `[BLAST] DATA_LOADERS=none` of the registry turns the data loaders off (blast_scope_src.cpp:78-80).
+  const noLoaders = Buffer.from("[BLAST]\nDATA_LOADERS=none\n");
+  const begunNoLoaders = reactor.call("losat_web2_file_begin", 2, "nol.ini", noLoaders.length);
+  assert.equal(reactor.call("losat_web2_file_chunk", begunNoLoaders.status, noLoaders).status, 0);
+  assert.equal(reactor.call("losat_web2_file_end", begunNoLoaders.status).status, 0);
+  const off = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini"].join("\0"));
+  assert.equal(off.status, 0, off.error);
+  assert.deepEqual(JSON.parse(off.streams.get(2).toString()), { data_loaders: false });
+  assert.equal(reactor.call("losat_web2_file_release", begunNoLoaders.status).status, 0);
   for (const argv of [["blastp", "-query", "q", "-subject", "s", "-evalue", "abc"],
                       ["tblastn", "-query", "q", "-subject", "s", "-db_gencode", "7"],
                       ["blastn", "-query", "q", "-subject", "s", "-nosuchoption", "1"],
@@ -713,13 +744,13 @@ function checkSurface(reactor, native) {
     assert.equal(validated.error, cli.stderr.toString(), "the CLI's message");
     fs.rmSync(dir, { recursive: true });
   }
-  // register and the scan of the program's kind (2: the TBLASTN query) agree on a
+  // register and the scan of the program's input (the TBLASTN query, NCBI's protein reader) agree on a
   // multi-record input, in chunks of any size.
   const input = fs.readFileSync(path.join(ROOT, "docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa"));
-  const registered = reactor.call("losat_web2_register", "tblastn", 0, input);
+  const registered = reactor.call("losat_web2_register", "tblastn", 0, 1, input);
   assert.ok(registered.status > 0, registered.error);
   const records = JSON.parse(registered.streams.get(2).toString()).records;
-  const scanner = reactor.exports.losat_web2_scan_begin(2);
+  const scanner = reactor.call("losat_web2_scan_begin", "tblastn", 0, 1).status;
   assert.ok(scanner > 0);
   for (let at = 0; at < input.length; at += 37) {
     assert.equal(reactor.call("losat_web2_scan_chunk", scanner, input.subarray(at, at + 37)).status, 0);
@@ -730,16 +761,35 @@ function checkSurface(reactor, native) {
   assert.deepEqual(index.map((r) => [r.id, r.length]), records.map((r) => [r.id, r.length]), "scan and register agree");
   assert.equal(reactor.call("losat_web2_release", registered.status).status, 0);
   assert.equal(reactor.call("losat_web2_release", registered.status).status, -1, "a released handle is gone");
-  // NCBI's protein reader reads a first record without a defline (its ID is empty), and
-  // LOSAT Web rejects a gap line, which its index cannot locate (abi_v2.md §4, §9).
-  const headless = reactor.call("losat_web2_register", "blastp", 0, Buffer.from("ACGT\n>x\nAC\n"));
+  // NCBI's protein reader reads a first record without a defline (its ID is empty), and a gap line's letters
+  // are its record's, as the CLI reads them (abi_v2.md §4, §9; line WQA's D13, 2026-11-20).
+  const headless = reactor.call("losat_web2_register", "blastp", 0, 1, Buffer.from("ACGT\n>x\nAC\n"));
   assert.ok(headless.status > 0, headless.error);
   assert.deepEqual(JSON.parse(headless.streams.get(2).toString()).records.map((r) => [r.id, r.length]),
                    [["", 4], ["x", 2]]);
   assert.equal(reactor.call("losat_web2_release", headless.status).status, 0);
-  const gap = reactor.call("losat_web2_register", "blastn", 1, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
-  assert.equal(gap.status, -1);
-  assert.match(gap.error, /^line 3 is a gap line .*not supported in the browser$/);
+  const gap = reactor.call("losat_web2_register", "blastn", 1, 1, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
+  assert.ok(gap.status > 0, gap.error);
+  assert.deepEqual(JSON.parse(gap.streams.get(2).toString()).records.map((r) => [r.id, r.length]), [["s", 18]]);
+  assert.equal(reactor.call("losat_web2_release", gap.status).status, 0);
+  // A first line that may be a Seq-id: the CLI's refusal with the data loaders on, data with them off (D13 (c), D16).
+  const seqId = Buffer.from("2HHB\nMKTAYIAKQR\n");
+  const refused = reactor.call("losat_web2_register", "blastp", 0, 1, seqId);
+  assert.equal(refused.status, -1);
+  assert.match(refused.error, /^the first line of the query \("2HHB"\) is not a defline and may be a sequence identifier .* LOSAT's BLASTP /);
+  const scanRefused = reactor.call("losat_web2_scan_begin", "blastp", 0, 1).status;
+  assert.equal(reactor.call("losat_web2_scan_chunk", scanRefused, seqId).status, 0);
+  assert.equal(reactor.call("losat_web2_scan_end", scanRefused).error, refused.error, "the scan refuses in the same words");
+  const data = reactor.call("losat_web2_register", "blastp", 0, 0, seqId);
+  assert.ok(data.status > 0, data.error);
+  assert.deepEqual(JSON.parse(data.streams.get(2).toString()).records.map((r) => [r.id, r.length]), [["", 13]]);
+  assert.equal(reactor.call("losat_web2_release", data.status).status, 0);
+  for (const [args, error] of [[["blastp", 2, 1], /^unknown input role 2$/], [["blastp", 0, 2], /^data_loaders must be 0 or 1, not 2$/],
+                               [["nosuch", 0, 1], /./]]) {
+    const begun = reactor.call("losat_web2_scan_begin", ...args);
+    assert.equal(begun.status, -1, args.join(" "));
+    assert.match(begun.error, error);
+  }
   checkFiles(reactor);
 }
 
@@ -798,32 +848,61 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor, close, waitForWorkers } = await engine.open();
-    assert.equal(reactor.exports.losat_web2_abi_version(), 4);
+    assert.equal(reactor.exports.losat_web2_abi_version(), 5);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
-    const subjects = new Map(); // "program subject" -> handle, kept across runs
+    const subjects = new Map(); // "program subject data_loaders" -> handle, kept across runs
     const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
     let countsRegistered = 0, countsKept = 0;
     for (const search of all) {
       const program = search.program;
       const query = inputPath(search, "-query"), subject = inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
-      const subjectKey = `${program} ${subject}`;
       const started = reactor.call("losat_web2_start", search.argv.join("\0"));
-      const together = started.status === 0 && JSON.parse(started.streams.get(2).toString()).register_inputs === true;
+      const start = started.status === 0 ? JSON.parse(started.streams.get(2).toString()) : undefined;
+      const together = start?.register_inputs === true;
+      // The host registers the file of -conffile, then validates the argv, whose *validation* says whether the
+      // run reads its inputs with NCBI's data loaders on, and registers the inputs so (abi_v2.md §4, §9; line
+      // WQA's D16, 2026-11-20). An argv that validate refuses is read with them on, as before any registry.
+      const registry = start?.conffile ? registerRegistry(reactor, search, start.conffile) : null;
+      const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
+      const first = reactor.call("losat_web2_validate", [...search.argv, ...custom, "-num_threads", "1"].join("\0"));
+      const dataLoaders = first.status === 0 ? JSON.parse(first.streams.get(2).toString()).data_loaders : true;
+      const subjectKey = `${program} ${subject} ${dataLoaders}`;
+      // An input that the CLI's reader refuses (a first line that may be a Seq-id with the data loaders on) fails
+      // the search as the CLI fails, before any hit: the subject first, as the CLI reads it first. The application
+      // shows the error on the input and runs nothing; the CLI has written no output for a subject (read with the
+      // arguments) and at most the outfmt 0 prolog for a query (read after it).
+      const refusedInput = (registered, role) => {
+        assert.equal(search.expect, "failure", `${engine.name} ${search.cases.join(",")}: register ${role}: ${registered.error}`);
+        assert.ok(registered.error.length > 0 && expected.own.toString().endsWith(cliError(registered.error)),
+                  `${engine.name} ${search.cases.join(",")}: the CLI's error (${registered.error})`);
+        for (const format of FORMATS[program]) {
+          if (role === "query" && format === 0) continue;
+          assert.equal(expected.outputs.get(format).length, 0, `${search.cases.join(",")}: the CLI writes no outfmt ${format}`);
+        }
+        results.push({ engine: engine.name, threads: 0, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {}, failure: registered.error });
+        console.log(`ok ${engine.name} ${search.cases.join(",")} (fails as the CLI, reading the ${role})`);
+        if (registry !== null) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
+      };
       if (!together && !subjects.has(subjectKey)) {
-        const registered = reactor.call("losat_web2_register", program, 1, fs.readFileSync(subject));
-        assert.ok(registered.status > 0, `register subject: ${registered.error}`);
+        const registered = reactor.call("losat_web2_register", program, 1, dataLoaders ? 1 : 0, fs.readFileSync(subject));
+        if (registered.status < 0) {
+          refusedInput(registered, "subject");
+          continue;
+        }
         subjects.set(subjectKey, registered.status);
       }
-      const q = together ? undefined : reactor.call("losat_web2_register", program, 0, fs.readFileSync(query));
-      if (q) assert.ok(q.status > 0, `register query: ${q.error}`);
+      const q = together ? undefined : reactor.call("losat_web2_register", program, 0, dataLoaders ? 1 : 0, fs.readFileSync(query));
+      if (q && q.status < 0) {
+        refusedInput(q, "query");
+        continue;
+      }
       let queryIds = q && JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
       const taxid = registerTaxidCounts(reactor, counts, search);
       const named = registerCounts(reactor, counts, search) ?? taxid;
       if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
       for (const threads of engine.threads) {
-        const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
         const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
         // The application validates the argv on the instance that holds its counts file, then runs it
         // (abi_v2.md §4): an error of validate is the CLI's first error. So is that of a search that
@@ -939,6 +1018,7 @@ async function main() {
         console.log(`ok ${label}`);
       }
       if (q) assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
+      if (registry !== null) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
     }
     for (const handle of subjects.values()) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
     for (const { handle } of counts.values()) assert.equal(reactor.call("losat_web2_file_release", handle).status, 0);

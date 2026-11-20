@@ -26,6 +26,8 @@
 //! - `bioseq`: the Bioseq of a query or subject record;
 //! - `masks`: the `Blast4-mask` lists (results and the `LCaseMask` options);
 //! - `writer`: the document.
+//! - `read`: the reader of an archive file (`blast_formatter -archive`): its objects one after
+//!   another, each as the typed request and results NCBI's `CRemoteBlast` reads.
 //!
 //! What a run keeps from one archive to the next is `RunState`: the diagnostics saved since the
 //! last archive (`DiagLog`) and what the searches have set in the options handle so far
@@ -36,6 +38,7 @@
 pub mod bioseq;
 pub mod masks;
 pub mod options;
+pub(crate) mod read;
 pub mod requests;
 pub mod strategy;
 pub mod writer;

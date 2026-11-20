@@ -145,6 +145,15 @@ impl<R: Read> StreamSource<R> {
         self.buf.len()
     }
 
+    /// The text from `pos` on: the bytes the source holds from there, then what `input` gives
+    /// after them (`Close` above: what a reader of one object did not use goes back to the
+    /// stream).
+    pub(crate) fn into_rest(self, pos: usize) -> (Vec<u8>, R) {
+        let mut buf = self.buf;
+        buf.drain(..(pos - self.base).min(buf.len()));
+        (buf, self.input)
+    }
+
     /// Reads blocks until `pos` is in the buffer or the stream ends. A read error ends the
     /// text, as a failed read ends an `istream` (its bad bit, which the object stream reads as
     /// the end of its input).
@@ -236,6 +245,9 @@ pub(crate) struct Reader<S: AsnSource> {
     defer_refusals: bool,
     /// The first refusal noted (`defer_refusals`).
     pub(crate) refusal: Option<AsnTextError>,
+    /// The start of a text the reader keeps while it reads on (a delayed member's, `hold`): the
+    /// source keeps its bytes from there.
+    held: Option<usize>,
 }
 
 /// What `ReadMemberId` read: a name, or the digits of a tag in brackets (`[3]`).
@@ -264,7 +276,22 @@ impl<S: AsnSource> Reader<S> {
             visible_only: false,
             defer_refusals: false,
             refusal: None,
+            held: None,
         }
+    }
+
+    /// Keep the bytes from `from` on while the reader reads on (`None`: keep none): a text that
+    /// the reader takes whole once its value ends (a delayed member, `NextElement` inside it).
+    pub(crate) fn hold(&mut self, from: Option<usize>) {
+        self.held = from;
+    }
+
+    /// The bytes before the current position (and before a text held) are not read again
+    /// (`AsnSource::release_before`): at each element of a block, and at the start of an object
+    /// of a stream.
+    pub(crate) fn release(&mut self) {
+        self.src
+            .release_before(self.held.map_or(self.pos, |held| held.min(self.pos)));
     }
 
     /// Note the refusals of the lexical layer in `refusal` and go on (`defer_refusals`).
@@ -718,7 +745,7 @@ impl<S: AsnSource> Reader<S> {
     //     }
     // ```
     pub(crate) fn next_element(&mut self, block_start: &mut bool) -> Result<bool> {
-        self.src.release_before(self.pos);
+        self.release();
         let c = self.skip_white_space()?;
         if *block_start {
             *block_start = false;

@@ -1,0 +1,1 @@
+Seq-entry ::= seq { id { local str "x" } , inst { repr raw , mol aa , length 1 , seq-data ncbieaa "A" } }

@@ -1,7 +1,10 @@
 //! NCBI's ASN.1 types as its serial library knows them (the type information that NCBI's
 //! `datatool` generates from the ASN.1 modules and their `.def` files), for the types that a
-//! PSSM file reaches (`PssmWithParameters`, psiblast and tblastn `-in_pssm`), and the one generic
-//! reader of ASN.1 text that runs on them (`read`). This module owns the table (`table`, generated
+//! PSSM file reaches (`PssmWithParameters`, psiblast and tblastn `-in_pssm`) and those of the
+//! BLAST archive and search strategy (`Blast4-archive`, `Blast4-request`,
+//! `Blast4-get-search-strategy-reply`), and the one generic reader of ASN.1 text that runs on
+//! them (`read`; a stream of objects and its encoding: `stream`; typed access to the values:
+//! `view`). This module owns the table (`table`, generated
 //! by `scripts/asn_spec_gen.py` and checked against NCBI's generated `*_.cpp` by
 //! `scripts/asn_spec_check.py`) and the generic value (`Value`); the PSSM's typed model
 //! (`report::serial::pssm`) is built from the value at its typed boundary
@@ -38,6 +41,8 @@
 
 mod hooks;
 pub(crate) mod read;
+pub(crate) mod stream;
+pub(crate) mod view;
 pub(crate) mod write;
 // Generated (`scripts/asn_spec_gen.py`), checked byte for byte by `scripts/asn_spec_check.py`.
 #[rustfmt::skip]
@@ -45,6 +50,8 @@ pub(crate) mod table;
 
 #[cfg(test)]
 mod read_tests;
+#[cfg(test)]
+mod stream_tests;
 #[cfg(test)]
 mod write_tests;
 

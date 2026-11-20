@@ -190,9 +190,13 @@ fn set_up_part(dir: &Path, setup: &str) {
 }
 
 /// Compares a run's stdout, stderr and exit status with `<dir>/<case>.{out,err,rc}` by bytes
-/// (the text is only shown).
+/// (the text is only shown). The frozen bytes of NCBI's are compared in LOSAT's words (NCBI's
+/// bytes through `losat::wording`, AGENTS.md rule 8; LOSAT's own files are left as they are).
 fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
-    let expected = |suffix: &str| fs::read(dir.join(format!("{case}.{suffix}"))).unwrap();
+    let expected = |suffix: &str| {
+        let bytes = fs::read(dir.join(format!("{case}.{suffix}"))).unwrap();
+        losat::wording::losat_output_bytes(&bytes).into_owned()
+    };
     for (name, got, want) in [
         ("stdout", out, expected("out")),
         ("stderr", err, expected("err")),
@@ -210,6 +214,40 @@ fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
         .parse()
         .unwrap();
     assert_eq!(status, rc, "{case}: exit status");
+}
+
+/// NCBI's frozen file in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
+/// A file that `-o` and `-logfile` both name (the rows `e1c_*_same`) is NCBI's output whose end
+/// the log's text has overwritten from the middle of its first line: the log's text (NCBI's two
+/// lines, `Error: (<class>::<code>) <message>` and the application's `Error: (106.16) ...` line
+/// naming the same exception) is rebuilt from the part that is left, mapped, and written from the
+/// same place, so the part that the log keeps starts at the same byte of its text.
+fn file_in_losat_words(frozen: &[u8]) -> Vec<u8> {
+    const FAILED: &[u8] = b"Error: (106.16) Application's execution failed (";
+    let mapped = |bytes: &[u8]| losat::wording::losat_output_bytes(bytes).into_owned();
+    let second = frozen
+        .windows(FAILED.len())
+        .rposition(|window| window == FAILED);
+    // The output (tab-delimited) ends in a tab; the log's text follows, cut in its first line.
+    let tail_start = frozen
+        .iter()
+        .rposition(|&byte| byte == b'\t')
+        .map(|at| at + 1);
+    let (Some(second), Some(tail_start)) = (second, tail_start) else {
+        return mapped(frozen);
+    };
+    if second < tail_start || frozen[tail_start..].starts_with(b"Error: ") {
+        return mapped(frozen);
+    }
+    let tail = &frozen[tail_start..];
+    let exception = &frozen[second + FAILED.len() - 1..];
+    let first = [&b"Error: "[..], exception].concat();
+    let text = [first, frozen[second..].to_vec()].concat();
+    assert!(text.ends_with(tail), "the log's text ends the file");
+    let kept = text.len() - tail.len();
+    let mut file = frozen[..tail_start].to_vec();
+    file.extend_from_slice(&mapped(&text)[kept..]);
+    file
 }
 
 /// Runs the rows of CASES.tsv whose `use` is `usage` and compares them with `expected` (`oracle/`
@@ -233,7 +271,9 @@ fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
             let got = fs::read(dir.join(made)).ok();
             assert_eq!(
                 got,
-                fs::read(&expected).ok(),
+                fs::read(&expected)
+                    .ok()
+                    .map(|bytes| file_in_losat_words(&bytes)),
                 "{case}: the file {made} (expected {})",
                 expected.display()
             );

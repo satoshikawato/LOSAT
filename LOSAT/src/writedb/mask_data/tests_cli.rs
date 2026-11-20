@@ -308,7 +308,12 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
             );
         };
         assert_eq!(run.status, ncbi.rc, "{context}");
-        assert_eq!(run.stderr, ncbi.stderr, "{file}: standard error");
+        // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
+        assert_eq!(
+            run.stderr,
+            crate::wording::losat_text(&ncbi.stderr),
+            "{file}: standard error"
+        );
         assert_eq!(run.stdout, logs[file], "{file}: standard output");
         if run.status == 0 && class == Class::Read {
             compared += assert_database(&base, protein, file, ncbi);

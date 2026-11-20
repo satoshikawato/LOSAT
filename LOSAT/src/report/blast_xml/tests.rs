@@ -405,11 +405,18 @@ fn strings_are_written_as_ncbis_us_ascii_stream_writes_them() {
     // The trace of an object written with `WriteObject` has no named frame.
     let (_, _, _, thrown) = def(b"a\xe9");
     let what = thrown.expect("thrown").exception().what();
-    let lines: Vec<&str> = what.lines().collect();
-    assert_eq!(lines.len(), 4, "{what}");
-    assert!(lines[1].ends_with("line 7202: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeNext() - Source string is not in UTF8 format (m_Pos = 0)"));
-    assert!(lines[2].ends_with("/src/serial/objostrxml.cpp\", line 1538: Error: (CStringException::eBadArgs) ncbi::CObjectOStreamXml::WriteClassMember() -  Frame type= eFrameClassMember, Member name= def (m_Pos = 0)"));
-    assert!(lines[3].ends_with("/src/serial/objostrxml.cpp\", line 1519: Error: (CStringException::eBadArgs) ncbi::CObjectOStreamXml::WriteClass() -  Frame type= eFrameClass, Object type= Hit (m_Pos = 0)"));
+    // NCBI's report (its header, then the three exceptions of the chain) in LOSAT's words
+    // (`crate::wording::losat_text`).
+    assert_eq!(what.lines().count(), 3, "{what}");
+    assert_eq!(
+        what,
+        crate::wording::losat_text(
+            "NCBI C++ Exception:\n\
+             \x20   T0 \"/src/corelib/ncbistr.cpp\", line 7202: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeNext() - Source string is not in UTF8 format (m_Pos = 0)\n\
+             \x20   T0 \"/src/serial/objostrxml.cpp\", line 1538: Error: (CStringException::eBadArgs) ncbi::CObjectOStreamXml::WriteClassMember() -  Frame type= eFrameClassMember, Member name= def (m_Pos = 0)\n\
+             \x20   T0 \"/src/serial/objostrxml.cpp\", line 1519: Error: (CStringException::eBadArgs) ncbi::CObjectOStreamXml::WriteClass() -  Frame type= eFrameClass, Object type= Hit (m_Pos = 0)\n"
+        )
+    );
 }
 
 #[test]
@@ -442,12 +449,10 @@ fn a_standard_xml_trace_names_the_choice_frames() {
         exception.get_msg(),
         " Frame type= eFrameNamed, Object type= BlastOutput2"
     );
-    let frames: Vec<String> = exception
-        .what()
-        .lines()
-        .skip(2)
-        .map(|line| line.split(" -  ").nth(1).unwrap_or("").to_string())
-        .collect();
+    // The frames of NCBI's report, in LOSAT's words (`crate::wording::losat_text`): the lines
+    // after the first exception's, each with the indentation of a further exception.
+    let what = exception.what();
+    let frames: Vec<&str> = what.lines().skip(1).map(str::trim_start).collect();
     assert_eq!(
         frames,
         [
@@ -461,6 +466,7 @@ fn a_standard_xml_trace_names_the_choice_frames() {
             "Frame type= eFrameClass, Object type= BlastOutput2 (m_Pos = 0)",
             "Frame type= eFrameNamed, Object type= BlastOutput2 (m_Pos = 0)",
         ]
+        .map(|frame| crate::wording::losat_text(frame).into_owned())
     );
 }
 
@@ -557,8 +563,11 @@ fn a_header_exception_comes_back_after_its_posts() {
     .unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
     assert_eq!(native.exit, 255);
+    // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
     assert!(
-        native.message.starts_with("Error: NCBI C++ Exception:\n"),
+        native.message.starts_with(&*crate::wording::losat_text(
+            "Error: NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 7190: Error: (CStringException::eBadArgs) ncbi::CUtf8::DecodeFirst() - Source string is not in UTF8 format (m_Pos = 0)\n"
+        )),
         "{}",
         native.message
     );

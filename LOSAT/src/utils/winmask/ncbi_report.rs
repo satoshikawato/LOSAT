@@ -145,13 +145,14 @@ mod tests {
     use crate::utils::winmask::FormatSite;
 
     // The texts of NCBI BLAST+ 2.17.0 (the official Linux x64 release) blastn
-    // `-window_masker_db` with hand-made counts files (line NP, M/STATE.md "M2 の実機確認").
+    // `-window_masker_db` with hand-made counts files (line NP, M/STATE.md "M2 の実機確認"). The
+    // expected values are NCBI's texts in LOSAT's words (`crate::wording::losat_text`).
     #[test]
     fn the_reports_are_ncbis() {
         let root = NCBI_BUILD_ROOT;
         assert_eq!(
             WinMaskError::Open { name: "nosuch.obinary".into() }.discover_exception().unwrap().what(),
-            format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n")
+            crate::wording::losat_text(&format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n"))
         );
         let factory = format!("    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n");
         let cases = [
@@ -177,14 +178,16 @@ mod tests {
         for (site, line) in cases {
             assert_eq!(
                 WinMaskError::format(site).create_report().unwrap(),
-                format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/{line}\n{factory}"),
+                crate::wording::losat_text(&format!(
+                    "NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/{line}\n{factory}"
+                )),
                 "{site:?}"
             );
         }
         let substr = "could not create a unit counts container: basic_string::substr: __pos (which is 7) > this->size() (which is 6)";
         assert_eq!(
             WinMaskError::CreateFail { message: substr.into() }.create_report().unwrap(),
-            format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 363: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - {substr}\n")
+            crate::wording::losat_text(&format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 363: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - {substr}\n"))
         );
         assert_eq!(
             WinMaskError::BadIndex { key: 1, value: 2 }.create_report(),

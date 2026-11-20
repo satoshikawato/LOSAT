@@ -107,6 +107,7 @@ ENGINE = Path(__file__).resolve().parents[1]
 TESTS = ENGINE / "tests"
 sys.path.insert(0, str(TESTS))
 import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14)
+import losat_wording  # noqa: E402  (LOSAT's words in NCBI's frozen bytes, AGENTS.md rule 8)
 
 MANIFEST = TESTS / "db_search_manifest"  # the directory: <program>.tsv for each of PROGRAMS, <program>.<family>.tsv
 FROZEN = TESTS / "fixtures" / "db_search"
@@ -674,10 +675,13 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     out = (FROZEN / f"{frozen_id(row)}.out").read_bytes()
     err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
+    # LOSAT's words in NCBI's frozen bytes (AGENTS.md rule 8, `losat_wording`).
+    expected_out_losat = losat_wording.losat_output_bytes(out)
+    expected_err_losat = losat_wording.losat_bytes(err)
     # The library reads the whole query before it searches: a reader error ends the call there,
     # with the command line's message of it, before the reports of the batches before it.
     if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \
-            and run.stderr.startswith(b"BLAST query error:") and run.stderr in err:
+            and run.stderr.startswith(b"BLAST query error:") and run.stderr in expected_err_losat:
         return "library-input-error", ""
     problems = []
     if files:
@@ -690,13 +694,13 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems.append(f"exit {run.returncode}, expected {row['rc']}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
     # A SAM row differs in the command line of the @PG line only (`strip_sam_cl`).
     if not files:
-        expected_out, observed_out = (out, run.stdout)
+        expected_out, observed_out = (expected_out_losat, run.stdout)
         if is_sam_outfmt(row["outfmt"]):
-            expected_out, observed_out = strip_sam_cl(out), strip_sam_cl(run.stdout)
+            expected_out, observed_out = strip_sam_cl(expected_out_losat), strip_sam_cl(run.stdout)
         if observed_out != expected_out:
             problems.append("stdout " + first_difference(expected_out, observed_out))
-    if run.stderr != err:
-        problems.append("stderr " + first_difference(err, run.stderr))
+    if run.stderr != expected_err_losat:
+        problems.append("stderr " + first_difference(expected_err_losat, run.stderr))
     if pssm:
         problems += xinclude.pssm_problems(pssms, row, FROZEN, first_difference)
     if problems:

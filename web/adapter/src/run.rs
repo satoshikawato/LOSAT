@@ -2430,27 +2430,140 @@ mod tests {
         assert!(!inputs_together(&dry));
     }
 
-    // LOSAT Web gives the engine subject records: BLASTP's `-db` (a database read from
-    // files, CLI only until LOSAT Web takes a database) is rejected by `validate` and by
-    // `run`, before any search.
+    /// The repository's `LOSAT/` directory, where the paths of the `-db` fixtures start
+    /// (`LOSAT/tests/db_search_manifest`).
+    fn losat_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../LOSAT")
+    }
+
+    /// The streams of a run of `words`, whose paths name files of `LOSAT/` (the run's working
+    /// directory, as the host's preopened `.` gives it, docs/web/abi_v2.md §3), with the query of
+    /// `register` and no subject (`-db`, line WQA D12a).
+    fn database_streams(
+        words: &[&str],
+        query: &str,
+    ) -> Result<std::collections::BTreeMap<u32, Vec<u8>>, String> {
+        let dir = losat_dir();
+        let absolute = |word: &str| {
+            if word.starts_with("tests/") {
+                dir.join(word).to_string_lossy().into_owned()
+            } else {
+                word.to_string()
+            }
+        };
+        let words: Vec<String> = words.iter().map(|word| absolute(word)).collect();
+        let words: Vec<&str> = words.iter().map(String::as_str).collect();
+        let bytes = std::fs::read(dir.join(query)).unwrap();
+        let (handle, _) = crate::store::register(words[0], 0, &bytes)?;
+        crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+        let program = Program::parse(words[0]).unwrap();
+        let result = crate::store::with_inputs(program, handle, 0, &words, |queries, subjects| {
+            assert!(subjects.is_empty());
+            run(&words, queries, subjects)
+        });
+        crate::store::release(handle).unwrap();
+        result??;
+        Ok(emitted_streams())
+    }
+
+    // A search of `-db` (line WQA D12a, 2026-11-20): `validate` takes it, `run` searches the
+    // database with the library's database entry (`run_local_database_<program>`), as the command
+    // line does, and each format is NCBI BLAST+ 2.17.0's frozen bytes of the same argv
+    // (LOSAT/tests/fixtures/db_search, the rows of LOSAT/tests/db_search_manifest), the filters
+    // too. The run takes no subject handle: `with_inputs` refuses one, and `register_inputs` reads
+    // the query alone.
     #[test]
-    fn a_database_search_is_rejected() {
-        let words = ["blastp", "-query", "q", "-db", "swissprot"];
-        let error = validate(&words).unwrap_err();
+    fn a_database_search_runs_as_the_command_line() {
+        let frozen = |row: &str| {
+            std::fs::read(losat_dir().join(format!("tests/fixtures/db_search/{row}.out"))).unwrap()
+        };
+        for (row, words, query) in [
+            (
+                "db.d1.6",
+                &["blastp", "-db", "tests/db_search/paja", "-query", "q"][..],
+                "tests/db_search/d1_q.faa",
+            ),
+            (
+                "db.blastn.mega.6",
+                &["blastn", "-db", "tests/db_search/nslice", "-query", "q"],
+                "tests/db_search/nslice_q.fna",
+            ),
+            (
+                "db.sl.bp.bsl.6",
+                &[
+                    "blastp",
+                    "-db",
+                    "tests/db_search/taxfilter/tfp",
+                    "-query",
+                    "q",
+                    "-seqidlist",
+                    "tests/db_search/seqidlist/sl_tfp.bsl",
+                ],
+                "tests/db_search/taxfilter/q.faa",
+            ),
+            (
+                "db.tf.bp.nosql.6",
+                &[
+                    "blastp",
+                    "-db",
+                    "tests/db_search/taxfilter/tfp",
+                    "-query",
+                    "q",
+                    "-taxids",
+                    "40674",
+                ],
+                "tests/db_search/taxfilter/q.faa",
+            ),
+        ] {
+            validate(words).unwrap_or_else(|error| panic!("{row}: {error}"));
+            assert!(searches_database(words), "{row}");
+            assert!(start_json(words).unwrap().ends_with(",\"database\":true}"));
+            let streams = database_streams(words, query).unwrap_or_else(|e| panic!("{row}: {e}"));
+            assert_eq!(text(&streams[&6]), text(&frozen(row)), "{row}");
+        }
+        // A run of -db takes no subject handle.
+        let words = ["blastp", "-db", "d", "-query", "q"];
+        let protein = b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ\n";
+        let (query, _) = crate::store::register("blastp", 0, protein).unwrap();
+        let (subject, _) = crate::store::register("blastp", 1, protein).unwrap();
+        let refused = crate::store::with_inputs(Program::Blastp, query, subject, &words, |_, _| ());
         assert_eq!(
-            error,
-            "-db (a database search) is not supported in the browser yet"
+            refused.unwrap_err(),
+            format!("a run of -db takes no subject handle: give 0, not {subject}")
         );
-        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
-        let query = [FastaRecord::new("Query_1", b"q", protein)];
-        let subject = [FastaRecord::new("Subject_1", b"s", protein)];
-        assert_eq!(
-            run(&words, &query, &subject).unwrap_err(),
-            "-db (a database search) is not supported in the browser yet"
+        crate::store::release(subject).unwrap();
+        // A database that is not there: the CLI's error, from the run.
+        let error = crate::store::with_inputs(Program::Blastp, query, 0, &words, |queries, _| {
+            run(&words, queries, &[])
+        })
+        .unwrap()
+        .unwrap_err();
+        assert!(
+            error.starts_with(
+                "BLAST Database error: No alias or index file found for protein database [d]"
+            ),
+            "{error}"
         );
+        crate::store::release(query).unwrap();
+        // -parse_deflines: `register_inputs` reads the query alone, with the ids of its deflines;
+        // the subject handle is 0 and the JSON's subject is null.
+        let parsed = ["blastp", "-db", "d", "-query", "q", "-parse_deflines"];
+        assert!(inputs_together(&parsed));
+        let (query, subject, response) =
+            crate::store::register_inputs(&parsed, b">sp|P1|X q\nMKTAYIAKQ\n", b"").unwrap();
+        assert_eq!(subject, 0);
+        assert!(response.ends_with(",\"subject\":null}"), "{response}");
+        crate::store::with_inputs(Program::Blastp, query, 0, &parsed, |queries, subjects| {
+            assert_eq!(queries.len(), 1);
+            assert!(subjects.is_empty());
+        })
+        .unwrap();
+        crate::store::release(query).unwrap();
+        assert!(crate::store::register_inputs(&parsed, b">q\nMK\n", b">s\nMK\n").is_err());
         // `-db` with `-subject` is the parser's conflict, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
         assert!(validate(&both).unwrap_err().contains("cannot be used with"));
+        assert!(!searches_database(&both));
         // `-dbsize` is an option of the search: accepted with the subject records.
         validate(&[
             "blastp", "-query", "q", "-subject", "s", "-dbsize", "1000000",
@@ -2533,6 +2646,11 @@ mod tests {
     ) -> Result<std::collections::BTreeMap<u32, Vec<u8>>, String> {
         crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
         run(words, query, subject)?;
+        Ok(emitted_streams())
+    }
+
+    /// The streams emitted since `EMITTED` was cleared, as a host keeps them (`streams`).
+    fn emitted_streams() -> std::collections::BTreeMap<u32, Vec<u8>> {
         let mut streams = std::collections::BTreeMap::new();
         crate::emit::EMITTED.with(|emitted| {
             for (stream, bytes) in emitted.borrow().iter() {
@@ -2546,7 +2664,7 @@ mod tests {
                     .extend_from_slice(bytes);
             }
         });
-        Ok(streams)
+        streams
     }
 
     /// The streams that the signals of stream 9 of `streams` discard, in order. Each signal says

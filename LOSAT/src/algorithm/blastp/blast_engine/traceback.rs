@@ -1035,9 +1035,19 @@ mod tests {
         let (first, second) = (&list.hsps[0], &list.hsps[1]);
         assert_eq!(first.e_value, 0.125);
         assert_eq!(second.e_value, 0.5);
-        let bits = |score: i32| (f64::from(score) * karlin.lambda - karlin.k.ln()) / std::f64::consts::LN_2;
-        assert!((first.bit_score - bits(28)).abs() < 1e-9, "{}", first.bit_score);
-        assert!((second.bit_score - bits(4)).abs() < 1e-9, "{}", second.bit_score);
+        let bits = |score: i32| {
+            (f64::from(score) * karlin.lambda - karlin.k.glibc_ln()) / std::f64::consts::LN_2
+        };
+        assert!(
+            (first.bit_score - bits(28)).abs() < 1e-9,
+            "{}",
+            first.bit_score
+        );
+        assert!(
+            (second.bit_score - bits(4)).abs() < 1e-9,
+            "{}",
+            second.bit_score
+        );
         assert_eq!((first.q_start, first.q_end, first.length), (1, 5, 5));
         assert_eq!((first.num_ident, first.gapopen), (5, 0));
         // Length 0: no letter, the query range [2, 2) written as q_start 3, q_end 2.

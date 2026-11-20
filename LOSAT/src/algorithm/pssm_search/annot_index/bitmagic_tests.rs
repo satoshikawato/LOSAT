@@ -1,3 +1,27 @@
+// This file is a modified work: tests written for LOSAT of its Rust port of the BitMagic library
+// 8.0.1 (http://bitmagic.io), as bundled in NCBI BLAST+ 2.17.0. The bit writer `BitOut` (its gamma
+// and binary interpolative encoders) is ported from the encoders of BitMagic's encoding.h; the
+// rest of the tests is LOSAT's own.
+//
+// Copyright(c) 2002-2025 Anatoliy Kuznetsov(anatoliy_kuznetsov at yahoo.com)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// For more information please visit:  http://bitmagic.io
+//
+// The text of the Apache License 2.0 and BitMagic's own licence file are in
+// `BITMAGIC_LICENSE.txt`, next to this file.
+
 //! Tests of the BitMagic decoder. The streams named `w..`, `s..`, `m..` are the Q-BM probes of
 //! line RG; their expected sizes and bits are what NCBI's BitMagic 8.0.1 decoded (a harness
 //! built from NCBI's headers, outside this repository). `differential` is the driver of the
@@ -34,8 +58,8 @@ fn stream(tokens: &[u8]) -> Vec<u8> {
     data
 }
 
-/// `bm::bit_out` (encoding.h:1301-1360, 1532-1560, 1644-1680): bits lowest first, flushed as
-/// little-endian 32-bit words.
+/// `bm::bit_out` (BitMagic 8.0.1: encoding.h:1301-1360, 1532-1560, 1644-1680): bits lowest first,
+/// flushed as little-endian 32-bit words.
 #[derive(Default)]
 struct BitOut {
     words: Vec<u32>,
@@ -847,7 +871,7 @@ fn differential() {
                     .filter(|row| *row != "-")
                     .map(|row| {
                         let row = row.parse::<u32>().unwrap();
-                        // `count_range` counts to `bm::id_max - 1` at most (bm.h:3251-3252)
+                        // `count_range` counts to `bm::id_max - 1` at most (BitMagic 8.0.1: bm.h:3251-3252)
                         format!(
                             "{row}:{}:{}",
                             answer(vector.get_bit(row).map(u64::from)),

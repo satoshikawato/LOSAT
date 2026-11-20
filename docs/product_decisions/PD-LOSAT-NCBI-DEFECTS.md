@@ -1884,7 +1884,9 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   annotations (version 1.52, 2026-11-20, line RG item Q-BM; the Owner decided on 2026-11-16
   (「推奨通り」, Q-BM) to port it): `bit-bvector` values and a `bit-set-bvector`'s sparse index are
   decoded where NCBI's object manager decodes them, at the first value read
-  (`CBVector_data::GetBitVector`: BitMagic 8.0.1's `bm::deserialize` in NCBI's 32-bit build), with
+  (`CBVector_data::GetBitVector`: `bm::deserialize` of BitMagic 8.0.1 (Apache-2.0, bundled in NCBI BLAST+) in
+  NCBI's 32-bit build, ported in LOSAT with the notice and licence text in
+  `LOSAT/src/algorithm/pssm_search/annot_index/BITMAGIC_LICENSE.txt`), with
   the tokens in NCBI's order and NCBI's checks: its `std::logic_error` `BM::Invalid serialization
   format` ends the run with `Error: BM::Invalid serialization format` and exit status 255 where
   the index reads the value, and is the `NCBI_CATCH` message of the `Sorted, max length` and

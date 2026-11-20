@@ -1,3 +1,28 @@
+// This file is a modified work: a Rust port, written for LOSAT, of parts of the BitMagic library
+// 8.0.1 (http://bitmagic.io) as bundled in NCBI BLAST+ 2.17.0 (`c++/include/util/bitset/`). It is
+// ported from these BitMagic files:
+// bm.h, bmblocks.h, bmconst.h, bmdef.h, bmfunc.h, bmserial.h, bmsimd.h, bmsse2.h, bmsse4.h,
+// bmsse_util.h, encoding.h.
+//
+// Copyright(c) 2002-2025 Anatoliy Kuznetsov(anatoliy_kuznetsov at yahoo.com)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// For more information please visit:  http://bitmagic.io
+//
+// The text of the Apache License 2.0 and BitMagic's own licence file are in
+// `BITMAGIC_LICENSE.txt`, next to this file.
+
 //! BitMagic 8.0.1's deserialization as NCBI BLAST+ 2.17.0's object manager runs it on the data of
 //! a Seq-table's `BVector-data` (line RG Q-BM, `bm/SPEC.md`): `bm::deserialize` into a
 //! `bm::bvector<>` made with the `size` member, in NCBI's 32-bit BitMagic build (`BM64ADDR` not
@@ -43,12 +68,12 @@ const BLOCK_BITS: u32 = 65536;
 /// numbering as BitMagic's 32-bit words).
 type Block = [u64; 1024];
 /// The entries of `gap_temp_block_`, `id_array_` and `sb_id_array_` (bmserial.h:5122-5128) and
-/// of `ex0_arr_` / `ex1_arr_` (`alloc_bit_block(tmp_buff_alloc_factor)`, 8 blocks of 8192 bytes
+/// of `ex0_arr_` / `ex1_arr_` (`alloc_bit_block` with `tmp_buff_alloc_factor`, 8 blocks of 8192 bytes
 /// as `gap_word_t`, bmserial.h:1269, 5119-5120).
 const GAP_ENTRIES: usize = 65536;
 const EX_ENTRIES: usize = 32768;
 /// The entries of the GAP result buffer of `combine_operation_block_or` and
-/// `combine_operation_with_block` (`tmp_buf[bm::gap_equiv_len * 3]`, bm.h:7287, 7665).
+/// `combine_operation_with_block` (a temporary buffer of 3 times `bm::gap_equiv_len`, bm.h:7287, 7665).
 const OR_BUF: usize = 3 * 4096;
 /// The decoded vector keeps a block of more runs than this as its words.
 const RUNS_MAX: usize = 2048;
@@ -279,7 +304,7 @@ impl Decoded {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:3258-3330
+    // BitMagic 8.0.1: bm.h:3258-3330
     // (`count_range_no_check(0, right)`: the first block whole by `block_bitcount` when `right`
     // is past it, else by `gap_bit_count_range`; the blocks between by `block_bitcount`; the
     // last by `gap_bit_count_to`; summed as `unsigned`)
@@ -482,13 +507,13 @@ impl Bytes<'_> {
         Ok(bytes)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:96 (`get_8`)
+    // BitMagic 8.0.1: encoding.h:96 (`get_8`)
     fn u8(&mut self) -> Result<u8, Fail> {
         let [byte] = self.take::<1>()?;
         Ok(byte)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:925-937, 1164-1171
+    // BitMagic 8.0.1: encoding.h:925-937, 1164-1171
     fn u16(&mut self) -> Result<u16, Fail> {
         let bytes = self.take::<2>()?;
         Ok(if self.beq {
@@ -498,14 +523,14 @@ impl Bytes<'_> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:943-949, 1173-1180 (both
+    // BitMagic 8.0.1: encoding.h:943-949, 1173-1180 (both
     // little-endian)
     fn u24(&mut self) -> Result<u32, Fail> {
         let [b0, b1, b2] = self.take::<3>()?;
         Ok(u32::from(b0) | u32::from(b1) << 8 | u32::from(b2) << 16)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:955-967, 1182-1189
+    // BitMagic 8.0.1: encoding.h:955-967, 1182-1189
     fn u32(&mut self) -> Result<u32, Fail> {
         let bytes = self.take::<4>()?;
         Ok(if self.beq {
@@ -515,21 +540,15 @@ impl Bytes<'_> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:973-985, 1191-1203 (both
+    // BitMagic 8.0.1: encoding.h:973-985, 1191-1203 (both
     // little-endian)
     fn u48(&mut self) -> Result<u64, Fail> {
         let [b0, b1, b2, b3, b4, b5] = self.take::<6>()?;
         Ok(u64::from_le_bytes([b0, b1, b2, b3, b4, b5, 0, 0]))
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:991-1012, 1205-1217
-    // ```c++
-    //     bm::id64_t a = buf_[0]+
-    //                    ((bm::id64_t)buf_[1] << 56) +
-    //                    ((bm::id64_t)buf_[2] << 48) +
-    //     ...
-    //                    ((bm::id64_t)buf_[7] << 8);
-    // ```
+    // BitMagic 8.0.1: encoding.h:991-1012, 1205-1217
+    // (big-endian: the first byte is the lowest, the other seven follow from the highest)
     fn u64(&mut self) -> Result<u64, Fail> {
         let bytes = self.take::<8>()?;
         if !self.beq {
@@ -539,7 +558,7 @@ impl Bytes<'_> {
         Ok(u64::from_be_bytes([b1, b2, b3, b4, b5, b6, b7, 0]) | u64::from(b0))
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:1103-1130 (`get_16(s, count)`:
+    // BitMagic 8.0.1: encoding.h:1103-1130 (`get_16(s, count)`:
     // a `memcpy` of `count` values), :1276-1295 (big-endian: a do-while loop that writes at least
     // one value, each from `buf_[0]` and `buf_[1]`, and moves 2 bytes for each)
     /// `get_16(out, count)`.
@@ -565,7 +584,7 @@ impl Bytes<'_> {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:1003-1027 (`get_32(w, count)`),
+    // BitMagic 8.0.1: encoding.h:1003-1027 (`get_32(w, count)`),
     // :1219-1236 (big-endian: a do-while loop that writes at least one word; the bit interval,
     // the one caller whose count may be 0, passes that count)
     /// `get_32(block + first, count)`, ORed into the block.
@@ -619,7 +638,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2638-2670 (`get_bits`; the
+    // BitMagic 8.0.1: encoding.h:2638-2670 (`get_bits`; the
     // callers ask for 1 to 31 bits)
     fn get_bits(&mut self, count: u32) -> Result<u32, Fail> {
         debug_assert!((1..32).contains(&count));
@@ -647,7 +666,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
         Ok(value)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2675-2692 (`get_bit`)
+    // BitMagic 8.0.1: encoding.h:2675-2692 (`get_bit`)
     fn get_bit(&mut self) -> Result<u32, Fail> {
         if self.used != 32 {
             let value = self.acc & 1;
@@ -661,8 +680,8 @@ impl<'r, 'a> BitIn<'r, 'a> {
         Ok(word & 1)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2506-2586 (`gamma`: the zero
-    // bits, the border bit, then that many bits; `_left[zero_bits]` and `1 << zero_bits` with 32
+    // BitMagic 8.0.1: encoding.h:2506-2586 (`gamma`: the zero
+    // bits, the border bit, then that many bits; the mask table and the shift by the zero count with 32
     // or more zero bits are undefined, U3)
     fn gamma(&mut self) -> Result<u32, Fail> {
         let mut acc = self.acc;
@@ -721,7 +740,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
         Ok(current)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2441-2458 (`gamma8`)
+    // BitMagic 8.0.1: encoding.h:2441-2458 (`gamma8`)
     fn gamma8(&mut self) -> Result<u32, Fail> {
         Ok(match self.gamma()? {
             1 => self.gamma()?,
@@ -731,7 +750,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2463-2483 (`delta16`)
+    // BitMagic 8.0.1: encoding.h:2463-2483 (`delta16`)
     fn delta16(&mut self) -> Result<u32, Fail> {
         Ok(match self.gamma()? {
             1 => 511 - self.get_bits(8)?,
@@ -741,7 +760,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2488-2501 (`delta16s`)
+    // BitMagic 8.0.1: encoding.h:2488-2501 (`delta16s`)
     fn delta16s(&mut self) -> Result<u32, Fail> {
         if self.get_bit()? == 1 {
             self.delta16()
@@ -750,7 +769,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2591-2623 (`get_16_no`,
+    // BitMagic 8.0.1: encoding.h:2591-2623 (`get_16_no`,
     // `get_24_no`, `get_32_no`: bytes of 8 bits, lowest first)
     fn get_16_no(&mut self) -> Result<u32, Fail> {
         let lo = self.get_bits(8)?;
@@ -768,25 +787,8 @@ impl<'r, 'a> BitIn<'r, 'a> {
         Ok(lo | self.get_16_no()? << 16)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2177-2190 (the same lines in
+    // BitMagic 8.0.1: encoding.h:2177-2190 (the same lines in
     // each `bic_decode_*_cm*`)
-    // ```c++
-    //         unsigned val = hi - lo - sz + 1;
-    //         if (val)
-    //         {
-    //             unsigned logv = bm::bit_scan_reverse32(val+1);
-    //
-    //             unsigned c = unsigned((1ull << (logv + 1)) - val - 1);
-    //             int64_t half_c = c >> 1;
-    //             int64_t half_r = val >> 1;
-    //             int64_t lo1 = half_r - half_c - ((val + 1) & 1);
-    //             int64_t hi1 = half_r + half_c + 1;
-    //
-    //             val = get_bits(logv);
-    //             if (val <= lo1 || val >= hi1)
-    //                 val += (get_bit() << logv);
-    //         }
-    // ```
     /// The centered minimal value of a range of `r + 1` values (always at most `r`; `r + 1 == 0`
     /// asks `bit_scan_reverse32(0)`, undefined).
     fn bic_value(&mut self, r: u32) -> Result<u32, Fail> {
@@ -810,22 +812,8 @@ impl<'r, 'a> BitIn<'r, 'a> {
         Ok(x)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:336-341 (`bic_decode_u16`:
+    // BitMagic 8.0.1: encoding.h:336-341 (`bic_decode_u16`:
     // nothing for `sz` 0), :2209-2247 (`bic_decode_u16_cm`)
-    // ```c++
-    //         unsigned mid_idx = sz >> 1;
-    //         val += lo + mid_idx;
-    //         arr[mid_idx] = bm::gap_word_t(val);
-    //
-    //         if (sz <= 1)
-    //             return;
-    //
-    //         bic_decode_u16_cm(arr, mid_idx, lo, bm::gap_word_t(val-1));
-    //         arr += ++mid_idx;
-    //         sz -= mid_idx;
-    //         lo = bm::gap_word_t(val + 1);
-    //     } while (sz);// for sz
-    // ```
     /// `bic_decode_u16(arr, sz, lo, hi)`: the decoder writes `arr[0..sz]` (an array of NCBI's
     /// that is shorter is written past, U4).
     fn bic_u16(&mut self, arr: &mut [u16], sz: u32, lo: u16, hi: u16) -> Result<(), Fail> {
@@ -864,18 +852,8 @@ impl<'r, 'a> BitIn<'r, 'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:343-348
+    // BitMagic 8.0.1: encoding.h:343-348
     // (`bic_decode_u16_bitset`), :2251-2290 (`bic_decode_u16_cm_bitset`)
-    // ```c++
-    //         unsigned mid_idx = sz >> 1;
-    //         val += lo + mid_idx;
-    //
-    //         // set bit in the target block
-    //         {
-    //             unsigned nword = (val >> bm::set_word_shift);
-    //             block[nword] |= (1u << (val & bm::set_word_mask));
-    //         }
-    // ```
     /// `bic_decode_u16_bitset(block, sz, lo, hi)`: each value sets its bit (a value past the
     /// block's 65536 bits writes past it, U4); `dry`: `bic_decode_u16_dry` (encoding.h:352-357,
     /// 2306-2345), which NCBI runs for a full block: the same reads, no write.
@@ -938,7 +916,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2167-2205
+    // BitMagic 8.0.1: encoding.h:2167-2205
     // (`bic_decode_u32_cm`, called without the wrapper's check of `sz`: with `sz` 0 the loop's
     // body runs once and writes `arr[0]`)
     /// `bic_decode_u32_cm(arr, sz, lo, hi)`: writes `arr[0..max(sz, 1)]`.
@@ -978,7 +956,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/encoding.h:2698-2798 (`decode_array`)
+    // BitMagic 8.0.1: encoding.h:2698-2798 (`decode_array`)
     /// `decode_array(arr, tb_wflags, &sz, default_sz)` into `arr` (`ex0_arr_` or `ex1_arr_`, of
     /// `EX_ENTRIES`): the header flags and the size. The forms write `arr[0..sz]` (delta-gamma
     /// also `arr[0]` with `sz` 0; a single value `arr[0]`); a window reads the array up to its
@@ -1084,16 +1062,8 @@ impl<'r, 'a> BitIn<'r, 'a> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:2648-2657 (`arr_restore_min`)
-// ```c++
-//     arr[0] = arr[0] + delta_acc;
-//     for (unsigned i = 1; i < arr_len; ++i)
-//     {
-//         arr[i] += min0 + delta_acc;
-//         BM_ASSERT(arr[i-1] < arr[i]);
-//         delta_acc += min0;
-//     } // for i
-// ```
+// BitMagic 8.0.1: bmfunc.h:2648-2657 (`arr_restore_min`)
+// Restores an array stored as differences: entry `i` after the first gets `i * min0` added.
 fn arr_restore_min_u16(arr: &mut [u16], len: u32, min0: u16) {
     let mut acc: u16 = 0;
     for value in arr.iter_mut().take(len as usize).skip(1) {
@@ -1110,7 +1080,7 @@ fn arr_restore_min_u32(arr: &mut [u32], min0: u32) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:2517-2573 (`arr_restore_min_w`; its
+// BitMagic 8.0.1: bmfunc.h:2517-2573 (`arr_restore_min_w`; its
 // first loop reads and writes `arr[1..wlen]`, its second `arr[wlen-1..arr_len]`: past `arr_len`
 // the entries are those that an earlier token wrote, and past the array NCBI reads past its buffer)
 fn arr_restore_min_w(
@@ -1317,28 +1287,7 @@ fn gap_of_runs(runs: &[(u16, u16)]) -> Vec<u16> {
     gap
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:4786-4811 (`gap_add_to_bitset`)
-// ```c++
-//     const T* pend = pcurr + len;
-//     BM_ASSERT(*pend == 65535);
-//     if (*pcurr & 1)  // Starts with 1
-//     {
-//         bm::or_bit_block(dest, 0, 1 + pcurr[1]);
-//         pcurr += 3;
-//     }
-//     else
-//         pcurr += 2;
-//
-//     unsigned bc, pos;
-//     for (; pcurr <= pend; )
-//     {
-//         BM_ASSERT(*pcurr > pcurr[-1]);
-//         pos = 1u + pcurr[-1];
-//         bc = *pcurr - pcurr[-1];
-//         pcurr += 2;
-//         bm::or_bit_block(dest, pos, bc);
-//     }
-// ```
+// BitMagic 8.0.1: bmfunc.h:4786-4811 (`gap_add_to_bitset`)
 /// `gap_add_to_bitset(dest, gap, len)` (and `gap_convert_to_bitset`, which clears `dest` and
 /// passes the header's length): ORs the runs of 1s whose end is at index `len` or before into the
 /// block, with no other check on the GAP. A run that ends where it starts sets nothing
@@ -1381,7 +1330,7 @@ fn gap_bitmap(gap: &[u16]) -> Result<Box<Block>, Fail> {
 /// The entries of a GAP block of each level (`gap_len_table`, bmconst.h:396-403).
 const GAP_LEVELS: [usize; 4] = [128, 256, 512, 1280];
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:5409-5418 (`gap_calc_level` with
+// BitMagic 8.0.1: bmfunc.h:5409-5418 (`gap_calc_level` with
 // the default `gap_len_table`: -1 above 1276)
 /// `gap_calc_level(len, glevel_len)`: the level of a GAP block of `len` entries (`gap_length`,
 /// one more than its last index).
@@ -1407,41 +1356,8 @@ fn with_level(head: u16, level: u16) -> u16 {
     (head & !6) | (level << 1)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:7414-7422 (`gap_operation_or`: the
+// BitMagic 8.0.1: bmfunc.h:7414-7422 (`gap_operation_or`: the
 // AND of both inverted, inverted), :3736-3790 (`gap_buff_op`)
-// ```c++
-//     T c1 = *cur1; T c2 = *cur2;
-//     while (1)
-//     {
-//         bitval = (T) F::op(bitval1, bitval2);
-//         res += (bitval != bitval_prev);
-//         bitval_prev = bitval;
-//         if (c1 < c2) // (*cur1 < *cur2)
-//         {
-//             *res = c1;
-//             ++cur1; c1 = *cur1;
-//             bitval1 ^= 1;
-//         }
-//         else // >=
-//         {
-//             *res = c2;
-//             if (c2 < c1) // (*cur2 < *cur1)
-//             {
-//                 bitval2 ^= 1;
-//             }
-//             else  // equal
-//             {
-//                 if (c2 == (bm::gap_max_bits - 1))
-//                     break;
-//                 ++cur1; c1 = *cur1;
-//                 bitval1 ^= 1; bitval2 ^= 1;
-//             }
-//             ++cur2; c2 = *cur2;
-//         }
-//     } // while
-//     dlen = (unsigned)(res - dest);
-//     *dest = (T)((*dest & 7) + (dlen << 3));
-// ```
 /// `gap_operation_or(a, b, tmp_buf, dlen)`: NCBI's merge of the two GAP blocks, which walks each to
 /// the first place where both read 65535 (whatever their headers say), into the result buffer of
 /// `OR_BUF` entries. The result's entries `[0..=dlen]`.
@@ -1514,7 +1430,8 @@ fn gap_len(gap: &[u16]) -> Result<usize, Fail> {
     }
 }
 
-/// One step of NCBI's binary searches: `if (buf[mid] < pos) start = mid + 1; else end = mid;`.
+/// One step of NCBI's binary searches: the start moves above the middle entry when that is below
+/// `pos`, else the end moves to it.
 fn gap_step(gap: &[u16], pos: u32, start: &mut usize, end: &mut usize) -> Result<(), Fail> {
     let mid = (*start + *end) >> 1;
     if u32::from(gap_at(gap, mid)?) < pos {
@@ -1553,34 +1470,7 @@ fn gap_value_at(gap: &[u16], at: usize) -> u16 {
     (gap[0] & 1) ^ ((at as u16).wrapping_sub(1) & 1)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:1899-1933 (`gap_test`, quoted in
-// part)
-// ```c++
-//     unsigned start = 1;
-//     unsigned end = 1 + ((*buf) >> 3);
-//     if (end - start < 10)
-//     {
-//         unsigned sv = *buf & 1;
-//         unsigned sv1= sv ^ 1;
-//         if (buf[1] >= pos) return sv;
-//         if (buf[2] >= pos) return sv1;
-//         ...
-//         if (buf[8] >= pos) return sv1;
-//         BM_ASSERT(buf[9] >= pos);
-//         return sv;
-//     }
-//     else
-//     {
-//         do
-//         {
-//             if (unsigned mid = (start + end) >> 1; buf[mid] < pos)
-//                 start = mid + 1;
-//             else
-//                 end = mid;
-//         } while (start != end);
-//     }
-//     return ((*buf) & 1) ^ ((--start) & 1);
-// ```
+// BitMagic 8.0.1: bmfunc.h:1899-1933 (`gap_test`)
 /// `gap_test(buf, pos)`: `gap_test_unr` of NCBI's scalar build (bmfunc.h:1943-1955).
 fn gap_test_scalar(gap: &[u16], pos: u32) -> Result<u16, Fail> {
     let len = gap_len(gap)?;
@@ -1599,15 +1489,8 @@ fn gap_test_scalar(gap: &[u16], pos: u32) -> Result<u16, Fail> {
     Ok(gap_value_at(gap, start))
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:1835-1886 (`gap_bfind` without
-// `VECT_GAP_BFIND`: the binary part of `gap_narrow`, then)
-// ```c++
-//     for(; true; ++start)
-//         if (buf[start] >= pos)
-//             break;
-//     *is_set = ((*buf) & 1) ^ ((start-1) & 1);
-//     return start;
-// ```
+// BitMagic 8.0.1: bmfunc.h:1835-1886 (`gap_bfind` without
+// `VECT_GAP_BFIND`: the binary part of `gap_narrow`, then a linear scan)
 /// `gap_bfind(buf, pos, &is_set)` of NCBI's scalar build: the entry of the run that holds `pos`.
 fn gap_bfind_scalar(gap: &[u16], pos: u32) -> Result<usize, Fail> {
     let len = gap_len(gap)?;
@@ -1618,10 +1501,11 @@ fn gap_bfind_scalar(gap: &[u16], pos: u32) -> Result<usize, Fail> {
     Ok(start)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmsse2.h:1378-1430 (`sse2_gap_find`; the
+// BitMagic 8.0.1: bmsse2.h:1378-1430 (`sse2_gap_find`; the
 // lanes from `size` on are set to 0xFFFF when `size` is below 8, none above), :1444-1499
-// (`sse2_gap_bfind`: `end = 1 + len`, the binary part of `gap_narrow`,
-// `size += (end != arr_end)`, `start += sse2_gap_find(buf + start, pos, size)`), :1501-1507
+// (`sse2_gap_bfind`: the end is the block's length plus one, the binary part of
+// `gap_narrow`, a count that grows by one unless the end is the array's end, then `sse2_gap_find`
+// on the rest), :1501-1507
 // (`sse2_gap_test`: its `is_set`)
 /// `sse2_gap_bfind(buf, pos, &is_set)` of NCBI's SSE2 build.
 fn gap_bfind_sse2(gap: &[u16], pos: u32) -> Result<usize, Fail> {
@@ -1665,7 +1549,7 @@ fn gap_bfind_sse2(gap: &[u16], pos: u32) -> Result<usize, Fail> {
     Ok(start + found)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmsse4.h:1339-1375 (`sse4_gap_find`: the
+// BitMagic 8.0.1: bmsse4.h:1339-1375 (`sse4_gap_find`: the
 // count of lanes at or above `pos`, the lanes from `size` on set to 0xFFFF when `size` is below
 // 8; `8 - count`, or with none, `size` less the count of the last 8 entries)
 /// `sse4_gap_find(buf + start, pos, size)`, `size` 4 to 16.
@@ -1690,30 +1574,8 @@ fn sse4_gap_find(gap: &[u16], start: usize, pos: u32, size: usize) -> Result<usi
     Ok(size - count)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmsse4.h:1389-1455 (`sse42_gap_bfind`),
+// BitMagic 8.0.1: bmsse4.h:1389-1455 (`sse42_gap_bfind`),
 // :1460-1526 (`sse42_gap_test`: one step per round while 16 or more are left)
-// ```c++
-//     unsigned start = 1;
-//     unsigned end = ((*buf) >> 3);
-//     unsigned size = end - start;
-//     ... (the binary part)
-//     ++size;
-//     if (size < 4) // for very short vector use conventional scan
-//     {
-//         const unsigned short* BMRESTRICT pbuf = buf + start;
-//         if (pbuf[0] >= pos) { }
-//         else if (pbuf[1] >= pos) { start++; }
-//         else
-//         {
-//             BM_ASSERT(pbuf[2] >= pos);
-//             start+=2;
-//         }
-//     }
-//     else
-//     {
-//         start += bm::sse4_gap_find(buf+start, (bm::gap_word_t)pos, size);
-//     }
-// ```
 /// `sse42_gap_bfind` (`step16` 2) and `sse42_gap_test` (`step16` 1) of NCBI's SSE4.2 build.
 fn gap_bfind_sse42(gap: &[u16], pos: u32, step16: usize) -> Result<usize, Fail> {
     let len = gap_len(gap)?;
@@ -1753,37 +1615,14 @@ fn gap_bfind(gap: &[u16], pos: u32, build: Build) -> Result<usize, Fail> {
     }
 }
 
-/// `*pcurr - prev` of NCBI's count functions: an `int` difference added to an `unsigned`.
+/// The difference of two entries in NCBI's count functions: an `int` difference added to an `unsigned`.
 fn gap_diff(to: u16, from: u32) -> u32 {
     u32::from(to).wrapping_sub(from)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:3097-3150 (`gap_bit_count_unr`; the
+// BitMagic 8.0.1: bmfunc.h:3097-3150 (`gap_bit_count_unr`; the
 // scalar build's unrolled loop adds the same differences as its last loop), bmsse_util.h:1070-1091
 // (`sse2_gap_sum_arr`, the SSE2 and SSE4.2 builds above 18 entries)
-// ```c++
-//     unsigned dsize = (*pcurr >> 3);
-//     unsigned cnt = 0;
-//     pcurr = buf + 1; // set up start position
-//     T first_one = *buf & 1;
-//     if (first_one)
-//     {
-//         cnt += *pcurr + 1;
-//         ++pcurr;
-//     }
-//     ++pcurr;  // set GAP to 1
-//     #elif defined(BMSSE42OPT) || defined(BMSSE2OPT)
-//     if (dsize > 18)
-//     {
-//         const unsigned unr_factor = 16;
-//         unsigned waves = (dsize - 2) / unr_factor;
-//         pcurr = sse2_gap_sum_arr(pcurr, waves, &cnt);
-//     }
-//     ...
-//     const T* pend = buf + dsize;
-//     for ( ; pcurr <= pend ; pcurr+=2)
-//         cnt += *pcurr - *(pcurr - 1);
-// ```
 /// `gap_bit_count_unr(buf)` of the scalar build (`sse` false) or of the SSE2 and SSE4.2 builds,
 /// whose 16-bit lanes add the differences of 16 entries a wave modulo 2^16 in four sums.
 fn gap_count_unr(gap: &[u16], sse: bool) -> Result<u32, Fail> {
@@ -1822,22 +1661,7 @@ fn gap_count(gap: &[u16], build: Build) -> Result<u32, Fail> {
     gap_count_unr(gap, build != Build::Scalar)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:3163-3200 (`gap_bit_count_range`)
-// ```c++
-//     unsigned start_pos = bm::gap_bfind(buf, left, &is_set);
-//     is_set = ~(is_set - 1u); // 0xFFF.. if true (mask for branchless code)
-//     const T* pcurr = buf + start_pos;
-//     if (right <= *pcurr) // we are in the target gap right now
-//         bits_counter = unsigned(right - left + 1u) & is_set;
-//     else
-//     {
-//         bits_counter = unsigned(*pcurr - left + 1u) & is_set;
-//         ...
-//             for (prev_gap = *pcurr++; right > *pcurr; prev_gap = *pcurr++)
-//                 bits_counter += (is_set ^= ~0u) & (*pcurr - prev_gap);
-//             bits_counter += unsigned(right - prev_gap) & (is_set ^ ~0u);
-//     }
-// ```
+// BitMagic 8.0.1: bmfunc.h:3163-3200 (`gap_bit_count_range`)
 /// `gap_bit_count_range(buf, left, right)` of `build` (its `gap_bfind`).
 fn gap_count_range(gap: &[u16], left: u32, right: u32, build: Build) -> Result<u32, Fail> {
     let mut p = gap_bfind(gap, left, build)?;
@@ -1860,28 +1684,8 @@ fn gap_count_range(gap: &[u16], left: u32, right: u32, build: Build) -> Result<u
     Ok(count.wrapping_add(right.wrapping_sub(prev) & !mask))
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:3488-3517 (`gap_bit_count_to`, the
+// BitMagic 8.0.1: bmfunc.h:3488-3517 (`gap_bit_count_to`, the
 // same in every build)
-// ```c++
-//     unsigned is_set = ~((unsigned(*buf) & 1u) - 1u); // 0xFFF.. if true (mask for branchless code)
-//     const T* pcurr = buf + 1;
-//     if (right <= *pcurr) // we are in the target block right now
-//     {
-//         bits_counter = (right + 1u) & is_set; // & is_set == if (is_set)
-//     }
-//     else
-//     {
-//         bits_counter = (*pcurr + 1u) & is_set;
-//         prev_gap = *pcurr++;
-//         for (is_set ^= ~0u; right > *pcurr; is_set ^= ~0u, prev_gap = *pcurr++)
-//         {
-//             bits_counter += (*pcurr - prev_gap) & is_set;
-//             if (*pcurr == bm::gap_max_bits-1)
-//                 goto cret;
-//         }
-//         bits_counter += (right - prev_gap) & is_set;
-//     }
-// ```
 /// `gap_bit_count_to(buf, right)`.
 fn gap_count_to(gap: &[u16], right: u32) -> Result<u32, Fail> {
     gap_len(gap)?;
@@ -1905,50 +1709,7 @@ fn gap_count_to(gap: &[u16], right: u32) -> Result<u32, Fail> {
     Ok(count.wrapping_add(right.wrapping_sub(prev) & mask))
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:4393-4438 (`gap_set_array`)
-// ```c++
-//     *buf = (T)((*buf & 6u) + (1u << 3)); // gap header setup
-//     T* pcurr = buf + 1;
-//     unsigned i = 0;
-//     T curr = arr[i];
-//     if (curr != 0) // need to add the first gap: (0 to arr[0]-1)
-//     {
-//         *pcurr = (T)(curr - 1);
-//         ++pcurr;
-//     }
-//     else
-//     {
-//         ++(*buf); // GAP starts with 1
-//     }
-//     T prev = curr;
-//     T acc = prev;
-//     for (i = 1; i < len; ++i)
-//     {
-//         curr = arr[i];
-//         if (curr == prev + 1)
-//         {
-//             ++acc;
-//             prev = curr;
-//         }
-//         else
-//         {
-//             *pcurr++ = acc;
-//             acc = curr;
-//             *pcurr++ = (T)(curr-1);
-//         }
-//         prev = curr;
-//     }
-//     *pcurr = acc;
-//     if (acc != bm::gap_max_bits - 1)
-//     {
-//         ++pcurr;
-//         *pcurr = bm::gap_max_bits - 1;
-//     }
-//     unsigned gap_len = unsigned(pcurr - buf);
-//     BM_ASSERT(gap_len == ((gap_len << 3) >> 3));
-//     *buf = (T)((*buf & 7) + (gap_len << 3));
-//     return gap_len+1;
-// ```
+// BitMagic 8.0.1: bmfunc.h:4393-4438 (`gap_set_array`)
 /// `gap_set_array(gap, ids, len)` after `gap[0] = 0` (ids in any order; `arr[0]` is read also
 /// for `len` 0, so `ids` holds at least one): the GAP's last index, whose header keeps its low 13
 /// bits.
@@ -1990,49 +1751,7 @@ fn gap_set_array(gap: &mut Arr, ids: &[u16]) -> Result<usize, Fail> {
     Ok(at)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:4153-4205 (`gap_add_value`)
-// ```c++
-//     T end = (T)(*buf >> 3);
-//     T curr = end;
-//     T* pcurr = buf + end;
-//     T* pend  = pcurr;
-//     T* pprev = pcurr - 1;
-//     if (!pos)
-//     {
-//         *buf ^= 1;
-//         if ( buf[1] ) // We need to insert a 1 bit platform here.
-//         {
-//             ::memmove(&buf[2], &buf[1], (end - 1) * sizeof(gap_word_t));
-//             buf[1] = 0;
-//             ++end;
-//         }
-//         else // Only 1 bit in the GAP. We need to delete the first GAP.
-//         {
-//             pprev = buf + 1; pcurr = pprev + 1;
-//             --end;
-//             do { *pprev++ = *pcurr++; } while (pcurr < pend);
-//         }
-//     }
-//     else if (((unsigned)(*pprev))+1 == pos && (curr > 1) ) // Left border bit
-//     {
-//        ++(*pprev);
-//        if (*pprev == *pcurr)  // Curr. GAP to be merged with prev.GAP.
-//             --end;
-//     }
-//     else if (*pcurr == pos) // Rightmost bit in the GAP. Border goes left.
-//     {
-//         --(*pcurr);
-//         end += (pcurr == pend);
-//     }
-//     else  // Worst case we need to split current block.
-//     {
-//         pcurr[0] = (T)(pos-1);
-//         pcurr[1] = (T)pos;
-//         end = (T)(end+2);
-//     }
-//     *buf = (T)((*buf & 7) + (end << 3));
-//     buf[end] = bm::gap_max_bits - 1;
-// ```
+// BitMagic 8.0.1: bmfunc.h:4153-4205 (`gap_add_value`)
 /// `gap_add_value(gap, pos)`, step by step on `gap_temp_block_`: any order of ids, a header that
 /// wraps (`end` is a `gap_word_t`). With `end` 0, the `memmove` of `end - 1` entries and the read
 /// of `*pprev` before the array are undefined: refused.
@@ -2075,66 +1794,8 @@ fn gap_add_value(gap: &mut Arr, pos: u16) -> Result<(), Fail> {
     gap.set(usize::from(end), 65535)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:4075-4140 (`gap_set_value`; the
+// BitMagic 8.0.1: bmfunc.h:4075-4140 (`gap_set_value`; the
 // four-argument form of 4048-4058 runs `gap_set_value_cpos`, 3962-4038, the same steps)
-// ```c++
-//     unsigned is_set;
-//     unsigned curr = bm::gap_bfind(buf, pos, &is_set);
-//     T end = (T) (*buf >> 3);
-//     if (is_set == val)
-//         return end;
-//     T* pcurr = buf + curr;
-//     T* pprev = pcurr - 1;
-//     T* pend = buf + end;
-//     if (!pos)
-//     {
-//         *buf ^= 1;
-//         if (buf[1]) // We need to insert a 1 bit GAP here
-//         {
-//             ::memmove(&buf[2], &buf[1], (end - 1) * sizeof(gap_word_t));
-//             buf[1] = 0;
-//             ++end;
-//         }
-//         else // Only 1 bit in the GAP. We need to delete the first GAP.
-//         {
-//             pprev = buf + 1; pcurr = pprev + 1;
-//             goto copy_gaps;
-//         }
-//     }
-//     else
-//     if (curr > 1 && ((unsigned)(*pprev))+1 == pos) // Left border bit
-//     {
-//        ++(*pprev);
-//        if (*pprev == *pcurr)  // Curr. GAP to be merged with prev.GAP.
-//        {
-//             --end;
-//             if (pcurr != pend) // GAP merge: 2 GAPS to be deleted
-//             {
-//                 ++pcurr;
-//                 copy_gaps:
-//                 --end;
-//                 do { *pprev++ = *pcurr++; } while (pcurr < pend);
-//             }
-//        }
-//     }
-//     else
-//     if (*pcurr == pos) // Rightmost bit in the GAP. Border goes left.
-//     {
-//         --(*pcurr);
-//         end += (pcurr == pend);
-//     }
-//     else  // Worst case: split current GAP
-//     {
-//         if (*pcurr != bm::gap_max_bits-1) // last gap does not need memmove
-//             ::memmove(pcurr+2, pcurr, (end - curr + 1)*(sizeof(T)));
-//         end += 2;
-//         pcurr[0] = (T)(pos-1);
-//         pcurr[1] = (T)pos;
-//     }
-//     *buf = (T)((*buf & 7) + (end << 3));
-//     buf[end] = bm::gap_max_bits-1;
-//     return end;
-// ```
 /// `gap_set_value(val, buf, pos)` after `gap_bfind` found the entry `curr`: any GAP block, a
 /// header that wraps (`end` is a `gap_word_t`). A `memmove` whose count wraps (`end - 1` with
 /// `end` 0, `end - curr + 1` with `curr` past `end + 1`) runs past the buffer: refused.
@@ -2254,7 +1915,7 @@ fn gap_set_value(
     Ok(end)
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:3000-3034 (`gap_restore_mins`)
+// BitMagic 8.0.1: bmfunc.h:3000-3034 (`gap_restore_mins`)
 fn gap_restore_mins(gap: &mut [u16], min0: u16, min1: u16) {
     let len = usize::from(gap[0] >> 3);
     gap[1] = gap[1].wrapping_add(min0);
@@ -2412,7 +2073,7 @@ impl Store {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:4646-4672 (`set_bit_no_check`),
+    // BitMagic 8.0.1: bm.h:4646-4672 (`set_bit_no_check`),
     // bmblocks.h:1076-1118 (`check_allocate_block`: a null block becomes the empty GAP block of
     // `gap_set_all`), bm.h:2119-2132 (`gap_block_set_no_ret`: `gap_set_value`, then above the
     // level's limit `extend_gap_block`, bmblocks.h:1810-1836)
@@ -2425,8 +2086,8 @@ impl Store {
         let slot = self.slot(nb);
         let Some(Slot::Gap(gap, valid)) = slot else {
             match slot {
-                // `gap_set_all(allocate_gap_block(0), gap_max_bits, 0)` (level 0, one run of 0s),
-                // in which `gap_set_value` makes the run of the one bit: `[head, p - 1, p, 65535]`
+                // an all-zero GAP block of level 0 (`gap_set_all`, one run of 0s), in which
+                // `gap_set_value` makes the run of the one bit: `[head, p - 1, p, 65535]`
                 // or the forms of p = 0 and p = 65535, far below level 0's limit
                 None => *slot = Some(Slot::Gap(gap_of_runs(&[(p, p)]), true)),
                 Some(Slot::Poison(rule)) => return Err(refuse(*rule)),
@@ -2456,7 +2117,7 @@ impl Store {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmblocks.h:602-643
+    // BitMagic 8.0.1: bmblocks.h:602-643
     // (`set_block_all_set`: the block is freed unread)
     fn set_block_all_set(&mut self, nb: u32) {
         if !matches!(self.lanes[(nb >> 8) as usize & 255], Lane::Full) {
@@ -2464,7 +2125,7 @@ impl Store {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmblocks.h:644-702 (`set_all_set`: a
+    // BitMagic 8.0.1: bmblocks.h:644-702 (`set_all_set`: a
     // whole sub-array becomes `FULL_BLOCK_FAKE_ADDR` at once, or each of its blocks full)
     /// `set_all_set(nb, nb_to)`: blocks `nb..=nb_to` full.
     fn set_all_set(&mut self, nb: u32, nb_to: u32) {
@@ -2498,43 +2159,7 @@ impl Store {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:7835-7905 (`set_range_no_check`)
-    // ```c++
-    //     if ((nbit_left == 0) && (r == bm::bits_in_block - 1)) // full block
-    //     {
-    //         nb = nblock_left;
-    //     }
-    //     else
-    //     {
-    //         gap_init_range_block<gap_word_t>(tmp_gap_blk,
-    //                                          (gap_word_t)nbit_left,
-    //                                          (gap_word_t)r,
-    //                                          (gap_word_t)1);
-    //         ...
-    //         combine_operation_with_block(nblock_left,
-    //             BM_IS_GAP(block),
-    //             block,
-    //             (bm::word_t*) tmp_gap_blk,
-    //             1, BM_OR);
-    //
-    //         if (nblock_left == nblock_right)  // in one block
-    //             return;
-    //         nb = nblock_left+1;
-    //     }
-    //     block_idx_type nb_to = nblock_right + (nbit_right ==(bm::bits_in_block-1));
-    //     if (nb < nb_to)
-    //     {
-    //         blockman_.set_all_set(nb, nb_to-1);
-    //     }
-    //     if (nb_to > nblock_right)
-    //         return;
-    //     ...
-    //     gap_init_range_block<gap_word_t>(tmp_gap_blk,
-    //                                      (gap_word_t)0,
-    //                                      (gap_word_t)nbit_right,
-    //                                      (gap_word_t)1);
-    //     combine_operation_with_block(nblock_right, ...);
-    // ```
+    // BitMagic 8.0.1: bm.h:7835-7905 (`set_range_no_check`)
     /// `set_range_no_check(left, right)`, `left <= right`.
     fn set_range(&mut self, left: u32, right: u32) -> Result<(), Fail> {
         let (nb_left, nb_right) = (left >> 16, right >> 16);
@@ -2564,56 +2189,8 @@ impl Store {
         self.or_gap(nb_right, &gap_of_runs(&[(0, nbit_right)]), false)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:7286-7360
+    // BitMagic 8.0.1: bm.h:7286-7360
     // (`combine_operation_block_or`), :7658-7833 (`combine_operation_with_block`, `BM_OR`)
-    // ```c++
-    //     if (IS_FULL_BLOCK(blk) || !arg_blk) // all bits are set
-    //         return; // nothing to do
-    //     ...
-    //     if (BM_IS_GAP(blk)) // our block GAP-type
-    //     {
-    //         bm::gap_word_t* gap_blk = BMGAP_PTR(blk);
-    //         if (BM_IS_GAP(arg_blk))  // both blocks GAP-type
-    //         {
-    //             const bm::gap_word_t* res; unsigned res_len;
-    //             res = bm::gap_operation_or(gap_blk, BMGAP_PTR(arg_blk),
-    //                                        tmp_buf, res_len);
-    //             blockman_.assign_gap_check(i, j, res, res_len, blk, tmp_buf);
-    //             return;
-    //         }
-    //         // GAP or BIT
-    //         //
-    //         bm::word_t* new_blk = blockman_.get_allocator().alloc_bit_block();
-    //         bm::bit_block_copy(new_blk, arg_blk);
-    //         bm::gap_add_to_bitset(new_blk, gap_blk);
-    //         ...
-    //     }
-    //     else // our block is BITSET-type (but NOT FULL_BLOCK we checked it)
-    //     {
-    //         if (BM_IS_GAP(arg_blk)) // argument block is GAP-type
-    //         {
-    //             const bm::gap_word_t* arg_gap = BMGAP_PTR(arg_blk);
-    //             if (!blk)
-    //             {
-    //                 bool gap = true;
-    //                 blk = blockman_.clone_gap_block(arg_gap, gap);
-    //                 blockman_.set_block(i, j, blk, gap);
-    //                 return;
-    //             }
-    //             // BIT & GAP
-    //             bm::gap_add_to_bitset(blk, arg_gap);
-    //             return;
-    //         } // if arg_gap
-    //     }
-    //     ...
-    //     bool all_one = bm::bit_block_or(blk, arg_blk);
-    //     if (all_one)
-    //     {
-    //         BM_ASSERT(bm::is_bits_one((bm::wordop_t*) blk));
-    //         blockman_.get_allocator().free_bit_block(blk);
-    //         blockman_.set_block_ptr(i, j, FULL_BLOCK_FAKE_ADDR);
-    //     }
-    // ```
     /// ORs the GAP block `arg` (the entries NCBI wrote) into block `nb`: `block_or`
     /// (`combine_operation_block_or`, which makes a GAP result of all ones the full block), or
     /// `combine_operation_with_block` (whose only GAP arguments here are `set_range`'s ranges).
@@ -2670,7 +2247,7 @@ impl Store {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:5326-5334, 5476-5492
+    // BitMagic 8.0.1: bmserial.h:5326-5334, 5476-5492
     // (`decode_bit_block`, `decode_arrbit`), bmblocks.h:1574-1625 (`deoptimize_block`)
     /// The block that a bit form decodes into: a null block becomes an empty bitmap and a GAP
     /// block a bitmap; true for the full block, which stays (NCBI then decodes without writing).
@@ -2918,7 +2495,7 @@ impl Arr {
         Ok(())
     }
 
-    /// `memmove(&v[dest], &v[src.start], src.len())`: the copies of written entries are written,
+    /// A `memmove` within the entries: the copies of written entries are written,
     /// those of entries past the written prefix are not; a copy past the prefix leaves it.
     fn copy_within(&mut self, src: std::ops::Range<usize>, dest: usize) -> Result<(), Fail> {
         let len = src.len();
@@ -2995,7 +2572,7 @@ const HM_NO_GAPL: u8 = 1 << 4;
 const HM_64_BIT: u8 = 1 << 5;
 
 impl Decoder<'_> {
-    /// `size_ = new_size` when a set bit or a range reaches past the size (`bvector<>::set_bit`,
+    /// The size grows when a set bit or a range reaches past the size (`bvector<>::set_bit`,
     /// `set_range`: bm.h:2380-2384, 4232-4236).
     fn grow(&mut self, last: u32) {
         if last >= self.size {
@@ -3003,26 +2580,10 @@ impl Decoder<'_> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:4085-4125 (the free
+    // BitMagic 8.0.1: bmserial.h:4085-4125 (the free
     // `deserialize`: the byte-order byte picks the decoder), :5508-5991
-    // (`deserializer::deserialize`), quoted in parts below.
+    // (`deserializer::deserialize`).
     fn run(&mut self) -> Result<usize, Fail> {
-        // ```c++
-        //     bm::decoder dec(buf);
-        //     unsigned char header_flag = dec.get_8();
-        //     ByteOrder bo = bo_current;
-        //     if (!(header_flag & BM_HM_NO_BO))
-        //     {
-        //         bo = (bm::ByteOrder) dec.get_8();
-        //     }
-        //     if (bo_current == bo)
-        //     {
-        //         deserializer<BV, bm::decoder> deserial;
-        //     ...
-        //     case LittleEndian:
-        //         {
-        //         deserializer<BV, bm::decoder_little_endian> deserial;
-        // ```
         let flag = self.bytes.u8()?;
         if flag & HM_NO_BO == 0 {
             self.bytes.beq = self.bytes.u8()? != 1;
@@ -3035,26 +2596,7 @@ impl Decoder<'_> {
         if flag & HM_64_BIT != 0 {
             return Err(Fail::Invalid);
         }
-        // ```c++
-        //     if (header_flag & BM_HM_ID_LIST)
-        //     {
-        //         // special case: the next comes plain list of integers
-        //         if (header_flag & BM_HM_RESIZE)
-        //         {
-        //             ...
-        //                 bv_size = dec.get_32();
-        //             if (bv_size > bv.size())
-        //                 bv.resize(bv_size);
-        //         }
-        //         for (unsigned cnt = dec.get_32(); cnt; --cnt)
-        //         {
-        //             bm::id_t idx = dec.get_32();
-        //             bv.set(idx);
-        //         } // for
-        //         // -1 for compatibility with other deserialization branches
-        //         return dec.size()-1;
-        //     }
-        // ```
+        // A header with the id-list flag holds a plain list of ids after an optional new size.
         if flag & HM_ID_LIST != 0 {
             if flag & HM_RESIZE != 0 {
                 let size = self.bytes.u32()?;
@@ -3219,14 +2761,10 @@ impl Decoder<'_> {
         Ok(self.bytes.pos)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:5722-5729
-    // ```c++
-    //                 size_type from = nb_i * bm::gap_max_bits;
-    //                 size_type to = from + full_blocks * bm::gap_max_bits;
-    //                 bv.set_range(from, to-1);
-    // ```
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:2368-2394 (`set_range`: the bounds in
+    // BitMagic 8.0.1: bmserial.h:5722-5729
+    // BitMagic 8.0.1: bm.h:2368-2394 (`set_range`: the bounds in
     // order, the size grows to the right one)
+    // Sets `full_blocks` whole blocks from block `nb` on.
     fn full_blocks(&mut self, nb: u32, full_blocks: u32) -> Result<(), Fail> {
         let from = nb.wrapping_mul(BLOCK_BITS);
         let to = from.wrapping_add(full_blocks.wrapping_mul(BLOCK_BITS));
@@ -3240,28 +2778,8 @@ impl Decoder<'_> {
         self.store.set_range(left, right)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:4671-4698 (`read_0runs_block`)
-    // ```c++
-    //     unsigned char run_type = dec.get_8();
-    //     for (unsigned j = 0; j < bm::set_block_size; run_type = !run_type)
-    //     {
-    //         unsigned run_length = dec.get_16();
-    //         if (run_type)
-    //         {
-    //             unsigned run_end = j + run_length;
-    //             BM_ASSERT(run_end <= bm::set_block_size);
-    //             for (;j < run_end; ++j)
-    //             {
-    //                 unsigned w = dec.get_32();
-    //                 blk[j] = w;
-    //             }
-    //         }
-    //         else
-    //         {
-    //             j += run_length;
-    //         }
-    //     } // for j
-    // ```
+    // BitMagic 8.0.1: bmserial.h:4671-4698 (`read_0runs_block`)
+    // Alternating runs of zero words and of stored words over the block's 2048 words.
     fn zero_runs(&mut self, nb: u32) -> Result<(), Fail> {
         let tmp = &mut self.s.tmp;
         tmp.fill(0);
@@ -3281,31 +2799,12 @@ impl Decoder<'_> {
             }
             ones = !ones;
         }
-        // `combine_operation_with_block(nb_i, temp_block, 0, BM_OR)`
+        // ORed into the block (`combine_operation_with_block`)
         self.store.or_bits(nb, tmp, false)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:5443-5468
+    // BitMagic 8.0.1: bmserial.h:5443-5468
     // (`decode_block_bit_interval`)
-    // ```c++
-    //     unsigned head_idx = dec.get_16();
-    //     unsigned tail_idx = dec.get_16();
-    //     if (!blk)
-    //     {
-    //         ...
-    //         for (unsigned k = 0; k < head_idx; ++k)
-    //             blk[k] = 0;
-    //         dec.get_32(blk + head_idx, tail_idx - head_idx + 1);
-    //         for (unsigned j = tail_idx + 1; j < bm::set_block_size; ++j)
-    //             blk[j] = 0;
-    //     }
-    //     else
-    //     {
-    //         bm::bit_block_set(temp_block_, 0);
-    //         dec.get_32(temp_block_ + head_idx, tail_idx - head_idx + 1);
-    //         bv.combine_operation_with_block(nb, temp_block_, 0, BM_OR);
-    //     }
-    // ```
     /// Token 17. `get_32` moves `tail - head + 1` words (wrapping), the big-endian decoder at
     /// least one; with `tail == head - 1` that one word goes to word `head`, which a null block's
     /// second loop clears again. Refused where the words or a null block's first loop pass the
@@ -3328,19 +2827,11 @@ impl Decoder<'_> {
         self.store.or_bits(nb, tmp, false)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:5154-5317
-    // (`deserialize_gap`), :4744-5034 (`read_gap_block`), :4200-4278 (`read_id_list`); quoted at
-    // each form below. Each form makes a GAP block in `gap_temp_block_` (14 and 15 into a null
+    // BitMagic 8.0.1: bmserial.h:5154-5317
+    // (`deserialize_gap`), :4744-5034 (`read_gap_block`), :4200-4278 (`read_id_list`).
+    // Each form makes a GAP block in `gap_temp_block_` (14 and 15 into a null
     // block: the new block itself), which `combine_operation_block_or` ORs into block `nb`; the id
     // lists of `deserialize_gap` above the last level are converted to bits first.
-    // ```c++
-    //     else
-    //     {
-    //         bm::word_t* tmp_blk = (bm::word_t*)gap_temp_block;
-    //         BMSET_PTRGAP(tmp_blk);
-    //         bv.combine_operation_block_or(i0, j0, blk, tmp_blk);
-    //     }
-    // ```
     fn gap_block(&mut self, token: u8, nb: u32) -> Result<(), Fail> {
         let s = &mut self.s;
         let gap = &mut s.gap;
@@ -3348,23 +2839,7 @@ impl Decoder<'_> {
             14 | 15 => return self.gap_plain(nb),
             61 => return self.gap_v3(nb),
             18 | 21 | 23 | 28 | 29 | 44 | 45 => {
-                // ```c++
-                //         	unsigned arr_len = this->read_id_list(dec, btype, this->id_array_);
-                //             gap_temp_block[0] = 0; // reset unused bits in gap header
-                //             unsigned gap_len =
-                //               bm::gap_set_array(gap_temp_block, this->id_array_, arr_len);
-                //             if (inv_flag)
-                //                 bm::gap_invert(gap_temp_block);
-                //
-                //             BM_ASSERT(gap_len == bm::gap_length(gap_temp_block));
-                //             int level = bm::gap_calc_level(gap_len, bman.glen());
-                //             if (level == -1)  // Too big to be GAP: convert to BIT block
-                //             {
-                //                 bm::gap_convert_to_bitset(temp_block_, gap_temp_block);
-                //                 bv.combine_operation_block_or(i0, j0, blk, temp_block_);
-                //                 return;
-                //             }
-                // ```
+                // An id list (`read_id_list`) of the GAP's 1 bits, made a GAP by `gap_set_array`.
                 // (23 and 29 in `read_gap_block`: the same, inverted, and no conversion.) The level
                 // is of the GAP's length, the conversion of the header's 13 bits of it.
                 let n = read_id_list(&mut self.bytes, token, &mut s.ids)?;
@@ -3380,18 +2855,9 @@ impl Decoder<'_> {
                 }
             }
             24 => {
-                // ```c++
-                //             bm::gap_set_all(dst_block, bm::gap_max_bits, 0);
-                //             gap_word_t len = decoder.get_16();
-                //             for (gap_word_t k = 0; k < len; ++k)
-                //             {
-                //                 gap_word_t bit_idx = decoder.get_16();
-                // 				bm::gap_add_value(dst_block, bit_idx);
-                //             } // for
-                //     ...
-                //         bm::gap_invert(dst_block);
-                // ```
-                // `gap_set_all` keeps the header's level bits, which no step here reads.
+                // The ids of the block's 0 bits, added one by one (`gap_add_value`) to an empty GAP
+                // that is then inverted. `gap_set_all` keeps the header's level bits, which no step
+                // here reads.
                 gap.set(0, (gap.v[0] & 6) + (1 << 3))?;
                 gap.set(1, 65535)?;
                 let n = self.bytes.u16()?;
@@ -3402,23 +2868,8 @@ impl Decoder<'_> {
                 gap.v[0] ^= 1;
             }
             20 => {
-                // ```c++
-                //         unsigned len = (gap_head >> 3);
-                //         --len;
-                //         *dst_block = gap_head;
-                //         gap_word_t* gap_data_ptr = dst_block + 1;
-                //         bit_in_type bin(decoder);
-                //         gap_word_t v = (gap_word_t)bin.gamma();
-                //         gap_word_t gap_sum = *gap_data_ptr = (gap_word_t)(v - 1);
-                //         for (unsigned i = 1; i < len; ++i)
-                //         {
-                //             v = (gap_word_t)bin.gamma();
-                //             gap_sum = (gap_word_t)(gap_sum + v);
-                //             *(++gap_data_ptr) = gap_sum;
-                //         }
-                //         dst_block[len+1] = bm::gap_max_bits - 1;
-                // ```
-                // A length of 0 runs the loop 2^32 - 1 times, past `gap_temp_block_`.
+                // The run ends as Elias gamma coded lengths. A length of 0 runs the loop 2^32 - 1
+                // times, past `gap_temp_block_`.
                 let head = self.bytes.u16()?;
                 let len = usize::from(head >> 3);
                 if len == 0 {
@@ -3436,15 +2887,7 @@ impl Decoder<'_> {
                 gap.wrote(len + 1);
             }
             27 => {
-                // ```c++
-                //         unsigned len = (gap_head >> 3);
-                //         *dst_block = gap_head;
-                //         bm::gap_word_t min_v = decoder.get_16();
-                //         dst_block[1] = min_v;
-                //         bit_in_type bin(decoder);
-                //         bin.bic_decode_u16(&dst_block[2], len-2, min_v, 65535);
-                //         dst_block[len] = bm::gap_max_bits - 1;
-                // ```
+                // A minimum, then the run ends in a binary-interpolative code.
                 let head = self.bytes.u16()?;
                 let len = usize::from(head >> 3);
                 gap.v[0] = head;
@@ -3460,27 +2903,7 @@ impl Decoder<'_> {
                 gap.wrote(len + 1);
             }
             43 => {
-                // ```c++
-                //             unsigned len = (gap_head >> 3);
-                //             bm::gap_word_t min8 = gap_head & bm::h2f_min_v_8bit;
-                //             bm::gap_word_t tail8 = gap_head & bm::h2f_max_v_8bit;
-                //             gap_head &= bm::gap_word_t(~(3 << 1)); // clear the flags
-                //             if (min8)
-                //                 min_v = decoder.get_8();
-                //             else
-                //                 min_v = decoder.get_16();
-                //             if (tail8)
-                //                 max_v = decoder.get_8();
-                //             else
-                //                 max_v = decoder.get_16();
-                //             max_v = bm::gap_word_t(65535 - max_v); // tail correction
-                //             dst_block[0] = gap_head;
-                //             dst_block[1] = min_v;
-                //             bit_in_type bin(decoder);
-                //             bin.bic_decode_u16(&dst_block[2], len-3, min_v, max_v);
-                //             dst_block[len-1] = max_v;
-                //             dst_block[len] = bm::gap_max_bits - 1;
-                // ```
+                // As 27, with the minimum and the tail each in one byte or two (header flags).
                 let head = self.bytes.u16()?;
                 let len = usize::from(head >> 3);
                 let min = if head & 2 != 0 {
@@ -3507,19 +2930,7 @@ impl Decoder<'_> {
                 gap.wrote(len + 1);
             }
             62 => {
-                // ```c++
-                //             gap_head = (bm::gap_word_t) bin.delta16s();
-                //             unsigned len = (gap_head >> 3);
-                //             ...
-                //             min_v = (bm::gap_word_t) ((min8) ? bin.gamma8() : bin.get_16_no());
-                //             max_v = (bm::gap_word_t) ((tail8) ? bin.gamma8() :  bin.get_16_no());
-                //             max_v = bm::gap_word_t(65535 - max_v); // tail correction
-                //             dst_block[0] = gap_head;
-                //             dst_block[1] = min_v;
-                //             bin.bic_decode_u16(&dst_block[2], len-3, min_v, max_v);
-                //             dst_block[len-1] = max_v;
-                //             dst_block[len] = bm::gap_max_bits - 1;
-                // ```
+                // As 43, with an Elias delta header and gamma or 16-bit coded minimum and tail.
                 let mut bin = BitIn::new(&mut self.bytes);
                 let head = bin.delta16s()? as u16;
                 let len = usize::from(head >> 3);
@@ -3542,32 +2953,7 @@ impl Decoder<'_> {
                 gap.wrote(len + 1);
             }
             _ => {
-                // 67
-                // ```c++
-                //         unsigned len = bin.gamma() + 1;
-                //         unsigned start_flag = bin.get_bit();
-                //         unsigned use_gamma = bin.get_bit();
-                //         dst_block[0] = gap_head = bm::gap_word_t((len << 3) | start_flag);
-                //         if (use_gamma)
-                //         {
-                //             dst_block[1] = (bm::gap_word_t) bin.gamma8();
-                //             bm::gap_word_t prev = dst_block[1];
-                //             for( unsigned i = 2; i < len; ++i)
-                //             {
-                //                 unsigned delta = bin.gamma8();
-                //                 dst_block[i] = (bm::gap_word_t)(prev + delta);
-                //                 prev = dst_block[i];
-                //             } // for i
-                //         }
-                //         else
-                //         {
-                //             for(unsigned i = 1; i < len; ++i)
-                //             {
-                //                 dst_block[i] = (bm::gap_word_t) bin.get_16_no();
-                //             } // for i
-                //         }
-                //         dst_block[len] = bm::gap_max_bits - 1;
-                // ```
+                // 67: an Elias gamma length, a start bit and a flag for gamma or 16-bit coded entries.
                 // A length of 0 (a gamma value of 2^32 - 1) writes 65535 into the header; one
                 // above 65535 writes past `gap_temp_block_`. The header keeps the low 13 bits of
                 // the length.
@@ -3598,51 +2984,8 @@ impl Decoder<'_> {
         self.store.or_gap(nb, self.s.gap.written(), true)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:5174-5229 (`deserialize_gap`,
+    // BitMagic 8.0.1: bmserial.h:5174-5229 (`deserialize_gap`,
     // `set_block_gap`, `set_block_gapbit`)
-    // ```c++
-    //         gap_head = (gap_word_t)
-    //             (sizeof(gap_word_t) == 2 ? dec.get_16() : dec.get_32());
-    //         unsigned len = gap_length(&gap_head);
-    //         int level = gap_calc_level(len, bman.glen());
-    //         --len;
-    //         if (level == -1)  // Too big to be GAP: convert to BIT block
-    //         {
-    //             *gap_temp_block = gap_head;
-    //             dec.get_16(gap_temp_block+1, len - 1);
-    //             gap_temp_block[len] = gap_max_bits - 1;
-    //             if (blk == 0)  // block does not exist yet
-    //             {
-    //                 ...
-    //                 gap_convert_to_bitset(blk, gap_temp_block);
-    //             }
-    //             else  // We have some data already here. Apply OR operation.
-    //             {
-    //                 gap_convert_to_bitset(temp_block_,
-    //                                       gap_temp_block);
-    //                 bv.combine_operation_block_or(i0, j0, blk, temp_block_);
-    //             }
-    //             return;
-    //         } // level == -1
-    //         ...
-    //         if (blk == 0)
-    //         {
-    //             ...
-    //             *gap_blk_ptr = gap_head;
-    //             ...
-    //             if (len > 1)
-    //                 dec.get_16(gap_blk + 1, len - 1);
-    //             gap_blk[len] = bm::gap_max_bits - 1;
-    //         }
-    //         else // target block exists
-    //         {
-    //             // read GAP block into a temp memory and perform OR
-    //             *gap_temp_block = gap_head;
-    //             dec.get_16(gap_temp_block + 1, len - 1);
-    //             gap_temp_block[len] = bm::gap_max_bits - 1;
-    //             break;
-    //         }
-    // ```
     /// Tokens 14 and 15. Into a null block the GAP becomes the block (a length of 0 puts 65535 in
     /// the header of a 128-entry block: NCBI cannot read it back). Into a block that exists (the
     /// full block too) it is read into `gap_temp_block_`: a length of 0 reads 2^32 - 1 values,
@@ -3669,7 +3012,7 @@ impl Decoder<'_> {
                 return Ok(());
             }
             let mut block = vec![0; len + 1];
-            // `set_gap_level(&gap_head, level)`: the level of `len + 1` entries (not past 1276)
+            // `set_gap_level`: the level of `len + 1` entries (not past 1276)
             block[0] = with_level(head, gap_calc_level(len + 1).unwrap_or(3));
             if len > 1 {
                 self.bytes.u16s(&mut block[1..], (len - 1) as u32)?;
@@ -3688,70 +3031,8 @@ impl Decoder<'_> {
         self.store.or_gap(nb, self.s.gap.written(), true)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:4844-4934 (the gap_bienc_v3
+    // BitMagic 8.0.1: bmserial.h:4844-4934 (the gap_bienc_v3
     // case of `read_gap_block`), :4701-4739 (`decode_mins`, `decode_min_max`)
-    // ```c++
-    //             unsigned char head_v3 = (unsigned char) bin.get_bits(8);
-    //             gap_head = (bm::gap_word_t) bin.delta16s();
-    //             unsigned len = (gap_head >> 3);
-    //             dst_block[0] = gap_head & bm::gap_word_t(~(3 << 1)); // clear the flags
-    //             unsigned ex0_cnt{0};
-    //             if (head_v3 & bm::h3f_exceptions)
-    //             {
-    //                 if (len < bm::gap_len_cut_off_v3)
-    //                 {
-    //                     if (len > 1)
-    //                     {
-    //                         dst_block[1] = (bm::gap_word_t) bin.delta16s();
-    //                         for (unsigned k = 2; k < len; ++k)
-    //                         {
-    //                             auto delta = bin.delta16s();
-    //                             dst_block[k] = bm::gap_word_t(dst_block[k-1] + delta);
-    //                         } // for k
-    //                     }
-    //                     dst_block[len] = bm::gap_max_bits - 1;
-    //                 }
-    //                 else
-    //                 {
-    //                     bm::decode_min_max(bin, gap_head, head_v3, min_v, max_v);
-    //                     dst_block[1] = min_v;
-    //                     bm::decode_mins(bin, head_v3, min0, min1);
-    //                     bin.bic_decode_u16(&dst_block[2], len-3, min_v+1, max_v);
-    //                     dst_block[len-1] = max_v+1;
-    //                     dst_block[len] = bm::gap_max_bits - 1;
-    //                     bm::gap_restore_mins(dst_block, min0, min1);
-    //                 }
-    //                 unsigned h3f =
-    //                     bin.decode_array(&ex0_arr[0], this->tb_wflags_, &ex0_cnt);
-    //                 bool restore_v = (h3f & bm::h3f_ex_arr_1);
-    //                 for (unsigned k = 0; k < ex0_cnt; ++k)
-    //                     bm::gap_set_value(restore_v, dst_block, ex0_arr[k]);
-    //                 if (h3f & bm::h3f_ex_arr_ex_EOC) // end-of-chain
-    //                 {}
-    //                 else
-    //                 {
-    //                     h3f =
-    //                         bin.decode_array(&ex0_arr[0], this->tb_wflags_, &ex0_cnt);
-    //                     restore_v = (h3f & bm::h3f_ex_arr_1);
-    //                     for (unsigned k = 0; k < ex0_cnt; ++k)
-    //                         bm::gap_set_value(restore_v, dst_block, ex0_arr[k]);
-    //                 }
-    //             } // exceptions
-    //             else
-    //             {
-    //                 // no-exeptions decode
-    //                 {
-    //                     bm::decode_min_max(bin, gap_head, head_v3, min_v, max_v);
-    //                     dst_block[1] = min_v;
-    //                     bm::decode_mins(bin, head_v3, min0,min1);
-    //                     bin.bic_decode_u16(&dst_block[2], len-3, min_v+1, max_v);
-    //                     dst_block[len-1] = max_v+1;
-    //                     dst_block[len] = bm::gap_max_bits - 1;
-    //                 }
-    //                 if (min0 || min1)
-    //                     bm::gap_restore_mins(dst_block, min0, min1);
-    //             }
-    // ```
     /// Token 61. With exceptions, `gap_set_value` sets or clears the GAP block in
     /// `gap_temp_block_` bit by bit, as NCBI's builds do (`gap_set_value`: on a GAP block that is
     /// not one they may differ), then the block is ORed in as the other GAP tokens.
@@ -3834,36 +3115,14 @@ impl Decoder<'_> {
         self.store.or_gap(nb, self.s.gap.written(), true)
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:5319-5386
+    // BitMagic 8.0.1: bmserial.h:5319-5386
     // (`decode_bit_block`), :5470-5504 (`decode_arrbit`), :4280-4418 (`read_bic_arr`),
-    // :4608-4629 (`read_bic_gap`), :4631-4669 (`read_digest0_block`); quoted at each form below.
+    // :4608-4629 (`read_bic_gap`), :4631-4669 (`read_digest0_block`).
     // The forms decode into the block or into `temp_block_`, ORed into the block (the inverted
     // forms invert it first). A null block becomes an empty bitmap and a GAP block a bitmap
     // first; a full block stays, and the forms that would write into it read their data without
     // a write (`IS_VALID_ADDR(blk)` false), except the inverted ones, which make it a bitmap of
     // ones (`deoptimize_block`) and decode into `temp_block_`.
-    // ```c++
-    //     if (!blk)
-    //     {
-    //         blk = bman.get_allocator().alloc_bit_block();
-    //         bman.set_block(nb, blk);
-    //         bm::bit_block_set(blk, 0);
-    //     }
-    //     else
-    //     if (BM_IS_GAP(blk))
-    //         blk = bman.deoptimize_block(nb);
-    //     ...
-    //     case bm::set_block_arr_bienc_inv:
-    //     case bm::set_block_arr_bienc_inv_v3:
-    //     case bm::set_block_arr_bienc_inv_v3s:
-    //         if (IS_FULL_BLOCK(blk))
-    //             blk = bman.deoptimize_block(nb);
-    //         bm::bit_block_set(temp_block_, 0);
-    //         this->read_bic_arr(dec, temp_block_, btype);
-    //         bm::bit_invert(temp_block_);
-    //         bm::bit_block_or(blk, temp_block_);
-    //         break;
-    // ```
     fn bit_block(&mut self, token: u8, nb: u32) -> Result<(), Fail> {
         let full = self.store.bit_target(nb)?;
         let inverted = matches!(token, 30 | 32 | 64 | 66);
@@ -3873,16 +3132,7 @@ impl Decoder<'_> {
         tmp.fill(0);
         match token {
             30 => {
-                // ```c++
-                //     bm::gap_word_t len = dec.get_16();
-                //     ...
-                //     for (unsigned k = 0; k < len; ++k)
-                //     {
-                //         gap_word_t bit_idx = dec.get_16();
-                //         bm::set_bit(blk, bit_idx);
-                //     }
-                // ```
-                // (30: `bit_block_set(temp_block_, ~0u)`, `clear_bit` for each, ORed.)
+                // The ids of the block's 0 bits: all ones, then each id cleared.
                 invert(tmp);
                 let n = self.bytes.u16()?;
                 for _ in 0..n {
@@ -3890,29 +3140,8 @@ impl Decoder<'_> {
                 }
             }
             31 | 32 | 57 => {
-                // ```c++
-                //     case bm::set_block_arr_bienc:
-                //     case bm::set_block_arr_bienc_inv:
-                //         min_v = dec.get_16();
-                //         max_v = dec.get_16();
-                //         break;
-                //     case bm::set_block_arr_bienc_8bh:
-                //         min_v = dec.get_8();
-                //         max_delta = dec.get_8();
-                //         max_v = bm::gap_word_t(65536 - max_delta);
-                //         break;
-                //     ...
-                //     arr_len = dec.get_16();
-                //     bit_in_type bin(dec);
-                //     if (!IS_VALID_ADDR(blk))
-                //     {
-                //         bin.bic_decode_u16_dry(arr_len-2, min_v, max_v);
-                //         return;
-                //     }
-                //     bm::set_bit(blk, min_v);
-                //     bm::set_bit(blk, max_v);
-                //     bin.bic_decode_u16_bitset(blk, arr_len-2, min_v, max_v);
-                // ```
+                // A minimum and a maximum (both set; 57 stores them in bytes), then the ids between
+                // them in a binary-interpolative code (32 is the inverted form).
                 let (min, max) = if token == 57 {
                     let min = u16::from(self.bytes.u8()?);
                     let delta = u32::from(self.bytes.u8()?);
@@ -3934,34 +3163,8 @@ impl Decoder<'_> {
                 )?;
             }
             65 | 66 => {
-                // ```c++
-                //             arr_len = (bm::gap_word_t) bin.delta16s();
-                //             bool need_min_max = bin.get_bits(1);
-                //             if (need_min_max)
-                //             {
-                //                 min_v = (bm::gap_word_t) bin.delta16s();
-                //                 arr_len -= 2;
-                //                 max_delta = (bm::gap_word_t) bin.delta16s();
-                //                 max_v = bm::gap_word_t(65536 - max_delta);
-                //                 if (IS_VALID_ADDR(blk))
-                //                 {
-                //                     bm::set_bit(tblk, min_v); bm::set_bit(tblk, max_v);
-                //                 }
-                //                 min_v++; max_v--;
-                //             }
-                //             else
-                //             {
-                //                 min_v = 0; max_v = 65535;
-                //             }
-                //             if (IS_VALID_ADDR(blk))
-                //             {
-                //                 bin.bic_decode_u16_bitset(tblk, arr_len, min_v, max_v);
-                //             }
-                //             else
-                //             {
-                //                 bin.bic_decode_u16_dry(arr_len, min_v, max_v);
-                //             }
-                // ```
+                // As 31 and 32 with Elias delta coded count and ends (66 inverted); the ends are
+                // optional.
                 let mut bin = BitIn::new(&mut self.bytes);
                 let mut arr_len = bin.delta16s()? as u16;
                 let (mut min, mut max) = (0u16, 65535u16);
@@ -3980,35 +3183,12 @@ impl Decoder<'_> {
                 bin.bic_u16_bitset(tmp, u32::from(arr_len), min, max, dry)?;
             }
             63 | 64 => {
-                // ```c++
-                //             unsigned h3f =
-                //                 bin.decode_array(arr_s, this->tb_wflags_, &s_cnt);
-                //             if (IS_VALID_ADDR(blk))
-                //                 bm::bit_block_rle_set(blk, arr_s,
-                //                         (bm::gap_word_t*)0, (bm::gap_word_t*)0, s_cnt, 0u);
-                //             if (bool no_gap_EOC = !(h3f & bm::h3f_ex_arr_ex_EOC); no_gap_EOC)
-                //             {
-                //                 ...
-                //                 h3f =
-                //                     bin.decode_array(arr_r, this->tb_wflags_, &r_cnt);
-                //                 h3f =
-                //                     bin.decode_array(arr_rl, this->tb_wflags_, &s_cnt, r_cnt);
-                //                 if (IS_VALID_ADDR(blk))
-                //                 {
-                //                     if ((h3f & bm::h3f_ex_upper2) == 1u) // BIC coder used
-                //                     {
-                //                         for (unsigned i = 0; i < r_cnt; ++i)
-                //                             arr_rl[i] -= arr_r[i];
-                //                     }
-                //                     bm::bit_block_rle_set(
-                //                         blk, (bm::gap_word_t*)0, arr_r, arr_rl, 0, r_cnt);
-                //                 } // if VALID(blk)
-                //             }
-                // ```
-                // NCBI reference (598d8ae6): c++/include/util/bitset/bmfunc.h:10069-10084
-                // (`bit_block_rle_set`: `or_bit_block(blk, r[i], rlen[i]+1)`, past the block when
+                // A list of single bits, then (unless its end flag is set) runs given by their
+                // starts and lengths (64 inverted).
+                // BitMagic 8.0.1: bmfunc.h:10069-10084
+                // (`bit_block_rle_set`: each run is ORed with `or_bit_block`, past the block when
                 // the run passes bit 65535)
-                // The run lengths are `arr_rl[0..r_cnt]`, which the third array may not have
+                // The `r_cnt` run lengths, which the third array may not have
                 // written (its own count is 0 or 1 for a single value): entries of an earlier
                 // token, or memory NCBI did not write. NCBI writes the lengths back into
                 // `ex1_arr_`.
@@ -4040,19 +3220,8 @@ impl Decoder<'_> {
                 }
             }
             33 => {
-                // ```c++
-                //     bm::gap_word_t head = dec.get_8();
-                //     unsigned arr_len = dec.get_16();
-                //     bm::gap_word_t min_v = dec.get_16();
-                //     id_array_[0] = head;
-                //     id_array_[1] = min_v;
-                //     id_array_[arr_len] = 65535;
-                //     bit_in_type bin(dec);
-                //     bin.bic_decode_u16(&id_array_[2], arr_len-2, min_v, 65535);
-                //     if (!IS_VALID_ADDR(blk))
-                //         return;
-                //     bm::gap_add_to_bitset(blk, id_array_, arr_len);
-                // ```
+                // A minimum, then the ids in a binary-interpolative code as the entries of a GAP
+                // that `gap_add_to_bitset` ORs in.
                 let head = u16::from(self.bytes.u8()?);
                 let arr_len = usize::from(self.bytes.u16()?);
                 let min = self.bytes.u16()?;
@@ -4072,23 +3241,7 @@ impl Decoder<'_> {
                 }
             }
             _ => {
-                // 34
-                // ```c++
-                //     bm::id64_t d0 = dec.get_64();
-                //     while (d0)
-                //     {
-                //         bm::id64_t t = bm::bmi_blsi_u64(d0); // d & -d;
-                //         unsigned wave = bm::word_bitcount64(t - 1);
-                //         unsigned off = wave * bm::set_block_digest_wave_size;
-                //         ...
-                //                 block[off+j+0] |= dec.get_32();
-                //                 block[off+j+1] |= dec.get_32();
-                //                 block[off+j+2] |= dec.get_32();
-                //                 block[off+j+3] |= dec.get_32();
-                //         ...
-                //         d0 = bm::bmi_bslr_u64(d0); // d &= d - 1;
-                //     } // while
-                // ```
+                // 34: a 64-bit digest of the waves of 32 words that are stored, then those words.
                 let mut d0 = self.bytes.u64()?;
                 while d0 != 0 {
                     let wave = d0.trailing_zeros() as usize;
@@ -4106,34 +3259,8 @@ impl Decoder<'_> {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:5470-5504 (`decode_arrbit`)
-    // ```c++
-    //     bm::gap_word_t len = dec.get_16();
-    //     if (BM_IS_GAP(blk))
-    //     {
-    //         blk = bman.deoptimize_block(nb);
-    //     }
-    //     else
-    //     {
-    //         if (!blk)  // block does not exists yet
-    //         {
-    //             ...
-    //         }
-    //         else
-    //             if (IS_FULL_BLOCK(blk)) // nothing to do
-    //             {
-    //                 for (unsigned k = 0; k < len; ++k) // dry read
-    //                     dec.get_16();
-    //                 return;
-    //             }
-    //     }
-    //     for (unsigned k = 0; k < len; ++k)
-    //     {
-    //         gap_word_t bit_idx = dec.get_16();
-    //         bm::set_bit(blk, bit_idx);
-    //     }
-    // ```
-    /// Token 16.
+    // BitMagic 8.0.1: bmserial.h:5470-5504 (`decode_arrbit`)
+    /// Token 16: a list of ids, set in the block (read and dropped for a full block).
     fn arr_bit(&mut self, nb: u32) -> Result<(), Fail> {
         let n = self.bytes.u16()?;
         let full = self.store.bit_target(nb)?;
@@ -4148,62 +3275,11 @@ impl Decoder<'_> {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:5388-5420
-    // (`decode_arr_sblock`: `set_bit_no_check(sb * 2^24 + arr[i])`, which leaves the size),
+    // BitMagic 8.0.1: bmserial.h:5388-5420
+    // (`decode_arr_sblock`: `set_bit_no_check` of each id of the super-block, which leaves the size),
     // :4420-4593 (`read_bic_sb_arr`)
-    // ```c++
-    //     case bm::set_sblock_bienc:
-    //         {
-    //             sb_flag = dec.get_8();
-    //             if (sb_flag & bm::sblock_flag_sb32)
-    //                 *sb_idx = dec.get_32();
-    //             else if (sb_flag & bm::sblock_flag_sb16)
-    //                 *sb_idx = dec.get_16();
-    //             else
-    //                 *sb_idx = dec.get_8();
-    //             if (sb_flag & bm::sblock_flag_len16)
-    //                 len = dec.get_16();
-    //             else
-    //                 len = dec.get_8();
-    //             if (!len) // there is a known issue in older version which could produce this
-    //             {
-    //                     throw std::logic_error(err_msg());
-    //             }
-    //             ... (min_v, max_v by the flags; max_v = bm::set_sub_total_bits - max_v)
-    //             unsigned min0 = 0;
-    //             if (sb_flag & bm::sblock_flag_dr_min)
-    //             {
-    //                 bool use_gamma = bin.get_bit();
-    //                 if (use_gamma)
-    //                     min0 = bin.gamma();
-    //                 else
-    //                     min0 = bin.get_16_no();
-    //             }
-    //             dst_arr[0] = min_v;
-    //             dst_arr[len-1] = max_v;
-    //             bin.bic_decode_u32_cm(&dst_arr[1], len-2, min_v, max_v);
-    //             if (min0)
-    //             {
-    //                 bm::arr_restore_min(&dst_arr[0], len, min0);
-    //             }
-    //         }
-    //         break;
-    //     case bm::set_sblock_bienc_v3:
-    //         {
-    //             sb_flag = bin.get_bits(8);
-    //             len = (sb_flag & bm::sblock_flag_len16) ?
-    //                             bin.delta16():
-    //                             bin.get_bits(8);
-    //             ... (min_v, max_v, min0 by the flags, then the super-block's index)
-    //             dst_arr[0] = min_v;
-    //             dst_arr[len-1] = max_v;
-    //             bin.bic_decode_u32_cm(&dst_arr[1], len-2, min_v+1, max_v-1);
-    //             if (min0)
-    //             {
-    //                 bm::arr_restore_min(&dst_arr[0], len, min0);
-    //             }
-    //         }
-    // ```
+    // A super-block (2^24 bits): its index and an array of ids in a binary-interpolative code,
+    // each set as a bit.
     fn super_block(&mut self, token: u8) -> Result<(), Fail> {
         const SUB_TOTAL_BITS: u32 = 1 << 24;
         let arr = &mut self.s.sb[..];
@@ -4286,7 +3362,7 @@ impl Decoder<'_> {
                 bin.get_bits(8)?
             };
         }
-        // `dst_arr[len-1]` with `len` 0 (68) writes 2^32 - 1 entries away.
+        // The last entry's index `len - 1` with `len` 0 (68) writes 2^32 - 1 entries away.
         let last = (len as usize)
             .checked_sub(1)
             .filter(|&last| last < arr.len())
@@ -4312,60 +3388,7 @@ impl Decoder<'_> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/include/util/bitset/bmserial.h:4200-4278 (`read_id_list`)
-// ```c++
-//     case set_block_arrgap:
-//     case set_block_arrgap_inv:
-//         len = decoder.get_16();
-//         decoder.get_16(dst_arr, len);
-// 		break;
-//     case set_block_arrgap_egamma:
-//     case set_block_arrgap_egamma_inv:
-//         {
-//             bit_in_type bin(decoder);
-//             len = (gap_word_t)bin.gamma();
-//             gap_word_t prev = 0;
-//             for (gap_word_t k = 0; k < len; ++k)
-//             {
-//                 gap_word_t bit_idx = (gap_word_t)bin.gamma();
-//                 if (k == 0) --bit_idx; // TODO: optimization
-//                 bit_idx = (gap_word_t)(bit_idx + prev);
-//                 prev = bit_idx;
-// 				dst_arr[k] = bit_idx;
-//             } // for
-//         }
-//         break;
-//     case set_block_arrgap_bienc:
-//     case set_block_arrgap_bienc_inv:
-//         {
-//         min_v = decoder.get_16();
-//         max_v = decoder.get_16();
-//         bit_in_type bin(decoder);
-//         len = bm::gap_word_t(bin.gamma() + 4);
-//         dst_arr[0] = min_v;
-//         dst_arr[len-1] = max_v;
-//         bin.bic_decode_u16(&dst_arr[1], len-2, min_v, max_v);
-//         break;
-//         }
-//     case set_block_arrgap_bienc_v2:
-//     case set_block_arrgap_bienc_inv_v2:
-//         {
-//         len = decoder.get_16();
-//         min_v = (len & 1) ?
-//               decoder.get_8()
-//             : decoder.get_16();
-//         max_v = (len & (1<<1)) ?
-//               decoder.get_8()
-//             : decoder.get_16();
-//         max_v = bm::gap_word_t(min_v + max_v);
-//         len = bm::gap_word_t(len >> 2);
-//         bit_in_type bin(decoder);
-//         dst_arr[0] = min_v;
-//         dst_arr[len-1] = max_v;
-//         bin.bic_decode_u16(&dst_arr[1], len-2, min_v, max_v);
-//         break;
-//         }
-// ```
+// BitMagic 8.0.1: bmserial.h:4200-4278 (`read_id_list`)
 /// `read_id_list(decoder, token, ids)`: the ids' count. The big-endian `get_16` of token 18
 /// writes `ids[0]` also for a count of 0.
 fn read_id_list(bytes: &mut Bytes<'_>, token: u8, ids: &mut Arr) -> Result<usize, Fail> {
@@ -4417,8 +3440,9 @@ fn read_id_list(bytes: &mut Bytes<'_>, token: u8, ids: &mut Arr) -> Result<usize
     }
 }
 
-/// `dst_arr[0] = min_v; dst_arr[len-1] = max_v; bin.bic_decode_u16(&dst_arr[1], len-2, min_v,
-/// max_v);` of `read_id_list` (a length of 0 writes before the array).
+/// The tail the binary-interpolative forms of `read_id_list` share: the first and last entries are
+/// the minimum and the maximum, the ones between come from `bic_decode_u16` (a length of 0 writes
+/// before the array).
 fn bic_id_list(
     bin: &mut BitIn<'_, '_>,
     ids: &mut Arr,

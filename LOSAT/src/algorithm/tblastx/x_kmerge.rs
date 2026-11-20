@@ -515,6 +515,7 @@ fn x_merge_one_frame<R: XRecord>(
             hits
         };
         adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
+        let merged = !hits.is_empty();
         if !hits.is_empty() && frame_ungapped_hits.is_empty() {
             frame_ungapped_hits = hits;
         } else if !hits.is_empty() {
@@ -525,6 +526,9 @@ fn x_merge_one_frame<R: XRecord>(
                 chunk.overlap,
             )
             .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
+        }
+        if merged && inp.subject_besthit {
+            frame_subject_besthit(&mut frame_ungapped_hits);
         }
     }
     KM_CHUNKS.fetch_add(chunks_merged, AtomicOrdering::Relaxed);
@@ -693,6 +697,7 @@ mod tests {
                     s_len: 0,
                     failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
                     passed: None,
+                    subject_besthit: false,
                 };
                 let unit = XExpand {
                     f: 0,
@@ -735,6 +740,7 @@ mod tests {
             s_len: 0,
             failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
             passed: None,
+            subject_besthit: false,
         };
         let unit = XExpand {
             f: 0,

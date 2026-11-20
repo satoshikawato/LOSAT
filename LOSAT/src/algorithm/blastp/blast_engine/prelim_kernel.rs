@@ -1475,9 +1475,11 @@ impl BlastpPrelimKernel<'_> {
                 endpoint_duplicates_purged,
             );
         }
-        // The subject's HSP lists per query (`subject_lists`); a hard chunk's HSPs stay in the
-        // list for the merge of the sequence's chunks (`db_masked.rs`).
+        // The subject's HSP lists per query (`subject_lists`) after `-subject_besthit`; a hard
+        // chunk's HSPs stay in the list for the merge of the sequence's chunks, which filters the
+        // joined list after each chunk (`db_masked.rs`).
         if !CHUNK {
+            self.subject_besthit(&mut preliminary_hsp_list);
             self.subject_lists(
                 scratch,
                 s_idx,
@@ -1492,6 +1494,27 @@ impl BlastpPrelimKernel<'_> {
         scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
         scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+    // `-subject_besthit` on the subject's list of every query, sorted by score, after each
+    // chunk's merge: before the e-values and the reap by the preliminary e-value.
+    /// `-subject_besthit`, when the search asks for it, over a subject's HSPs sorted by score
+    /// (`core::blast_hits::subject_besthit`): at the end of `gapped_subject`, and after each hard
+    /// chunk's merge into a masked sequence's list (`db_masked.rs`).
+    #[inline(always)]
+    pub(super) fn subject_besthit(&self, preliminary_hsp_list: &mut Vec<BlastpPreliminaryHsp>) {
+        if self.args.subject_besthit {
+            crate::core::blast_hits::subject_besthit(preliminary_hsp_list, false, |hsp| {
+                crate::core::blast_hits::BestHitExtent {
+                    context: i64::from(hsp.query_context),
+                    query_frame: 0,
+                    offset: i64::from(hsp.query_start),
+                    end: i64::from(hsp.query_end),
+                    query_length: 0,
+                }
+            });
+        }
     }
 
     /// The HSP lists per query of a subject of `subject_len` letters from its HSPs

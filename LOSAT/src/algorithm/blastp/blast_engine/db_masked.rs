@@ -146,7 +146,8 @@ impl BlastpDbMasking<'_> {
 // into the mask after it, so there are none, and the merge appends the chunk's HSPs and sorts
 // the list by score (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766; no limit on the
 // HSPs of a list in the preliminary stage). TBLASTN's and TBLASTX's chunks of a long range
-// overlap; this reason does not carry over.
+// overlap; this reason does not carry over. With `-subject_besthit` the filter then runs on the
+// joined list after every chunk with HSPs (blast_engine.c:586-591, blast_hits.c:2537-2606).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:869-899
 // After the chunks, the E-values of the sequence's HSPs with its whole length and the reap by
 // the preliminary E-value.
@@ -195,6 +196,7 @@ fn hard_chunks(
             None,
         );
         let offset = chunk.offset as i32;
+        let chunk_hits = !scratch.preliminary_hsp_list.is_empty();
         masked
             .hits
             .extend(scratch.preliminary_hsp_list.drain(..).map(|mut hsp| {
@@ -203,6 +205,11 @@ fn hard_chunks(
                 hsp.gapped_subject_start += offset;
                 hsp
             }));
+        if kernel.args.subject_besthit && chunk_hits {
+            // The filter of the joined list after this chunk, in the merge's order.
+            masked.hits.sort_by(preliminary_score_compare);
+            kernel.subject_besthit(&mut masked.hits);
+        }
     }
     // The merge's order: by score, then the subject's offset and end, then the query's (a total
     // order among one query's HSPs, which are split by query below in this order).

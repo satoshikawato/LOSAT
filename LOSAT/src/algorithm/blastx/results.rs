@@ -839,133 +839,27 @@ pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
     usize::try_from(size).unwrap_or(0)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2538-2588
-// ```c++
-// Blast_HSPListSubjectBestHit(EBlastProgramType program,
-// 		                    const BlastHSPSubjectBestHitOptions* subject_besthit_opts,
-// 		                    const BlastQueryInfo *query_info,
-//                             BlastHSPList* hsp_list)
-// {
-//    BlastHSP** hsp_array;  /* hsp_array to purge. */
-//    const int range_diff = subject_besthit_opts->max_range_diff;
-//    Boolean isBlastn = (program == eBlastTypeBlastn);
-//    unsigned int i, j;
-//    int o, e;
-//    int curr_context, target_context;
-//    int qlen;
-//
-//    /* If HSP list is empty, return immediately. */
-//    if (hsp_list == NULL || hsp_list->hspcnt == 0)
-//        return 0;
-//
-//    if (Blast_ProgramIsPhiBlast(program))
-//        return hsp_list->hspcnt;
-//
-//    hsp_array = hsp_list->hsp_array;
-//
-//    // The hsp list is sorted by score
-//    for(i=0; i < hsp_list->hspcnt -1; i++) {
-// 	  if(hsp_array[i] == NULL){
-// 		  continue;
-// 	  }
-//       j = 1;
-//       o = hsp_array[i]->query.offset - range_diff;
-//       e = hsp_array[i]->query.end + range_diff;
-//       if (o < 0) o = 0;
-//       if (e < 0) e = hsp_array[i]->query.end;
-//       while (i+j < hsp_list->hspcnt) {
-//           if (hsp_array[i+j] && hsp_array[i]->context == hsp_array[i+j]->context &&
-//               ((hsp_array[i+j]->query.offset >= o) &&
-//                (hsp_array[i+j]->query.end <= e))){
-//        	      hsp_array[i+j] = Blast_HSPFree(hsp_array[i+j]);
-//           }
-//           j++;
-//       }
-//    }
-//
-//    Blast_HSPListPurgeNullHSPs(hsp_list);
-//
-//    if(isBlastn) {
-// 	   for(i=0; i < hsp_list->hspcnt -1; i++) {
-// 	   	  if(hsp_array[i] == NULL){
-// 	   		  continue;
-// 	   	  }
-// 	   	  // Flip query offsets of current hsp to target context frame
-// 	   	  j = 1;
-// ```
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:1211-1211
-// ```c++
-// #define DEFAULT_SUBJECT_BESTHIT_PROT_MAX_RANGE_DIFF 3
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1960-1973
-// ```c++
-// }
-//
-// BlastHSPSubjectBestHitOptions*
-// BlastHSPSubjectBestHitOptionsNew(Boolean isProtein)
-// {
-//     BlastHSPSubjectBestHitOptions* retval =
-//         (BlastHSPSubjectBestHitOptions*) calloc(1, sizeof(BlastHSPSubjectBestHitOptions));
-//     if(isProtein){
-//         retval->max_range_diff = DEFAULT_SUBJECT_BESTHIT_PROT_MAX_RANGE_DIFF;
-//     }
-//     else {
-//         retval->max_range_diff = DEFAULT_SUBJECT_BESTHIT_NUCL_MAX_RANGE_DIFF;
-//     }
-//     return retval;
-// ```
-pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) -> Vec<Hsp> {
-    let removed = subject_besthit_removed(hsps, |h| &h.hsp);
-    let mut discarded = Vec::new();
-    let mut i = 0;
-    hsps.retain(|h| {
-        let keep = !removed[i];
-        i += 1;
-        if !keep {
-            discarded.push(h.clone());
-        }
-        keep
-    });
-    discarded
+/// `-subject_besthit` over one subject's HSPs of BLASTX (`core::blast_hits::subject_besthit`):
+/// the contexts are the query frames, and the offsets those of the HSP in its frame.
+pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) {
+    crate::core::blast_hits::subject_besthit(hsps, false, |h| best_hit_extent(&h.hsp));
 }
 
 /// `subject_besthit` of a list of preliminary HSPs sorted by score: the list of a sequence with
 /// `-db_hard_mask` after each of its chunks joins it (`search_db_masked.rs`; series NP, M4b).
 pub(crate) fn subject_besthit_preliminary(hsps: &mut Vec<PreliminaryHsp>) {
-    let removed = subject_besthit_removed(hsps, |h| h);
-    let mut i = 0;
-    hsps.retain(|_| {
-        let keep = !removed[i];
-        i += 1;
-        keep
-    });
+    crate::core::blast_hits::subject_besthit(hsps, false, best_hit_extent);
 }
 
-/// Which HSPs of `hsps` (sorted by score; `hsp` gives each one's preliminary HSP) the filter of
-/// `subject_besthit` deletes: one owner of the rule for both lists.
-fn subject_besthit_removed<T>(hsps: &[T], hsp: impl Fn(&T) -> &PreliminaryHsp) -> Vec<bool> {
-    let mut removed = vec![false; hsps.len()];
-    for i in 0..hsps.len().saturating_sub(1) {
-        if removed[i] {
-            continue;
-        }
-        let a = hsp(&hsps[i]);
-        let begin = (a.q_start - 3).max(0);
-        // `if (e < 0) e = hsp_array[i]->query.end;` (blast_hits.c:2569): only the end of an
-        // HSP of length -4 or less near the start of its context (the one-hit word finder with
-        // `-window_size 0`, aa_ungapped.c:1054,1083) lies below -3.
-        let mut end = a.q_end + 3;
-        if end < 0 {
-            end = a.q_end;
-        }
-        for j in i + 1..hsps.len() {
-            let b = hsp(&hsps[j]);
-            if !removed[j] && a.context == b.context && b.q_start >= begin && b.q_end <= end {
-                removed[j] = true;
-            }
-        }
+/// What `-subject_besthit` reads of a BLASTX HSP.
+fn best_hit_extent(hsp: &PreliminaryHsp) -> crate::core::blast_hits::BestHitExtent {
+    crate::core::blast_hits::BestHitExtent {
+        context: hsp.context as i64,
+        query_frame: i32::from(hsp.frame),
+        offset: i64::from(hsp.q_start),
+        end: i64::from(hsp.q_end),
+        query_length: 0,
     }
-    removed
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:399-421
@@ -2648,29 +2542,22 @@ mod negative_length_tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2566-2569
-    // ```c
-    //       o = hsp_array[i]->query.offset - range_diff;
-    //       e = hsp_array[i]->query.end + range_diff;
-    //       if (o < 0) o = 0;
-    //       if (e < 0) e = hsp_array[i]->query.end;
-    // ```
     /// An HSP of length -4 at the start of its context ends at -4: its end + 3 is below 0, so
     /// NCBI's range ends at -4 itself and keeps a weaker HSP ending at -2 (an end + 3 of -1
     /// would remove it), and removes one that ends at -4 or before.
     #[test]
     fn subject_besthit_keeps_the_end_below_minus_three() {
-        let mut hsps = vec![hsp(0, 9, 0, -4), hsp(0, 5, 1, -3), hsp(0, 4, 0, -5)];
-        let removed = subject_besthit(&mut hsps);
-        assert_eq!(removed.len(), 1);
-        assert_eq!((removed[0].hsp.q_start, removed[0].hsp.q_end), (0, -5));
-        assert_eq!(
+        let ends = |hsps: &[Hsp]| {
             hsps.iter()
                 .map(|h| (h.hsp.q_start, h.hsp.q_end))
-                .collect::<Vec<_>>(),
-            vec![(0, -4), (1, -2)]
-        );
+                .collect::<Vec<_>>()
+        };
+        let mut hsps = vec![hsp(0, 9, 0, -4), hsp(0, 5, 1, -3), hsp(0, 4, 0, -5)];
+        subject_besthit(&mut hsps);
+        assert_eq!(ends(&hsps), vec![(0, -4), (1, -2)]);
         // An end + 3 of 0 or more is the range's end, as before.
         let mut hsps = vec![hsp(0, 9, 0, -3), hsp(0, 5, 1, -2)];
-        assert_eq!(subject_besthit(&mut hsps).len(), 1);
+        subject_besthit(&mut hsps);
+        assert_eq!(ends(&hsps), vec![(0, -3)]);
     }
 }

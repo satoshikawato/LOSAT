@@ -195,7 +195,6 @@ Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for whi
 | :--- | :--- |
 | `-ungapped` | Refused. |
 | `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`, and `-matrix IDENTITY`, which NCBI searches without them) | Refused. With `-comp_based_stats` 1 to 3 it works. |
-| `-subject_besthit` | Refused. |
 | `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`), when a query with a residue that can be scored is followed in the same batch of queries by one with none (all `X`, empty, or masked whole by `-seg yes`) and `-searchsp` is not given or is 0 | Refused. NCBI reports every e-value of the first of the two as 0. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7; 5 is the default of `-task blastp-fast`) | Refused. NCBI crashes. |
 | `-threshold` with the compressed lookup table, when the neighboring words fill NCBI's 1024 overflow banks | Refused. NCBI corrupts its heap. |
@@ -262,7 +261,6 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 | :--- | :--- |
 | `-ungapped` | Refused. |
 | `-use_sw_tback` | Refused. |
-| `-subject_besthit` | Refused. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7) | Refused, as in `blastp`. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A hit list size of 2^31 - 50 or more | Refused, as in `blastp`. |
@@ -289,7 +287,6 @@ The error names the sequence and exits with status 1: `Error: subject sequence N
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-subject_besthit` | Refused. |
 | `-query_gencode 32`, `-db_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
 | An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension passes into the next frame of the query | Refused. See Rare inputs. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation | Refused. NCBI crashes. |
@@ -343,7 +340,7 @@ These refusals apply to every search program that reads databases.
 | `-in_msa` with a master sequence from which no ungapped Karlin-Altschul parameters can be computed (X, O, `*` or lower-case x alone, or X with gaps: no residue that the parameters can be computed from), or with `-matrix IDENTITY` | Refused. NCBI crashes. |
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-html` | Refused: not yet supported. |
-| `-best_hit_overhang`, `-best_hit_score_edge`, `-subject_besthit` | Refused, as in `blastp`. |
+| `-best_hit_overhang`, `-best_hit_score_edge` | Refused, as in `blastp`. |
 | `-use_sw_tback` | Refused. |
 | `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm` or `-in_msa`, only 0, 6 and 7 work. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |

@@ -78,13 +78,8 @@ fn database_error(kept: anyhow::Error) -> anyhow::Error {
         Err(refusal) => refusal,
     }
 }
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
-// ```c++
-//     catch (const CObjReaderParseException& e) {                             \
-//         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
+/// A reader error of the input as the application reports it (`CObjReaderParseException`:
+/// `blastinput::app::query_error`, the one producer of that line); any other error as it is.
 pub(super) fn input_error(error: anyhow::Error) -> anyhow::Error {
     let text = if let Some(e) = error.downcast_ref::<FastaParseError>() {
         e.to_string()
@@ -93,11 +88,7 @@ pub(super) fn input_error(error: anyhow::Error) -> anyhow::Error {
     } else {
         return error;
     };
-    NativeError {
-        exit: 1,
-        message: format!("BLAST query error: {text}\n").into(),
-    }
-    .into()
+    crate::blastinput::app::query_error(&text)
 }
 
 /// The error that ends the read of the `-subject` file (`ReadSequencesToBlast`, NCBI's

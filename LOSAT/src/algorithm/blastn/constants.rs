@@ -9,6 +9,16 @@ pub const X_DROP_GAPPED_NUCL: i32 = 30; // BLAST_GAP_X_DROPOFF_NUCL (blastn, non
 pub const X_DROP_GAPPED_GREEDY: i32 = 25; // BLAST_GAP_X_DROPOFF_GREEDY (megablast, greedy)
 pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for final traceback (共通)
 
+/// The engine pair of matrix-only scoring (option reward 0 / penalty 0, `-task rmblastn`).
+///
+/// NCBI reference: c++/include/algo/blast/core/blast_options.h:151-152
+/// ```c
+/// #define BLAST_PENALTY -3        /**< default nucleotide mismatch score */
+/// #define BLAST_REWARD 1          /**< default nucleotide match score */
+/// ```
+pub const BLAST_REWARD: i32 = 1;
+pub const BLAST_PENALTY: i32 = -3;
+
 // REMOVED: MAX_HITS_PER_KMER - Over-represented k-mer filtering does not exist in NCBI BLAST
 // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
 // NCBI BLAST adds all k-mers to lookup table regardless of frequency

@@ -2748,7 +2748,7 @@ impl SeqDb {
             warnings.append(&mut posted);
             let ids = processed.map_err(|invalid| {
                 warnings.push(ListWarning::Error(invalid.error.message.clone()));
-                SeqDbError::NotFound(invalid.message().into())
+                SeqDbError::NotFound(invalid.message())
             })?;
             if ids.is_empty() {
                 warnings.push(ListWarning::Posted(EMPTY_LIST_WARNING.to_string()));

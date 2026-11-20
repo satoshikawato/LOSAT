@@ -2251,7 +2251,7 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
         if !posted(&e.message) {
             // `eprint!` of the bytes: a failed write panics as `eprint!`'s does.
             if let Err(error) =
-                std::io::Write::write_all(&mut std::io::stderr(), &catch_all_text(&e.message))
+                std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&e.message))
             {
                 panic!("failed printing to stderr: {error}");
             }

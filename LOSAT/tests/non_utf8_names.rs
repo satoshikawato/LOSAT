@@ -201,7 +201,7 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
                 output.status.code() == Some(1)
                     && output.stdout.is_empty()
                     && stderr.contains("the name of the database is not valid UTF-8")
-                    && stderr.contains("not supported by LOSAT's blastdbcmd")
+                    && stderr.contains("this database is not supported by LOSAT's BLASTDBCMD")
             }
             other => panic!("kind {other}"),
         };

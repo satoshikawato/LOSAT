@@ -58,7 +58,7 @@ pub struct StatFile {
 /// ...
 /// ```
 pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
-    let name = path.to_string_lossy().into_owned();
+    let name = crate::utils::os_bytes::path_bytes(path).into_owned();
     let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
     discover(&mut file)
 }
@@ -529,7 +529,7 @@ impl UnitCounts {
     /// The `-t_*_pct` settings of the windowmasker application are not ported (blastn passes
     /// -1, `seq_masker.hpp:178-181`).
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
-        let name = path.to_string_lossy().into_owned();
+        let name = crate::utils::os_bytes::path_bytes(path).into_owned();
         let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
         Self::read(&mut file, params)
     }

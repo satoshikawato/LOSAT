@@ -375,7 +375,7 @@ fn strings_are_written_as_ncbis_us_ascii_stream_writes_them() {
     }
     // The trace of an object written with `WriteObject` has no named frame.
     let (_, _, _, thrown) = def(b"a\xe9");
-    let what = thrown.expect("thrown").exception().what();
+    let what = String::from_utf8(thrown.expect("thrown").exception().what()).unwrap();
     // NCBI's report (its header, then the three exceptions of the chain) in LOSAT's words
     // (`crate::wording::losat_text`).
     assert_eq!(what.lines().count(), 3, "{what}");
@@ -418,11 +418,11 @@ fn a_standard_xml_trace_names_the_choice_frames() {
     let exception = enc.take_thrown().expect("thrown").exception();
     assert_eq!(
         exception.get_msg(),
-        " Frame type= eFrameNamed, Object type= BlastOutput2"
+        b" Frame type= eFrameNamed, Object type= BlastOutput2"
     );
     // The frames of NCBI's report, in LOSAT's words (`crate::wording::losat_text`): the lines
     // after the first exception's, each with the indentation of a further exception.
-    let what = exception.what();
+    let what = String::from_utf8(exception.what()).unwrap();
     let frames: Vec<&str> = what.lines().skip(1).map(str::trim_start).collect();
     assert_eq!(
         frames,

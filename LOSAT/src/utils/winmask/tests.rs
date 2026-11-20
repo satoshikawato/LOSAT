@@ -683,9 +683,12 @@ fn a_bare_pct_line_is_the_factorys_substr_error() {
 
 /// The report of an error as blastn prints it: the reader's exception, then the factory's rethrow.
 fn reader_report(error: &WinMaskError) -> String {
-    error
-        .create_report()
-        .unwrap_or_else(|| panic!("no report: {error}"))
+    String::from_utf8(
+        error
+            .create_report()
+            .unwrap_or_else(|| panic!("no report: {error}")),
+    )
+    .unwrap()
 }
 
 /// NCBI's report in LOSAT's words (`crate::wording::losat_text`).

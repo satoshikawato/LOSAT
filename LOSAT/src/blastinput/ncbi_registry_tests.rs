@@ -22,13 +22,13 @@ fn unix(bytes: &[u8]) -> RegistryRead {
 /// `(m_Pos = <n>)`, which LOSAT writes as `(position <n>)`).
 fn failure(read: &RegistryRead) -> (String, u32, &'static str, String) {
     let error = read.error.as_ref().expect("an error");
-    let what = error.what();
+    let what = String::from_utf8(error.what()).unwrap();
     let pos = what
         .rsplit_once(crate::wording::POSITION)
         .map(|(_, rest)| rest.trim_end_matches(")\n").to_string())
         .unwrap_or_default();
     (
-        error.get_msg().to_string(),
+        String::from_utf8(error.get_msg().to_vec()).unwrap(),
         error.site().line,
         error.site().kind,
         pos,
@@ -161,7 +161,7 @@ fn every_error_is_ncbis() {
 fn the_report_is_ncbis() {
     let read = unix(b"garbage\n");
     assert_eq!(
-        read.error.unwrap().what(),
+        String::from_utf8(read.error.unwrap().what()).unwrap(),
         // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
         crate::wording::losat_text(&format!(
             "NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = 1)\n",

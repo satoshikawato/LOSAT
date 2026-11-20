@@ -39,7 +39,9 @@ use super::{Live, MatchError, HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
 pub(crate) const LENGTH_ERROR: &str = "basic_string::_M_replace_aux";
 /// `what()` of `std::bad_alloc`.
 pub(crate) const BAD_ALLOC: &str = "std::bad_alloc";
-/// `what()` of the `std::length_error` that `reserve` throws for a capacity above `max_size()`.
+/// `what()` of the `std::length_error` that `reserve` throws for a capacity above `max_size()`, as
+/// observed with the fixture's own program (`programs/strprobe.cpp`, rows of `string_ops.tsv`), not
+/// with rpsbproc: rpsbproc reserves twice a pattern's length and never reaches it.
 const RESERVE_LENGTH_ERROR: &str = "basic_string::_M_create";
 
 /// `max_size()` of NCBI's string (the build is C++20): 2^63 - 1.

@@ -1,8 +1,9 @@
 //! The growth model against the observation tables of
-//! `LOSAT/tests/fixtures/rpsbproc_growth/` (`README.md`: the programs, the compiler, the library
-//! and the dates): every row of the string table, every row of the vector table, and the
-//! (The allocations of NCBI's rpsbproc 0.5.1 binary for edited motifs are compared in
-//! `sites_tests.rs`.)
+//! `LOSAT/tests/fixtures/rpsbproc_growth/` (`README.md` names the programs, the compiler, the
+//! library and the dates): every row of the string tables (`string_ops.tsv`,
+//! `string_ops_large.tsv`), the rows that hold a gibibyte or more at once (`string_ops_host.tsv`),
+//! and every row of the vector table (`vector_ops.tsv`). The allocations of NCBI's rpsbproc 0.5.1
+//! binary for edited motifs are compared in `sites_tests.rs`.
 
 use super::super::RECORD_BYTES;
 use super::*;

@@ -1514,7 +1514,13 @@ fn write_pairwise(
         // `PairwiseView::report_sort`).
         sort: view.report_sort(options.report_sort()),
         view,
-        html: options.html,
+        html: options.html.as_ref().map(|links| {
+            let oids: &[crate::seqdb::Oid] = match shown {
+                ShownSubjects::Database { reported, .. } => reported.oids(),
+                ShownSubjects::Fasta { .. } => &[],
+            };
+            crate::report::html_ids::HtmlReport::new(links, oids.iter().copied())
+        }),
         ..PairwiseConfig::default()
     };
     // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3c), made once.

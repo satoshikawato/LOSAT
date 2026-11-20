@@ -900,8 +900,8 @@ pub struct ResolvedOptions {
     /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
     pub show_gis: bool,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
-    /// outfmt 0 and 18 reports; false for rpstblastn, which has no `-html`.
-    pub html: bool,
+    /// outfmt 0 and 18 reports, with the run's links; None for rpstblastn, which has no `-html`.
+    pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// The tabular report with a field list or a delimiter (outfmt 6 and 7), or outfmt 10 or
     /// 20 (`TabularSpec::of`); `None` for the default outfmt 6 and 7 (the `std` fields and a
     /// tab, `TabularSpec::std`, which the reports write with the same shared writer, `tabular.rs`)
@@ -1530,7 +1530,9 @@ impl BlastxArgs {
             formatting: self.formatting,
             outfmt,
             show_gis: self.show_gis,
-            html: self.html,
+            // Set at the program's setup (`blastinput::app::html_links`, native.rs `run_inner`,
+            // local.rs `check_resolutions`).
+            html: None,
             tabular,
             taxdb_found: false,
             subject_taxdb: None,

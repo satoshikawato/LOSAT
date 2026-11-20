@@ -1,18 +1,139 @@
 //! The ids of `-html` reports: the link of a sequence's id (NCBI's `CAlignFormatUtil::GetIDUrlGen`),
-//! the label of its score link and the anchor of its alignment heading. Reached only with `-html`:
+//! the label of its score link and the anchor of its alignment heading, and the run's and the
+//! report's `-html` data that they read (`HtmlLinks`, `HtmlReport`). Reached only with `-html`:
 //! the plain report never classifies an id here.
-// The description rows (D5) and headings (D6, D7) call these next (T4a2 piece A, in progress).
-#![cfg_attr(not(test), allow(dead_code))]
 
+use std::io::{self, Write};
+use std::sync::Arc;
+
+use super::formatter_registry::{map_template, InitConfig};
+use crate::report::db_subject::ParsedSubject;
+use crate::seqdb::Oid;
 use crate::seqid::label;
-use crate::seqid::model::ParsedSeqId;
+use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
 use crate::seqid::rank::{find_best, text_score};
+
+/// The `-html` links of a run (`PairwiseConfig::html` holds them through `HtmlReport`): NCBI's
+/// formatter registry (`CAlignFormatUtil::InitConfig`, `m_Reg`, `m_Protocol`: statics, one per
+/// run), read once at the program's setup and only with `-html` (`blastinput::app::html_links`,
+/// so that LOSAT's refusal of the file comes before the first byte); the `-db` text as NCBI keeps
+/// it (`CBlastFormat::m_DbName`, `NStr::TruncateSpaces` of `-db`; empty for `-subject`), the
+/// `<@db_name@>` of a local id's link; and whether the database holds nucleotides (`m_IsDbNa`).
+#[derive(Debug)]
+pub struct HtmlLinks {
+    pub(crate) registry: InitConfig,
+    pub(crate) db_name: Vec<u8>,
+    pub(crate) nucleotide: bool,
+}
+
+/// The `-html` data of one pairwise report (`PairwiseConfig::html`; `None` is the plain report):
+/// the run's links and the OID of each database sequence that the report can show, by subject
+/// index, which names a sequence without parsed Seq-ids (`gnl|BL_ORD_ID|<oid>`); empty for a
+/// `-subject` report, whose records without parsed Seq-ids are `lcl|Subject_<index + 1>`. The
+/// one OID source of the five programs' reports: each program hands its reported sequences'
+/// OIDs (`HtmlReport::new`) where it makes the report's `PairwiseConfig`, only with `-html`.
+#[derive(Clone, Debug)]
+pub struct HtmlReport {
+    pub(crate) links: Arc<HtmlLinks>,
+    oids: Vec<Oid>,
+}
+
+impl HtmlReport {
+    /// The report of the run's links `links` whose database sequences have the OIDs `oids` by
+    /// subject index (none for `-subject`).
+    pub(crate) fn new(links: &Arc<HtmlLinks>, oids: impl IntoIterator<Item = Oid>) -> Self {
+        HtmlReport {
+            links: Arc::clone(links),
+            oids: oids.into_iter().collect(),
+        }
+    }
+
+    // NCBI reference (2.17.0): c++/src/objtools/align_format/showdefline.cpp:459-494
+    // ```c++
+    //     if(m_Option & (eHtml | eShowCSVDescr)){
+    //         ...
+    //         string accession;
+    //         sdl->id->GetLabel(&accession, CSeq_id::eContent);
+    //         ... (score_url, `score_link`)
+    //         if(sdl->id->Which() == CSeq_id::e_Local && (m_Option & eHtml)){
+    //             //get taxid info for local blast db such as igblast db
+    //             ITERATE(list<CRef<CBlast_def_line> >, iter_bdl, bdl) {
+    //                 if ((*iter_bdl)->IsSetTaxid() && (*iter_bdl)->CanGetTaxid()){
+    //                     seqUrlInfo.taxid = (*iter_bdl)->GetTaxid();
+    //                     break;
+    //                 }
+    //             }
+    //         }
+    //         sdl->id_url = CAlignFormatUtil::GetIDUrl(&seqUrlInfo,aln_id,*m_ScopeRef);
+    //     }
+    // ```
+    /// The link (`sdl->id_url`, empty for none) and the score link (`sdl->score_url`) of the
+    /// description row of rank `rank` (from 1, NCBI's `blast_rank`) for the subject of index
+    /// `s_idx`, `parsed` when it has parsed Seq-ids: the link of its Bioseq's ids (`GetIDUrl`
+    /// with the handle of the Seq-align id) with the display id's `GetLabel(eContent)` as the
+    /// accession; without parsed ids a database sequence is `gnl|BL_ORD_ID|<oid>` and a
+    /// `-subject` record `lcl|Subject_<s_idx + 1>`. The registry's posts, its `GETURL_DEBUG` line
+    /// and its exception go to standard error at the first link of the run (`id_url`).
+    pub(crate) fn description_links(
+        &self,
+        parsed: Option<&ParsedSubject>,
+        s_idx: u32,
+        rank: usize,
+    ) -> io::Result<(Vec<u8>, Vec<u8>)> {
+        let own;
+        let (ids, display, gi, taxid) = match parsed {
+            Some(subject) => match subject.description_ids() {
+                Some((display, gi)) => {
+                    let taxid = match display {
+                        ParsedSeqId::Local(_) => subject.first_taxid(),
+                        _ => 0,
+                    };
+                    (subject.bioseq_ids(), display, gi, taxid)
+                }
+                None => return Ok((Vec::new(), Vec::new())),
+            },
+            None => {
+                own = [self.unparsed_id(s_idx)];
+                (&own[..], &own[0], 0, 0)
+            }
+        };
+        let mut accession = Vec::new();
+        description_accession(display, &mut accession);
+        let info = SeqUrlInfo {
+            accession: &accession,
+            rank,
+            nucleotide: self.links.nucleotide,
+            place: LinkPlace::Description,
+            taxid,
+        };
+        let link = id_url(ids, &info, &self.links, &mut io::stderr())?;
+        let mut score = Vec::new();
+        score_link(gi, &accession, &mut score);
+        Ok((link, score))
+    }
+
+    /// The id of the subject of index `s_idx` without parsed Seq-ids: `gnl|BL_ORD_ID|<oid>` of a
+    /// database sequence, `lcl|Subject_<s_idx + 1>` of a `-subject` record.
+    fn unparsed_id(&self, s_idx: u32) -> ParsedSeqId {
+        match self.oids.get(s_idx as usize) {
+            Some(oid) => ParsedSeqId::General(Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: ObjectId::Id(i32::try_from(oid.get()).expect("an OID is NCBI's int")),
+            }),
+            None => ParsedSeqId::Local(ObjectId::Str(
+                format!("Subject_{}", u64::from(s_idx) + 1).into_bytes(),
+            )),
+        }
+    }
+}
 
 /// Where a link is written: a description row (`x_FillDeflineAndId`, `isAlignLink` false, NCBI's
 /// empty RID) or an alignment heading (`x_InitSeqUrl`, `isAlignLink` true, RID `0`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkPlace {
     Description,
+    // The alignment headings (D6, D7; line RG T4a2, next) make it; the allowance goes with them.
+    #[cfg_attr(not(test), allow(dead_code))]
     Heading,
 }
 
@@ -33,26 +154,6 @@ pub struct SeqUrlInfo<'a> {
     pub taxid: i32,
 }
 
-/// The formatter configuration that the links read: `[LOCAL_ID] TOOL_URL` of the file that
-/// NCBI's `InitConfig` opens, the `-db` text as typed (empty for `-subject`) and the protocol of
-/// `MapProtocol` (`[BLASTFMTUTIL] PROTOCOL` of that file, else `https:`). The registry
-/// (`report/formatter_registry.rs`) gives it; `IdUrlConfig::DEFAULT` is a run without that file.
-#[derive(Clone, Copy, Debug)]
-pub struct IdUrlConfig<'a> {
-    pub local_id_url: Option<&'a [u8]>,
-    pub db_name: &'a [u8],
-    pub protocol: &'a [u8],
-}
-
-impl IdUrlConfig<'static> {
-    /// No configuration file: no local-id link, protocol `https:`.
-    pub const DEFAULT: Self = IdUrlConfig {
-        local_id_url: None,
-        db_name: b"",
-        protocol: b"https:",
-    };
-}
-
 // NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:181,187
 // ```c++
 //     { "ENTREZ", "<a title=\"Show report for <@acc@>\" <@cssInf@>href=\"https://www.ncbi.nlm.nih.gov/<@db@>/<@acc@>?report=genbank&log$=<@log@>&blast_rank=<@blast_rank@>&RID=<@rid@>\" <@target@>>" },
@@ -60,61 +161,6 @@ impl IdUrlConfig<'static> {
 // ```
 const ENTREZ: &[u8] = b"<a title=\"Show report for <@acc@>\" <@cssInf@>href=\"https://www.ncbi.nlm.nih.gov/<@db@>/<@acc@>?report=genbank&log$=<@log@>&blast_rank=<@blast_rank@>&RID=<@rid@>\" <@target@>>";
 const TRACE: &[u8] = b"<a title=\"Show report for <@val@>\" <@cssInf@>href=\"https://www.ncbi.nlm.nih.gov/Traces/trace.cgi?cmd=retrieve&dopt=fasta&val=<@val@>&RID=<@rid@>\">";
-
-// NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:3593-3599
-// ```c++
-// string CAlignFormatUtil::MapTemplate(string inpString,string tmplParamName,string templParamVal)
-// {
-//     string outString;
-//     string tmplParam = "<@" + tmplParamName + "@>";
-//     NStr::Replace(inpString,tmplParam,templParamVal,outString);
-//     return outString;
-// }
-// ```
-/// `MapTemplate`: every `<@name@>` of `text`, left to right, replaced by `value` (`NStr::Replace`,
-/// corelib/ncbistr.cpp:3310-3390: a replaced value is not searched again).
-pub fn map_template(text: &[u8], name: &str, value: &[u8]) -> Vec<u8> {
-    let tag = format!("<@{name}@>").into_bytes();
-    let mut out = Vec::with_capacity(text.len() + value.len());
-    let mut at = 0;
-    while let Some(found) = text[at..]
-        .windows(tag.len())
-        .position(|w| w == tag.as_slice())
-    {
-        out.extend_from_slice(&text[at..at + found]);
-        out.extend_from_slice(value);
-        at += found + tag.len();
-    }
-    out.extend_from_slice(&text[at..]);
-    out
-}
-
-// NCBI reference (2.17.0): c++/src/corelib/ncbistr.cpp:5610-5626 (`s_Encode`, rows 0x20-0x7F)
-// ```c++
-//     "+",   "!",   "%22", "%23", "$",   "%25", "%26", "'",
-//     "(",   ")",   "*",   "%2B", ",",   "-",   ".",   "%2F",
-//     ...
-//     "X",   "Y",   "Z",   "%5B", "%5C", "%5D", "%5E", "_",
-//     "%60", "a",   "b",   "c",   "d",   "e",   "f",   "g",
-// ```
-/// `NStr::URLEncode` with its default `eUrlEnc_SkipMarkChars` (ncbistr.cpp:6058-6131): letters,
-/// digits and `! $ ' ( ) * , - . _` stay, a space becomes `+`, every other byte `%XX` (upper-case
-/// hex).
-pub fn url_encode(text: &[u8], out: &mut Vec<u8>) {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    for &byte in text {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => out.push(byte),
-            b'!' | b'$' | b'\'' | b'(' | b')' | b'*' | b',' | b'-' | b'.' | b'_' => out.push(byte),
-            b' ' => out.push(b'+'),
-            _ => out.extend_from_slice(&[
-                b'%',
-                HEX[usize::from(byte >> 4)],
-                HEX[usize::from(byte & 15)],
-            ]),
-        }
-    }
-}
 
 // NCBI reference (2.17.0): c++/src/objtools/align_format/align_format_util.cpp:4979-4996
 // ```c++
@@ -164,8 +210,13 @@ fn has_text_seq_id(ids: &[ParsedSeqId]) -> bool {
 // ```
 /// The Entrez link of a Textseq-id, `pdb` or patent id (`GetIDUrlGen` :3788-3798, without
 /// templates: `acc` again, then `cssInf` and `target` empty). The ENTREZ template has no `gi`
-/// tag, so the GI is not needed.
-fn entrez_url(info: &SeqUrlInfo<'_>, config: &IdUrlConfig<'_>) -> Vec<u8> {
+/// tag, so the GI is not needed. `s_MapCommonUrlParams` ends with the registry's `MapProtocol`
+/// (`InitConfig::map_protocol`), whose first call of the run reads the registry.
+fn entrez_url(
+    info: &SeqUrlInfo<'_>,
+    links: &HtmlLinks,
+    diagnostics: &mut dyn Write,
+) -> io::Result<Vec<u8>> {
     let (db, mol): (&[u8], &str) = if info.nucleotide {
         (b"nucleotide", "nucl")
     } else {
@@ -180,10 +231,10 @@ fn entrez_url(info: &SeqUrlInfo<'_>, config: &IdUrlConfig<'_>) -> Vec<u8> {
     url = map_template(&url, "blast_rank", info.rank.to_string().as_bytes());
     url = map_template(&url, "rid", rid(info.place));
     url = map_template(&url, "acc", info.accession);
-    url = map_template(&url, "protocol", config.protocol);
+    url = links.registry.map_protocol(&url, diagnostics)?;
     url = map_template(&url, "acc", info.accession);
     url = map_template(&url, "cssInf", b"");
-    map_template(&url, "target", b"")
+    Ok(map_template(&url, "target", b""))
 }
 
 /// The RID of the links: NCBI's empty `m_Rid` of the description table, `0` of the alignments.
@@ -242,12 +293,20 @@ fn rid(place: LinkPlace) -> &'static [u8] {
 // ```
 /// `GetIDUrlGen` of the id list `ids` (the Bioseq's for a description row, the definition line's
 /// for a heading): the Entrez link of a list with a Textseq-id, `pdb` or patent id; the trace
-/// link of a `gnl|TI|n` best id; the `[LOCAL_ID] TOOL_URL` template with its tags filled (no
-/// `<a`) for a local best id; else nothing (empty). The applications set no templates, so the
-/// WGS branch (only with `useTemplates`) is never taken; `MapProtocol` ends every kind.
-pub fn id_url(ids: &[ParsedSeqId], info: &SeqUrlInfo<'_>, config: &IdUrlConfig<'_>) -> Vec<u8> {
+/// link of a `gnl|TI|n` best id; the registry's `[LOCAL_ID] TOOL_URL` with its tags filled
+/// (`InitConfig::local_id_url`, no `<a`) for a local best id (`Subject_N` too); else nothing
+/// (empty). The applications set no templates, so the WGS branch (only with `useTemplates`) is
+/// never taken. `MapProtocol` ends every kind, so the registry is read at the first id of the run
+/// whatever its kind: its posts and the `GETURL_DEBUG` line go to `diagnostics` (standard error)
+/// then, and a malformed file's exception is the `io::Error` of every call (§1.9 of SURVEY_T4).
+pub fn id_url(
+    ids: &[ParsedSeqId],
+    info: &SeqUrlInfo<'_>,
+    links: &HtmlLinks,
+    diagnostics: &mut dyn Write,
+) -> io::Result<Vec<u8>> {
     let url = if has_text_seq_id(ids) {
-        entrez_url(info, config)
+        entrez_url(info, links, diagnostics)?
     } else {
         match find_best(ids, text_score) {
             Some(best @ ParsedSeqId::General(dbtag)) if dbtag.db.eq_ignore_ascii_case(b"TI") => {
@@ -258,29 +317,22 @@ pub fn id_url(ids: &[ParsedSeqId], info: &SeqUrlInfo<'_>, config: &IdUrlConfig<'
                 let url = map_template(&url, "cssInf", b"");
                 map_template(&url, "rid", rid(info.place))
             }
-            Some(local @ ParsedSeqId::Local(_)) => local_url(local, info, config),
+            Some(local @ ParsedSeqId::Local(_)) => {
+                // `wid->GetLabel(&id_string, CSeq_id::eContent)`; `local_id_url` ends with
+                // `MapProtocol`.
+                let mut id_string = Vec::new();
+                label::content(local, true, &mut id_string);
+                return links.registry.local_id_url(
+                    &id_string,
+                    &links.db_name,
+                    info.taxid,
+                    diagnostics,
+                );
+            }
             _ => Vec::new(),
         }
     };
-    map_template(&url, "protocol", config.protocol)
-}
-
-/// The `[LOCAL_ID] TOOL_URL` template of a local id `local` with its tags filled
-/// (`GetIDUrlGen` :3818-3834); empty without the template.
-fn local_url(local: &ParsedSeqId, info: &SeqUrlInfo<'_>, config: &IdUrlConfig<'_>) -> Vec<u8> {
-    let template = config.local_id_url.unwrap_or_default();
-    let mut id_string = Vec::new();
-    label::content(local, true, &mut id_string);
-    let mut encoded = Vec::new();
-    url_encode(&id_string, &mut encoded);
-    let mut url = map_template(template, "seq_id", &encoded);
-    encoded.clear();
-    url_encode(config.db_name, &mut encoded);
-    url = map_template(&url, "db_name", &encoded);
-    url = map_template(&url, "taxid", info.taxid.to_string().as_bytes());
-    url = map_template(&url, "cssInf", b"");
-    url = map_template(&url, "title", &id_string);
-    map_template(&url, "target", b"")
+    links.registry.map_protocol(&url, diagnostics)
 }
 
 /// `GetLabel(eContent)` of a description row's display id (showdefline.cpp:463-464): the
@@ -292,6 +344,8 @@ pub fn description_accession(display_id: &ParsedSeqId, out: &mut Vec<u8>) {
 /// `CAlignFormatUtil::GetLabel(seqID, CSeq_id::eContent)` of a heading's id (showalign.cpp:2208,
 /// 2266; `eContent` converts to `with_version` true): the accession of its link and, without a
 /// GI, the id of the "more sequence titles" block.
+// The alignment headings (D6, D7; line RG T4a2, next) call it; the allowance goes with them.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn heading_label(id: &ParsedSeqId, out: &mut Vec<u8>) {
     label::format_label(id, true, out);
 }
@@ -330,6 +384,8 @@ pub fn score_link(gi: i64, accession: &[u8], out: &mut Vec<u8>) {
 /// The anchor of a heading line: `<a name=` the GI, or without one `GetSeqIdString` of the id,
 /// with its version for a database's definition line and without for a `-subject` Bioseq
 /// (`with_version`), then `></a>`.
+// The alignment headings (D6, D7; line RG T4a2, next) call it; the allowance goes with them.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn anchor(gi: i64, id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
     out.extend_from_slice(b"<a name=");
     if gi == 0 {

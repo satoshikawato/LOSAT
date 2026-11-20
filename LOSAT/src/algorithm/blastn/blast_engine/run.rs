@@ -6516,8 +6516,9 @@ struct BlastnReportInputs<'a> {
     epilog: bool,
     /// `-show_gis` (the labels of the query-anchored sections, outfmt 1 to 4).
     show_gis: bool,
-    /// `-html` (`BlastnArgs::html`): the HTML form of the outfmt 0 and 18 reports.
-    html: bool,
+    /// `-html` (`BlastnArgs::html`): the HTML form of the outfmt 0 and 18 reports. The run's
+    /// `-html` links; None: plain.
+    html: Option<Arc<crate::report::html_ids::HtmlLinks>>,
     /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
     /// before the search (`write_pairwise_prologs`).
     prolog: bool,
@@ -7621,7 +7622,18 @@ fn post_process_hits_and_write(
                     // others, `PairwiseView::report_sort`).
                     sort: view.report_sort(report.formatting.report_sort()),
                     view,
-                    html: report.html,
+                    html: report.html.as_ref().map(|links| {
+                        crate::report::html_ids::HtmlReport::new(
+                            links,
+                            report
+                                .database_ordinals
+                                .zip(report.database_reader)
+                                .into_iter()
+                                .flat_map(|(ordinals, reader)| {
+                                    ordinals.iter().map(move |&o| reader.oid_map().oid(o))
+                                }),
+                        )
+                    }),
                     ..PairwiseConfig::default()
                 };
                 // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3b).
@@ -7974,7 +7986,7 @@ fn write_custom_tabular(
             &queries,
             writer,
             warnings,
-            report.html,
+            report.html.is_some(),
         );
     }
     let tab = BlastnTabular {
@@ -8944,6 +8956,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
         }
         outfmts.push(choice.number);
     }
+    args.html_links = app::html_links(args.html, Program::Blastn, args.database_name())?;
     // The hit list size and the counts of the pairwise report, with the formatting
     // handler's warnings (`ExtractAlgorithmOptions`), once for the run.
     let (counts, warnings) = crate::algorithm::blastn::scoring::report_counts_of(args, &outfmts)?;
@@ -12358,7 +12371,7 @@ fn write_reports_untimed(
         finished_hit_lists: reported.is_some(),
         epilog,
         show_gis: args.show_gis,
-        html: args.html,
+        html: args.html_links.clone(),
         prolog: outputs
             .formats
             .iter()

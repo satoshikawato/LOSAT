@@ -176,9 +176,6 @@ pub(crate) fn tax_browser_template(registry: Option<&RegistryRead>) -> &[u8] {
 ///     return outString;
 /// }
 /// ```
-// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
-// writes; the allowance goes with that wiring.
-#[allow(dead_code)]
 pub(crate) fn map_template(input: &[u8], name: &str, value: &[u8]) -> Vec<u8> {
     let token = [b"<@", name.as_bytes(), b"@>"].concat();
     let mut out = Vec::with_capacity(input.len());
@@ -209,9 +206,6 @@ pub(crate) fn map_template(input: &[u8], name: &str, value: &[u8]) -> Vec<u8> {
 ///         encode_table = s_Encode;
 /// ```
 /// The other rows keep `A`-`Z`, `a`-`z` and `_` only (`%40`, `%5B`-`%5E`, `%60`, `%7B`-`%7F`).
-// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
-// writes; the allowance goes with that wiring.
-#[allow(dead_code)]
 pub(crate) fn url_encode(text: &[u8]) -> Vec<u8> {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut out = Vec::with_capacity(text.len());
@@ -267,9 +261,6 @@ pub(crate) fn url_encode(text: &[u8]) -> Vec<u8> {
 ///         }
 ///     }
 /// ```
-// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
-// writes; the allowance goes with that wiring.
-#[allow(dead_code)]
 fn init_config_path(
     fmtcfg: Option<&std::ffi::OsStr>,
     ncbi: Option<&std::ffi::OsStr>,
@@ -291,9 +282,6 @@ fn init_config_path(
 }
 
 /// What `InitConfig` found (`CAlignFormatUtil::m_Reg`, static in NCBI: one per run).
-// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
-// writes; the allowance goes with that wiring.
-#[allow(dead_code)]
 #[derive(Debug)]
 enum ConfigFile {
     /// No file: `m_Reg` stays null and NCBI looks again at each call (a run's files and
@@ -320,9 +308,6 @@ enum ConfigFile {
 /// `local_id_url`), never by the organism report. The effects of a read, the posts, the
 /// `GETURL_DEBUG` line and the exception of a malformed file, happen at that call, as in NCBI
 /// (line RG T4 probes `env_geturl`, `cfg.*`: a malformed file fails only with hits, rc 255).
-// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
-// writes; the allowance goes with that wiring.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct InitConfig {
     file: ConfigFile,
@@ -332,9 +317,6 @@ pub(crate) struct InitConfig {
     reported: std::sync::atomic::AtomicBool,
 }
 
-// Called by the `-html` id links (line RG T4a2, D5-D7, `report::pairwise`), which another branch
-// writes; the allowance goes with that wiring.
-#[allow(dead_code)]
 impl InitConfig {
     /// The registry of the run of `program` (in lower case, as NCBI's posts name it), from the
     /// environment (`FMTCFG`, `NCBI`, `GETURL_DEBUG`) and the current directory. LOSAT refuses a
@@ -364,7 +346,7 @@ impl InitConfig {
 
     /// `read` of the file `file` (its path as NCBI names it and its bytes; `None`: no file),
     /// `debug`: `GETURL_DEBUG` is set.
-    fn of(
+    pub(super) fn of(
         program: &str,
         file: Option<(std::ffi::OsString, Vec<u8>)>,
         debug: bool,

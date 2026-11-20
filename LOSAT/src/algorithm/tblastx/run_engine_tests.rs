@@ -52,6 +52,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         num_descriptions: None,
         num_alignments: None,
         report_counts: Default::default(),
+        html_links: None,
         max_hsps: None,
         qcov_hsp_perc: None,
         seg: "no".to_string(),

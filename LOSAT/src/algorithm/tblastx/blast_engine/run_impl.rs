@@ -1450,7 +1450,11 @@ fn check_ncbi_options(
     args: &TblastxArgs,
     choices: &[crate::blastinput::app::FormatChoice],
     diagnostics: &mut dyn std::io::Write,
-) -> Result<(Option<SequenceRange>, ReportCounts)> {
+) -> Result<(
+    Option<SequenceRange>,
+    ReportCounts,
+    Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
+)> {
     use crate::blastinput::app::{formatting_handler_check, options_error, Program};
     args.seg_spec()?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
@@ -1472,6 +1476,8 @@ fn check_ncbi_options(
         formatting_handler_check(choice, Program::Tblastx)?;
         crate::blastinput::app::html_format_check(choice.number, Program::Tblastx, args.html)?;
     }
+    let html =
+        crate::blastinput::app::html_links(args.html, Program::Tblastx, args.database_name())?;
     // The hit list size and the counts of the pairwise report
     // (`blastinput::report_counts`), with the handler's warnings.
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
@@ -1531,7 +1537,7 @@ fn check_ncbi_options(
             "expect value or cutoff score must be greater than zero",
         ));
     }
-    Ok((query_range, counts))
+    Ok((query_range, counts, html))
 }
 
 /// The `-outfmt` of the command line (`check_ncbi_options`).
@@ -1702,9 +1708,10 @@ fn search_cli(
     outputs: &mut ReportOutputs<'_>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    let (query_range, counts) =
+    let (query_range, counts, html_links) =
         check_ncbi_options(&args, &cli_outfmts(&args)?, outputs.diagnostics)?;
     args.report_counts = counts;
+    args.html_links = html_links;
     let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?;
     let source = match &database {
         Some(database) => SubjectSource::Database(database),
@@ -1858,9 +1865,10 @@ pub fn run_local(
     check_subjects_not_empty(subject_records)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
-    let (query_range, counts) =
+    let (query_range, counts, html_links) =
         check_ncbi_options(&args, &output_choices(outputs)?, outputs.diagnostics)?;
     args.report_counts = counts;
+    args.html_links = html_links;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();
     subject_taxonomy(&mut args, setting.as_ref(), outputs)?;
@@ -1944,9 +1952,10 @@ fn search_database(
         .resolve(&settings, &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
-    let (query_range, counts) =
+    let (query_range, counts, html_links) =
         check_ncbi_options(&args, &output_choices(outputs)?, outputs.diagnostics)?;
     args.report_counts = counts;
+    args.html_links = html_links;
     let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
     search(
@@ -2881,7 +2890,18 @@ fn write_tblastx_outputs(
                         // for the others, `PairwiseView::report_sort`).
                         sort: view.report_sort(args.formatting.report_sort()),
                         view,
-                        html: args.html,
+                        html: args.html_links.as_ref().map(|links| {
+                            crate::report::html_ids::HtmlReport::new(
+                                links,
+                                run.database.into_iter().flat_map(|database| {
+                                    database
+                                        .reported
+                                        .ordinals
+                                        .iter()
+                                        .map(move |&o| database.oids.oid(o))
+                                }),
+                            )
+                        }),
                         ..crate::report::pairwise::PairwiseConfig::default()
                     };
                     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251 (quoted

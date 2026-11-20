@@ -817,8 +817,9 @@ pub struct ResolvedBlastpArgs {
     /// `-show_gis`, for the same reports.
     pub show_gis: bool,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
-    /// outfmt 0 and 18 reports; false for psiblast and rpsblast, which have no `-html`.
-    pub html: bool,
+    /// outfmt 0 and 18 reports, with the run's links; None for psiblast and rpsblast, which
+    /// have no `-html`.
+    pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
     /// `-dbsize` (`eff_len_options->db_length`; 0 when it is not given).
@@ -1243,6 +1244,11 @@ impl BlastpArgs {
             crate::blastinput::app::Program::Blastp,
             self.html,
         )?;
+        let html = crate::blastinput::app::html_links(
+            self.html,
+            crate::blastinput::app::Program::Blastp,
+            self.db.as_deref().map(crate::seqdb::db_argument_name),
+        )?;
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`), with the handler's warnings.
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
@@ -1406,7 +1412,7 @@ impl BlastpArgs {
             subject: self.subject.clone().unwrap_or_default(),
             parse_deflines: self.parse_deflines,
             show_gis: self.show_gis,
-            html: self.html,
+            html,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
             // ```c++
             //     if (args.Exist(kArgDb) && args[kArgDb]) {

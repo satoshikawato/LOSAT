@@ -1068,7 +1068,7 @@ fn write_blastx_tax_report(
         loads,
         names,
         program,
-        options.html,
+        options.html.is_some(),
     )?;
     let mut q_idx = 0;
     for batch in batches {

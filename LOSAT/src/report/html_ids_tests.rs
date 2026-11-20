@@ -3,6 +3,7 @@
 // bp.s.f0.rc_localid.h, bp.dp.f0.h).
 
 use super::*;
+use crate::report::formatter_registry::url_encode;
 
 fn ids(text: &str) -> Vec<ParsedSeqId> {
     crate::seqid::parse::parse_ids(text.as_bytes(), 0, &mut |_| {})
@@ -38,7 +39,24 @@ fn url(ids: &[ParsedSeqId], rank: usize, nucleotide: bool, place: LinkPlace) -> 
         place,
         taxid: 0,
     };
-    text(id_url(ids, &info, &IdUrlConfig::DEFAULT))
+    let mut err = Vec::new();
+    let url = id_url(ids, &info, &links(None, b""), &mut err).unwrap();
+    assert!(err.is_empty());
+    text(url)
+}
+
+/// The links of a run with the registry file `file` (`None`: none) and the `-db` text `db`.
+fn links(file: Option<&[u8]>, db: &[u8]) -> HtmlLinks {
+    HtmlLinks {
+        registry: InitConfig::of(
+            "blastp",
+            file.map(|bytes| (".ncbirc".into(), bytes.to_vec())),
+            false,
+        )
+        .unwrap(),
+        db_name: db.to_vec(),
+        nucleotide: false,
+    }
 }
 
 #[test]
@@ -110,7 +128,8 @@ fn trace_links_and_ids_without_a_link() {
 
 #[test]
 fn local_id_template_tags() {
-    let template = b"http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>";
+    // `T/t4/rc/localid/.ncbirc` (probes `bp.di.f0.rc_localid.h`, `bp.s.f0.rc_localid.h`).
+    let file: &[u8] = b"[LOCAL_ID]\nTOOL_URL=http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>\n";
     let local = ids("lcl|s3_local_identifier");
     let accession = accession(&local);
     let info = SeqUrlInfo {
@@ -120,24 +139,67 @@ fn local_id_template_tags() {
         place: LinkPlace::Description,
         taxid: 9606,
     };
-    let config = IdUrlConfig {
-        local_id_url: Some(template),
-        db_name: b"../../../t2/db/ps_ids",
-        protocol: b"https:",
-    };
+    let mut err = Vec::new();
+    let db = links(Some(file), b"../../../t2/db/ps_ids");
     assert_eq!(
-        text(id_url(&local, &info, &config)),
+        text(id_url(&local, &info, &db, &mut err).unwrap()),
         "http://local.example/s3_local_identifier?db=..%2F..%2F..%2Ft2%2Fdb%2Fps_ids&taxid=9606&p=https:&t=s3_local_identifier"
     );
     let subject = ids("lcl|Subject_1");
     let info = SeqUrlInfo { taxid: 0, ..info };
-    let config = IdUrlConfig {
-        db_name: b"",
-        ..config
-    };
     assert_eq!(
-        text(id_url(&subject, &info, &config)),
+        text(id_url(&subject, &info, &links(Some(file), b""), &mut err).unwrap()),
         "http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1"
+    );
+    // Without the template a local id has no link.
+    assert_eq!(
+        text(id_url(&subject, &info, &links(None, b""), &mut err).unwrap()),
+        ""
+    );
+    assert!(err.is_empty());
+}
+
+// D5: the description rows' links and score links of the ids that the formatter makes for a
+// subject without parsed Seq-ids (NCBI BLAST+ 2.17.0 `bp.dp.f0.h`, `bp.s.f0.h`,
+// `bp.s.f0.rc_localid.h`: `gnl|BL_ORD_ID|<oid>`, `lcl|Subject_<index + 1>`) and of a record with
+// parsed ids (`bp.dm.f0.h` row 1).
+#[test]
+fn description_links_of_the_row_ids() {
+    let file: &[u8] = b"[LOCAL_ID]\nTOOL_URL=http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>\n";
+    let row = |report: &HtmlReport, parsed: Option<&ParsedSubject>, s_idx: u32, rank: usize| {
+        let (link, score) = report.description_links(parsed, s_idx, rank).unwrap();
+        (text(link), text(score))
+    };
+    let oids = [0, 2, 10].map(crate::seqdb::Oid::of_unrestricted);
+    let database = HtmlReport::new(&Arc::new(links(None, b"../../db/ps_plain")), oids);
+    assert_eq!(
+        row(&database, None, 2, 3),
+        (String::new(), "<a href=#BL_ORD_ID:10>".into())
+    );
+    let records = HtmlReport::new(&Arc::new(links(None, b"")), []);
+    assert_eq!(
+        row(&records, None, 0, 1),
+        (String::new(), "<a href=#Subject_1>".into())
+    );
+    let records = HtmlReport::new(&Arc::new(links(Some(file), b"")), []);
+    assert_eq!(
+        row(&records, None, 2, 2),
+        (
+            "http://local.example/Subject_3?db=&taxid=0&p=https:&t=Subject_3".into(),
+            "<a href=#Subject_3>".into()
+        )
+    );
+    let believed = crate::blastinput::fasta_reader::believed::BelievedIds::new(
+        ids("pir||A12345"),
+        crate::report::archive::bioseq::SeqLocStrand::Unknown,
+    );
+    let record = ParsedSubject::of_record(&believed, b"pir subject");
+    assert_eq!(
+        row(&records, Some(&record), 0, 1),
+        (
+            "<a title=\"Show report for A12345\" href=\"https://www.ncbi.nlm.nih.gov/protein/A12345?report=genbank&log$=prottop&blast_rank=1&RID=\" >".into(),
+            "<a href=#A12345>".into()
+        )
     );
 }
 
@@ -157,9 +219,11 @@ fn anchors_with_and_without_version() {
 
 #[test]
 fn url_encoding_and_templates() {
-    let mut out = Vec::new();
-    url_encode(b"a b/c.d-e_f~g%h!$'()*,", &mut out);
-    assert_eq!(text(out), "a+b%2Fc.d-e_f%7Eg%25h!$'()*,");
+    // The registry's helpers (`formatter_registry`), the one owner of both.
+    assert_eq!(
+        text(url_encode(b"a b/c.d-e_f~g%h!$'()*,")),
+        "a+b%2Fc.d-e_f%7Eg%25h!$'()*,"
+    );
     // A value is not searched again; every occurrence is replaced.
     assert_eq!(
         text(map_template(b"<@a@>x<@a@>", "a", b"<@a@>")),

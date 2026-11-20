@@ -295,6 +295,7 @@ fn parse_blastn_args(
         dbsize: None,
         show_gis: false,
         html: false,
+        html_links: None,
         parse_deflines: false,
         id_scope: None,
         searchsp: None,
@@ -476,6 +477,7 @@ fn parse_tblastx_args(
         num_descriptions: None,
         num_alignments: None,
         report_counts: Default::default(),
+        html_links: None,
         max_hsps: None,
         qcov_hsp_perc: None,
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.

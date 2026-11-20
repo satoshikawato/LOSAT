@@ -198,6 +198,10 @@ pub struct TblastxArgs {
     // Reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
     #[arg(skip)]
     pub report_counts: crate::blastinput::report_counts::ReportCounts,
+    // The `-html` links of the run, which `check_ncbi_options` makes
+    // (`blastinput::app::html_links`). Not a public option.
+    #[arg(skip)]
+    pub html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:196-206
     // ```c
     //         arg_desc.AddOptionalKey(kArgQueryCovHspPerc, "float_value",

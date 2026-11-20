@@ -370,6 +370,10 @@ pub struct BlastnArgs {
     // Reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
     #[arg(skip)]
     pub report_counts: crate::blastinput::report_counts::ReportCounts,
+    // The `-html` links of the run, which `process_options` sets
+    // (`blastinput::app::html_links`). Not a public option.
+    #[arg(skip)]
+    pub html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     // Remove word seeds with high frequency in the searched database (off).
     // Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:257 (limit_lookup)
     // NCBI blastn has no such option: it is magicblast's (blast_args.cpp:1492-1501), so

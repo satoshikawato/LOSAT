@@ -69,8 +69,9 @@ pub struct PairwiseConfig {
     /// to 4. The rest of the report is the same.
     pub view: PairwiseView,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
-    /// report.
-    pub html: bool,
+    /// report, with the run's links and the report's OIDs (`html_ids::HtmlReport`, made only with
+    /// `-html`); `None`: the plain report.
+    pub html: Option<super::html_ids::HtmlReport>,
 }
 
 impl Default for PairwiseConfig {
@@ -82,7 +83,7 @@ impl Default for PairwiseConfig {
             protein_matrix: ScoringMatrix::Blosum62,
             sort: Default::default(),
             view: PairwiseView::Pairwise,
-            html: false,
+            html: None,
         }
     }
 }
@@ -1971,6 +1972,11 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     show_sum_n: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
+    // `-html`: the rows' links, and the subjects with parsed Seq-ids by subject index.
+    html: Option<(
+        &super::html_ids::HtmlReport,
+        &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    )>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -1986,6 +1992,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
             )
         },
         read,
+        html.map(|(report, parsed)| HtmlRows { report, parsed }),
     )
 }
 
@@ -3466,7 +3473,12 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             .query_titles
             .get(q_idx)
             .map_or(&b""[..], |title| title.as_ref());
-        write_blastp_query_header(writer, query_title, query.query_length, self.config.html)?;
+        write_blastp_query_header(
+            writer,
+            query_title,
+            query.query_length,
+            self.config.html.is_some(),
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
@@ -3524,6 +3536,10 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 )
             },
             read,
+            self.config.html.as_ref().map(|report| HtmlRows {
+                report,
+                parsed: self.parsed_subjects,
+            }),
         )?;
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
         // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
@@ -3860,6 +3876,8 @@ fn write_description_table<W: Write>(
     columns: Option<SortColumns>,
     mut label_of: impl FnMut(u32) -> DescriptionLabel,
     read: super::query_warnings::SubjectReadHook<'_, W>,
+    // `-html`: the rows' links (`HtmlRows`); `None`: the plain table.
+    html: Option<HtmlRows<'_>>,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:513-514
     // ```c++
@@ -3989,7 +4007,7 @@ fn write_description_table<W: Write>(
     }
     writeln!(writer)?;
     writeln!(writer)?;
-    for (s_idx, best, total, sum_n, values) in &rows {
+    for (index, (s_idx, best, total, sum_n, values)) in rows.iter().enumerate() {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1587-1589
         // ```c++
         //     try{
@@ -3999,12 +4017,17 @@ fn write_description_table<W: Write>(
         // Each line loads its subject (`x_GetDeflineInfo` of `x_DisplayDeflineTableBody`) after
         // the lines before it are written (`QueryWarnings::subject_read`).
         read(*s_idx, writer)?;
-        label_of(*s_idx).write_cut(writer)?;
-        write!(
-            writer,
-            "  {:<max_score$}",
-            format_bitscore_ncbi(best.hit.bit_score)
-        )?;
+        let bits = format_bitscore_ncbi(best.hit.bit_score);
+        match html {
+            None => {
+                label_of(*s_idx).write_cut(writer)?;
+                write!(writer, "  {bits:<max_score$}")?;
+            }
+            Some(html) => {
+                let rank = (*s_idx, index + 1);
+                html.write_start(writer, &label_of(*s_idx), rank, &bits, max_score)?;
+            }
+        }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-956
         // ```c++
         //         if (m_Option & eShowTotalScore) {
@@ -4271,21 +4294,115 @@ impl DescriptionLabel {
     /// whole label below never cuts the id.)
     fn write_cut<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         // A label of a title alone is written as the joined label was: one write of its letters.
-        let len = self.id.len() + self.title.len();
-        if len > 68 {
-            let id = self.id.len().min(65);
-            if id > 0 {
-                writer.write_all(&self.id[..id])?;
-            }
-            writer.write_all(&self.title[..65 - id])?;
+        let (id, title, cut) = self.cut();
+        if id > 0 {
+            writer.write_all(&self.id[..id])?;
+        }
+        writer.write_all(&self.title[..title])?;
+        if cut {
             writer.write_all(b"...")
         } else {
-            if !self.id.is_empty() {
-                writer.write_all(&self.id)?;
-            }
-            writer.write_all(&self.title)?;
-            write_spaces(writer, 68 - len)
+            write_spaces(writer, 68 - id - title)
         }
+    }
+
+    /// The bytes of the id text and of the title that the line keeps and whether `...` follows
+    /// (`write_cut`): a label longer than 68 columns keeps 65 bytes.
+    fn cut(&self) -> (usize, usize, bool) {
+        if self.id.len() + self.title.len() > 68 {
+            let id = self.id.len().min(65);
+            (id, 65 - id, true)
+        } else {
+            (self.id.len(), self.title.len(), false)
+        }
+    }
+
+    /// The `-html` label (`write_cut` with `eHtml`): the link `link` (`sdl->id_url`), the id
+    /// text, `</a>` after a link, then the cut title `HTMLEncode`d; the cut and the padding count
+    /// the raw bytes (`line_length`).
+    ///
+    /// NCBI reference (2.17.0): c++/src/objtools/align_format/showdefline.cpp:883-885, 909-931
+    /// ```c++
+    ///         if((m_Option & eHtml) && (sdl->id_url != NcbiEmptyString)) {
+    ///             out << sdl->id_url;
+    ///         }
+    ///     ...
+    ///         if((m_Option & eHtml) && (sdl->id_url != NcbiEmptyString)) {
+    ///             out << "</a>";
+    ///         }
+    ///     ...
+    ///         if (m_Option & eHtml) {
+    ///             out << CHTMLHelper::HTMLEncode(actual_line_component);
+    ///         } else {
+    ///             out << actual_line_component;
+    ///         }
+    ///         line_length += actual_line_component.size();
+    ///         //pad the short lines
+    ///         CAlignFormatUtil::AddSpace(out, m_LineLen - line_length);
+    /// ```
+    fn write_html<W: Write>(&self, writer: &mut W, link: &[u8]) -> io::Result<()> {
+        let (id, title, cut) = self.cut();
+        writer.write_all(link)?;
+        writer.write_all(&self.id[..id])?;
+        if !link.is_empty() {
+            writer.write_all(b"</a>")?;
+        }
+        let mut encoded = Vec::new();
+        super::html::html_encode_into(&self.title[..title], &mut encoded);
+        writer.write_all(&encoded)?;
+        if cut {
+            writer.write_all(b"...")
+        } else {
+            write_spaces(writer, 68 - id - title)
+        }
+    }
+}
+
+/// The `-html` inputs of a description table (`write_description_table`): the report's links and
+/// OIDs (`PairwiseConfig::html`) and the subjects with parsed Seq-ids by subject index (those of
+/// the labels).
+#[derive(Clone, Copy)]
+struct HtmlRows<'a> {
+    report: &'a super::html_ids::HtmlReport,
+    parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+}
+
+impl HtmlRows<'_> {
+    /// The start of the `-html` description row of rank `rank` (from 1) for the subject `s_idx`
+    /// with the label `label` and the bit score `bits` (in a column of `max_score`): the label
+    /// (`DescriptionLabel::write_html`), two spaces, then the bit score inside the score link.
+    ///
+    /// NCBI reference (2.17.0): c++/src/objtools/align_format/showdefline.cpp:932-939
+    /// ```c++
+    ///         out << kTwoSpaceMargin;
+    ///
+    ///         if((m_Option & eHtml) && (sdl->score_url != NcbiEmptyString)) {
+    ///             out << sdl->score_url;
+    ///         }
+    ///         out << (*iter)->bit_string;
+    ///         if((m_Option & eHtml) && (sdl->score_url != NcbiEmptyString)) {
+    ///             out << "</a>";
+    ///         }
+    ///         CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - (*iter)->bit_string.size());
+    /// ```
+    fn write_start<W: Write>(
+        self,
+        writer: &mut W,
+        label: &DescriptionLabel,
+        (s_idx, rank): (u32, usize),
+        bits: &str,
+        max_score: usize,
+    ) -> io::Result<()> {
+        let parsed = self.parsed.get(s_idx as usize).and_then(Option::as_deref);
+        let (link, score) = self.report.description_links(parsed, s_idx, rank)?;
+        label.write_html(writer, &link)?;
+        writer.write_all(b"  ")?;
+        writer.write_all(&score)?;
+        writer.write_all(bits.as_bytes())?;
+        if !score.is_empty() {
+            writer.write_all(b"</a>")?;
+        }
+        write_spaces(writer, max_score.saturating_sub(bits.len()))
     }
 }
 
@@ -4329,6 +4446,8 @@ fn write_blastn_description_table<W: Write>(
     protein: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
+    // `-html`: the report's links and OIDs (`PairwiseConfig::html`).
+    html: Option<&super::html_ids::HtmlReport>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -4359,6 +4478,7 @@ fn write_blastn_description_table<W: Write>(
             )
         },
         read,
+        html.map(|report| HtmlRows { report, parsed }),
     )
 }
 
@@ -4735,7 +4855,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             writer,
             &query.query_name,
             query.query_length,
-            self.config.html,
+            self.config.html.is_some(),
         )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
@@ -4771,6 +4891,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             read,
+            self.config.html.as_ref(),
         )?;
         writeln!(writer)
     }
@@ -5452,7 +5573,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             writer,
             &query.query_name,
             query.query_length,
-            self.config.html,
+            self.config.html.is_some(),
         )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
@@ -5490,6 +5611,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             read,
+            self.config.html.as_ref(),
         )?;
         writeln!(writer)
     }
@@ -6912,7 +7034,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             writer,
             &self.query_titles[q_idx],
             query.query_length,
-            self.config.html,
+            self.config.html.is_some(),
         )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
@@ -6968,6 +7090,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             read,
+            self.config.html.as_ref(),
         )?;
         writeln!(writer)
     }
@@ -7590,7 +7713,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             writer,
             &query.query_name,
             query.query_length,
-            self.config.html,
+            self.config.html.is_some(),
         )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
@@ -7627,6 +7750,13 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             !self.options.gapped && self.options.sum_stats,
             self.config.sort_columns(query.query_length),
             read,
+            self.config.html.as_ref().map(|report| {
+                let parsed = match self.database {
+                    Some((_, _, parsed, _)) => parsed,
+                    None => self.records_parsed,
+                };
+                (report, parsed)
+            }),
         )?;
         writeln!(writer)
     }
@@ -8460,6 +8590,92 @@ mod tblastx_tests {
         assert_eq!(lines[6], "Sbjct  183  N  185");
     }
 
+    // D5: NCBI BLAST+ 2.17.0's description rows of `-subject` records without parsed ids
+    // (`blastp -subject ps_spec.faa -outfmt 0 -html`, probes `bp.s.f0.h` and, with
+    // `T/t4/rc/localid/.ncbirc`, `bp.s.f0.rc_localid.h`): the title encoded after the cut on raw
+    // bytes, the padding of raw bytes, the score link of `Subject_N`, and the local-id link.
+    #[test]
+    fn html_description_rows_are_ncbis() {
+        let mut first = tblastx_hit(1);
+        first.hit.bit_score = 313.0;
+        first.hit.e_value = 2e-109;
+        let mut third = tblastx_hit(1);
+        third.hit.s_idx = 2;
+        third.hit.bit_score = 247.0;
+        third.hit.e_value = 2e-87;
+        let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+            [(0, vec![&first]), (2, vec![&third])].into_iter().collect();
+        let titles: std::collections::HashMap<u32, Vec<u8>> = [
+            (
+                0,
+                b"s1 a<b>c & d \"e\" &amp; &lt;f&gt; &#62; &auml; short".to_vec(),
+            ),
+            (
+                2,
+                [
+                    &b"s3 "[..],
+                    &[b'x'; 70],
+                    b" & tail after a word of seventy letters",
+                ]
+                .concat(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let rows = |file: Option<&[u8]>| {
+            let registry = crate::report::formatter_registry::InitConfig::of(
+                "blastp",
+                file.map(|bytes| (".ncbirc".into(), bytes.to_vec())),
+                false,
+            )
+            .unwrap();
+            let links = Arc::new(crate::report::html_ids::HtmlLinks {
+                registry,
+                db_name: Vec::new(),
+                nucleotide: false,
+            });
+            let report = crate::report::html_ids::HtmlReport::new(&links, []);
+            let mut out = Vec::new();
+            write_blastn_description_table(
+                &mut out,
+                &[0, 2],
+                true,
+                &hits,
+                &titles,
+                &[],
+                &[],
+                false,
+                true,
+                None,
+                &mut crate::report::query_warnings::no_subject_reads,
+                Some(&report),
+            )
+            .unwrap();
+            String::from_utf8(out)
+                .unwrap()
+                .lines()
+                .skip(3)
+                .take(2)
+                .map(String::from)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rows(None),
+            [
+                "s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109",
+                "s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#Subject_3>247</a>     2e-87 ",
+            ]
+        );
+        let file: &[u8] = b"[LOCAL_ID]\nTOOL_URL=http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>\n";
+        assert_eq!(
+            rows(Some(file)),
+            [
+                "http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1</a>s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109",
+                "http://local.example/Subject_3?db=&taxid=0&p=https:&t=Subject_3</a>s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#Subject_3>247</a>     2e-87 ",
+            ]
+        );
+    }
+
     // NCBI c++/src/objtools/align_format/showdefline.cpp:829-836,961-965: the N column of
     // an ungapped sum-statistics search, from the first HSP of each subject.
     #[test]
@@ -8490,6 +8706,7 @@ mod tblastx_tests {
             false,
             None,
             &mut crate::report::query_warnings::no_subject_reads,
+            None,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -8556,6 +8773,7 @@ mod tblastx_tests {
             true,
             columns,
             &mut crate::report::query_warnings::no_subject_reads,
+            None,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -8604,6 +8822,7 @@ mod tblastx_tests {
             false,
             columns,
             &mut crate::report::query_warnings::no_subject_reads,
+            None,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -8647,6 +8866,7 @@ mod tblastx_tests {
             true,
             columns,
             &mut crate::report::query_warnings::no_subject_reads,
+            None,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -8695,6 +8915,7 @@ mod tblastx_tests {
                 true,
                 columns,
                 &mut crate::report::query_warnings::no_subject_reads,
+                None,
             )
             .map(|()| out)
         };
@@ -8747,6 +8968,7 @@ mod tblastx_tests {
                 show_sum_n,
                 None,
                 &mut crate::report::query_warnings::no_subject_reads,
+                None,
             )
             .unwrap();
             let text = String::from_utf8(out).unwrap();
@@ -9049,6 +9271,7 @@ mod tblastx_tests {
             false,
             None,
             &mut crate::report::query_warnings::no_subject_reads,
+            None,
         )
         .unwrap();
         let row = out.split(|&byte| byte == b'\n').nth(3).unwrap().to_vec();
@@ -9156,7 +9379,7 @@ mod tblastx_tests {
             protein_matrix: ScoringMatrix::Blosum62,
             sort: Default::default(),
             view: PairwiseView::Pairwise,
-            html: false,
+            html: None,
         };
         let gapped_k = [0.041, 0.047, 0.041, 0.041];
         let write = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {

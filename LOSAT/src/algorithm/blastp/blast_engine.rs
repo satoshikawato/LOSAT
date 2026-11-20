@@ -9080,7 +9080,10 @@ fn write_reports_without_queries(
                     protein_matrix: args.scoring.matrix,
                     sort: args.sort,
                     view: view.unwrap_or_default(),
-                    html: args.html,
+                    html: args
+                        .html
+                        .as_ref()
+                        .map(|links| crate::report::html_ids::HtmlReport::new(links, [])),
                 };
                 write_blastp_pairwise_report(
                     &[],

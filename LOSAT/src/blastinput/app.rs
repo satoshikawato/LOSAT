@@ -672,6 +672,36 @@ pub fn html_format_check(number: i32, program: Program, html: bool) -> anyhow::R
     Ok(())
 }
 
+/// The `-html` links of a run (`report::html_ids::HtmlLinks`), `None` without `-html`: NCBI's
+/// formatter registry (`InitConfig::read`: `FMTCFG`, `NCBI`, `GETURL_DEBUG` and the file),
+/// read once per run where each program checks its formats (`html_format_check`), so that
+/// LOSAT's refusal of the file comes before the first byte; `database` is the `-db` value as NCBI
+/// keeps it (`database_name()`, `None` for `-subject`). One function for the five programs; the
+/// links go where the option went (`PairwiseConfig::html`).
+pub(crate) fn html_links(
+    html: bool,
+    program: Program,
+    database: Option<&str>,
+) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
+    if !html {
+        return Ok(None);
+    }
+    let registry =
+        crate::report::formatter_registry::InitConfig::read(&program.name().to_ascii_lowercase())
+            .map_err(|what| anyhow::anyhow!("{what}'s {}", program.name()))?;
+    Ok(Some(std::sync::Arc::new(
+        crate::report::html_ids::HtmlLinks {
+            registry,
+            db_name: database.unwrap_or_default().as_bytes().to_vec(),
+            // `m_IsDbNa`: the subjects of BLASTN, TBLASTN and TBLASTX are nucleotide sequences.
+            nucleotide: matches!(
+                program,
+                Program::Blastn | Program::Tblastn | Program::Tblastx
+            ),
+        },
+    )))
+}
+
 /// NCBI's error for the XInclude formats (13 and 14) written to standard output, after
 /// `Query is Empty!`.
 ///

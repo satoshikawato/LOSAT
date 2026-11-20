@@ -1541,13 +1541,35 @@ impl ParsedSubject {
     fn description_id(&self) -> (Vec<u8>, bool) {
         let mut start = Vec::new();
         let mut wrote_gi = false;
-        if let Some((defline, found)) = self.display_defline() {
-            if let Some(id) = defline.display_id() {
-                let gi = if found { defline.gi() } else { 0 };
-                wrote_gi = description_id(id, gi, self.show_gis, &mut start);
-            }
+        if let Some((id, gi)) = self.description_ids() {
+            wrote_gi = description_id(id, gi, self.show_gis, &mut start);
         }
         (start, wrote_gi)
+    }
+
+    /// The display id of the description line and its GI (`GetDisplayIds`' `wid` and `gi`: the
+    /// GI of `display_defline` where it holds the Seq-align id, else 0).
+    pub fn description_ids(&self) -> Option<(&ParsedSeqId, i64)> {
+        let (defline, found) = self.display_defline()?;
+        let id = defline.display_id()?;
+        Some((id, if found { defline.gi() } else { 0 }))
+    }
+
+    /// The ids of the subject Bioseq (`handle.GetBioseqCore()->GetId()` of the Seq-align id: its
+    /// definition line's, a `-subject` record's own), whose link `-html` writes
+    /// (`report::html_ids::id_url`).
+    pub fn bioseq_ids(&self) -> &[ParsedSeqId] {
+        &self.target().ids
+    }
+
+    /// The taxid of the first definition line that has one (0 for none; a `-subject` record has
+    /// no Blast-def-line), the `<@taxid@>` of a local id's `-html` link (showdefline.cpp:484-491).
+    pub fn first_taxid(&self) -> i32 {
+        self.set
+            .deflines
+            .iter()
+            .find_map(|defline| defline.taxid)
+            .unwrap_or(0)
     }
 
     /// The definition line whose id the description line shows (`DeflineSet::display_defline`

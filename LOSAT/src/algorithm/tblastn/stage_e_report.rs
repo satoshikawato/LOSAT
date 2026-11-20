@@ -89,6 +89,16 @@ impl ShownSubjects<'_> {
         }
     }
 
+    /// The OIDs of the reported database sequences by rank (none for `-subject`).
+    fn report_oids(&self) -> Vec<crate::seqdb::Oid> {
+        match self {
+            Self::Fasta { .. } => Vec::new(),
+            Self::Database { reported, oids, .. } => {
+                reported.ordinals.iter().map(|&o| oids.oid(o)).collect()
+            }
+        }
+    }
+
     /// The reported database sequences with parsed Seq-ids by rank, or the records whose ids
     /// `-parse_deflines` read by index (empty without them).
     pub(super) fn parsed_subjects(
@@ -784,7 +794,7 @@ pub(super) fn render(
                     )
                     .expect("a pairwise view of formats 0 to 4"),
                     anchored.as_ref(),
-                    tabular.html,
+                    tabular.html.as_ref(),
                 )?,
                 // BLAST XML: one document per run, a header before the first query and a
                 // trailer after the last (`blast_xml`).
@@ -1524,7 +1534,7 @@ fn write_pairwise(
     view: crate::report::pairwise::PairwiseView,
     anchored: Option<&super::anchored::AnchoredSequences<'_>>,
     // `-html`: the HTML form of the report (`TabularInputs::html`).
-    html: bool,
+    html: Option<&Arc<crate::report::html_ids::HtmlLinks>>,
 ) -> Result<()> {
     ensure!(
         ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
@@ -1640,7 +1650,8 @@ fn write_pairwise(
         // `PairwiseView::report_sort`).
         sort: view.report_sort(formatting.report_sort()),
         view,
-        html,
+        html: html
+            .map(|links| crate::report::html_ids::HtmlReport::new(links, shown.report_oids())),
         ..PairwiseConfig::default()
     };
     write_tblastn_pairwise_report(

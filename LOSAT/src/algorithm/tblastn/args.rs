@@ -448,6 +448,8 @@ pub struct ResolvedTblastnArgs {
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     /// `-in_pssm`: the query's PSSM (PSI-TBLASTN, `in_pssm.rs`).
     pub pssm: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
+    /// The `-html` links of the run (`blastinput::app::html_links`); `None` without `-html`.
+    pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
 }
 
 impl TblastnArgs {
@@ -747,6 +749,11 @@ impl TblastnArgs {
                 self.html,
             )?;
         }
+        let html = crate::blastinput::app::html_links(
+            self.html,
+            crate::blastinput::app::Program::Tblastn,
+            self.database_name(),
+        )?;
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
             "tblastn",
             outfmts.unwrap_or(&own_outfmt),
@@ -866,6 +873,7 @@ impl TblastnArgs {
             num_threads: self.num_threads,
             query_range,
             pssm,
+            html,
         })
     }
 }

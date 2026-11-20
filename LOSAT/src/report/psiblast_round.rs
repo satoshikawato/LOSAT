@@ -254,6 +254,8 @@ impl RoundSections<'_> {
                 None,
                 |s_idx| self.label(group, s_idx),
                 read,
+                // psiblast refuses `-html` (`cli::UNPORTED_PSIBLAST_OWN_ARGS`): the plain table.
+                None,
             )?,
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1528

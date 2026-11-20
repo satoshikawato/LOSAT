@@ -576,6 +576,7 @@ fn run_inner(
     )?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
     app::html_format_check(choice.number, Program::Blastx, args.html)?;
+    let html = app::html_links(args.html, Program::Blastx, args.database_name())?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;
@@ -587,6 +588,7 @@ fn run_inner(
     //         exit_code = BLAST_INPUT_ERROR;                                      \
     // ```
     let mut options = resolution.map_err(options_error)?;
+    options.html = html;
     options.query_range = query_range;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
     // ```c++

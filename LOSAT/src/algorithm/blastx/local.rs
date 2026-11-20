@@ -1359,6 +1359,7 @@ fn check_resolutions(
         app::formatting_handler_check(choice, Program::Blastx)?;
         app::html_format_check(choice.number, Program::Blastx, args.html)?;
     }
+    let html = app::html_links(args.html, Program::Blastx, args.database_name())?;
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "blastx",
@@ -1371,7 +1372,11 @@ fn check_resolutions(
     diagnostics.write_all(&warnings)?;
     resolutions
         .into_iter()
-        .map(|resolution| resolution.map_err(options_error))
+        .map(|resolution| {
+            let mut options = resolution.map_err(options_error)?;
+            options.html = html.clone();
+            Ok(options)
+        })
         .collect()
 }
 

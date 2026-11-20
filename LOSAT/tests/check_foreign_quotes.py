@@ -39,10 +39,13 @@ language (Rust examples, commands and output stay). In Markdown and text files o
 paragraph right above a fence is read for its citation (their fences are mostly commands and
 examples), and PIN and REF do not apply (dated records keep the paths they were written with).
 
+`--fix` removes what QUOTE finds and pins what PIN finds (a branch that merges a dev with
+quotes removed runs it; it changes comment lines only), then checks again; REF is fixed by hand.
+
 The tables below are the one place that says which sources are NCBI's. There is no
 allowlist of exceptions: cite the file and lines instead of quoting them.
 
-Usage: python3 LOSAT/tests/check_foreign_quotes.py --root .
+Usage: python3 LOSAT/tests/check_foreign_quotes.py --root . [--fix]
        python3 LOSAT/tests/check_foreign_quotes.py --write-table --ncbi-src $NCBI_SRC \\
            --rpsbproc-src <dir holding RpsbProc/>
 """
@@ -73,6 +76,7 @@ RUST_FENCES = frozenset({"rust", "no_run", "ignore", "should_panic", "compile_fa
 # The labels of a citation of NCBI's source that name the pinned trees.
 PINNED_LABELS = (
     "NCBI reference (598d8ae6)",
+    "NCBI references (598d8ae6)",
     "NCBI reference (RpsbProc 0.5.1, 2025-05-13)",
     "NCBI unit test (598d8ae6)",
 )
@@ -80,7 +84,7 @@ PINNED_LABELS = (
 NCBI_LABEL_USE_RE = re.compile(r"\bNCBI (?:reference|unit test)s?(?=\s*[:(])(?:\s*\([^)]*\))?")
 # A path of a local checkout of NCBI's tree.
 CHECKOUT_PATH_RE = re.compile(r"(?:ncbi-blast[\w.+-]*|GitHub)/c\+\+/")
-# A path of the pinned trees, with its lines: `c++/src/x.c:12-20,31`.
+# A path of the pinned trees, with its lines: `c++/<path>:12-20,31`.
 TREE_PATH_RE = re.compile(
     r"(?<![\w.+/-])(?P<path>(?:c\+\+|RpsbProc)/[\w.+/-]*[\w+/])"
     r"(?::(?P<ranges>\d+(?:-\d+)?(?:,\s?\d+(?:-\d+)?)*))?"
@@ -321,6 +325,17 @@ def is_citation(text: str) -> bool:
     )
 
 
+def cites_source(text: str) -> bool:
+    """Whether a citation line cites a source file: an NCBI label, a path with a source extension,
+    or a path of the pinned trees (not a label over prose, `Result: zero.`)."""
+    return (
+        NCBI_CITATION_RE.match(text) is not None
+        or NCBI_PATH_LABEL_RE.match(text) is not None
+        or CITE_RE.search(text) is not None
+        or TREE_PATH_RE.search(text) is not None
+    )
+
+
 def is_label_line(text: str) -> bool:
     """Whether a comment line starts with a citation label: `<label>: <path>...`,
     `NCBI reference ...` or `<project> [<version>] reference ...`."""
@@ -358,11 +373,16 @@ def load_table(path: Path = TABLE_PATH) -> dict[str, int]:
 
 
 def directories(table: dict[str, int]) -> frozenset[str]:
+    """The directories of the table's files (`c++/src/`) and their names without the last
+    extension (`.../data/user-column-db` of a BLAST database's files)."""
     out = set()
     for path in table:
         parts = path.split("/")
         for end in range(1, len(parts)):
             out.add("/".join(parts[:end]) + "/")
+        stem, dot, _ = path.rpartition(".")
+        if dot and "/" in stem:
+            out.add(stem)
     return frozenset(out)
 
 
@@ -371,7 +391,7 @@ def ref_problem(path: str, ranges: str | None, table: dict[str, int], dirs: froz
     if path.endswith("/"):
         return None if path in dirs else "no such directory"
     if path not in table:
-        return None if path + "/" in dirs else "no such file"
+        return None if path + "/" in dirs or path in dirs else "no such file"
     count = table[path]
     for part in (ranges or "").split(","):
         part = part.strip()
@@ -426,7 +446,7 @@ def check_text(
         if FENCE_RE.match(text):
             if not in_fence:
                 language = text.strip()[3:].strip().split(" ")[0].split(",")[0].lower()
-                in_run = bool(cited)
+                in_run = [entry for entry in cited if cites_source(entry[1])]
                 # Without a citation in the run, the last citation above in the file (in source
                 # files: a quote inside a function cited above the function).
                 if not cited and last_citation is not None and source_file:
@@ -439,7 +459,7 @@ def check_text(
                     findings.append(Finding(rel, number, "QUOTE", "source text", where))
                 elif in_run and source_file and language not in RUST_FENCES:
                     findings.append(
-                        Finding(rel, number, "QUOTE", "source text", f"cited at :{cited[0][0]}: {cited[0][1]}")
+                        Finding(rel, number, "QUOTE", "source text", f"cited at :{in_run[0][0]}: {in_run[0][1]}")
                     )
             in_fence = not in_fence
             run_label, run_citations = None, []
@@ -452,9 +472,10 @@ def check_text(
         citation = is_citation(text)
         if run_label is not None and not citation and CODE_LINE_RE.search(text):
             found = cited_source([run_label])
-            if found is None:
+            if found is None and cites_source(run_label[1]):
                 found = ("source text", f"cited at :{run_label[0]}: {run_label[1]}")
-            findings.append(Finding(rel, number, "QUOTE", found[0], found[1]))
+            if found is not None:
+                findings.append(Finding(rel, number, "QUOTE", found[0], found[1]))
         if is_label_line(text):
             run_label = (number, text)
         elif citation:
@@ -492,6 +513,87 @@ def find(root: Path, table: dict[str, int] | None = None) -> list[Finding]:
         rel = path.relative_to(root).as_posix()
         findings.extend(check_text(rel, text.splitlines(), style, table, dirs))
     return findings
+
+
+# The unpinned forms of a citation of NCBI's tree that `--fix` rewrites to the pinned label.
+CHECKOUT_PREFIX = r"(?:/mnt/c/Users/[^/\s]+/GitHub/|[\w./-]*/)?(?:ncbi-blast[\w.+-]*/)?"
+PIN_FIXES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"\bNCBI reference(?: \((?!598d8ae6\)|RpsbProc)[^)]*\))?:\s*" + CHECKOUT_PREFIX + r"(?=c\+\+/)"),
+        "NCBI reference (598d8ae6): ",
+    ),
+    (re.compile(r"(?<![\w`])References?:\s*" + CHECKOUT_PREFIX + r"(?=c\+\+/)"), "NCBI reference (598d8ae6): "),
+    (re.compile(r"(?<![\w`])(?:/mnt/c/Users/[^/\s]+/GitHub/)?ncbi-blast[\w.+-]*/(?=c\+\+/)"), ""),
+)
+BLANK_COMMENT_RE = re.compile(r"^\s*(?://[/!]?|#)\s*$")
+
+
+def fix_lines(lines: list[str], style: str, findings: Sequence[Finding]) -> list[str]:
+    """`lines` without the source text that `findings` name (QUOTE: a fence from its opening to
+    its closing line, or one code line) and with PIN's labels pinned where the label names a
+    path of NCBI's tree. A blank comment line left doubled, or left between a comment and
+    code, goes too. REF is left to the writer: cite the right file and lines."""
+    texts = comment_texts(style, lines)
+    drop: set[int] = set()
+    for finding in findings:
+        index = finding.line - 1
+        if finding.kind == "QUOTE":
+            text = texts[index] or ""
+            if FENCE_RE.match(text):
+                end = index + 1
+                while end < len(lines) and texts[end] is not None and not FENCE_RE.match(texts[end] or ""):
+                    end += 1
+                drop.update(range(index, min(end, len(lines) - 1) + 1))
+            else:
+                drop.add(index)
+        elif finding.kind == "PIN":
+            line = lines[index]
+            for pattern, replacement in PIN_FIXES:
+                line = pattern.sub(replacement, line)
+            lines[index] = line
+    out: list[str] = []
+    index = 0
+    while index < len(lines):
+        if index not in drop:
+            out.append(lines[index])
+            index += 1
+            continue
+        end = index
+        while end in drop:
+            end += 1
+        before = out[-1] if out else None
+        after = lines[end] if end < len(lines) else None
+        blank_before = before is not None and BLANK_COMMENT_RE.match(before) is not None
+        blank_after = after is not None and BLANK_COMMENT_RE.match(after) is not None
+        comment_after = after is not None and re.match(r"^\s*(?://|#)", after) is not None
+        if blank_before and blank_after:
+            end += 1
+        elif blank_before and not comment_after:
+            out.pop()
+        index = end
+    return out
+
+
+def fix(root: Path) -> int:
+    """Rewrite the files with findings (`fix_lines`); the number of files changed."""
+    table = load_table()
+    dirs = directories(table)
+    changed = 0
+    for path in source_files(root):
+        text = path.read_text(encoding="utf-8")
+        style = COMMENT_STYLES[path.suffix]
+        lines = text.split("\n")
+        rel = path.relative_to(root).as_posix()
+        findings = [
+            f for f in check_text(rel, lines, style, table, dirs) if f.kind in ("QUOTE", "PIN")
+        ]
+        if not findings:
+            continue
+        new = "\n".join(fix_lines(list(lines), style, findings))
+        if new != text:
+            path.write_text(new, encoding="utf-8")
+            changed += 1
+    return changed
 
 
 def write_table(ncbi_src: Path, rpsbproc_src: Path, out: Path = TABLE_PATH) -> int:
@@ -538,6 +640,9 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=Path("."), help="repository root")
     parser.add_argument("--write-table", action="store_true", help="regenerate the tree table")
+    parser.add_argument(
+        "--fix", action="store_true", help="remove the quoted source text and pin the labels"
+    )
     parser.add_argument("--ncbi-src", type=Path, help="checkout of NCBI's tree at 598d8ae6")
     parser.add_argument("--rpsbproc-src", type=Path, help="directory that holds RpsbProc/")
     return parser.parse_args(argv)
@@ -561,6 +666,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"wrote {TABLE_PATH.name}: {count} files")
         return 0
     root = args.root.resolve()
+    if args.fix:
+        print(f"fixed {fix(root)} files")
     findings = find(root)
     for f in findings:
         print(f"{f.kind}\t{f.path}:{f.line}\t{f.source}\t{ADVICE[f.kind]}\t{f.text}")

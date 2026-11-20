@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 PINNED = "598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4"
-# A path of NCBI's tree with its lines: `c++/src/x.c:12-20,31`.
+# A path of NCBI's tree with its lines: `c++/<path>:12-20,31`.
 CITE_RE = re.compile(
     r"(?<![\w.+/-])(?P<path>c\+\+/[\w.+/-]*[\w+])"
     r"(?::(?P<ranges>\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*))?"

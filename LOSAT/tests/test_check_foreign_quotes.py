@@ -185,6 +185,10 @@ class CheckTextTest(unittest.TestCase):
         )
         self.assertEqual(findings(ncbi), [("QUOTE", 2, "source text")])
 
+    def test_a_code_line_under_a_label_that_cites_no_source_passes(self) -> None:
+        text = "BLASTP also matched at n8. Page errors: zero.\n- reports pool_threads=8 and ready=true;\n"
+        self.assertEqual(findings(text, "text"), [])
+
     def test_unpinned_ncbi_labels_and_checkout_paths_fail(self) -> None:
         self.assertEqual(pinned(NCBI_CITATION), [])
         for label in ("NCBI reference: ", "NCBI reference (2.17.0): ", "Reference: ncbi-blast/"):
@@ -192,7 +196,10 @@ class CheckTextTest(unittest.TestCase):
             self.assertEqual([k for k, _, _ in pinned(text)], ["PIN"], label)
         local = "// see /mnt/c/Users/x/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1\n"
         self.assertEqual([k for k, _, _ in pinned(local)], ["PIN"])
-        rpsbproc = "// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1-9\n"
+        rpsbproc = (
+            "// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1-9\n"
+            "// NCBI references (598d8ae6):\n"
+        )
         unit = "// NCBI unit test (598d8ae6): c++/src/algo/blast/core/blast_hits.c:10-20 Case\n"
         prose = "//! see that module's NCBI reference), and its reader\n"
         self.assertEqual(pinned(rpsbproc + unit + prose), [])
@@ -227,6 +234,7 @@ class CheckTextTest(unittest.TestCase):
             table = checker.load_table(path)
         self.assertEqual(table, {"c++/src/a/b.c": 12, "c++/include/d.h": 3})
         self.assertIn("c++/src/", checker.directories(table))
+        self.assertIn("c++/src/a/b", checker.directories(table))
 
     def test_python_docstrings_and_hash_comments_are_read(self) -> None:
         docstring = (
@@ -255,6 +263,38 @@ class CheckTextTest(unittest.TestCase):
         self.assertEqual(findings(text, "text"), [("QUOTE", 10, "glibc")])
         long_paragraph = "glibc 2.39: libio/fileops.c:1\n" + "ACGT" * 50 + "\n" * 1 + "x\n" * 5000
         self.assertEqual(findings(long_paragraph, "text"), [])
+
+
+class FixTest(unittest.TestCase):
+    def fixed(self, text: str, style: str = "slash") -> str:
+        lines = text.split("\n")
+        found = checker.check_text("x", lines, style, TABLE)
+        return "\n".join(checker.fix_lines(list(lines), style, found))
+
+    def test_fix_removes_quotes_and_pins_labels_and_is_idempotent(self) -> None:
+        text = (
+            "    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381\n"
+            "    // ```c\n    // qsort(a, n, sizeof(BlastHSP*), cmp);\n    // ```\n"
+            "    //\n    // The sort is stable.\n"
+            "    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_hits.c:20:\n    // x = y;\n"
+            "    let x = 1;\n"
+        )
+        want = (
+            "    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381\n"
+            "    //\n    // The sort is stable.\n"
+            "    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:20:\n"
+            "    let x = 1;\n"
+        )
+        once = self.fixed(text)
+        self.assertEqual(once, want)
+        self.assertEqual(self.fixed(once), once)
+        self.assertEqual(pinned(once), [])
+
+    def test_fix_drops_a_blank_line_left_before_code(self) -> None:
+        text = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\n//\n// ```c\n// x;\n// ```\nfn f() {}\n"
+        self.assertEqual(
+            self.fixed(text), "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\nfn f() {}\n"
+        )
 
 
 class MainTest(unittest.TestCase):

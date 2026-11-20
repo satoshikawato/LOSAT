@@ -89,7 +89,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 LOSAT stops with an error for these `blastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
 - `-task rmblastn` and `-reward 0`.
-- `-ungapped` together with `-outfmt` 8, 9, 11, 12 or 17.
+- `-ungapped` together with `-outfmt 17` (SAM).
 - `-html`, `-remote`, `-entrez_query`, `-gilist`, `-import_search_strategy`, `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-filtering_db` and `-index_name`. `-use_index true` on a database that has a MegaBLAST index (`makembindex`).
 - `-db_hard_mask` with `-task blastn-short` on a database whose sequences are masked to their end, and on a database whose masks overlap or are stored out of order.

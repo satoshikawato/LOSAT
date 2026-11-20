@@ -1,0 +1,2 @@
+qaccver,saccver,pident,length,mismatch,gapopen,qstart,qend,sstart,send,evalue,bitscore
+qok1,sok1,99.194,124,1,0,1,124,1,124,3.85e-73,250

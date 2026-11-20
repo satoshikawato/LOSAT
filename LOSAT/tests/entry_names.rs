@@ -323,7 +323,7 @@ fn search_program_help_says_what_outfmt_writes() {
         ),
         (
             "psiblast",
-            "Written: 0, 6, 7, 10 and 20; with -in_pssm: 0, 6 and 7.",
+            "Written: 0, 6, 7, 10 and 20; with -in_pssm or -in_msa: 0, 6 and 7.",
             "Formats 6, 7, 10 and 20 take",
         ),
         (

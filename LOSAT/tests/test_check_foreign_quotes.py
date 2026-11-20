@@ -290,6 +290,20 @@ class FixTest(unittest.TestCase):
         self.assertEqual(self.fixed(once), once)
         self.assertEqual(pinned(once), [])
 
+    def test_fix_writes_the_path_of_a_base_name_and_keeps_code(self) -> None:
+        text = (
+            "// NCBI reference: blast_hits.c:2-3 `Blast_HSPListSortByScore`\n"
+            "// ```c\n// qsort(a, n, s, cmp);\nfn f() {}\n"
+        )
+        lines = text.split("\n")
+        found = checker.check_text("x", lines, "slash", TABLE)
+        fixed = checker.fix_lines(list(lines), "slash", found, checker.base_names(TABLE))
+        self.assertEqual(
+            "\n".join(fixed),
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-3"
+            " `Blast_HSPListSortByScore`\nfn f() {}\n",
+        )
+
     def test_fix_drops_a_blank_line_left_before_code(self) -> None:
         text = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\n//\n// ```c\n// x;\n// ```\nfn f() {}\n"
         self.assertEqual(

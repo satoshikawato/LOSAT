@@ -525,14 +525,35 @@ PIN_FIXES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?<![\w`])References?:\s*" + CHECKOUT_PREFIX + r"(?=c\+\+/)"), "NCBI reference (598d8ae6): "),
     (re.compile(r"(?<![\w`])(?:/mnt/c/Users/[^/\s]+/GitHub/)?ncbi-blast[\w.+-]*/(?=c\+\+/)"), ""),
 )
+# A label that names a file of NCBI's tree by its base name; `--fix` writes the file's path when
+# the tree has one file of that name.
+BARE_LABEL_RE = re.compile(
+    r"\bNCBI (?P<kind>reference|unit test)(?P<s>s?)(?: \((?!598d8ae6\)|RpsbProc)[^)]*\))?:\s*"
+    r"(?P<name>[\w+-]+\.(?:c|h|cc|cpp|cxx|hpp|inl|asn))\b"
+)
 BLANK_COMMENT_RE = re.compile(r"^\s*(?://[/!]?|#)\s*$")
 
 
-def fix_lines(lines: list[str], style: str, findings: Sequence[Finding]) -> list[str]:
+def base_names(table: dict[str, int]) -> dict[str, str]:
+    """The base names that one file of NCBI's tree has, with that file's path."""
+    seen: dict[str, list[str]] = {}
+    for path in table:
+        if path.startswith("c++/"):
+            seen.setdefault(path.rsplit("/", 1)[-1], []).append(path)
+    return {name: paths[0] for name, paths in seen.items() if len(paths) == 1}
+
+
+def fix_lines(
+    lines: list[str],
+    style: str,
+    findings: Sequence[Finding],
+    names: dict[str, str] | None = None,
+) -> list[str]:
     """`lines` without the source text that `findings` name (QUOTE: a fence from its opening to
     its closing line, or one code line) and with PIN's labels pinned where the label names a
-    path of NCBI's tree. A blank comment line left doubled, or left between a comment and
-    code, goes too. REF is left to the writer: cite the right file and lines."""
+    path of NCBI's tree, or a base name that one file of the tree has (`names`, from
+    `base_names`). A blank comment line left doubled, or left between a comment and code, goes
+    too. Only comment lines change. REF is left to the writer: cite the right file and lines."""
     texts = comment_texts(style, lines)
     drop: set[int] = set()
     for finding in findings:
@@ -543,14 +564,25 @@ def fix_lines(lines: list[str], style: str, findings: Sequence[Finding]) -> list
                 end = index + 1
                 while end < len(lines) and texts[end] is not None and not FENCE_RE.match(texts[end] or ""):
                     end += 1
-                drop.update(range(index, min(end, len(lines) - 1) + 1))
+                closed = end < len(lines) and texts[end] is not None
+                drop.update(range(index, end + 1 if closed else end))
             else:
                 drop.add(index)
         elif finding.kind == "PIN":
             line = lines[index]
             for pattern, replacement in PIN_FIXES:
                 line = pattern.sub(replacement, line)
+            if names:
+                line = BARE_LABEL_RE.sub(
+                    lambda m: (
+                        f"NCBI {m['kind']}{m['s']} (598d8ae6): {names[m['name']]}"
+                        if m["name"] in names
+                        else m[0]
+                    ),
+                    line,
+                )
             lines[index] = line
+    drop = {index for index in drop if texts[index] is not None}
     out: list[str] = []
     index = 0
     while index < len(lines):
@@ -578,6 +610,7 @@ def fix(root: Path) -> int:
     """Rewrite the files with findings (`fix_lines`); the number of files changed."""
     table = load_table()
     dirs = directories(table)
+    names = base_names(table)
     changed = 0
     for path in source_files(root):
         text = path.read_text(encoding="utf-8")
@@ -589,7 +622,7 @@ def fix(root: Path) -> int:
         ]
         if not findings:
             continue
-        new = "\n".join(fix_lines(list(lines), style, findings))
+        new = "\n".join(fix_lines(list(lines), style, findings, names))
         if new != text:
             path.write_text(new, encoding="utf-8")
             changed += 1

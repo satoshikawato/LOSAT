@@ -1072,6 +1072,19 @@ impl BlastCompoHeap {
 
     /// Whether `more` insertions can fill the heap to its cutoff (`filled_to_cutoff`): the bound
     /// that the window redo's look ahead uses (`x_redo_par::x_end_above`). No NCBI counterpart.
+    #[cfg_attr(
+        all(
+            not(test),
+            not(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))
+        ),
+        expect(
+            dead_code,
+            reason = "used only with `parallel` threads (x_redo_par) and by unit tests"
+        )
+    )]
     pub(crate) fn may_fill(&self, more: usize) -> bool {
         self.x_ends_early && self.n.saturating_add(more) >= self.heap_threshold
     }
@@ -2733,7 +2746,7 @@ mod tests {
         assert!(!heaps[1].filled_to_cutoff() && !heaps[1].may_fill(5));
         assert!(!blast_compo_early_termination(weak, &heaps[1..]));
         assert!(!blast_compo_early_termination(weak, &heaps));
-        // A third, better match is kept in place of the worst, as in any heap.
+        // A match within the cutoff would still be inserted, as in any heap.
         assert!(heaps[1].would_insert(1e-30, 70, 3));
     }
 

@@ -1426,7 +1426,7 @@ pub(super) fn prelim_sinks(
     //     ASSERT(inclusion_ethresh != 0.0);
     // ```
     // The heaps hold psiblast's larger hit lists (`traceback_hitlist_size`).
-    let redone_matches = build_redone_match_heaps(query_count, &args.redone_match_heap());
+    let redone_matches = build_redone_match_heaps(query_count, || args.redone_match_heap());
     let preliminary_hit_lists: Vec<Option<BlastpHitList>> =
         std::iter::repeat_with(|| None).take(query_count).collect();
     // The preliminary hit lists with the compact element (`x_prelim_compact.rs`), the lists the

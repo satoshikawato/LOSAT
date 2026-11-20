@@ -362,14 +362,15 @@ fn unified_p_without_search_space(refusal: UnifiedPRefusal<'_>, query: usize) ->
 /// NCBI passes the context index after the loop over the query's frames has advanced it, so for
 /// BLASTP (one frame) the context is the NEXT query's of the query batch (`query_batches`, each
 /// query's batch as a range: `kappa_query_batches`): its length, its length adjustment and its
-/// effective search space, which for a query that is not valid are 0 and the `-searchsp` value
-/// (0 when not given). Reproduced (PD-LOSAT-NCBI-DEFECTS rule 2).
+/// effective search space. For a query that is not valid the length adjustment is 0 and the
+/// search space is the `-searchsp` value (0 when not given). Reproduced (PD-LOSAT-NCBI-DEFECTS
+/// rule 2).
 ///
 /// For the last query of a batch NCBI reads past the batch's contexts (heap bytes: its reports
 /// differ from run to run). LOSAT reads the query's own context there, which is what NCBI
-/// reads for that query when a copy of it follows in the same batch (the exception of
-/// PD-LOSAT-NCBI-DEFECTS for unified P-values; the redo also ends no match early then,
-/// `ResolvedBlastpArgs::redone_match_heap`).
+/// reads for that query when a copy of it follows in the same batch and the batch is searched
+/// in the same chunks (the exception of PD-LOSAT-NCBI-DEFECTS for unified P-values; the redo
+/// also ends no match early then, `ResolvedBlastpArgs::redone_match_heap`).
 ///
 /// A next query whose effective search space is 0 makes NCBI's scale infinite: NCBI reports
 /// every E-value of the query before it as 0, an alignment whose E-value was 0 without an

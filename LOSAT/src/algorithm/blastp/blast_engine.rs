@@ -1101,10 +1101,13 @@ fn blastp_local_scaling_factor(mode: BlastpCompositionMode, matrix: ScoringMatri
 //                               inclusion_ethresh);
 // }
 // ```
-fn build_redone_match_heaps(num_queries: usize, heap: &BlastCompoHeap) -> Vec<BlastCompoHeap> {
+fn build_redone_match_heaps(
+    num_queries: usize,
+    heap: impl Fn() -> BlastCompoHeap,
+) -> Vec<BlastCompoHeap> {
     // `heap`: one query's heap as BlastCompo_HeapInitialize leaves it
-    // (`ResolvedBlastpArgs::redone_match_heap`).
-    (0..num_queries).map(|_| heap.clone()).collect()
+    // (`ResolvedBlastpArgs::redone_match_heap`), built anew for each query.
+    (0..num_queries).map(|_| heap()).collect()
 }
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
 // ```c
@@ -14453,7 +14456,7 @@ mod tests {
     // ```
     #[test]
     fn test_redone_match_heaps_use_hitlist_size_not_prelim_hitlist_size() {
-        let heaps = build_redone_match_heaps(3, &BlastCompoHeap::new(7, PSI_INCLUSION_ETHRESH));
+        let heaps = build_redone_match_heaps(3, || BlastCompoHeap::new(7, PSI_INCLUSION_ETHRESH));
         assert_eq!(heaps.len(), 3);
         assert_eq!(heaps[0].heap_threshold, 7);
         assert!((heaps[0].ecutoff - PSI_INCLUSION_ETHRESH).abs() < f64::EPSILON);

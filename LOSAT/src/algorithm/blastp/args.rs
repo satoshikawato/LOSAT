@@ -985,7 +985,7 @@ impl ResolvedBlastpArgs {
     /// The heap of one query's redone matches as the composition-based redo starts.
     ///
     /// With unified P-values (BLASTP's `-comp_based_stats 1u`, `2u`, `3u`) the redo ends no match
-    /// early ([`BlastCompoHeap::without_early_end`]): the only query whose matches NCBI's test can
+    /// early ([`super::hsp::BlastCompoHeap::without_early_end`]): the only query whose matches NCBI's test can
     /// end is the last one of a query batch, whose result LOSAT defines by NCBI's search with a
     /// copy of it after it, where NCBI redoes every match of it.
     pub(crate) fn redone_match_heap(&self) -> super::hsp::BlastCompoHeap {

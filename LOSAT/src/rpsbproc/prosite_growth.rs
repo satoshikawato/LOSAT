@@ -32,7 +32,7 @@
 //! more fails on every host (`std::bad_alloc`); what NCBI holds at once of `HOST_DEPENDENT_BYTES`
 //! or more depends on the host (refused).
 
-use super::{Live, MatchError, HOST_DEPENDENT_BYTES, RECORD_BYTES, USER_SPACE_BYTES};
+use super::{Live, MatchError, HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
 
 /// `what()` of the `std::length_error` that NCBI's `append(n, c)` throws for a length above
 /// `max_size()` (rpsbproc prints it as `Application's execution failed: ...`).
@@ -202,7 +202,7 @@ impl Live {
 /// buffer of match records.
 #[cfg(test)]
 pub(crate) mod events {
-    use super::RECORD_BYTES;
+    use super::super::RECORD_BYTES;
     use std::cell::RefCell;
 
     thread_local! {

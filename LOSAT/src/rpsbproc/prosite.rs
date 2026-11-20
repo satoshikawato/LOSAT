@@ -66,12 +66,12 @@ pub(crate) const HOST_DEPENDENT_BYTES: u64 = 1 << 30;
 /// fails on every host and throws `std::bad_alloc`.
 pub(crate) const USER_SPACE_BYTES: u64 = 1 << 47;
 
-// The growth of libstdc++'s string and vector in NCBI's motif check (`CxxString`, `Live::grow`).
+// The growth of the C++ library's string and vector in NCBI's motif check (`CxxString`, `Live::grow`).
 #[path = "prosite_growth.rs"]
 mod growth;
-pub(crate) use growth::{CxxString, MapEnd};
 #[cfg(test)]
 pub(crate) use growth::{events as growth_events, BAD_ALLOC, LENGTH_ERROR};
+pub(crate) use growth::{CxxString, MapEnd};
 
 /// `CProSite::EParseError` without `eNoError`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

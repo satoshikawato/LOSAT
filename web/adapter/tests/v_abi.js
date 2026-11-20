@@ -15,10 +15,20 @@
 // The searches come from web/adapter/tools/v_abi_cases.py; where a frozen SHA-256
 // exists (Gate A, the Stage G matrix, NCBI's fixtures) the match is recorded as well, for a
 // search with `"frozen_prefix"` after the frozen path prefix is put back (`toFrozen`). A
-// search marked `"expect": "failure"` must fail in the CLI and in the ABI with the same
-// error. A search with `"outfmt"` (a format besides 0, 6 and 7, or 6 or 7 with fields) runs
+// search marked `"expect": "failure"` must fail in the CLI's run of the argv's own -outfmt (its
+// `"outfmt"`, else outfmt 0) and in the ABI with the same error, and stream 3 then the error must
+// be that run's standard error, byte for byte (abi_v2.md §5, §7; line WQA's sweep, D3 review,
+// 2026-11-19). The CLI's runs of the other formats may complete: in a run of two searches
+// (`-num_descriptions`, `-num_alignments`) the outcome is that of the argv's own search, and the
+// other writes formats that the argv does not ask for (§7). A search that completes completes in
+// the CLI's run of its own -outfmt, and the CLI's runs of its other formats may fail, whose streams
+// are then empty (the run discards them, stream 9); its stream 3 is the CLI's standard error for
+// the argv followed by what the other formats' standard error adds (§5, `nativeOutputs`; line
+// WQA's sweep, D3 review r2, 2026-11-19). A search with `"outfmt"` 0, 6 or 7 alone runs with that
+// -outfmt, which is one of the program's formats; one with another `"outfmt"` (a format besides
+// 0, 6 and 7, or 6 or 7 with fields) runs
 // with that -outfmt: its output, stream 4, is compared with the CLI's run of the same argv,
-// whose standard error is then stream 3 (abi_v2.md §5, §7); SAM's (`"sam": true`) without the
+// whose standard error then starts stream 3 (abi_v2.md §5, §7); SAM's (`"sam": true`) without the
 // CL tag of its @PG line, where each writes its own command line. The output of outfmt 13 and 14
 // (`"files": true`) is a ZIP archive, whose entries are compared with the files of the CLI's run
 // with `-out results`: the side files `results_<n>.json|xml`, and the master file as
@@ -26,11 +36,11 @@
 //
 // A search with `"fails_alone"` lists the formats of 0, 6 and 7 whose CLI run of the argv fails
 // while the argv's own format runs (a record that is both a query and a subject under
-// -parse_deflines and has masks: LOSAT refuses outfmt 0 alone; line WQA's sweep, D7, 2026-11-19):
-// the run writes no stream for them, and stream 3 is the CLI's standard error of the argv's own
-// format followed by each such format's error (the last line of its CLI run's standard error), as
-// the adapter writes a refusal of a format that failed alone (abi_v2.md §7), and the run's signals of
-// stream 9 name them and no other stream, each with the place of its error, which holds it (abi_v2.md §5). Its `"outfmt"` may be 6 or 7 (the argv's own
+// -parse_deflines and has masks: LOSAT refuses outfmt 0 alone; line WQA's sweep, D7, 2026-11-19),
+// and their CLI runs must fail. As for every format whose CLI run fails in a run that completes, the
+// run writes no stream for them, stream 3 adds their error after the warnings (`nativeOutputs`; the
+// adapter writes a refusal of a format that failed alone, abi_v2.md §7), and the run's signals of
+// stream 9 name them, each with the place of its error, which holds it (abi_v2.md §5). Its `"outfmt"` may be 6 or 7 (the argv's own
 // format then is that stream, and no stream 4 is written). Every run that succeeds says once where its messages go
 // (stream 10): stream 3 without -logfile (line WQA's sweep, D7, 2026-11-20).
 //
@@ -62,6 +72,8 @@ const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifa
 const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7], blastx: [0, 6, 7] };
 // The stream of the output of the argv's -outfmt.
 const CUSTOM_STREAM = 4;
+// The signals that discard what the host received of an output stream (abi_v2.md §5).
+const DISCARD_STREAM = 9;
 const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx", "blastx"]);
 
 function sha256(bytes) {
@@ -160,9 +172,6 @@ function nativeFiles(directory, outfmt) {
   return files;
 }
 
-// The -outfmt numbers whose warnings are those of outfmt 6 (the tabular writer's): the structured
-// formats do not write the queries' warnings (`ReportFormat::writes_query_warnings`).
-const TABULAR = new Set([6, 7, 10, 20]);
 
 function parseArgs(argv) {
   const options = {};
@@ -188,8 +197,11 @@ class Reactor {
 
   // Pointers and lengths are unsigned; JavaScript receives an i32 as a signed number
   // (docs/web/abi_v2.md §6), so a pointer of 2 GiB or more arrives negative.
+  // A signal of stream 9 discards what the host received of the stream that it names (§5), as the
+  // application discards it: the stream of a run is then empty. The signals are kept on stream 9.
   emit(stream, ptr, len) {
     const chunk = Buffer.from(new Uint8Array(this.memory().buffer, ptr >>> 0, len >>> 0));
+    if (stream === DISCARD_STREAM) this.streams.delete(chunk.readUInt32LE(0));
     if (!this.streams.has(stream)) this.streams.set(stream, []);
     this.streams.get(stream).push(chunk);
   }
@@ -348,83 +360,164 @@ function nativeEnv(search) {
   return env;
 }
 
-// The CLI's outputs of a search, one run per format with -out. A search with
-// `"expect": "failure"` fails in the CLI (exit 3 or 1), whose files keep what was written
-// before the failure (the outfmt 0 prolog before a first query batch fails).
+// The formatting handler's warnings (blast_args.cpp:2947-2989): the CLI writes those of
+// -num_descriptions, -line_length and -sorthits for formats above 4 only, that of -sorthsps for
+// formats other than 0, and that of the few matches for the hit list size of the format.
+const HANDLER = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches|The parameter -line_length is not applicable|The parameter -sorthits is ignored|The parameter -sorthsps is ignored)/;
+// The structured formats, whose writers do not write the queries' warnings (abi_v2.md §5,
+// `ReportFormat::writes_query_warnings`).
+const STRUCTURED = new Set([5, 8, 9, 11, 12, 13, 14, 15, 16, 17]);
+
+// The hit list size that the CLI derives for the output format `number` from the options of `argv`
+// (`report_counts`, NCBI blast_args.cpp:2894-2973): the formats of a run with the same size are one
+// search (abi_v2.md §7).
+function hitListSize(argv, number) {
+  const value = (flag) => {
+    const at = argv.lastIndexOf(flag);
+    return at < 0 ? undefined : Number(argv[at + 1]);
+  };
+  const [max, descriptions, alignments] = ["-max_target_seqs", "-num_descriptions", "-num_alignments"].map(value);
+  if (max !== undefined) return max;
+  if (number > 4) return alignments ?? 500;
+  return descriptions === undefined && alignments === undefined ? 500 : Math.max(descriptions ?? 500, alignments ?? 250);
+}
+
+// The lines of `text` (each with its line end) that it has more times than `held` (line -> copies),
+// in order, of those that `keep` keeps; `held` then holds them (the adapter's `Diagnostics`).
+function linesAfter(held, text, keep = () => true) {
+  const copies = new Map();
+  let added = "";
+  for (const line of text.split(/(?<=\n)/)) {
+    if (line === "" || !keep(line)) continue;
+    const copy = (copies.get(line) || 0) + 1;
+    copies.set(line, copy);
+    if (copy > (held.get(line) || 0)) added += line;
+  }
+  for (const [line, copy] of copies) held.set(line, Math.max(held.get(line) || 0, copy));
+  return added;
+}
+
+// The formats `formats` in the order of a search's formats after its first: the tabular ones, then
+// those up to 4 (abi_v2.md §7).
+function searchOrder(formats) {
+  return [...formats.filter((format) => format > 4), ...formats.filter((format) => format <= 4)];
+}
+
+// The CLI's outputs of a search, one run per format with -out. A search with `"expect": "failure"`
+// fails in the CLI's run of the argv's own -outfmt (exit 3 or 1), whose files keep what was
+// written before the failure (the outfmt 0 prolog before a first query batch fails); the runs of
+// its other formats may complete (a run of two searches, abi_v2.md §7). A search that completes
+// completes in the CLI's run of its own -outfmt, and the runs of its other formats may fail (the
+// other search of a run of two searches, a format that fails alone, §7), whose outputs the run
+// then discards: they are empty (line WQA's sweep, D3 review r2, 2026-11-19). `own` is the CLI's
+// standard error for the run's argv: that of the search's -outfmt, else that of outfmt 0.
+// `stderr` is stream 3 of a run that completes (§5): `own`, then the lines of the other formats'
+// standard error that it does not hold, each line as many times as one of them has it more often
+// than stream 3 holds it, the formats of the argv's own search first (the tabular ones, then those
+// up to 4); for a structured -outfmt, whose writer does not write the queries' warnings, only the
+// formatting handler's lines of the formats of its search, and the error of one that fails alone
+// (the lines of its standard error that are not warnings: LOSAT's refusal of outfmt 0 of a record
+// that is both a query and a subject and has masks, line WQA's sweep, D7, 2026-11-19).
 function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
-  let stderr = null, status = null;
-  const stderrs = new Map();
+  const stderrs = new Map(), failed = new Map();
+  const failure = search.expect === "failure";
+  // The argv's own format: 0, 6 or 7 alone is one of the program's formats, any other -outfmt is
+  // the output of its own (`null`).
+  const outfmt = search.outfmt === undefined ? "0" : search.outfmt.trim();
+  const ownFormat = /^[067]$/.test(outfmt) ? Number(outfmt) : null;
+  // The formats that the search says fail alone (`"fails_alone"`), whose CLI run must fail.
   const alone = new Set(search.fails_alone || []);
-  const refusals = [];
+  let status = null;
   for (const format of FORMATS[search.program]) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
-    const failed = result.status !== 0;
-    if (failed !== (search.expect === "failure" || alone.has(format))) {
-      throw new Error(`native ${argv.join(" ")} ${failed ? "failed" : "succeeded"} (exit ${result.status}): ${result.error ?? result.stderr}`);
+    const fails = result.status !== 0;
+    if (format === ownFormat) {
+      if (fails !== failure) {
+        throw new Error(`native ${argv.join(" ")} ${fails ? "failed" : "succeeded"} (exit ${result.status}): ${result.error ?? result.stderr}`);
+      }
+      status = result.status;
+    } else if (alone.has(format) && !fails) {
+      throw new Error(`native ${argv.join(" ")} succeeded, where "fails_alone" says that it fails`);
     }
-    if (alone.has(format)) {
-      // The format that fails alone: no stream, and its error after the warnings on stream 3.
-      fs.rmSync(out, { force: true });
-      outputs.set(format, Buffer.alloc(0));
-      const messages = result.stderr.toString().split("\n").filter(Boolean);
-      refusals.push(Buffer.from(`${messages[messages.length - 1]}\n`));
-      continue;
-    }
-    outputs.set(format, fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0));
+    const file = fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0);
+    outputs.set(format, fails && !failure ? Buffer.alloc(0) : file);
     fs.rmSync(out, { force: true });
     stderrs.set(format, result.stderr);
-    if (stderr === null) [stderr, status] = [result.stderr, result.status];
+    failed.set(format, fails);
   }
-  // The diagnostics are the CLI's standard error for the tabular formats (abi_v2.md §5):
-  // outfmt 6 and 7 write the same lines, and outfmt 0 the same without the formatting
-  // handler's lines, which -num_descriptions and -num_alignments can make differ, and which
-  // -line_length, -sorthits and -sorthsps give for formats above 4 (other than 0) only.
-  const handler = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches|The parameter -line_length is not applicable|The parameter -sorthits is ignored|The parameter -sorthsps is ignored)/;
-  const lines = (format) => stderrs.get(format).toString().split("\n");
-  const withoutHandler = (format) => lines(format).filter((line) => !handler.test(line));
-  if (stderrs.has(6)) {
-    stderr = stderrs.get(6);
-    if (stderrs.has(7)) assert.equal(sha256(stderrs.get(7)), sha256(stderr), "outfmt 7 writes the warnings of outfmt 6");
-    for (const format of FORMATS[search.program].filter((f) => f !== 6 && !alone.has(f))) {
-      assert.deepEqual(withoutHandler(format), withoutHandler(6), `outfmt ${format}: the same warnings but the handler's`);
-      for (const line of lines(format)) assert.ok(lines(6).includes(line), `outfmt ${format}: ${line} is in the warnings of outfmt 6`);
-    }
-  }
-  if (customStream(search)) {
+  let own = ownFormat === null ? null : stderrs.get(ownFormat);
+  if (ownFormat === null) {
     const directory = fs.mkdtempSync(path.join(scratch, "native.custom."));
     const out = path.join(directory, search.files ? "results" : "native.custom.out");
     const argv = [...search.argv, "-outfmt", search.outfmt, "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
-    if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed (exit ${result.status}): ${result.error ?? result.stderr}`);
-    outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : fs.readFileSync(out));
-    fs.rmSync(directory, { recursive: true, force: true });
-    // The warnings of outfmt 6, and those of the fields' writer (NCBI's taxdb warning).
-    if (TABULAR.has(Number(search.outfmt.trim().split(" ")[0]))) {
-      for (const line of lines(6)) assert.ok(result.stderr.toString().split("\n").includes(line), `-outfmt ${search.outfmt}: ${line} is in its warnings`);
+    if ((result.status !== 0) !== failure) {
+      throw new Error(`native ${argv.join(" ")} ${failure ? "succeeded" : "failed"} (exit ${result.status}): ${result.error ?? result.stderr}`);
     }
-    stderr = result.stderr;
+    if (!failure) outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : fs.readFileSync(out));
+    fs.rmSync(directory, { recursive: true, force: true });
+    [own, status] = [result.stderr, result.status];
   }
-  return { outputs, stderr, status, diagnostics: Buffer.concat([stderr, ...refusals]) };
+  let stderr = null;
+  // The streams of the formats whose CLI run fails while the run completes, which the run's signals
+  // of stream 9 name (abi_v2.md §5): the other search's, or a format's that fails alone (§7).
+  let failedStreams = [];
+  if (!failure) {
+    const number = parseInt(outfmt, 10);
+    const size = hitListSize(search.argv, number);
+    const structured = ownFormat === null && STRUCTURED.has(number);
+    const others = FORMATS[search.program].filter((format) => format !== ownFormat);
+    const same = searchOrder(others.filter((format) => hitListSize(search.argv, format) === size));
+    const other = searchOrder(others.filter((format) => hitListSize(search.argv, format) !== size));
+    const held = new Map();
+    let text = linesAfter(held, own.toString());
+    for (const format of same) {
+      const keep = structured ? (line) => HANDLER.test(line) || (failed.get(format) && !line.startsWith("Warning: ")) : undefined;
+      text += linesAfter(held, stderrs.get(format).toString(), keep);
+    }
+    for (const format of other) text += linesAfter(held, stderrs.get(format).toString());
+    stderr = Buffer.from(text);
+    failedStreams = others.filter((format) => failed.get(format)).sort((a, b) => a - b);
+  }
+  return { outputs, stderr, status, own, failedStreams };
 }
 
 // Whether the search's `"outfmt"` writes stream 4: a format besides 0, 6 and 7, or 6 or 7 with
-// fields (an argv's own plain 6 or 7, of a search with `"fails_alone"`, is that stream).
+// fields (an argv's own plain 0, 6 or 7 is that stream).
 function customStream(search) {
-  return search.outfmt !== undefined && !/^\s*[67]\s*$/.test(search.outfmt);
+  return search.outfmt !== undefined && !/^\s*[067]\s*$/.test(search.outfmt);
+}
+
+// An error of `run` or `validate` as the CLI writes it (abi_v2.md §4, §5): NCBI's messages as they
+// are (with their line end), but for those of the application start, which come without their
+// last line end, and which begin with NCBI's severity and error code (`Critical: (106.23)`,
+// `Error: (CRegistryException::eSection)`); LOSAT's own errors after `Error: ` and with a line end
+// (line WQA's sweep, D3 review r2 L2, 2026-11-19).
+function cliError(error) {
+  if (error.endsWith("\n")) return error;
+  if (/^(Critical|Error): \(/.test(error)) return `${error}\n`;
+  return `Error: ${error}\n`;
 }
 
 // A run that fails as the CLI fails: the CLI's error is the last message of its standard
-// error (the warnings before it go to stream 3, which a failed run does not send), and
-// whatever the run sent of an output before it failed is the start of the CLI's file. A search with
-// `"prolog": false` fails before any output (an error of the options or of their files), so the
-// CLI's files are empty; the others fail after the CLI wrote the outfmt 0 prolog.
+// error, and the warnings that the CLI writes before it are stream 3, which a failed run sends
+// (abi_v2.md §5): stream 3 then the error are the CLI's standard error for the run's argv, byte
+// for byte (line WQA's sweep, D3, 2026-11-19), also in a run of two searches, whose outcome is
+// that of the argv's own search (§7). Whatever the run sent of an output before it failed is the
+// start of the CLI's file. A search with `"prolog": false` fails before any output (an error of
+// the options or of their files), so the CLI's outfmt 0 file is empty; the others fail after the
+// CLI wrote the outfmt 0 prolog, or the CLI's outfmt 0 completes (the other search of a run whose
+// own -outfmt is a tabular one).
 function checkFailure(run, expected, search, label) {
   const program = search.program;
   assert.equal(run.status, -1, `${label}: the run fails as the CLI (exit ${expected.status})`);
-  assert.ok(run.error.length > 0 && expected.stderr.toString().endsWith(run.error), `${label}: the CLI's error (${run.error})`);
+  assert.ok(run.error.length > 0 && expected.own.toString().endsWith(cliError(run.error)), `${label}: the CLI's error (${run.error})`);
+  const diagnostics = run.streams.get(3) || Buffer.alloc(0);
+  assert.equal(diagnostics.toString() + cliError(run.error), expected.own.toString(),
+               `${label}: stream 3 and the error are the CLI's standard error`);
   for (const format of FORMATS[program]) {
     const sent = run.streams.get(format) || Buffer.alloc(0);
     assert.ok(expected.outputs.get(format).subarray(0, sent.length).equals(sent), `${label}: outfmt ${format} before the failure`);
@@ -734,11 +827,12 @@ async function main() {
         const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
         const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
         // The application validates the argv on the instance that holds its counts file, then runs it
-        // (abi_v2.md §4): an error of validate is the CLI's first error.
-        if (named && named.held !== "absent") {
+        // (abi_v2.md §4): an error of validate is the CLI's first error. So is that of a search that
+        // fails without a counts file, whose validate makes the checks of the argv's own search (§7).
+        if (named ? named.held !== "absent" : search.expect === "failure") {
           const validated = reactor.call("losat_web2_validate", argv);
           if (search.expect === "failure" && validated.status !== 0) {
-            assert.ok(expected.stderr.toString().endsWith(validated.error), `${engine.name} n${threads} ${search.cases.join(",")}: validate gives the CLI's error (${validated.error})`);
+            assert.ok(expected.own.toString().endsWith(cliError(validated.error)), `${engine.name} n${threads} ${search.cases.join(",")}: validate gives the CLI's error (${validated.error})`);
           } else {
             assert.equal(validated.status, 0, `${engine.name} n${threads} ${search.cases.join(",")}: validate: ${validated.error}`);
           }
@@ -750,7 +844,7 @@ async function main() {
           if (inputs.status < 0) {
             // The CLI fails reading the inputs, before any output.
             assert.equal(search.expect, "failure", `${label}: register_inputs: ${inputs.error}`);
-            assert.ok(inputs.error.length > 0 && expected.stderr.toString().endsWith(`${inputs.error}\n`), `${label}: the CLI's error (${inputs.error})`);
+            assert.ok(inputs.error.length > 0 && expected.own.toString().endsWith(`${inputs.error}\n`), `${label}: the CLI's error (${inputs.error})`);
             for (const format of FORMATS[program]) assert.equal(expected.outputs.get(format).length, 0, `${label}: the CLI writes no outfmt ${format}`);
             results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {}, failure: inputs.error });
             console.log(`ok ${label} (fails as the CLI, reading the inputs)`);
@@ -808,24 +902,11 @@ async function main() {
           row.formats.custom = sha256(actual);
           if (search.frozen.custom) row.frozen.custom = sha256(toFrozen(actual, search.frozen_prefix)) === search.frozen.custom;
         } else {
-          assert.ok(!run.streams.has(CUSTOM_STREAM), `${label}: no stream ${CUSTOM_STREAM} without -outfmt`);
+          assert.ok(!run.streams.has(CUSTOM_STREAM), `${label}: no stream ${CUSTOM_STREAM} without an -outfmt of its own`);
         }
         const diagnostics = run.streams.get(3) || Buffer.alloc(0);
-        assert.equal(sha256(diagnostics), sha256(expected.diagnostics), `${label}: diagnostics\n${diagnostics}`);
-        row.diagnostics = sha256(expected.diagnostics);
-        // The run's signals of stream 9 name the streams that it could not write: those whose CLI run of the argv
-        // fails (abi_v2.md §5; line WQA's sweep, D7, 2026-11-19), each with where its error is (2026-11-20): stream 3,
-        // which then holds it, the file of -logfile (stream 8), or nowhere.
-        const signals = run.streams.get(9) || Buffer.alloc(0);
-        assert.equal(signals.length % 8, 0, `${label}: signals of 8 bytes (stream 9)`);
-        const failed = Array.from({ length: signals.length / 8 }, (_, i) => [signals.readUInt32LE(8 * i), signals.readUInt32LE(8 * i + 4)]);
-        const failedStreams = failed.map(([stream]) => stream).sort((a, b) => a - b);
-        assert.deepEqual(failedStreams, [...(search.fails_alone || [])].sort((a, b) => a - b), `${label}: the streams that the run says failed (stream 9)`);
-        for (const [stream, place] of failed) {
-          if (place === 3) assert.ok(diagnostics.length > 0, `${label}: the error of stream ${stream} is on stream 3, which is empty`);
-          else if (place === 8) assert.ok(run.streams.has(8), `${label}: the error of stream ${stream} is in the file of -logfile, which the run did not give`);
-          else assert.equal(place, 0xffffffff, `${label}: the place of the error of stream ${stream}`);
-        }
+        assert.equal(sha256(diagnostics), sha256(expected.stderr), `${label}: diagnostics\n${diagnostics}`);
+        row.diagnostics = sha256(expected.stderr);
         // The run's signal of stream 10 says where its messages go (abi_v2.md §5; line WQA's sweep, D7, 2026-11-20): one
         // signal of 4 bytes; stream 3 without -logfile; the file of -logfile only where the run gave it.
         const messages = run.streams.get(10) || Buffer.alloc(0);
@@ -834,6 +915,22 @@ async function main() {
         assert.ok([3, 8, 0xffffffff].includes(messagesPlace), `${label}: the place of the run's messages (${messagesPlace})`);
         if (!search.argv.some((word) => word === "-logfile" || word.startsWith("-logfile="))) {
           assert.equal(messagesPlace, 3, `${label}: the run's messages go to stream 3 without -logfile`);
+        }
+        // The run's signals of stream 9 name the streams that it could not write: those whose CLI run of the argv
+        // fails (abi_v2.md §5; line WQA's sweep, D7, 2026-11-19), each with where its error is (2026-11-20): stream 3,
+        // which then holds it, or nowhere where the run's messages go nowhere; never the file of -logfile, which holds
+        // what the CLI's file holds for the argv (line WQA's sweep, D3 review r2, 2026-11-19).
+        const signals = run.streams.get(9) || Buffer.alloc(0);
+        assert.equal(signals.length % 8, 0, `${label}: signals of 8 bytes (stream 9)`);
+        const failed = Array.from({ length: signals.length / 8 }, (_, i) => [signals.readUInt32LE(8 * i), signals.readUInt32LE(8 * i + 4)]);
+        const failedStreams = failed.map(([stream]) => stream).sort((a, b) => a - b);
+        assert.deepEqual(failedStreams, expected.failedStreams, `${label}: the streams that the run says failed (stream 9)`);
+        for (const [stream, place] of failed) {
+          if (place === 3) assert.ok(diagnostics.length > 0, `${label}: the error of stream ${stream} is on stream 3, which is empty`);
+          else {
+            assert.equal(place, 0xffffffff, `${label}: the place of the error of stream ${stream}`);
+            assert.equal(messagesPlace, 0xffffffff, `${label}: the error of stream ${stream} is nowhere, where the run's messages go`);
+          }
         }
         if (messagesPlace === 8) assert.ok(run.streams.has(8), `${label}: the run's messages are in the file of -logfile, which the run did not give`);
         if (search.fails_alone) row.fails_alone = search.fails_alone;

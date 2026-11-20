@@ -329,6 +329,8 @@ These refusals apply to every search program that reads databases.
 | Option or value | What happens |
 | :--- | :--- |
 | `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern` | Refused: not yet supported. |
+| `-html` | Refused: not yet supported. |
+| `-best_hit_overhang`, `-best_hit_score_edge`, `-subject_besthit` | Refused, as in `blastp`. |
 | `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm`, only 0, 6 and 7 work. |
 | `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`) | Refused, as in `blastp`. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
@@ -369,6 +371,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - With `-subject`, a Seq-id twice in the query's entry where NCBI's exception may write a Seq-id as a subject record spelled it. That is a GenBank, EMBL or DDBJ accession alone, a name, a patent number or country with a letter, or more than 64 letters in a local or general id or in an accession.
 - With `-out_pssm`, a PSSM of frequency ratios only without `rpsdbparams`. NCBI cannot write its matrix name.
 - With `-out_ascii_pssm`, a PSSM whose information content comes without the other columns of NCBI's long ASCII form.
+- With `-out_ascii_pssm`, a PSSM query with a residue that its coding does not have. NCBI prints its letter from memory it never set.
 - A real number in a PSSM whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`) is read with the exact exponent, the smallest normal double; see [Differences](differences.md). The PSSM's ASN.1 text is read as NCBI reads it.
 
 </details>
@@ -406,7 +409,6 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpsblast` option. |
-| The environment variable `ADAPTIVE_CBS` with composition-based statistics | Refused. |
 | A query above 5,000,000 letters | Refused. |
 | A database that lists one volume twice (`-db "x x"`) | Refused. The database layer refuses it for every program; NCBI's `rpsblast` searches the volume once. |
 | A profile database whose volumes differ in matrix or gap costs | Refused. |
@@ -437,7 +439,6 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number 
 | `-use_sw_tback` with composition-based statistics | Refused. |
 | `-ungapped` without composition-based statistics | Refused. NCBI's `rpstblastn` crashes after the search. With composition-based statistics it gets NCBI's own error. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
-| A `CHUNK_SIZE` that NCBI cannot read as a number | Refused. NCBI stops with an exception that names its build's source files. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpstblastn` option. |
 | `-query_gencode 32` | Refused (exit status 2). |
@@ -610,7 +611,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 ## Out of scope: they need NCBI's servers or its GI and IPG databases
 
 - `-remote` and `-entrez_query`: all programs.
-- `-gilist` and `-negative_gilist`: all five search programs.
+- `-gilist` and `-negative_gilist`: all five search programs and `psiblast`.
 - `-ipglist` and `-negative_ipglist`: `blastp`, `blastx`, `psiblast`.
 - `-import_search_strategy`: all programs that take it.
 

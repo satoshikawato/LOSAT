@@ -1551,11 +1551,12 @@ mod tests {
         assert_eq!(int_with_commas(23), "23");
     }
 
-    /// The message, the line and the position of an error.
+    /// The message, the line and the position of an error (NCBI's `(m_Pos = <n>)`, which LOSAT
+    /// writes as `(position <n>)`).
     fn failure(e: NcbiException) -> (String, u32, String) {
         let what = e.what();
         let pos = what
-            .rsplit_once("(m_Pos = ")
+            .rsplit_once(crate::wording::POSITION)
             .map(|(_, rest)| rest.trim_end_matches(")\n").to_string())
             .unwrap_or_default();
         (e.get_msg().to_string(), e.site().line, pos)
@@ -1862,15 +1863,20 @@ mod tests {
                 "Cannot convert string '3000000000' to int, overflow (m_Pos = 0)",
             ),
         ] {
-            let error = taxid(text).unwrap_err().what();
-            assert!(
-                error.ends_with(&format!(
-                    "line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - \
-                     {message}\n"
-                )),
-                "{error}"
+            let error = taxid(text).unwrap_err();
+            assert_eq!(error.site().line, line);
+            assert_eq!(
+                error.site().function.map(str::to_string),
+                Some(format!("ncbi::NStr::{function}"))
             );
-            assert!(error.starts_with("NCBI C++ Exception:\n    T0 \""));
+            // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
+            assert_eq!(
+                error.what(),
+                crate::wording::losat_text(&format!(
+                    "NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line {line}: Error: \
+                     (CStringException::eConvert) ncbi::NStr::{function}() - {message}\n"
+                ))
+            );
         }
     }
 
@@ -2043,7 +2049,7 @@ mod tests {
         assert_eq!(string_to_uint_base(b"173", 10).unwrap(), 173);
         let failure = |e: NcbiException| {
             let what = e.what();
-            let pos = what.rsplit_once("(m_Pos = ").unwrap().1;
+            let pos = what.rsplit_once(crate::wording::POSITION).unwrap().1;
             (
                 e.get_msg().to_string(),
                 e.site().line,

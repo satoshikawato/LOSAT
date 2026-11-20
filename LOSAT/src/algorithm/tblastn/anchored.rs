@@ -2,7 +2,8 @@
 //! the letters, labels and masks of a query's section, read where outfmt 0's rows read them
 //! (`stage_e_report::pairwise_hits`).
 //!
-//! - Letters: the searched protein letters of the queries, upper case, and the nucleotides of the
+//! - Letters: the searched protein letters of the queries, upper case (a PSSM query's Bioseq
+//!   letters as they are, `row_letters::QueryLetters`), and the nucleotides of the
 //!   subjects (the records' letters, or a packed subject's), in their records' positions (the
 //!   searched letters start at the `-query_loc` or `-subject_loc` interval); the section translates
 //!   a subject's rows with the database's genetic code (`subject_genetic_code`, NCBI's
@@ -22,10 +23,15 @@ use crate::blastinput::seq_range::Placements;
 use crate::report::query_anchored::{
     database_label, query_record_letters, record_label, Mask, ReportSequences,
 };
+use crate::report::row_letters::QueryLetters;
 
 /// What the sections of a TBLASTN report read (module doc).
 pub(super) struct AnchoredSequences<'a> {
     pub(super) queries: &'a [FastaRecord],
+    /// The PSSM query's Bioseq letters where they are not its record's
+    /// (`PsiSearch::bioseq_letters`), which the sections show as they are (`QueryLetters`); a run
+    /// of such a query has no other.
+    pub(super) query_bioseq: Option<&'a [u8]>,
     pub(super) query_placements: &'a Placements,
     pub(super) subject_records: &'a [FastaRecord],
     pub(super) subject_letters: SubjectLetters<'a>,
@@ -46,7 +52,7 @@ impl ReportSequences for AnchoredSequences<'_> {
 
     fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>) {
         query_record_letters(
-            &self.queries[q_idx],
+            QueryLetters::new(self.queries[q_idx].seq(), self.query_bioseq),
             self.query_placements.offset(q_idx),
             from,
             to,

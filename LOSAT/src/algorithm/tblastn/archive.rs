@@ -62,6 +62,7 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
     inputs.culling_limit = args.culling_limit;
+    inputs.subject_besthit = args.subject_besthit;
     inputs.sum_stats = args.sum_stats;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
     // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
@@ -413,8 +414,8 @@ mod tests {
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTN refuses many of these options at the command line or
     // in its limits (word sizes 2 and 4, matrices, gap costs,
-    // `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-subject_besthit`,
-    // `-use_sw_tback`): the list that NCBI would record is what the archive's model knows
+    // `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-use_sw_tback`): the
+    // list that NCBI would record is what the archive's model knows
     // about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def", &[], "EvalueThreshold=cutoff:e-value:10 DbGeneticCode=integer:1 UngappedMode=boolean:False LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
@@ -529,7 +530,7 @@ mod tests {
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                "-subject_besthit" | "-use_sw_tback" => {
+                "-use_sw_tback" => {
                     by_hand.push((extra[index], ""));
                     index += 1;
                 }
@@ -548,11 +549,8 @@ mod tests {
             return None;
         };
         let mut inputs = option_inputs(&args);
-        for (name, _) in by_hand {
-            match name {
-                "-subject_besthit" => inputs.subject_besthit = true,
-                _ => inputs.use_sw_tback = true,
-            }
+        for _ in by_hand {
+            inputs.use_sw_tback = true;
         }
         Some(inputs)
     }

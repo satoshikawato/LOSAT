@@ -1372,6 +1372,9 @@ pub(super) struct XSubject<'a> {
     /// Where the units note a right walk that went on past a NULLB (`run_subject_units` gives
     /// its units one; None elsewhere).
     pub passed: Option<&'a std::sync::atomic::AtomicBool>,
+    /// `-subject_besthit`: each frame's list is filtered after each chunk's merge
+    /// (`frame_subject_besthit`).
+    pub subject_besthit: bool,
 }
 
 impl<'a> XSubject<'a> {
@@ -2584,6 +2587,9 @@ impl<M: TbxScore> XPairPar<M> {
                         chunk.overlap,
                     )
                     .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
+                    if inp.subject_besthit {
+                        frame_subject_besthit(&mut frame_ungapped_hits);
+                    }
                 }
             }
             if !frame_ungapped_hits.is_empty() {
@@ -2646,6 +2652,7 @@ impl<M: TbxScore> XPairPar<M> {
                     get_ungapped_hsp_list_into(init_hsps, inp.contexts, inp.s_frames, exact)
                 };
                 adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
+                let merged = !hits.is_empty();
                 if !hits.is_empty() && frame_ungapped_hits.is_empty() {
                     frame_ungapped_hits = hits;
                 } else if !hits.is_empty() {
@@ -2656,6 +2663,9 @@ impl<M: TbxScore> XPairPar<M> {
                         chunk.overlap,
                     )
                     .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED);
+                }
+                if merged && inp.subject_besthit {
+                    frame_subject_besthit(&mut frame_ungapped_hits);
                 }
             }
             if !frame_ungapped_hits.is_empty() {
@@ -4059,6 +4069,7 @@ mod tests {
             s_len: 999,
             failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
             passed: None,
+            subject_besthit: false,
         };
         let units = unit_lists(&pp, &inp);
         assert_eq!(
@@ -4166,6 +4177,7 @@ mod tests {
                 s_len: 999,
                 failure: &alone,
                 passed: None,
+                subject_besthit: false,
             };
             let chunk = SubjectChunk {
                 offset: 0,
@@ -4529,6 +4541,7 @@ mod tests {
                 s_len: 999,
                 failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
                 passed: None,
+                subject_besthit: false,
             };
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
@@ -4668,6 +4681,7 @@ mod tests {
                 s_len: 999,
                 failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
                 passed: None,
+                subject_besthit: false,
             };
             let plain = XPairPar {
                 groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
@@ -5764,6 +5778,7 @@ mod tests {
                 s_len: 4_321,
                 failure: &self.failure,
                 passed: None,
+                subject_besthit: false,
             }
         }
     }
@@ -6043,6 +6058,7 @@ mod tests {
             s_len: 38,
             failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
             passed: None,
+            subject_besthit: false,
         };
         for (ctx_idx, f) in [(0usize, 0usize), (65_535, 1), (65_536, 0), (70_000, 1)] {
             let ctx = &contexts[ctx_idx];
@@ -6637,6 +6653,7 @@ mod tests {
                 s_len: 999,
                 failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
                 passed: None,
+                subject_besthit: false,
             };
             // Masked unit tables in about half of the cases (ratio 1: every unit whose unmasked
             // table is at least the masked one's size).

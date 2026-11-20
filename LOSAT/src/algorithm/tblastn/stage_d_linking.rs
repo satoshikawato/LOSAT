@@ -1147,6 +1147,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
         for (oid, subject) in subjects.iter().enumerate() {

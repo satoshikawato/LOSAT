@@ -102,6 +102,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         ))]
         diag_array_size,
         x_read_failure,
+        subject_besthit,
         ..
     } = cx;
     let &SubjectScan {
@@ -228,6 +229,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
                     failure: x_read_failure,
                     s_idx,
                 }),
+                subject_besthit,
             },
             &scan_chunk,
             sc,
@@ -274,6 +276,8 @@ pub(super) struct ChunkSums<'s> {
     pub(super) stats_hsp_filtered_by_cutoff: &'s mut usize,
     pub(super) stats_score_distribution: &'s mut Vec<i32>,
     pub(super) one_hit: Option<OneHitChunkMerge<'s>>,
+    /// `-subject_besthit`: the frame's list is filtered after each merge.
+    pub(super) subject_besthit: bool,
 }
 
 /// Searches the chunks of one subject frame (`split_state`) with `scan_chunk`, which scans a chunk
@@ -478,6 +482,9 @@ fn add_chunk_result(sums: &mut ChunkSums<'_>, result: TblastxChunkScanResult) {
             sums.one_hit
                 .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED)
                 .refuse(undefined);
+        }
+        if sums.subject_besthit {
+            super::frame_subject_besthit(sums.frame_ungapped_hits);
         }
     }
 }

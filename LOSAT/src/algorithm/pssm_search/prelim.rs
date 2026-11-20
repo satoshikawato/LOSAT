@@ -70,6 +70,8 @@ pub(crate) struct PssmPrelim<'a, R: PssmRows> {
     /// link_hsp_params`) and the query's context as the linking reads it; `None` without sum
     /// statistics.
     pub(crate) link: Option<(EvenGapLinkParams, LinkContext)>,
+    /// `-subject_besthit`: the subject's list is filtered after its sort by score.
+    pub(crate) subject_besthit: bool,
 }
 
 /// The memory of one subject's preliminary search, kept from subject to subject as NCBI keeps
@@ -265,6 +267,20 @@ impl<R: PssmRows> PssmPrelim<'_, R> {
             .any(|pair| score_compare(&pair[0], &pair[1]) == std::cmp::Ordering::Greater)
         {
             hsps.sort_by(score_compare);
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+        // `-subject_besthit` on the subject's list (one context), sorted by score, before the
+        // e-values and the reap by the preliminary e-value.
+        if self.subject_besthit {
+            crate::core::blast_hits::subject_besthit(hsps, false, |hsp| {
+                crate::core::blast_hits::BestHitExtent {
+                    context: 0,
+                    query_frame: 0,
+                    offset: i64::from(hsp.query_start),
+                    end: i64::from(hsp.query_end),
+                    query_length: 0,
+                }
+            });
         }
         if hsps.is_empty() {
             return None;

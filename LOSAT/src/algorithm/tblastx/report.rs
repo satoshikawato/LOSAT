@@ -1488,6 +1488,7 @@ pub(crate) struct HitFilters<'a> {
     pub max_hsps: usize,
     pub query_cov_hsp_perc: f64,
     pub query_lengths: &'a [usize],
+    pub subject_besthit: bool,
 }
 
 impl HitFilters<'_> {
@@ -1519,6 +1520,29 @@ impl HitFilters<'_> {
             )
         });
         hsps.is_empty()
+    }
+
+    /// `-subject_besthit` on one final list of a query (`s_FilterBlastResults`, after `-max_hsps`
+    /// and the coverage, which the preliminary reap already applied to these HSPs): the contexts
+    /// are the query's frames. The best e-value is not set again, as NCBI's is not. Every HSP here
+    /// has a positive length (the one-hit word finder's HSPs of length 0 or less are dropped
+    /// before the re-evaluation, as NCBI's re-evaluation deletes them:
+    /// `link_one_hit_with_int4_ends`), so the `usize` offsets are NCBI's `Int4` ones.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:858-861
+    pub(super) fn subject_besthit(&self, hsps: &mut Vec<TblastxHsp>) {
+        if !self.subject_besthit {
+            return;
+        }
+        crate::core::blast_hits::subject_besthit(hsps, false, |hsp| {
+            crate::core::blast_hits::BestHitExtent {
+                context: super::hsp_culling::tblastx_context(hsp.hit.query_frame) as i64,
+                query_frame: hsp.hit.query_frame,
+                offset: hsp.hit.sort_query_offset as i64,
+                end: hsp.hit.sort_query_end as i64,
+                query_length: 0,
+            }
+        });
     }
 }
 
@@ -1651,6 +1675,7 @@ pub(crate) fn culled_hit_order(
             };
             list.update_best_evalue();
             trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
+            filters.subject_besthit(&mut list.hsps);
             final_lists.hsplist_array.push(list);
         }
         final_lists.hsplist_count = final_lists.hsplist_array.len();

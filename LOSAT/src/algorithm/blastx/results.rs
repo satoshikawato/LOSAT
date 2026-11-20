@@ -251,42 +251,18 @@ pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
     usize::try_from(size).unwrap_or(0)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2538-2588
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:1211-1211
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1960-1973
-pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) -> Vec<Hsp> {
-    let mut removed = vec![false; hsps.len()];
-    for i in 0..hsps.len().saturating_sub(1) {
-        if removed[i] {
-            continue;
+/// `-subject_besthit` over one subject's HSPs of BLASTX (`core::blast_hits::subject_besthit`):
+/// the contexts are the query frames, and the offsets those of the HSP in its frame.
+pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) {
+    crate::core::blast_hits::subject_besthit(hsps, false, |h| {
+        crate::core::blast_hits::BestHitExtent {
+            context: h.hsp.context as i64,
+            query_frame: i32::from(h.hsp.frame),
+            offset: i64::from(h.hsp.q_start),
+            end: i64::from(h.hsp.q_end),
+            query_length: 0,
         }
-        let a = &hsps[i].hsp;
-        let begin = (a.q_start - 3).max(0);
-        // A negative end is replaced by the query end of the HSP (blast_hits.c:2569): only the
-        // end of an HSP of length -4 or less near the start of its context (the one-hit word
-        // finder with `-window_size 0`, aa_ungapped.c:1054,1083) lies below -3.
-        let mut end = a.q_end + 3;
-        if end < 0 {
-            end = a.q_end;
-        }
-        for j in i + 1..hsps.len() {
-            let b = &hsps[j].hsp;
-            if !removed[j] && a.context == b.context && b.q_start >= begin && b.q_end <= end {
-                removed[j] = true;
-            }
-        }
-    }
-    let mut discarded = Vec::new();
-    let mut i = 0;
-    hsps.retain(|h| {
-        let keep = !removed[i];
-        i += 1;
-        if !keep {
-            discarded.push(h.clone());
-        }
-        keep
     });
-    discarded
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:399-421
@@ -858,18 +834,17 @@ mod negative_length_tests {
     /// would remove it), and removes one that ends at -4 or before.
     #[test]
     fn subject_besthit_keeps_the_end_below_minus_three() {
-        let mut hsps = vec![hsp(0, 9, 0, -4), hsp(0, 5, 1, -3), hsp(0, 4, 0, -5)];
-        let removed = subject_besthit(&mut hsps);
-        assert_eq!(removed.len(), 1);
-        assert_eq!((removed[0].hsp.q_start, removed[0].hsp.q_end), (0, -5));
-        assert_eq!(
+        let ends = |hsps: &[Hsp]| {
             hsps.iter()
                 .map(|h| (h.hsp.q_start, h.hsp.q_end))
-                .collect::<Vec<_>>(),
-            vec![(0, -4), (1, -2)]
-        );
+                .collect::<Vec<_>>()
+        };
+        let mut hsps = vec![hsp(0, 9, 0, -4), hsp(0, 5, 1, -3), hsp(0, 4, 0, -5)];
+        subject_besthit(&mut hsps);
+        assert_eq!(ends(&hsps), vec![(0, -4), (1, -2)]);
         // An end + 3 of 0 or more is the range's end, as before.
         let mut hsps = vec![hsp(0, 9, 0, -3), hsp(0, 5, 1, -2)];
-        assert_eq!(subject_besthit(&mut hsps).len(), 1);
+        subject_besthit(&mut hsps);
+        assert_eq!(ends(&hsps), vec![(0, -3)]);
     }
 }

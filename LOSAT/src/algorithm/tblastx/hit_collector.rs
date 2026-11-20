@@ -139,9 +139,10 @@ impl QueryLists {
             if !sorts_results {
                 hit_list.put_in_traceback_order(hitlist_size);
             }
-            if filters.max_hsps > 0 {
+            if filters.max_hsps > 0 || filters.subject_besthit {
                 for list in &mut hit_list.hsplist_array {
                     trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
+                    filters.subject_besthit(&mut list.hsps);
                 }
             }
             if sorts_results {
@@ -173,6 +174,8 @@ pub(crate) struct HitCollector {
     culling_limit: i32,
     max_hsps: usize,
     query_cov_hsp_perc: f64,
+    /// `-subject_besthit` (`HitFilters::subject_besthit`).
+    subject_besthit: bool,
     /// The batch's queries' nucleotide lengths, read by the coverage reap and the culling
     /// (empty when neither applies).
     query_lengths: Vec<usize>,
@@ -211,6 +214,15 @@ impl HitCollector {
             args.evalue,
         )
         .sorting_results(sorts_results)
+        .with_subject_besthit(args.subject_besthit)
+    }
+
+    /// The collector with `-subject_besthit` (`HitCollector::subject_besthit`).
+    pub(super) fn with_subject_besthit(self, subject_besthit: bool) -> Self {
+        Self {
+            subject_besthit,
+            ..self
+        }
     }
 
     /// The collector with `sorts_results` (`HitCollector::sorts_results`).
@@ -243,6 +255,7 @@ impl HitCollector {
             culling_limit,
             max_hsps,
             query_cov_hsp_perc,
+            subject_besthit: false,
             query_lengths,
             evalue_threshold,
             sorts_results: true,
@@ -292,6 +305,7 @@ impl HitCollector {
                     max_hsps: self.max_hsps,
                     query_cov_hsp_perc: self.query_cov_hsp_perc,
                     query_lengths: &self.query_lengths,
+                    subject_besthit: self.subject_besthit,
                 };
                 // Each query's HSPs moved once into a list grown by `push` (a list is kept
                 // until the batch ends; `split_off` would keep every list at the capacity of
@@ -320,6 +334,7 @@ impl HitCollector {
             max_hsps: self.max_hsps,
             query_cov_hsp_perc: self.query_cov_hsp_perc,
             query_lengths: &self.query_lengths,
+            subject_besthit: self.subject_besthit,
         };
         match self.lists {
             Lists::Collector(lists) => lists.finish(&filters, self.sorts_results),
@@ -551,6 +566,7 @@ mod tests {
             max_hsps: 2,
             query_cov_hsp_perc: 25.0,
             query_lengths: &query_lengths,
+            subject_besthit: false,
         };
         let want = reference(&lists, size, &filters);
         let q0: Vec<&TblastxHsp> = want.iter().filter(|hsp| hsp.hit.q_idx == 0).collect();
@@ -593,6 +609,7 @@ mod tests {
                 max_hsps: 0,
                 query_cov_hsp_perc: 0.0,
                 query_lengths: &query_lengths,
+                subject_besthit: false,
             },
             true,
         );

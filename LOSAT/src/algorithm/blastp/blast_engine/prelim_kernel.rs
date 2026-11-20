@@ -1071,6 +1071,20 @@ impl BlastpPrelimKernel<'_> {
                 endpoint_duplicates_purged,
             );
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+        // `-subject_besthit` on the subject's list of every query, sorted by score, before the
+        // e-values and the reap by the preliminary e-value.
+        if args.subject_besthit {
+            crate::core::blast_hits::subject_besthit(&mut preliminary_hsp_list, false, |hsp| {
+                crate::core::blast_hits::BestHitExtent {
+                    context: i64::from(hsp.query_context),
+                    query_frame: 0,
+                    offset: i64::from(hsp.query_start),
+                    end: i64::from(hsp.query_end),
+                    query_length: 0,
+                }
+            });
+        }
         if x_hits_flat::x_bphitsflat() {
             x_hits_flat::x_lists_by_query(
                 &mut preliminary_hsp_list,

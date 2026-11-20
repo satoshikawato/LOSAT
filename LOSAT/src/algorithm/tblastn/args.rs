@@ -178,6 +178,10 @@ pub struct TblastnArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
+    /// Return only the best HSP for each non overlapping query region
+    #[arg(long)]
+    pub subject_besthit: bool,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3168-3181
@@ -295,6 +299,8 @@ pub struct ResolvedTblastnArgs {
     pub query_cov_hsp_perc: f64,
     /// The -culling_limit value (0: no culling).
     pub culling_limit: i32,
+    /// Whether -subject_besthit was given.
+    pub subject_besthit: bool,
     pub composition_mode: crate::blastinput::app::CompositionMode,
     /// The `-comp_based_stats` value as typed.
     pub comp_based_stats: String,
@@ -547,6 +553,7 @@ impl TblastnArgs {
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit_value(),
+            subject_besthit: self.subject_besthit,
             composition_mode,
             comp_based_stats: self.comp_based_stats.clone(),
             num_threads: self.num_threads,

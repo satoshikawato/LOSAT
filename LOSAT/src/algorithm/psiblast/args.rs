@@ -113,6 +113,11 @@ pub struct PsiblastArgs {
     // every round culls, the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit")]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
+    // psiblast's `CHspFilteringArgs`, blastp's (`BlastpArgs::subject_besthit`): every round.
+    /// Return only the best HSP for each non overlapping query region
+    #[arg(long)]
+    pub subject_besthit: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229, 276-286
     // (cited at `BlastpArgs::xdrop_ungap`)
     // psiblast's `CGenericSearchArgs` (psiblast_args.cpp:67): blastp's X-drops in bits, which
@@ -347,6 +352,7 @@ impl PsiblastArgs {
             max_hsps_per_subject: self.max_hsps_per_subject,
             qcov_hsp_perc: self.qcov_hsp_perc,
             culling_limit: self.culling_limit,
+            subject_besthit: self.subject_besthit,
             ungapped: false,
             xdrop_ungap: self.xdrop_ungap,
             xdrop_gap: self.xdrop_gap,
@@ -420,6 +426,7 @@ impl PsiblastArgs {
         inputs.qcov_hsp_perc = self.qcov_hsp_perc;
         inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
         inputs.culling_limit = self.culling_limit;
+        inputs.subject_besthit = self.subject_besthit;
         // `static_cast<int>` of the double, as BLASTP's (`blastp::archive::option_inputs`).
         inputs.threshold = self
             .threshold

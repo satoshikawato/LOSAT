@@ -1,142 +1,23 @@
-//! Subject Best Hit filtering for BLASTN
+//! `-subject_besthit` for BLASTN's final HSP lists (`core::blast_hits::subject_besthit`, with
+//! the pass over the other strand that only BLASTN runs).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2537-2606
-//! Function: Blast_HSPListSubjectBestHit
-//!
-//! This filter removes HSPs in overlapping query ranges after the best scoring HSP.
-//! For BLASTN, it also performs cross-strand filtering.
 
 use super::super::hsp::BlastnHsp;
+use crate::core::blast_hits::{subject_besthit, BestHitExtent};
 
-/// Default range difference for subject best hit filtering
-/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:1211-1212
-const MAX_RANGE_DIFF: i64 = 3;
-
-/// The fields of an HSP that `Blast_HSPListSubjectBestHit` reads: its context, the frame of
-/// the query, the query offsets within the context (NCBI's `Int4` offsets: an HSP can lie
-/// outside its context, `BlastnHsp::outside_query_context`) and the length of the context.
-#[derive(Debug, Clone, Copy)]
-pub struct BestHitKey {
-    pub context: u32,
-    pub query_frame: i32,
-    pub query_offset: i64,
-    pub query_end: i64,
-    pub query_length: i64,
-}
-
-/// Apply Subject Best Hit filtering to remove HSPs with overlapping query ranges.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2537-2606 Blast_HSPListSubjectBestHit
-///
-/// Arguments:
-/// - `hits`: Vector of HSPs, already sorted by score descending
-/// - `query_len`: Length of the query sequence (for cross-strand coordinate flipping)
+/// `Blast_HSPListSubjectBestHit` over a final HSP list of BLASTN, in its order: a query of
+/// `query_len` bases, whose plus strand is context `2 * q_idx` and minus strand the next one,
+/// with the HSPs' offsets in their own context (NCBI's `query.offset` and `query.end`, not the
+/// report's coordinates).
 pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2563-2567
-    // Subject-best-hit filtering uses internal query.offset/query.end, not
-    // output coordinates.
-    subject_best_hit_by(hits, |h| BestHitKey {
-        context: h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 },
+    subject_besthit(hits, true, |h| BestHitExtent {
+        context: i64::from(h.q_idx) * 2 + i64::from(h.query_frame < 0),
         query_frame: h.query_frame,
-        query_offset: i64::from(h.internal_q_offset_0),
-        query_end: i64::from(h.internal_q_end_0),
+        offset: i64::from(h.internal_q_offset_0),
+        end: i64::from(h.internal_q_end_0),
         query_length: query_len as i64,
     });
-}
-
-/// `Blast_HSPListSubjectBestHit` over an HSP list in its order, with the fields of each HSP
-/// given by `key`: the preliminary list of a subject holds the HSPs of every query, each
-/// with the length of its own context (`query_info->contexts[curr_context].query_length`).
-pub fn subject_best_hit_by<T>(hits: &mut Vec<T>, key: impl Fn(&T) -> BestHitKey) {
-    if hits.len() <= 1 {
-        return;
-    }
-    let keys: Vec<BestHitKey> = hits.iter().map(&key).collect();
-    // Mark HSPs for removal
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2560-2566
-    let mut to_remove = vec![false; hits.len()];
-
-    // Pass 1: Same-strand filtering
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2561-2577
-    for i in 0..hits.len() {
-        if to_remove[i] {
-            continue;
-        }
-
-        let hit_i_context = keys[i].context;
-        let (i_q_offset, i_q_end) = (keys[i].query_offset, keys[i].query_end);
-        let o = i_q_offset - MAX_RANGE_DIFF;
-        let e = i_q_end + MAX_RANGE_DIFF;
-
-        for j in (i + 1)..hits.len() {
-            if to_remove[j] {
-                continue;
-            }
-
-            let hit_j_context = keys[j].context;
-            let (j_q_offset, j_q_end) = (keys[j].query_offset, keys[j].query_end);
-
-            // Same context (strand) check
-            if hit_i_context == hit_j_context {
-                // Check if query range is within ±range_diff
-                if j_q_offset >= o && j_q_end <= e {
-                    to_remove[j] = true;
-                }
-            }
-        }
-    }
-
-    // Pass 2: Cross-strand filtering (BLASTN-specific)
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2582-2604
-    for i in 0..hits.len() {
-        if to_remove[i] {
-            continue;
-        }
-
-        let hit_i_context = keys[i].context;
-        let query_len = keys[i].query_length;
-        let target_context = if keys[i].query_frame > 0 {
-            hit_i_context + 1
-        } else {
-            hit_i_context.saturating_sub(1)
-        };
-
-        // Flip coordinates for cross-strand comparison
-        // NCBI: e = qlen - (query.offset - range_diff)
-        // NCBI: o = qlen - (query.end + range_diff)
-        let (i_q_offset, i_q_end) = (keys[i].query_offset, keys[i].query_end);
-        let flipped_o = query_len - (i_q_end + MAX_RANGE_DIFF);
-        let flipped_e = query_len - (i_q_offset - MAX_RANGE_DIFF);
-
-        for j in (i + 1)..hits.len() {
-            if to_remove[j] {
-                continue;
-            }
-
-            let hit_j_context = keys[j].context;
-            let (j_q_offset, j_q_end) = (keys[j].query_offset, keys[j].query_end);
-
-            // Target context (opposite strand) check
-            if hit_j_context == target_context {
-                // Check if query range (in flipped coordinates) is within range
-                if j_q_offset >= flipped_o && j_q_end <= flipped_e {
-                    to_remove[j] = true;
-                }
-            }
-        }
-    }
-
-    // Remove marked HSPs by compacting the vector
-    let mut write_idx = 0;
-    for read_idx in 0..hits.len() {
-        if !to_remove[read_idx] {
-            if write_idx != read_idx {
-                hits.swap(write_idx, read_idx);
-            }
-            write_idx += 1;
-        }
-    }
-    hits.truncate(write_idx);
 }
 
 #[cfg(test)]

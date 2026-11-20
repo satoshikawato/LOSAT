@@ -676,6 +676,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stage_c_hsps =
             preliminary_hsps_of_letters(&[&search_query], &subject_nt, 1, profile).unwrap();
@@ -934,6 +935,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let stage_c_hsps =
             preliminary_hsps_of_letters(&[&search_query], &subject_nt, 32, profile).unwrap();
@@ -1304,6 +1306,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-625;
         // c++/src/algo/blast/core/blast_engine.c:484-525
@@ -2029,6 +2032,7 @@ mod tests {
             gap_xdrop: 38,
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
+            subject_besthit: false,
         };
         let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
         for (oid, (_, subject)) in subjects.iter().enumerate() {

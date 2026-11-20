@@ -245,6 +245,34 @@ impl KappaResultHitList {
         }
     }
 
+    /// `-subject_besthit` on each final list of the query (`s_FilterBlastResults`, after
+    /// `-qcov_hsp_perc`; a query is one context): the later HSPs within a kept HSP's query range
+    /// widened by 3 go, with their payloads. The best e-value is not set again, as NCBI's is not.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:858-861
+    pub(super) fn subject_besthit(&mut self) {
+        use crate::core::blast_hits::{subject_besthit, BestHitExtent};
+        let extent = |linked: &LinkedHsp| BestHitExtent {
+            context: 0,
+            query_frame: 0,
+            offset: i64::from(linked.hsp.q_start),
+            end: i64::from(linked.hsp.q_end),
+            query_length: 0,
+        };
+        for list in &mut self.lists {
+            if list.payloads.is_empty() {
+                subject_besthit(&mut list.hsps.hsps, false, extent);
+            } else {
+                let mut paired: Vec<_> = std::mem::take(&mut list.hsps.hsps)
+                    .into_iter()
+                    .zip(std::mem::take(&mut list.payloads))
+                    .collect();
+                subject_besthit(&mut paired, false, |(linked, _)| extent(linked));
+                (list.hsps.hsps, list.payloads) = paired.into_iter().unzip();
+            }
+        }
+    }
+
     pub(super) fn lists(&self) -> &[KappaResultList] {
         &self.lists
     }

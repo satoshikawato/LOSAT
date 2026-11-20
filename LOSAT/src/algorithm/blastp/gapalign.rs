@@ -624,12 +624,12 @@ fn prune_terminal_gap_ops(
             GapEditOp::Sub(_) => break,
             GapEditOp::Del(n) => {
                 *score_left += gap_open + gap_extend * n as i32;
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4687-4688: gap_align->subject_start += esp->num[0];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4687-4688
                 *subject_start += n as i32;
             }
             GapEditOp::Ins(n) => {
                 *score_left += gap_open + gap_extend * n as i32;
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4689-4690: gap_align->query_start += esp->num[0];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4689-4690
                 *query_start += n as i32;
             }
         }
@@ -644,12 +644,12 @@ fn prune_terminal_gap_ops(
             GapEditOp::Sub(_) => break,
             GapEditOp::Del(n) => {
                 *score_right += gap_open + gap_extend * n as i32;
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4703-4704: gap_align->subject_stop -= esp->num[i-1];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4703-4704
                 *subject_stop -= n as i32;
             }
             GapEditOp::Ins(n) => {
                 *score_right += gap_open + gap_extend * n as i32;
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4705-4706: gap_align->query_stop -= esp->num[i-1];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4705-4706
                 *query_stop -= n as i32;
             }
         }
@@ -2776,13 +2776,13 @@ mod tests {
         let mut edit_script = vec![GapEditOp::Ins(2), GapEditOp::Sub(3), GapEditOp::Del(1)];
         let mut score_left = 30;
         let mut score_right = 40;
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_start;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
         let mut query_start = 10i32;
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_stop;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
         let mut query_stop = 15i32;
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 subject_start;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
         let mut subject_start = 20i32;
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 subject_stop;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
         let mut subject_stop = 24i32;
 
         prune_terminal_gap_ops(
@@ -3451,13 +3451,13 @@ mod tests {
         assert_eq!(fields[0], 0); // successful C status maps to Some
         assert_eq!(i32::from(fence_hit), fields[1]);
         assert_eq!(result.score, fields[2]);
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_start;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
         assert_eq!(result.query_start, fields[3]);
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_stop;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
         assert_eq!(result.query_stop, fields[4]);
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 subject_start;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
         assert_eq!(result.subject_start, fields[5]);
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 subject_stop;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
         assert_eq!(result.subject_stop, fields[6]);
         assert_eq!(lines.next(), Some("SCRIPT\t-1"));
         assert!(result.edit_script.is_empty());

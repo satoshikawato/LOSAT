@@ -383,7 +383,6 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
     }));
     let jobs = &*speculative_jobs;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-513
-    // BLAST_GappedAlignmentWithTraceback(...);
     crate::utils::threading::report_stage("blastn", "dp_traceback", jobs.len(), jobs.len() > 1);
     speculative_results.clear();
     speculative_results.resize_with(batch_end - prelim_index, || None);
@@ -399,9 +398,6 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
                         .filter_map(|&index| {
                             let p = &prelim_hits[index];
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-472,509-513
-                            // AdjustSubjectRange(&s_start, &adjusted_s_length,
-                            //                    q_start, query_length, &start_shift);
-                            // BLAST_GappedAlignmentWithTraceback(...);
                             // Keep the exact preparation with its speculative DP.
                             let prepared = prepare_traceback(traceback_ctx, p)?;
                             if x_fence::x_fenced(x_fenced) {

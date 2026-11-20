@@ -200,7 +200,6 @@ pub fn cut_off_gap_edit_script(
         gap_info.truncate(found_index.saturating_add(1));
 
         // Update HSP coordinates
-        // NCBI: hsp->query.end = hsp->query.offset + qid;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2449-2449
         q_end_0 = q_offset_0 + qid as i32;
         s_end_0 = s_offset_0.saturating_add(sid);
@@ -422,7 +421,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     );
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2480-2500
-    //     s_CutOffGapEditScript(hsp, hsp_array[i]->query.end, hsp_array[i]->subject.end, TRUE);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2478-2500
     // The C code keeps the sorted active prefix and moves trimmed/null HSPs to
     // the tail by decrementing hsp_count before shifting hsp_array left.
@@ -464,8 +462,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
                             keeper_s_end,
                         );
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2490-2492,2516-2518
-                        // s_CutOffGapEditScript(hsp, hsp_array[w]->query.end,
-                        //                      hsp_array[w]->subject.end, TRUE);
                         // End immutable keeper/removed borrows before editing this one slot.
                         let removed_hit = hsp_storage[handle.get() - 1]
                             .as_mut()
@@ -521,7 +517,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     );
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2499-2528
-    //     s_CutOffGapEditScript(hsp, hsp_array[i]->query.offset, hsp_array[i]->subject.offset, FALSE);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2512-2528
     // Repeat the same active-prefix mutation NCBI uses for common endpoints.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2504-2528
@@ -562,8 +557,6 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
                             keeper_s_offset,
                         );
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2490-2492,2516-2518
-                        // s_CutOffGapEditScript(hsp, hsp_array[w]->query.offset,
-                        //                      hsp_array[w]->subject.offset, FALSE);
                         // End immutable keeper/removed borrows before editing this one slot.
                         let removed_hit = hsp_storage[handle.get() - 1]
                             .as_mut()
@@ -1340,8 +1333,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2480-2535
-    // if (!purge && hsp->query.end > hsp_array[i]->query.end)
-    //     s_CutOffGapEditScript(hsp, ..., TRUE);
     // Repeated removals in both passes must keep the active order and the
     // reverse removal order of live trimmed tail entries around NULL slots.
     #[test]
@@ -1531,7 +1522,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2490-2499,2516-2525
-    // s_CutOffGapEditScript(hsp, ..., TRUE); ... s_CutOffGapEditScript(hsp, ..., FALSE);
     // Also complements unit_tests/api/blasthits_unit_test.cpp:1163-1204.
     #[test]
     fn final_active_slot_can_be_trimmed_or_deleted_in_either_pass() {

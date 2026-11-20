@@ -53,7 +53,6 @@ pub fn cutoff_score_max_from_evalue(
     gapped_params: &KarlinParams,
 ) -> i32 {
     // NCBI: Check for invalid Karlin parameters (c++/src/algo/blast/core/blast_stat.c:4101-4102)
-    // if (kbp->Lambda == -1. || kbp->K == -1. || kbp->H == -1.) return 1;
     if gapped_params.lambda < 0.0 || gapped_params.k < 0.0 || gapped_params.h < 0.0 {
         return 1; // Return error value (matches NCBI behavior)
     }
@@ -152,7 +151,6 @@ pub fn compute_blastn_cutoff_score_ungapped(
     let searchsp = min_len * subject_len;
 
     // NCBI: Check for invalid Karlin parameters (c++/src/algo/blast/core/blast_stat.c:4101-4102)
-    // if (kbp->Lambda == -1. || kbp->K == -1. || kbp->H == -1.) return 1;
     if ungapped_params.lambda < 0.0 || ungapped_params.k < 0.0 || ungapped_params.h < 0.0 {
         return 1; // Return error value (matches NCBI behavior)
     }

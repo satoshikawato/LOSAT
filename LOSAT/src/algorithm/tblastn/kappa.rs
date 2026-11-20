@@ -154,7 +154,6 @@ fn reap_keep(hsps: &[(usize, GappedHsp)]) -> Vec<bool> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:305-358:
-// Blast_HSPInit(..., unknown_value, unknown_value, ..., &editScript, &new_hsp);
 #[derive(Debug)]
 pub(super) struct ConvertedKappaHsp {
     pub context: usize,
@@ -164,7 +163,6 @@ pub(super) struct ConvertedKappaHsp {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:305-358:
-// Blast_HSPInit(..., unknown_value, unknown_value, ..., &editScript, &new_hsp);
 pub(super) fn convert_distinct_alignments(
     alignments: &mut Option<Box<BlastCompoAlignment>>,
 ) -> Result<Vec<ConvertedKappaHsp>> {
@@ -226,8 +224,6 @@ pub(super) fn postredo_num_ident(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526:
-// Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp,
-//                                       scoring_options, 0, sbp);
 // c++/src/algo/blast/core/blast_hits.c:767-811:
 #[cfg(test)]
 pub(super) fn postredo_converted_stats(
@@ -476,7 +472,6 @@ mod tests {
     use crate::utils::glibc_fma_libm::GlibcLibm;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-357:
-    // Blast_HSPInit(..., &editScript, &new_hsp);
     // Each alignment transfers its own script, even when its numeric HSP
     // fields are identical to another alignment.
     #[test]
@@ -634,7 +629,6 @@ mod tests {
         )
         .unwrap();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(160, true)],
             subject_nt.len() as i64,
@@ -888,7 +882,6 @@ mod tests {
         )
         .unwrap();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
             subject_nt.len() as i64,
@@ -1262,7 +1255,6 @@ mod tests {
         .unwrap();
         let query_lengths = [120, 70, 120];
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
             6_377,
@@ -1993,7 +1985,6 @@ mod tests {
         )
         .unwrap();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
             total_nt_length as i64,
@@ -2327,8 +2318,6 @@ mod tests {
             assert_eq!(postredo.hsps[0].hsp.frame, heap_hsp[8].parse().unwrap());
             assert!(heap.insert(candidate).is_none());
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:305-358,3687-3713:
-            // Blast_HSPInit(..., &editScript, &new_hsp);
-            // s_HSPListNormalizeScores(...); s_ComputeNumIdentities(...);
             let Some(BlastCompoAlignmentContext::EditScript(script)) = align.context.as_ref()
             else {
                 panic!("OID {oid} Kappa HSP lacks an edit script");
@@ -2378,7 +2367,6 @@ mod tests {
                 );
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
                 // core/blast_hits.c:3243-3297,3420-3437:
-                // while ((hsp_list = BlastCompo_HeapPop(heap)) != NULL)
                 let expected_in: Vec<_> = result_in[result_index].split('\t').collect();
                 assert_eq!(popped.subject_index, expected_in[1].parse().unwrap());
                 assert_eq!(result.lists().len(), expected_in[2].parse().unwrap());

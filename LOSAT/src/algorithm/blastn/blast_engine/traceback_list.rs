@@ -169,7 +169,6 @@ pub(super) fn trace_hsp_list(
         ))]
         let mut speculative_scratch: Vec<_> = if speculative_traceback {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-513
-            // BLAST_GappedAlignmentWithTraceback(...);
             // Each independent scratch slot retains its intermediate results.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
             // Each slot of the batch also has the scratch of the greedy aligner, so that
@@ -426,8 +425,6 @@ pub(super) fn trace_hsp_list(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4017
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:451-460
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:403-405,436-472
-                //     AdjustSubjectRange(&s_start, &adjusted_s_length,
-                //                        q_start, query_length, &start_shift);
                 // Consume only after the live ordered containment check. An HSP
                 // skipped at batch start can become eligible after endpoint
                 // replacement, so missing results still prepare and run here.

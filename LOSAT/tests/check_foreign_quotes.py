@@ -90,6 +90,9 @@ TREE_PATH_RE = re.compile(
     r"(?::(?P<ranges>\d+(?:-\d+)?(?:,\s?\d+(?:-\d+)?)*))?"
 )
 TABLE_PATH = Path(__file__).with_name("ncbi_source_lines.tsv")
+# What follows the last cited path and lines of a line (`...c:410-420: opt.SetX(true);`).
+CITATION_TAIL_RE = re.compile(r"\s*[:,;]?\s*(?P<tail>[^`].*)$")
+CODE_AFTER_CITATION = "code after the citation"
 
 # Files in NCBI's tree that are other projects' code: they carry no NCBI PUBLIC DOMAIN NOTICE.
 # A path is matched when it contains the entry (after `c++/`; `boost_erf.c` by its name alone).
@@ -187,7 +190,15 @@ CODE_LINE_RE = re.compile(
     r"(?:=|\breturn\b|\w\()[^.`]*;\s*$|^\s*\}\s*$|\)\s*\{\s*$|^\s*#\s*define\b"
     r"|^\s*(?:static\s+)?(?:const\s+)?(?:unsigned\s+|signed\s+)?"
     r"(?:int|double|float|char|void|size_t|long|bool|Int4|Int8|Uint4|Uint8)\s+\**\w+\s*[(=;]"
+    # C statements: `if (...) continue;`, `q++;`, `break;`, `} else {`, `case X:`, `f (a, b);`
+    r"|^\s*(?:\}\s*)?(?:if|for|while|switch)\s*\(.*\)\s*(?:\{|[^`]*;)?\s*$"
+    r"|^\s*(?:break|continue)\s*;\s*$|\w(?:\+\+|--)\s*;\s*$"
+    r"|^\s*\}\s*else\b|^\s*else\s*\{\s*$|^\s*case\s+[\w:]+\s*:\s*|^\s*default\s*:\s*$"
+    r"|^\s*[\w*&>.\[\]-]*\w\([^`]*\)\s*;\s*$|^\s*[\w*&>.\[\]-]*\w\([^()`]*,\s*$"
 )
+# The indentation of a comment line's text (after its marker; a docstring's line as it is):
+# an indented block under a source label is quoted code even after a blank line.
+MARKER_RE = re.compile(r"^\s*(?://[/!]?|#!?)")
 SKIPPED_DIRS = frozenset(
     {".git", ".worktrees", "target", "node_modules", ".venv", "venv", "__pycache__"}
 )
@@ -234,6 +245,8 @@ def python_texts(lines: Sequence[str]) -> list[str | None] | None:
                 if number == node.lineno:
                     opening = DOCSTRING_RE.match(lines[number - 1])
                     text = opening.group("text").strip() if opening is not None else text
+                if number == node.end_lineno and number != node.lineno:
+                    text = re.sub(r"(?:\"\"\"|\'\'\')\s*$", "", text).rstrip()
                 texts[number - 1] = text
     for token in tokens:
         if token.type == tokenize.COMMENT:
@@ -421,6 +434,19 @@ def pin_problem(text: str) -> str | None:
 TRAILING_COMMENT_RE = re.compile(r"[\w;,{}()\[\]]\s+//[/!]?\s(?P<text>.*)$")
 
 
+def code_after_citation(text: str) -> int | None:
+    """Where code that follows the last cited path of NCBI's tree starts in `text`, or None."""
+    last = None
+    for last in TREE_PATH_RE.finditer(text):
+        pass
+    if last is None:
+        return None
+    tail = CITATION_TAIL_RE.match(text, last.end())
+    if tail is None or not CODE_LINE_RE.search(tail.group("tail")):
+        return None
+    return last.end()
+
+
 def citation_findings(
     rel: str, number: int, text: str, table: dict[str, int], dirs: frozenset[str]
 ) -> list[Finding]:
@@ -434,6 +460,12 @@ def citation_findings(
         if problem is not None:
             findings.append(Finding(rel, number, "REF", problem, match.group(0)))
     return findings
+
+
+def text_indent(line: str) -> int:
+    marker = MARKER_RE.match(line)
+    rest = line[marker.end() :] if marker else line
+    return len(rest) - len(rest.lstrip(" "))
 
 
 def check_text(
@@ -453,6 +485,11 @@ def check_text(
     run_label: tuple[int, str] | None = None
     run_citations: list[tuple[int, str]] = []
     in_fence = False
+    # The last label line of the comment that cites source, with its indentation: a code line
+    # indented 4 more under it is quoted, blank lines between or not.
+    block_label: tuple[int, str, int] | None = None
+    # A quoted call that goes on to the next line (`f(a,`): its lines up to the `;` are quoted.
+    open_call: tuple[str, str] | None = None
     source_file = style != "text"
     if table is not None and dirs is None:
         dirs = directories(table)
@@ -465,6 +502,8 @@ def check_text(
                 )
             in_fence = False  # a fence ends with its comment run
             run_label, run_citations = None, []
+            block_label = None
+            open_call = None
             continue
         cited = [run_label] if run_label is not None else list(run_citations)
         if FENCE_RE.match(text):
@@ -494,14 +533,30 @@ def check_text(
             run_label, run_citations = None, []
             continue
         citation = is_citation(text)
-        if run_label is not None and not citation and CODE_LINE_RE.search(text):
-            found = cited_source([run_label])
-            if found is None and cites_source(run_label[1]):
-                found = ("source text", f"cited at :{run_label[0]}: {run_label[1]}")
+        if open_call is not None:
+            if text and not citation and not text.endswith("."):
+                findings.append(Finding(rel, number, "QUOTE", open_call[0], open_call[1]))
+                if not text.endswith(","):
+                    open_call = None
+                continue
+            open_call = None
+        label = run_label
+        if label is None and block_label is not None and text_indent(lines[number - 1]) >= block_label[2] + 4:
+            label = (block_label[0], block_label[1])
+        if label is not None and not citation and CODE_LINE_RE.search(text):
+            found = cited_source([label])
+            if found is None and cites_source(label[1]):
+                found = ("source text", f"cited at :{label[0]}: {label[1]}")
             if found is not None:
                 findings.append(Finding(rel, number, "QUOTE", found[0], found[1]))
+                if text.endswith(","):
+                    open_call = found
+        if source_file and code_after_citation(text) is not None:
+            findings.append(Finding(rel, number, "QUOTE", CODE_AFTER_CITATION, text))
         if is_label_line(text):
             run_label = (number, text)
+            if cites_source(text) and style != "text":
+                block_label = (number, text, text_indent(lines[number - 1]))
         elif citation:
             run_citations.append((number, text))
         labelled = LABELLED_RE.match(text)
@@ -578,6 +633,11 @@ def fix_lines(
         index = finding.line - 1
         if finding.kind == "QUOTE":
             text = texts[index] or ""
+            if finding.source == CODE_AFTER_CITATION:
+                cut = code_after_citation(lines[index])
+                if cut is not None:
+                    lines[index] = lines[index][:cut].rstrip()
+                continue
             if FENCE_RE.match(text):
                 end = index + 1
                 while end < len(lines) and texts[end] is not None and not FENCE_RE.match(texts[end] or ""):
@@ -605,10 +665,15 @@ def fix_lines(
             lines[index] = line
     drop = {index for index in drop if texts[index] is not None}
     if style == "python":
-        # A docstring's quotes stay: a fence that shares their line loses only its backticks.
+        # A docstring's quotes stay: the text before closing quotes goes, and a fence that
+        # shares the opening quotes' line loses only its backticks.
         for index in [i for i in drop if '"""' in lines[i] or "'''" in lines[i]]:
             drop.discard(index)
-            lines[index] = lines[index].replace("```", "", 1)
+            closing = re.match(r"^(\s*)\S.*?(\"\"\"|''')\s*$", lines[index])
+            if closing is not None and not lines[index].lstrip().startswith(closing.group(2)):
+                lines[index] = closing.group(1) + closing.group(2)
+            else:
+                lines[index] = lines[index].replace("```", "", 1)
 
     def blank(line: str) -> bool:
         if style in ("text", "python"):
@@ -735,12 +800,17 @@ def fix(root: Path) -> tuple[int, list[str]]:
         style = COMMENT_STYLES[path.suffix]
         lines = text.split("\n")
         rel = path.relative_to(root).as_posix()
-        findings = [
-            f for f in check_text(rel, lines, style, table, dirs) if f.kind in ("QUOTE", "PIN")
-        ]
-        if not findings:
-            continue
-        new = "\n".join(fix_lines(list(lines), style, findings, names))
+        # Removing a line can bring the next under a label: fix until nothing changes.
+        new = text
+        for _ in range(5):
+            findings = [
+                f for f in check_text(rel, lines, style, table, dirs) if f.kind in ("QUOTE", "PIN")
+            ]
+            fixed = fix_lines(list(lines), style, findings, names) if findings else lines
+            if fixed == lines:
+                break
+            lines = fixed
+            new = "\n".join(lines)
         if new == text:
             continue
         if not same_code(path.suffix, text, new):

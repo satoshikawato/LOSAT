@@ -93,7 +93,6 @@ pub(crate) fn s_blast_aa_scan_subject(
             let new_char = unsafe { *subject.get_unchecked(s + word_length - 1) } as usize;
             index = ((index << charsize) | new_char) & mask;
 
-            // [C] if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:89-93
             // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57
             let pv_word = unsafe { *pv.add(index >> PV_ARRAY_BTS) };

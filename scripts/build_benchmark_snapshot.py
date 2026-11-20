@@ -222,8 +222,6 @@ def read_cases() -> list[dict[str, str]]:
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-# qaccver saccver pident length mismatch gapopen qstart qend sstart send
-# evalue bitscore
 # Preserve recorded outfmt 6 pident/length values without biological filtering.
 def build_alignment_dataset(
     distribution_run: Path, snapshot: Path

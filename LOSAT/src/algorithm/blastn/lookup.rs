@@ -1229,7 +1229,6 @@ pub fn build_pv_direct_lookup(
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
         let seq = seq_blastna;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:99-100
-        // if (word_length > to - from + 1) continue;
         if seq.len() < safe_word_size {
             continue;
         }

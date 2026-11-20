@@ -2344,7 +2344,6 @@ fn write_blastp_tabular_hit_lists(
     // Index of the next HSP in the final hit list (collect_hits_from_hit_lists order).
     let mut hsp_index = 0;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1264-1283,1322-1325
-    // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
     for (q_idx, hit_list_opt) in hit_lists.iter().enumerate() {
         // The query's warnings come before its lines (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {

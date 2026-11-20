@@ -39,7 +39,6 @@ def main() -> None:
         return ''.join(randomizer.choice('ACGT') for _ in range(length))
     # Pinned NCBI c++/src/algo/blast/core/blast_engine.c:804-850:
     #     s_BlastSearchEngineOneContext(...);
-    #     Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
     # }
     mode = sys.argv[2] if len(sys.argv) == 3 else ''
     assert mode in ('', '--six-frame', '--no-fence'), 'usage: run_multi_hsp_trace.py NEW_OUTPUT_DIR [--six-frame|--no-fence]'

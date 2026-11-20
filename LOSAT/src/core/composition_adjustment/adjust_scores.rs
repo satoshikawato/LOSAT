@@ -787,7 +787,6 @@ pub struct BlastAdjustScoresResult {
 // left = start; for (i = left; i > 0; i--) if (subject_data[i-1] == eStopChar)
 //     { if (i + kCompositionMargin < left) left = i + kCompositionMargin; break; }
 // right = finish; for (i = right; i < length; i++)
-//     if (subject_data[i] == eStopChar)
 //     { if (i - kCompositionMargin > right) right = i - kCompositionMargin; break; }
 pub(crate) fn blast_get_composition_range(
     subject_data: &[u8],
@@ -2674,10 +2673,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1234-1254;
     // composition_adjustment/composition_adjustment.c:1414-1530:
-    // Blast_AdjustScores(matrix, query_composition, query.length,
-    //                    &subject_composition, subject.length,
-    //                    scaledMatrixInfo, compo_adjust_mode,
-    //                    RE_pseudocounts, NRrecord, &matrix_adjust_rule, ...);
     #[test]
     fn pinned_tblastn_mode2_adjustment_rules_match_ncbi_call_inputs() {
         for case in [

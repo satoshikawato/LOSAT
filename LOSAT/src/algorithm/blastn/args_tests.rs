@@ -199,7 +199,7 @@ fn options_without_an_ncbi_blastn_equivalent_are_rejected() {
 
 #[test]
 fn query_defaults_to_standard_input() {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:47: const string kDfltArgQuery("-");
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:47
     let args = parse_args(&["-subject", "subject.fasta"]);
     assert_eq!(args.query, PathBuf::from("-"));
 }

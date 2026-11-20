@@ -15,7 +15,7 @@ pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for 
 // Database word count filtering (kDbFilter) exists but filters based on database counts, not query counts
 
 /// Scan range for off-diagonal hit detection
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:658: Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:658
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:63
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:165-168
 pub const SCAN_RANGE_BLASTN: usize = 0;
@@ -25,7 +25,7 @@ pub const SCAN_RANGE_MEGABLAST: usize = 0;
 // DEPRECATED: These fixed thresholds are replaced by dynamically calculated cutoff_score
 // based on NCBI BLAST's implementation (blast_parameters.c:368-374).
 // The dynamic calculation uses gap_trigger (bit score 27.0) and cutoff_score_max (from E-value).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:343-344: gap_trigger calculation
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:368-374: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
 // These constants are kept for backward compatibility but are no longer used in the main code path.

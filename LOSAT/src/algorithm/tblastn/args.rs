@@ -27,7 +27,6 @@ pub(crate) const TBLASTN_TASK: TaskParser =
 #[command(rename_all = "snake_case")]
 pub struct TblastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427:
-    // arg_desc.AddDefaultKey(kArgQuery, "input_file", "Input file name",
     // The default `-` is standard input.
     #[arg(long, value_parser = ncbi_input_path(), value_name = "PATH", default_value = "-")]
     pub query: PathBuf,
@@ -107,10 +106,7 @@ pub struct TblastnArgs {
     #[arg(long, value_parser = tblastn_threshold_value, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for tblastn-fast]")]
     pub threshold: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:220-229,280-286:
-    // arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value", ...);
-    // arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value", ...);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-214,276-278:
-    // arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value", ...);
     #[arg(long, value_parser = tblastn_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
     #[arg(long, value_parser = tblastn_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
@@ -151,7 +147,6 @@ pub struct TblastnArgs {
     )]
     pub seg: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
-    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
     #[arg(long)]
     pub lcase_masking: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342

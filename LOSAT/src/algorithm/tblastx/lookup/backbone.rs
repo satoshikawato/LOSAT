@@ -2070,7 +2070,6 @@ pub(crate) fn x_tbx_build_ncbi_lookup(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
-// s_AddWordHits(lookup, matrix, query->sequence, ...);
 pub(crate) fn build_ncbi_lookup_for_profile(
     queries: &[Vec<QueryFrame>],
     threshold: i32,

@@ -356,7 +356,6 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
     } = chunk_cx;
     let diag_ptr = diag_array.as_mut_ptr();
 
-    // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
     // NCBI uses Uint4 for offsets; apply unsigned wrapping.
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:141-150
     //             c++/src/algo/blast/core/aa_ungapped.c:516
@@ -365,7 +364,6 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
     // SAFETY: diag_coord is masked by diag_mask, which is < diag_array.len()
     let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
 
-    // [C] if (diag_array[diag_coord].flag)
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-531
     if diag_entry.flag() != 0 {
         // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
@@ -395,13 +393,11 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
     else {
         // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
         let last_hit = diag_entry.last_hit() - diag_offset;
-        // [C] diff = subject_offset - last_hit;
         // NCBI uses Uint4 for subject_offset; compute with unsigned wrap.
         // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:141-150
         //             c++/src/algo/blast/core/aa_ungapped.c:535-536
         let diff = subject_offset.wrapping_sub(last_hit as u32) as i32;
 
-        // [C] if (diff >= window)
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-544
         if diff >= window {
             if cx.diag_enabled {
@@ -414,7 +410,6 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
             return None;
         }
 
-        // [C] if (diff < wordsize)
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:549-551
         if diff < wordsize {
             if cx.diag_enabled {
@@ -426,7 +421,6 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
             return None;
         }
 
-        // [C] curr_context = BSearchContextInfo(query_offset, query_info);
         // NCBI passes Uint4 query_offset into BSearchContextInfo (Int4).
         // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:141-150
         //             c++/src/algo/blast/core/aa_ungapped.c:560
@@ -480,7 +474,6 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         // and `x_dropoff_per_context` maps `contexts`, one entry each.
         let x_dropoff = unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };
 
-        // [C] score = s_BlastAaExtendTwoHit(matrix, subject, query,
         //                                   last_hit + wordsize, subject_offset, query_offset, ...)
         // Two-hit ungapped extension (NCBI `s_BlastAaExtendTwoHit`)
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158
@@ -574,7 +567,6 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
             diag_entry.set_last_hit(subject_offset.wrapping_add(diag_offset as u32) as i32);
         }
 
-        // [C] if (score >= cutoffs->cutoff_score)
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-591 (Extension後のcutoffチェック)
         if collect_hsp_saving_stats {
             if score >= cutoff {
@@ -718,7 +710,6 @@ where
     let &FrameCx {
         s_frames_listed, ..
     } = frame;
-    // [C] Blast_ExtendWordExit(ewp, subject->length);
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614
     advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
@@ -1069,7 +1060,6 @@ fn scan_chunk_bucketed<S: TbxScore>(
                 break;
             };
 
-            // [C] for (i = 0; i < hits; ++i)
             // The hits of this scan call are appended to the buckets and
             // processed, bucket by bucket, when the buffer is full.
             //

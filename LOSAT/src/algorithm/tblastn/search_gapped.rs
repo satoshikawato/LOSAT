@@ -50,8 +50,6 @@ pub(super) struct TracebackOwnedHsp {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-552:
-// BlastInitHitListReset(init_hitlist); WordFinder(..., init_hitlist, ...);
-// GetGappedScore(..., init_hitlist, &hsp_list, ...);
 // Score only this chunk's sorted initial HSPs before the next chunk scan.
 /// `subject_sequence` is the chunk's residues of `frame` and `subject_frame` the frame's residues
 /// from the chunk's first one on (`subject_sequence` and the letters after it); `score` is the
@@ -103,7 +101,6 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3827-3834,3908-3919,
     // 4065-4091:
-    //                                   hit_options->min_diag_separation)) { ... }
     let mut tree = BlastIntervalTree::new(
         0,
         total_query_length + 1,
@@ -119,7 +116,6 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
     );
     for hit in frame_initial {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2371-2468:
-        // context = BSearchContextInfo(init_hsp->offsets.qs_offsets.q_off, query_info);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:212-229:
         // s_GetQueryStrandOffset(query_info, context) returns the protein context's
         // query_offset, which is also used by containment and insertion.
@@ -144,7 +140,6 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
             .context("negative context-local initial query start")?;
         let s_start = usize::try_from(hit.s_start).context("negative initial subject start")?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
-        // max_offset = BlastGetStartForGappedAlignment(query_tmp.sequence,
         //     subject->sequence, gap_align->sbp, q_start, length, s_start, length);
         // status = s_BlastProtGappedAlignment(...);
         // A negative Int4 length comes only from the one-hit word finder (`-window_size 0`,
@@ -212,7 +207,6 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
             )
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058:
-        //     Blast_HSPInit(..., gap_align->score, ..., &new_hsp);
         if gapped.score >= cutoff_scores[context] {
             let saved = GappedHsp {
                 frame: frame.frame,
@@ -1231,7 +1225,6 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         #[cfg(test)]
         let gapped = probe_gapped(unit, frame.frame, chunk.offset, gapped)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:539-552,555:
-        // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
         let purged = purge_preliminary_common_endpoints(gapped);
         #[cfg(test)]
         probe_event(unit, || {
@@ -1299,7 +1292,6 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
-            // Blast_HSPListsMerge(&hsp_list, &hsp_list_for_chunks, ...);
             per_frame = merge_adjusted_chunk(per_frame, unit_hsps, chunk, profile.hsp_num_max)?;
             #[cfg(test)]
             probe_push(|| {
@@ -1800,8 +1792,6 @@ fn append_preliminary_hsps(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
-// Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, kHspNumMax,
-//                     &(backup.offset), INT4_MIN, overlap, TRUE, FALSE);
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3050:
 // Adjust subject offset, end and gapped_start before merging.
 fn merge_adjusted_chunk(
@@ -1871,8 +1861,6 @@ pub(super) fn merge_two_chunk_hsps(old: &mut GappedHsp, new: &GappedHsp, allow_g
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
 // overlap = backup.offset == hard_range.left ? 0 : DBSEQ_CHUNK_OVERLAP;
-// Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, kHspNumMax,
-//                     &backup.offset, INT4_MIN, overlap, TRUE, FALSE);
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035:
 // move overlap HSPs to the front, match equal contexts whose diagonals
 // differ by less than 10, merge, purge the consumed new HSPs, combine by score.
@@ -2042,7 +2030,6 @@ impl<'a> TargetTranslation<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1154-1228:
-    // nucl_end = MIN(subject->length, 3*hsp->subject.end + kMaxTranslation);
     //     length = BLAST_GetTranslation(...);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:428-455:
     pub(super) fn get(
@@ -2253,8 +2240,6 @@ fn sort_gapped_score_if_needed(hsps: &mut [GappedHsp]) {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:537,817-838,931-995:
 // return s_HSPIsContained(hsp, query_start, node->hsp, node->leftptr,
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:352-360:
-// Blast_IntervalTreeInit(0, query_blk->length + 1,
-//   0, (subject_length > 0 ? subject_length : subject_blk->length / 3) + 1);
 fn traceback_tree_hsp(hsp: &GappedHsp, query_length: i32) -> TreeHsp {
     TreeHsp {
         query_offset: hsp.q_start,
@@ -2321,7 +2306,6 @@ fn purge_traceback_common_endpoints(mut hsps: Vec<TracebackOwnedHsp>) -> Vec<Tra
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1382:
-    // if (!Blast_HSPListIsSortedByScore(hsp_list)) qsort(..., ScoreCompareHSPs);
     if hsps
         .windows(2)
         .any(|pair| compare_gapped_score(&pair[0].hsp, &pair[1].hsp).is_gt())
@@ -2334,10 +2318,7 @@ fn purge_traceback_common_endpoints(mut hsps: Vec<TracebackOwnedHsp>) -> Vec<Tra
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:303-312,408-440,503-536,
 // 709-721,1644-1684:
-// BLAST_GappedAlignmentWithTraceback(..., fence_hit);
-// if (fence_error) break;
 // if (fence_hit) { /* refetch whole subject */
-//     Blast_TracebackFromHSPList(..., &fence_hit);
 // The NCBI endpoint purge and interval-tree pass follow traceback; ambiguity
 // reevaluation has no HSPs in this non-greedy, purge=TRUE profile.
 #[allow(dead_code)]
@@ -2371,8 +2352,6 @@ const HSP_MAX_WINDOW: usize = 11;
 //     *s_retval = s_start + q_length/2; return TRUE; }
 // if (score > max_score) { max_score = score; max_offset = index1; }
 //     *s_retval = max_offset - q_start + s_start; return TRUE; }
-// if (score > 0) { *q_retval = hsp->query.end - HSP_MAX_WINDOW/2;
-//     *s_retval = hsp->subject.end - HSP_MAX_WINDOW/2; return TRUE; }
 pub(super) fn blast_get_offsets_for_gapped_alignment_protein(
     query: &[u8],
     subject: &[u8],
@@ -2432,9 +2411,6 @@ pub(super) fn blast_get_offsets_for_gapped_alignment_protein(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:508-513:
-// BLAST_GappedAlignmentWithTraceback(program_number, query, adjusted_subject,
-//     gap_align, score_params, q_start, s_start, query_length,
-//     adjusted_s_length, fence_hit);
 #[allow(dead_code)]
 fn full_translation_traceback_with_matrix(
     query: &[u8],
@@ -2506,7 +2482,6 @@ fn full_translation_traceback_with_matrix_and_events(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-625;
 // c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
-// if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
 // Soft masking keeps both traceback and identity inputs unmasked.
 #[allow(dead_code)]
 fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
@@ -2533,7 +2508,6 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
     let mut ordered = gapped.to_vec();
     sort_gapped_score_if_needed(&mut ordered);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-605,675-693:
-    // Blast_HSPUpdateWithTraceback(...); Blast_HSPListSortByScore(...);
     // return the retained HSPs in source order to existing Stage C observers.
     Ok(
         full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
@@ -2678,7 +2652,6 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
 ) -> Result<(Vec<TracebackOwnedHsp>, i32, usize)> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
-    // Blast_HSPGetNumIdentitiesAndPositives(query_nomask, ...);
     // Trace the masked working query, then count identities on its
     // separately retained unmasked sequence.
     let query_frame = if soft_masking {
@@ -2721,13 +2694,10 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:352-360,401-405,
         // 583-605:
         // tree = Blast_IntervalTreeInit(...);
-        // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-        //                                   hit_options->min_diag_separation)) { ... }
         let mut tree = BlastIntervalTree::new(0, query_length + 1, 0, subject_limit);
         for hit in &ordered {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:403-405,607-609:
             // if (... || !BlastIntervalTreeContainsHSP(tree, hsp, ...)) { ... }
-            // else { hsp_array[index] = Blast_HSPFree(hsp); }
             // Test containment before
             // obtaining target translation or attempting traceback.
             let contained = tree.contains_hsp(&traceback_tree_hsp(hit, query_length), 0, 0);
@@ -2756,8 +2726,6 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-449:
             //   retval = BlastGetOffsetsForGappedAlignment(...);
             //   if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
-            // } else { q_start = hsp->query.gapped_start;
-            //          s_start = hsp->subject.gapped_start; }
             let (q_start, s_start) = if hit.q_gapped_start == 0 && hit.s_gapped_start == 0 {
                 let q_offset = usize::try_from(hit.q_start)?;
                 let q_end = usize::try_from(hit.q_end)?;
@@ -2830,8 +2798,6 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
             let subject_start = usize::try_from(alignment.subject_start)?;
             let subject_stop = usize::try_from(alignment.subject_stop)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:585-605:
-            // Blast_HSPGetNumIdentitiesAndPositives(..., &align_length, sbp);
-            // if (!delete_hsp) BlastIntervalTreeAddHSP(...);
             let align_length: usize = alignment
                 .edit_script
                 .iter()
@@ -2879,11 +2845,11 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
             let saved = GappedHsp {
                 frame: hit.frame,
                 score: alignment.score,
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583: Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583
                 q_start: alignment.query_start,
                 q_end: alignment.query_stop,
                 q_gapped_start: i32::try_from(q_start)?,
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:599: Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:599
                 s_start: alignment.subject_start + i32::try_from(subject_base)?,
                 s_end: alignment.subject_stop + i32::try_from(subject_base)?,
                 s_gapped_start: i32::try_from(s_start as isize + subject_base)?,
@@ -2902,14 +2868,12 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
         if !retry {
             let mut results = purge_traceback_common_endpoints(results);
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:672-693:
-            // for (...) if (BlastIntervalTreeContainsHSP(tree, hsp, query_info,
             let mut final_tree = BlastIntervalTree::new(0, query_length + 1, 0, subject_limit);
             results.retain(|item| {
                 let hsp = &item.hsp;
                 let tree_hsp = traceback_tree_hsp(hsp, query_length);
                 let contained = final_tree.contains_hsp(&tree_hsp, 0, 0);
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:675-693:
-                // if (BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...))
                 // After score sort, test
                 // interval-tree containment again before retaining HSPs.
                 if let Some(events) = containment_events.as_deref_mut() {
@@ -3757,7 +3721,6 @@ mod tests {
         )
         .unwrap();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
             subject.len() as i64,
@@ -3881,7 +3844,6 @@ mod tests {
         )
         .unwrap();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
             subject.len() as i64,
@@ -4136,7 +4098,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
-    // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2537,2809-2864:
     // Remove a lower-scoring
     // common-start HSP, then cap the cumulative score-sorted list.
@@ -4726,7 +4687,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-448:
-    //               hsp->subject.gapped_start = s_start; }
     #[test]
     fn real_path_start_offset_success_writeback_matches_ncbi() {
         compare_real_path_start_offset_with_ncbi(true);
@@ -4884,7 +4844,6 @@ mod tests {
     // max_offset = BlastGetStartForGappedAlignment(...);
     // status = s_BlastProtGappedAlignment(...);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:811-811
-    //               gap_align->subject_start, gap_align->subject_stop, ...);
     fn compare_fixture(fixture_name: &str, oracle_name: &str, lowercase: bool) {
         let root = format!(
             "{}/../docs/evidence/tlosan_stage_c/{fixture_name}/",
@@ -5030,9 +4989,7 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1677:
     // if (fence_hit) { /* refetch whole subject */ }
-    // Blast_TracebackFromHSPList(..., &fence_hit);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-589:
-    // BLAST_GappedAlignmentWithTraceback(...);
     #[test]
     fn full_translation_traceback_matches_ncbi_post_fence_scores_and_offsets() {
         let root = concat!(
@@ -5613,7 +5570,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1154-1228:
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:432:
-    // BLAST_GappedAlignmentWithTraceback(..., fence_hit);
     // Only a fence causes full-subject retry.
     #[test]
     fn nonzero_base_partial_traceback_without_fence_matches_ncbi() {
@@ -5767,7 +5723,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(gapped, expected_gapped);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-589,635-666:
-        // BLAST_GappedAlignmentWithTraceback(...);
         // The extra -1 HSP grows from raw 38 to raw 236 before endpoint purge.
         let removed = gapped
             .iter()
@@ -5978,7 +5933,6 @@ mod tests {
         assert_eq!(actual_snapshots, expected_snapshots);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:401-405,583-605:
-    //     BLAST_GappedAlignmentWithTraceback(...);
     // The pinned BLOSUM45/word-2 trace contains positive traceback-side
     // containment, including the full-translation retry.
     #[test]
@@ -6189,7 +6143,6 @@ mod tests {
         }
         assert_eq!(subject.len(), 15_000_962);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 28.
         let profile = PreliminaryProfile {
             seg: None,
@@ -6236,7 +6189,6 @@ mod tests {
         assert_eq!(actual, expected);
         assert_eq!(actual.len(), 2);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
-        //                     kHspNumMax, &(backup.offset), INT4_MIN, 100, ...);
         let mut second = actual[1];
         second.s_start += 4_999_900;
         second.s_end += 4_999_900;
@@ -6737,7 +6689,6 @@ mod tests {
             })
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 30.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
         // SUBJECT_SPLIT_NO_RANGE skips WordFinder/GetGappedScore in the
@@ -7068,8 +7019,6 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-638;
     // c++/src/algo/blast/core/blast_engine.c:484-525;
     // c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
-    // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-    // BLAST_ComplementMaskLocations(..., filter_maskloc, lookup_segments);
     // Soft masking excludes the same seed intervals but keeps K in every
     // WordFinder, GetGappedScore and traceback query input.
     #[test]
@@ -7675,7 +7624,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1241-1256;
     // c++/src/algo/blast/core/blast_setup.c:614-638:
-    // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
     // The overlapping SEG/lowercase intervals still restrict lookup, while
     // WordFinder, GetGappedScore and traceback use the unmasked query.
     #[test]
@@ -7851,7 +7799,6 @@ mod tests {
         assert_eq!(subject.len(), 30_001_262);
         subject[14_997_000..30_000_000].make_ascii_lowercase();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 30.
         let profile = PreliminaryProfile {
             seg: None,

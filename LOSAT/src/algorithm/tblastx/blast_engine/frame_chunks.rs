@@ -377,7 +377,6 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
                 }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
-            // status = s_GetNextSubjectChunk(subject, &backup, ...);
             crate::utils::threading::report_stage(
                 "tblastx",
                 "subject_chunks",

@@ -8,7 +8,6 @@
 // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:380-383
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4031
-// BLAST_GreedyGappedAlignment(...);
 // This fixture crosses an ungapped score valley at raw X-drop 13; using
 // blastn's 20-bit option (raw 11) changes the traceback seed and edit script.
 // Keep the full input: shortening it can change the automatic word cutoff.

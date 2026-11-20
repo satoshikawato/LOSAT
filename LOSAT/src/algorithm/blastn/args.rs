@@ -71,7 +71,6 @@ impl QueryStrand {
 
 // CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
-// arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value", ..., eInteger);
 // arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
 // arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
 // The single-dash lexical translation is owned by crate::cli.
@@ -255,9 +254,7 @@ pub struct BlastnArgs {
         help = "Cost to extend a gap (default: 0 for megablast, 2 for the other tasks)"
     )]
     pub gap_extend: Option<i32>,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:410-420: opt.SetDustFiltering(false/true);
-    // opt.SetDustFilteringLevel(...); opt.SetDustFilteringWindow(...);
-    // opt.SetDustFilteringLinker(...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:410-420
     // NCBI reads -dust in its filtering handler, after the output is opened
     // (`resolve_dust`); an omitted value keeps the default (20 64 1).
     #[arg(

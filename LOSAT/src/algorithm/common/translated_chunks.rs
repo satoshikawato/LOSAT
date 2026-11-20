@@ -7,7 +7,6 @@
 use anyhow::{bail, Result};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264:
-// } else { subject->length = hard_ranges[hm_index].right - backup->offset; }
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54:
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:192:
 // This schedule covers the unmasked translated frame's single hard range.
@@ -45,12 +44,10 @@ pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedC
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:489-502:
 // apply_mask_to_both_strands = true; PackedSeqLocToMaskedQueryRegions(...);
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
-// if (do_pos) mqr.push_back(...); if (do_neg) mqr.push_back(...);
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:689-707,825-826:
 // both mask copies enter masked_ranges before BlastSeqBlkSetSeqRanges.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:211-215:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831
-// if (context == 0) { seq_ranges[i].left = backup.seq_ranges[i].left / 3;
 //                     seq_ranges[i].right = backup.seq_ranges[i].right / 3; }
 // else if (context == 3) { /* reverse ranges using subject->length */ }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:51-59
@@ -74,7 +71,6 @@ fn translated_scan_ranges(
                 index += 1;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
-            // if (do_pos) mqr.push_back(...); if (do_neg) mqr.push_back(...);
             for _ in 0..2 {
                 nucleotide_ranges.push((left, start));
                 left = index - 1;

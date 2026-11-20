@@ -168,7 +168,7 @@ fn query_hsp_lists_merge(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1463-1478
                 let end_diag = hsp1.q_end as i64 - hsp1.s_end as i64;
                 let start_diag = (hsp2.q_start as i64 - 1) - (hsp2.s_start as i64 - 1);
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537: #define OVERLAP_DIAG_CLOSE 10
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537
                 if (end_diag - start_diag).abs() < 10 && merge_two_hsps(hsp1, hsp2) {
                     *slot = None;
                 }

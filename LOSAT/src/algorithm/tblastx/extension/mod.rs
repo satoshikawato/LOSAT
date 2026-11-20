@@ -55,14 +55,10 @@ pub fn get_score(a: u8, b: u8) -> i32 {
 /// We combine both steps here for 1-indexed output.
 ///
 /// For positive frames:
-///   NCBI core: start = CODON_LENGTH*(segment->offset) + segment->frame - 1
-///   NCBI core: end = CODON_LENGTH*segment->end + segment->frame - 2
 ///   Output +1: start = 3*offset + frame - 1 + 1 = 3*offset + shift + 1
 ///   Output +1: end = 3*end + frame - 2 + 1 = 3*end + shift
 ///
 /// For negative frames:
-///   NCBI core: start = seq_length - CODON_LENGTH*segment->offset + segment->frame
-///   NCBI core: end = seq_length - CODON_LENGTH*segment->end + segment->frame + 1
 ///   Output +1: start = len - (3*offset + shift + 1) + 1 = len - 3*offset - shift
 ///   Output +1: end = len - (3*end + shift) + 1
 pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize) -> (usize, usize) {

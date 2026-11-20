@@ -3,7 +3,6 @@
 NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108:
   x_PrintField(*iter); ... m_Ostream << "\n";
 NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:794-808:
-  dbname = string("User specified sequence set (Input: ") + m_SubjectTag ...;
 Synthetic subprocesses exercise the harness only, never certify a search.
 """
 

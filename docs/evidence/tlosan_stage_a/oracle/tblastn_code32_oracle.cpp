@@ -26,7 +26,6 @@ USING_SCOPE(objects);
 USING_SCOPE(blast);
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2538-2557:
-//   m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(), ...);
 // This fixture-only reader supplies the same pinned FASTA letters to the API.
 static std::pair<std::string, std::string> ReadFasta(const char* path) {
     std::ifstream in(path);
@@ -102,7 +101,6 @@ int main(int argc, char** argv) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1048-1056:
     options->SetDbGeneticCode(code);
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193,287-291:
-    //   InitializeSubject(db_args, m_OptsHndl, ..., db_adapter, scope);
     CSearchDatabase search_db(argv[3], CSearchDatabase::eBlastDbIsNucleotide);
     CRef<CLocalDbAdapter> db(new CLocalDbAdapter(search_db));
 

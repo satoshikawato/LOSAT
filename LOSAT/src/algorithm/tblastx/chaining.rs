@@ -52,7 +52,7 @@ pub struct UngappedHit {
     /// returns equality, so no biological tie-break absent from NCBI is added.
     pub hsp_list_order: u32,
     /// NCBI ELinkOrderingMethod: 0 = small gaps, 1 = large gaps
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c line 973: H->ordering_method = ordering_method;
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c
     pub ordering_method: u8,
     /// NCBI: H->linked_set - TRUE if this HSP is part of a multi-HSP chain
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c lines 959-962, 972

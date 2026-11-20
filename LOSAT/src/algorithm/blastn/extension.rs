@@ -850,7 +850,6 @@ where
             return (0, 0, q_off_adjusted, s_off_adjusted);
         }
 
-        // NCBI: search for valid left end and reposition q_off
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:546-549
         while q_off_adjusted < q_range && s_off_adjusted < s_range {
             if !is_seed_masked(s_off_adjusted, q_off_adjusted) {
@@ -951,7 +950,6 @@ where
     s_pos = s_pos.saturating_sub(lut_word_length - 1);
     q_pos = q_pos.saturating_sub(lut_word_length - 1);
 
-    // NCBI: while (*extended < ext_max) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:600-602
     // NCBI BLAST: This loop runs regardless of locations status
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:597-603

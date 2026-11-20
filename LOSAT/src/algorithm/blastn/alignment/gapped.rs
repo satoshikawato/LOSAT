@@ -1473,7 +1473,6 @@ fn extend_gapped_one_direction_with_traceback_scalar(
     row0[0] = SCRIPT_GAP_IN_A;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:481-490
-    //     if (score < -x_dropoff) break;
     let mut b_size = 1usize;
     for i in 1..=n.min(*dp_mem_alloc - 1) {
         if score < -x_dropoff {
@@ -1747,8 +1746,6 @@ fn extend_gapped_one_direction_with_traceback_scalar(
     let mut edit_ops: Vec<GapEditOp> = Vec::new();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:689-726
-    //     case SCRIPT_GAP_IN_A: ...
-    //     case SCRIPT_GAP_IN_B: ...
     //     default: ...
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:689-726 (traceback uses edit_script rows/offsets)
     while a_index > 0 || b_index > 0 {

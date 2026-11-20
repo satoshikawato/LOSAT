@@ -3,7 +3,6 @@
 
 NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108:
 //     }
-//     m_Ostream << "\n";
 // }
 """
 import hashlib

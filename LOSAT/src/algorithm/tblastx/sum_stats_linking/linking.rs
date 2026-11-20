@@ -292,7 +292,6 @@ struct LhHelper {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633,654-658:
 // if(sum0>=max0) { max0=sum0; best[0]=H; }
 // if(sum1>=max1) { max1=sum1; best[1]=H; }
-// /* Inside this while loop, the linked list order never changes */
 // Each channel retains its own (score, stable post-sort group index) winner.
 // SENTINEL_IDX means inactive, never a real contender at cutoff equality.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -561,7 +560,6 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // NCBI memory pooling: c++/src/algo/blast/core/link_hsps.c:452-454 allocates lh_helper once with
     // MAX(1024, hspcnt+5) and reuses it across all frame groups.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-    // for (frame_index=0; frame_index<num_query_frames; frame_index++) { ... }
     crate::utils::threading::report_stage(
         "tblastx",
         "linking",
@@ -739,7 +737,6 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994,1080-1085
-    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
     // Preserve the existing empty/singleton replay shortcut. The owned group
     // kernel and its contiguous payload layout are unchanged; only these
     // adjacent final sorts and replay borrow stationary result records.
@@ -881,9 +878,7 @@ fn replay_ncbi_output_list(mut sorted_hits: Vec<&mut UngappedHit>) -> Vec<Ungapp
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863
 // if(b0) { H2_index=next_larger; }
-// if(!(b0|b1|b2)) { H_hsp_num=H2->hsp_link.num[index];
 //   H_hsp_sum=H2->hsp_link.sum[index]; H_hsp_xsum=H2->hsp_link.xsum[index];
-//   H_hsp_link=H2; }
 // Both cursor drivers expand this single selection/trace body. All caller
 // state is explicit; continue targets the surrounding predecessor loop.
 macro_rules! visit_large_gap_predecessor {
@@ -990,7 +985,7 @@ fn scan_large_gap_predecessors(
 
     #[cfg(all(losat_wasi_threads, feature = "wasm-threads"))]
     {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827: for(H2_index=H_index-1; H2_index>1;)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827
         // Preserve the no-visit case before borrowing any helper slice.
         if h_lh_idx - 1 > 1 {
             let mut prefix = &pool_lh_helpers[2..h_lh_idx];
@@ -1473,7 +1468,6 @@ fn link_hsp_group_ncbi(
     // Use pool_lh_helpers directly throughout the function (all lh_helpers references replaced)
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:654-658:
-    // /* Inside this while loop, the linked list order never changes */
     // Allocate once per sorted group; stable leaves survive all cached rounds.
     let mut maximum_tree = DualMaximumTree::new(n);
 
@@ -1797,7 +1791,6 @@ fn link_hsp_group_ncbi(
                 };
 
                 // NCBI `c++/src/algo/blast/core/link_hsps.c:781-782` lines 781-795:
-                //   if ((!first_pass) && ((H2==0) || (H2->hsp_link.changed==0))) { ... }
                 //
                 // This is the original fast-path: if the previous best choice exists and
                 // was not changed in the last pass, it is still the best.
@@ -1858,7 +1851,6 @@ fn link_hsp_group_ncbi(
                         }
 
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:812-863
-                        // for (H2_index=H_index-1; H2_index>1;) { ... }
                         // Enter once per original HSP, after its initial-best setup.
                         #[cfg(all(losat_wasi_threads, feature = "wasm-threads"))]
                         {
@@ -2581,7 +2573,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:907-908,936-937,965-978:
     // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
-    // for (H=best[ordering_method]; H!=NULL; H=H->hsp_link.link[ordering_method])
     #[test]
     fn dual_maximum_surviving_addback_and_multi_remove() {
         let mut scores = vec![[9, 1], [2, 12], [3, 11], [1, 4], [0, 2]];
@@ -2921,8 +2912,6 @@ mod tests {
     #[test]
     fn test_ncbi_comparison_semantics() {
         // NCBI s_RevCompareHSPsTbx (c++/src/algo/blast/core/link_hsps.c:367-370):
-        // if (h1->subject.offset < h2->subject.offset) return 1;
-        // if (h1->subject.offset > h2->subject.offset) return -1;
         //
         // In C qsort: positive return means first arg comes AFTER second arg
         // So: h1.offset < h2.offset → h1 after h2 → smaller comes after → DESCENDING
@@ -2971,7 +2960,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:478-486,990-994
-    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
     #[test]
     fn test_final_link_sorts_preserve_payloads_addresses_and_all_ties() {
         use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
@@ -3043,7 +3031,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558,990-994,1080-1085
-    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
     #[test]
     fn test_final_link_replay_parallel_matches_sequential_complete_payloads() {
         let params = KarlinParams::default();

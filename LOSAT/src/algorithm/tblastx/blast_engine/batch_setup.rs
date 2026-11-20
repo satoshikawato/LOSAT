@@ -200,8 +200,7 @@ pub(super) fn query_frames(
         .collect();
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Translate, t_translate);
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:404-406: opt.SetSegFilteringWindow(...);
-    // opt.SetSegFilteringLocut(...); opt.SetSegFilteringHicut(...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:404-406
     if args.lcase_masking {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1239-1256 (see
         // `mask_lcase`): the lower-case runs join the SEG intervals of each frame.

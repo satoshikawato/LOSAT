@@ -941,9 +941,6 @@ fn translated_query_composition(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1504-1525;
 // c++/src/algo/blast/core/blast_util.c:428-454,1141-1205:
 // translation_start = frame > 0 ? 3 * range->begin
-//     : self->length - 3 * range->end + frame + 1;
-// Blast_GetPartialTranslation(na_sequence + translation_start,
-//                             num_nucleotides, frame, genetic_code, ...);
 fn translated_subject_window_sequence(
     subject_nt: SubjectNt<'_>,
     range: &BlastCompoSequenceRange,
@@ -1006,7 +1003,6 @@ fn translated_subject_composition(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1414-1455,1530-1548:
-// BlastSetUp_Filter(eBlastTypeTblastn, seqData->data, seqData->length, ...);
 fn mask_translated_subject_seg(translation: &mut [u8]) -> Result<bool> {
     if translation.len() < 2 || translation[0] != 0 || translation[translation.len() - 1] != 0 {
         bail!("NCBI translated subject SEG data lacks sentinels");
@@ -2287,8 +2283,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1417-1455,1530-1548:
-    // BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1";
-    // Blast_MaskTheResidues(seqData->data, seqData->length, FALSE, ...);
     #[test]
     fn translated_kappa_seg_bytes_match_ncbi_mask_calls() {
         let trace = std::fs::read_to_string(format!(

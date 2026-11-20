@@ -291,7 +291,6 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped (c++/src/algo/blast/core/blast_hits.c:2702-2705)
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:675-733
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:688
-        //   return s_UpdateReevaluatedHSPUngapped(hsp, cutoff_score, score, ...);
         // If score < cutoff_score, the HSP is deleted (s_UpdateReevaluatedHSPUngapped returns FALSE)
         let t0 = if timing_enabled {
             Some(std::time::Instant::now())

@@ -4466,7 +4466,6 @@ fn search_query_batch<S: TbxScore>(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180,261-264;
     // c++/src/algo/blast/core/blast_engine.c:1372-1374,1434-1443
-    // BlastInitialWordParametersUpdate(..., BlastSeqSrcGetAvgSeqLen(seq_src), ...);
     // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
     // The set's numbers are read once per run (`SubjectSetNumbers`: the records' sums, or the
     // database index's numbers).

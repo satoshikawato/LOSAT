@@ -1008,7 +1008,6 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-536
-    // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide, ...);
     // A single subject can contain independent chunks. Pool availability
     // is separate from the outer subject traversal's number of jobs.
     if requested_parallel {
@@ -1081,7 +1080,6 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500
-                // status = s_GetNextSubjectChunk(subject, &backup, ...);
                 // EXPERIMENT (LOSAT_X_BNFEWSUBJ): a batch whose longest chunk is a large
                 // part of its letters (`x_few_subj::serial_chunks`), which this subject's
                 // owner searches by itself, searches its chunks in order as one-chunk
@@ -1165,7 +1163,6 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         Vec::with_capacity(chunk_batch.len());
                     if HARD {
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500
-                        // status = s_GetNextSubjectChunk(subject, &backup, ...);
                         // Each job's chunks one after another with one scratch, as the subject's
                         // own loop searches them.
                         let mut job_results: Vec<Vec<(usize, usize, Vec<PrelimHit>)>> =
@@ -1230,7 +1227,6 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                 SubjectChunkStatus::Ok(chunk) => {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500
-                    // status = s_GetNextSubjectChunk(subject, &backup, ...);
                     crate::utils::threading::report_stage("blastn", "subject_chunks", 1, false);
                     let soft_ranges = split_state.soft_ranges.as_slice();
                     let hits = prelim_chunk_hits::<UNGAPPED>(

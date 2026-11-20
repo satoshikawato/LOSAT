@@ -203,7 +203,6 @@ pub struct PairwiseHit {
     // eCompoScaleOldMatrix => Method 1; other adjusted matrices => Method 2.
     pub comp_adjust_method: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3595-3598:
-    // if (aln_vec_info->sum_n > 0) out << "(" << sum_n << ")";
     pub sum_n: Option<i32>,
     /// The columns (0-based) of `subject_seq` whose letter is a stored gap character (`-`,
     /// NCBIstdaa 0, which makeblastdb stores for a `-` of a protein FASTA): residues of the
@@ -1929,8 +1928,6 @@ fn write_tblastn_unsearched_query_footer_spacing<W: Write>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478:
-// if (kbp_ungap) CBlastFormatUtil::PrintKAParameters(..., false, gbp);
-// if (kbp_gap) CBlastFormatUtil::PrintKAParameters(..., true, gbp);
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:477-478
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1491
 fn write_blastp_query_footer_spacing<W: Write>(
@@ -2640,7 +2637,6 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
-            // if (m_PrelimSearch->CheckInternalData() != 0)
             // The all-invalid batch uses -1 sentinel blocks. An invalid query
             // within a searched batch has null blocks (blast_results.cpp:82-103),
             // so only the blank lines and the zero search space are written
@@ -5264,8 +5260,6 @@ mod tests {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-445,1490-1589:
-// PrintProlog(); AcknowledgeBlastQuery(...); x_DisplayDeflines(...);
-// display.DisplaySeqalign(...); x_PrintOneQueryFooter(...);
 // This uses the local-subject database header and TBLASTN translated alignment.
 /// The outfmt 0 prolog of tblastn (the version, the references and the database), which
 /// NCBI writes before it reads the first query batch (as `write_tblastx_pairwise_prolog`).
@@ -5331,7 +5325,6 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     }
     let mut writer = io::BufWriter::new(writer);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424:
-    // BlastPrintVersionInfo(m_Program,...); BlastPrintReference(...);
     write_translated_pairwise_intro(&mut writer, program, &report.version)?;
     // The prolog ends with one blank line; each query's preamble starts with two
     // (blast_format.cpp:1491), after the query's warnings.
@@ -5453,7 +5446,6 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             // when there is no valid context. blast_format.cpp:445-477
             // writes only the blank lines and zero search space in that case.
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
-            // if (m_PrelimSearch->CheckInternalData() != 0)
             // The all-invalid batch uses -1 sentinel blocks. An invalid query
             // within a searched batch has null blocks (blast_results.cpp:82-103).
             if self.query_batch_skipped[q_idx] {
@@ -5590,7 +5582,6 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3578-3604,2122-2149:
-// if (comp_adjust) out << ", Method: Compositional matrix adjust.";
 // out << " Identities = ..." << " Positives = ..." << " Gaps = ...";
 // TBLASTN reports one translated subject frame, without a query frame.
 fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Result<()> {
@@ -5598,7 +5589,6 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     let bits = format_bitscore_ncbi(h.bit_score);
     let evalue = format_evalue_ncbi(h.e_value);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3599-3604:
-    // if (comp_adj_method == 1) out << ", Method: Composition-based stats.";
     // else if (comp_adj_method == 2) out << ", Method: Compositional matrix adjust.";
     let method = match hit.comp_adjust_method {
         Some(1) => ", Method: Composition-based stats.",
@@ -5606,9 +5596,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
         _ => "",
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182:
-    // if (hsp->num > 1) scores.push_back(s_MakeScore("sum_n", ..., hsp->num));
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3595-3598:
-    // if (aln_vec_info->sum_n > 0) out << "(" << aln_vec_info->sum_n << ")";
     let expect = expect_label(hit.sum_n);
     writeln!(
         writer,

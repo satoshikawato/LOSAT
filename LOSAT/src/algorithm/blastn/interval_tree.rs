@@ -1779,8 +1779,6 @@ impl BlastIntervalTree {
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:822-831
         // All conditions must be true:
-        // 1. in_hsp->score <= tree_hsp->score
-        // 2. SIGN(in_hsp->subject.frame) == SIGN(tree_hsp->subject.frame)
         // 3. CONTAINED_IN_HSP for start endpoint
         // 4. CONTAINED_IN_HSP for end endpoint
         if in_hsp.score <= tree_hsp.score

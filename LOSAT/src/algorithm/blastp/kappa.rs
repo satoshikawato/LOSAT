@@ -637,7 +637,7 @@ fn redo_preliminary_blastp_hit(
         );
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767-1770: BlastCompo_AlignmentNew(gap_align->score, ... , *edit_script);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767-1770
     Some(RedoneBlastpTraceback {
         score: aligned.score,
         edit_script: aligned.edit_script,
@@ -740,7 +740,7 @@ fn blastp_redo_one_alignment_callback(
         return Ok(None);
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767-1772
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767-1772: obj = BlastCompo_AlignmentNew(..., *edit_script); *edit_script = NULL;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767-1772
     let edit_script_context = Some(BlastCompoAlignmentContext::EditScript(std::mem::take(
         &mut redone_hit.edit_script,
     )));

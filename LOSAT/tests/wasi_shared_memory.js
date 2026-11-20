@@ -2,7 +2,6 @@
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // if (num_threads > kMaxValue) { m_NumThreads = kMaxValue; }
-// else { m_NumThreads = num_threads; }
 // Host compatibility only: preserve the requested parallel search and every
 // original memory operation. No search code or on-disk artifact is changed.
 //

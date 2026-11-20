@@ -18,7 +18,6 @@ rustflags = ["-C", "target-feature=+simd128", "-C", "link-arg=--max-memory=42949
 rustflags = ["-C", "target-feature=+simd128"]
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-861
-# for (H2_index=H_index-1; H2_index>1;) { ... }
 # Align native x86_64 loop heads so unrelated function-size changes do not
 # displace the repeated helper scan from its measured fast alignment. This
 # changes instruction padding, preserving the same search operations/order.

@@ -240,7 +240,6 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
     fi
     if [[ "$RUN_NCBI" == 1 ]]; then
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
-        #     opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger()); }
         # TBLASTX's database target applies non-default subject genetic codes;
         # every timed oracle target is a database so requested nN remains active.
         case "$task" in
@@ -261,7 +260,6 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
             prepared_dbs[$db]=1
         fi
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
-        #     m_NumThreads != CThreadable::kMinNumThreads) { ...
         #     ERR_POST(Warning << ... << "ignored when 'subject' is specified."); }
         # Preserve local-subject NCBI rows only for non-TBLASTX distributions.
         # They are stored separately and are never selected as timing samples.
@@ -271,7 +269,6 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
         args[2]=-db
         args[3]="$db"
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239
-        #     m_NumThreads = CThreadable::kMinNumThreads; ... }
         # Record both requested counts against -db, where NCBI can use nN.
         run_timed "$BLAST_OUT_DIR/$ncbi_stem.n1" "$ncbi_bin" "${args[@]}" -num_threads 1
         if [[ "$LOSAT_THREADS" != 1 ]]; then

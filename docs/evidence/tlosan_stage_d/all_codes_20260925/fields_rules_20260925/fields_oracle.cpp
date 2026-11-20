@@ -34,7 +34,6 @@ USING_SCOPE(objects);
 USING_SCOPE(blast);
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2538-2557:
-//   m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(), ...);
 // This fixture-only reader supplies the same pinned FASTA letters to the API.
 static std::pair<std::string, std::string> ReadFasta(const char* path) {
     std::ifstream in(path);

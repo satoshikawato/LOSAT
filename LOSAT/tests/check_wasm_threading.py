@@ -132,7 +132,6 @@ def main():
     parser.add_argument("--native", type=Path, required=True)
     parser.add_argument("--native-serial", type=Path)
     # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-    # #ifdef NCBI_NO_THREADS
     parser.add_argument("--serial", type=Path, help="opt in to serial compatibility checks")
     parser.add_argument("--threaded", type=Path, required=True)
     parser.add_argument("--reactor", type=Path, required=True)

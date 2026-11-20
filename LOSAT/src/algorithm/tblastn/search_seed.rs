@@ -24,8 +24,6 @@ use anyhow::Result;
 // c++/src/algo/blast/api/blast_setup_cxx.cpp:655-657;
 // c++/src/algo/blast/core/blast_filter.c:1241-1256;
 // c++/src/algo/blast/core/blast_setup.c:614-638:
-// if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-// BLAST_ComplementMaskLocations(..., filter_maskloc, lookup_segments);
 // query lowercase spans join the filtering locations; their complement
 // defines lookup segments, and hard masking replaces those residues with X.
 // Keep the unmasked copy for identity calculation after traceback.
@@ -679,7 +677,6 @@ pub(super) fn x_scan_plan(
     // An unknown genetic code is refused before the subject length is looked at.
     GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
-    // if (seq_arg.seq->length < min_subj_seq_length) { ... continue; }
     let length = subject.len();
     if length < word_length * 3 + 2 {
         return Ok(None);
@@ -1218,7 +1215,6 @@ mod tests {
     // CRandom random(base_length); ambiguous ncbi4na bases are picked once
     // for the compressed ncbi2na preliminary subject.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:767-775,804-812
-    // BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na, ...);
     #[test]
     fn ncbi_preliminary_subject_frames_match_all_fixture_bytes() {
         let root = concat!(
@@ -1276,8 +1272,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505
-    // for (i = 0; i < hits; ++i) { query_offset = offset_pairs[i].qs_offsets.q_off;
-    //                            subject_offset = offset_pairs[i].qs_offsets.s_off; }
     #[test]
     fn ncbi_all_candidates_match_in_set_and_order() {
         let root = concat!(
@@ -1558,7 +1552,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1381
-    // BlastSetUp_Filter(..., query_blk, ...);
     #[test]
     fn seg_suppresses_low_complexity_query_seeds() {
         let root = concat!(
@@ -1606,7 +1599,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:747-775,804-841
-    // BLAST_GetAllTranslations(..., subject->gen_code_string, ...);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:478-505
     #[test]
     fn code32_api_oracle_candidates_match_in_set_and_order() {
@@ -1649,7 +1641,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqfeat/gc.prt:340-347
-    // id 32 , ncbieaa "FFLLSSSSYYWWCCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
     #[test]
     fn code_32_changes_search_words_and_ambiguity_resolves() {
         let root = concat!(

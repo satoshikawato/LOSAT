@@ -291,10 +291,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:656-672
                 // Two-hit filter: check if there's a previous hit within window_size
-                // NCBI: last_hit = hit_level_array[real_diag].last_hit;
-                // NCBI: hit_saved = hit_level_array[real_diag].flag;
                 // NCBI: if (s_off_pos < last_hit) return 0;  // hit within explored area
-                // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) { ... }
                 let diag_idx = if use_array_indexing {
                     diag as usize
                 } else {
@@ -386,7 +383,6 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 let window_end = last_hit + window_size as i32;
                 if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:677-680
-                    //                          query_mask, query_info, s_range,
                     // For non-two-stage lookup, word_length == lut_word_length, so type_of_word returns (1, 0)
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-680
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-680
@@ -446,7 +442,6 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     }
                 } else {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-726
-                    //                     query_mask, query_info, s_range,
                     // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
@@ -601,10 +596,8 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
 
                 // Skip if ungapped score is too low
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752
-                // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
                 // Use dynamically calculated cutoff_score instead of fixed threshold
                 // off_found is set by off-diagonal search
-                // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
                 if !(off_found || ungapped_score >= cutoff_score) {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752-760
                     hit_ready = false;

@@ -678,8 +678,7 @@ pub(crate) fn apply_dust_masking<L: QueryLetters + ?Sized>(
     queries: &L,
     pool: &SearchPool<'_>,
 ) -> Vec<Vec<MaskedInterval>> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:418-420: opt.SetDustFilteringLevel(...);
-    // opt.SetDustFilteringWindow(...); opt.SetDustFilteringLinker(...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:418-420
     if let Some((dust_level, dust_window, dust_linker)) = args.dust.params() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:92-128
         if args.verbose {

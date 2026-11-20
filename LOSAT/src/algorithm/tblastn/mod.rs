@@ -29,8 +29,6 @@ mod search_init;
 // Too far and overlap without a branch.
 mod x_tbn_hitbf;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-552,555:
-// aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
-// Blast_HSPListPurgeHSPsWithCommonEndpoints(...);
 mod search_gapped;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
 // translated db_length /= 3 before per-context length adjustment and search space.

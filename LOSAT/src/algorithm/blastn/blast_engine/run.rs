@@ -11656,7 +11656,6 @@ mod tests {
             ])
             .unwrap();
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-            // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
             let mut output = Vec::new();
             let mut stderr = std::io::stderr();
             run_local(

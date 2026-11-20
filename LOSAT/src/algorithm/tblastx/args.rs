@@ -17,7 +17,6 @@ use std::path::PathBuf;
 #[command(rename_all = "snake_case")]
 pub struct TblastxArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427:
-    // arg_desc.AddDefaultKey(kArgQuery, "input_file", "Input file name",
     // The default `-` is standard input.
     #[arg(long, value_parser = ncbi_input_path(), value_name = "PATH", default_value = "-")]
     pub query: PathBuf,
@@ -134,9 +133,7 @@ pub struct TblastxArgs {
     //
     // Therefore, for tblastx we do NOT apply nucleotide-level DUST masking.
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406: opt.SetSegFiltering(false/true);
-    // opt.SetSegFilteringWindow(...); opt.SetSegFilteringLocut(...);
-    // opt.SetSegFilteringHicut(...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406
     // Read when NCBI's filtering handler reads it (`blastinput/app.rs` `parse_seg_option`).
     #[arg(
         long,
@@ -156,7 +153,6 @@ pub struct TblastxArgs {
     #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics [default: true]")]
     pub sum_stats: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
-    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
     #[arg(long)]
     pub lcase_masking: bool,
 

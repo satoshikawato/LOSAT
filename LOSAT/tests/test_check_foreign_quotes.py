@@ -265,6 +265,60 @@ class CheckTextTest(unittest.TestCase):
         self.assertEqual(findings(long_paragraph, "text"), [])
 
 
+class StatementTest(unittest.TestCase):
+    CITE = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-9\n"
+
+    def quoted(self, text: str, style: str = "slash") -> list[int]:
+        return [f.line for f in checker.check_text("x", text.split("\n"), style, TABLE) if f.kind == "QUOTE"]
+
+    def test_c_statements_under_a_citation_are_quoted(self) -> None:
+        for line in (
+            "if (s_off + ext_to > s_range) continue;",
+            "q++;",
+            "} else {",
+            "case eBlastp:",
+            "default:",
+            "Blast_HSPInit(..., &editScript, &new_hsp);",
+        ):
+            self.assertEqual(self.quoted(self.CITE + "//     " + line + "\nfn f() {}\n"), [2], line)
+
+    def test_a_quoted_call_is_quoted_to_its_end_and_prose_is_not(self) -> None:
+        text = (
+            self.CITE + "//     AdjustSubjectRange(&s_start, &length,\n"
+            "//                        q_start, query_length, &shift);\n"
+            "// The subject range is clipped as NCBI's is.\n"
+            "// Diagnostic (LOSAT_TIMING): the subject FASTA (utils/xtiming.rs);\n"
+        )
+        self.assertEqual(self.quoted(text), [2, 3])
+
+    def test_code_after_a_citation_is_cut(self) -> None:
+        text = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-3: opt.SetDust(true);\nfn f() {}\n"
+        lines = text.split("\n")
+        found = checker.check_text("x", lines, "slash", TABLE)
+        self.assertEqual([f.kind for f in found], ["QUOTE"])
+        self.assertEqual(
+            checker.fix_lines(list(lines), "slash", found)[0],
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-3",
+        )
+        prose = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-3 (blastn: 50, megablast: 6)\n"
+        self.assertEqual(checker.check_text("x", [prose], "slash", TABLE), [])
+
+    def test_an_indented_block_after_a_blank_docstring_line_is_quoted(self) -> None:
+        text = (
+            'def f():\n    """Chunks.\n\n'
+            "    NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-9\n\n"
+            "        if (num_chunks <= 1) {\n"
+            '           *chunk_size = length;"""\n    return 1\n'
+        )
+        self.assertEqual(self.quoted(text, "python"), [6, 7])
+        lines = text.split("\n")
+        found = checker.check_text("x", lines, "python", TABLE)
+        fixed = "\n".join(checker.fix_lines(list(lines), "python", found))
+        self.assertNotIn("chunk", fixed.split("blast_hits.c")[1])
+        self.assertIn('"""\n    return 1', fixed)
+        self.assertEqual(checker.python_code(fixed), checker.python_code(text))
+
+
 class FixTest(unittest.TestCase):
     def fixed(self, text: str, style: str = "slash") -> str:
         lines = text.split("\n")

@@ -55,7 +55,6 @@ def main():
     parser.add_argument("--node", default="node")
     parser.add_argument("--reverse-order", action="store_true")
     # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-    # #ifdef NCBI_NO_THREADS
     # Serial artifacts are an explicit compatibility build, not the default.
     parser.add_argument("--include-serial", action="store_true",
                         help="also build serial command/reactor compatibility artifacts")

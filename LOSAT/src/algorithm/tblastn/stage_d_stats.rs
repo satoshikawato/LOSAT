@@ -39,8 +39,6 @@ pub(super) struct LocalContextCutoffs {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1011-1024:
-// BLAST_CalcEffLengths(...); BlastHitSavingParametersUpdate(...);
-// BlastInitialWordParametersUpdate(...); BlastLinkHSPParametersUpdate(...);
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct LocalSubjectParameters {
     pub lengths: Vec<LocalContextLength>,
@@ -53,8 +51,6 @@ pub(super) struct LocalSubjectParameters {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:774-815,831-856;
 // c++/src/algo/blast/core/blast_setup.c:1016-1024:
-// if (params->do_sum_stats) BlastLinkHSPParametersNew(...);
-// BlastHitSavingParametersUpdate(..., subject_length, 0, hit_params);
 // The latter call passes zero compositionBasedStats even when the search uses
 // composition mode 2; the score block's Gumbel state is still consulted.
 #[derive(Clone, Copy)]
@@ -72,9 +68,6 @@ pub(super) struct LocalParameterOptions<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:964-985,1001-1024:
-// BlastHitSavingParametersNew(..., min_subject_length,
-//                              (*ext_params)->options->compositionBasedStats, ...);
-// BlastHitSavingParametersUpdate(..., subject_length, 0, hit_params);
 // The update is NCBI's statistics of each subject (`db_length == 0`, blast_engine.c:1433-1443):
 // the subject's length in nucleotides and a composition-based statistics of 0 (no stretch of the
 // e-value).
@@ -90,11 +83,7 @@ pub(super) enum LocalParameterCall {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
-// BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK, alpha/kbp->Lambda,
-//                               beta, query_length, db_length, db_num_seqs,
-//                               &length_adjustment);
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1442,1446-1467:
-// BLAST_OneSubjectUpdateParameters(..., seq_arg.seq->length, ...);
 #[allow(dead_code)] // Stage D's public path remains gated until C/D/E are complete.
 pub(super) fn local_subject_effective_lengths(
     query_contexts: &[(usize, bool)],
@@ -278,8 +267,6 @@ pub(super) fn local_parameters_for_blocks(
     let mut prelim_evalue = options.expect_value;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:902-999:
-    // if (sbp->gbp && sbp->gbp->filled)
-    //     new_cutoff = BLAST_SpougeEtoS(evalue, kbp, sbp->gbp,
     //                                   query_length, avg_subject_length);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:931-946:
     let mut hit = Vec::with_capacity(query_contexts.len());
@@ -417,7 +404,6 @@ mod tests {
         )
         .unwrap();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let result = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
             subject_length as i64,
@@ -606,8 +592,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1117-1155;
     // c++/src/algo/blast/core/blast_stat.c:4491-4532:
-    // BLAST_UnevenGapSumE(50, 50, 2, sum_score, 105, 135,
-    //                     14175, BLAST_GapDecayDivisor(0.1, 2));
     #[test]
     fn positive_uneven_gap_pair_matches_ncbi_double_bits() {
         let params = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
@@ -646,7 +630,6 @@ mod tests {
         )
         .unwrap();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let result = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
             subject_length as i64,
@@ -674,7 +657,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-847:
-    // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
     // The pinned natural two-subject trace records D_CONTEXT 0, 18, 22848.
     #[test]
     fn two_local_subjects_use_both_sequences_in_effective_search_space() {

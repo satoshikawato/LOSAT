@@ -5,7 +5,6 @@ const path = require("node:path");
 const { createThreadHost } = require("./wasi_thread_host");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-96,770-832
-// m_Outfile(ostr); CBlastTabularInfo tabinfo(m_Outfile, ...);
 // Preserve raw API bytes, including each format's existing labels.
 function runPair(host, program, query, subject, format, args) {
   const api = host.instance.exports;

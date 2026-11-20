@@ -1568,9 +1568,7 @@ fn search(
         let seg = resolved.seg.params();
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-188:
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1417:
-        //                         CConstRef<blast::CBlastQueryVector> queries,
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:251-252,275-301:
-        //     CLocalBlast lcl_blast(query_factory, ..., db_adapter);
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:70-127:
         // Search each accumulated batch independently; preliminary linking
         // and sum-statistics depend on its concatenated query contexts.

@@ -595,7 +595,6 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             }
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-726
-            //                     query_mask, query_info, s_range,
             // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
@@ -791,10 +790,8 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
 
         // Skip if ungapped score is too low
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752
-        // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
         // Use dynamically calculated cutoff_score instead of fixed threshold
         // off_found is set by off-diagonal search (Step 3)
-        // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
         if !(off_found || ungapped_score >= cutoff_score) {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752-760
             hit_ready = false;
@@ -989,18 +986,10 @@ pub(super) fn word_extend_pair(
 
         // RIGHT extension (forwards from lut_word_length end)
         // NCBI BLAST: c++/src/algo/blast/core/na_ungapped.c:1120-1136
-        //     if (s_off + ext_to - ext_left > s_range) continue;
-        //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
-        //         q++;
-        //             s++;
         // Only do right extension if left didn't get all bases
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1120-1136
-        //     if (s_off + ext_to - ext_left > s_range) continue;
-        //         if (mismatch) break;
-        //         q++;
         let mut ext_right = 0usize;
         if ext_left < ext_to {
-            // NCBI BLAST: s_off = s_offset + lut_word_length;
             // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1122-1124
             let mut s_off = kmer_start + lut_word_length;
@@ -1018,7 +1007,6 @@ pub(super) fn word_extend_pair(
             }
             let mut s_idx = s_off / COMPRESSION_RATIO;
 
-            // NCBI BLAST: for (; ext_right < ext_to - ext_left; ++ext_right)
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1128-1136
             while ext_right < (ext_to - ext_left) {
                 if debug_enabled {

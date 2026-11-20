@@ -19,21 +19,16 @@ pub(super) use culling::PrelimCulling;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:152-181;
 // core/blast_kappa.c:2494-2515:
-// while (NULL != (hsp_list = BlastCompo_HeapPop(heap)))
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2510-2510
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:305-358,
 // 3690-3706; core/blast_hits.h:126-143:
-// Blast_HSPInit(..., &editScript, &new_hsp);
 // new_hsp->num_ident = 0; /* filled after postredo evaluation */
-// s_HSPListNormalizeScores(...); s_ComputeNumIdentities(...);
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct KappaHspPayload {
     pub bit_score: f64,
     pub num_ident: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526;
     // c++/src/algo/blast/core/blast_hits.c:767-811,966-989:
-    // Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp,
-    //                                       scoring_options, 0, sbp);
     // Alignment length and gap counts follow the same gap_info operation lengths.
     pub num_positives: usize,
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:971-1021,1090-1095:
@@ -89,8 +84,6 @@ impl KappaResultHitList {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3243-3297:
-    // if (hit_list->hsplist_count < hit_list->hsplist_max)
-    //     if (!hit_list->heapified) s_CreateHeap(..., s_EvalueCompareHSPLists);
     pub(super) fn update(
         &mut self,
         mut incoming: KappaResultList,
@@ -141,7 +134,6 @@ impl KappaResultHitList {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1776;
     // c++/src/algo/blast/core/blast_hits.c:3383-3400:
-    // if (BlastSeqSrcGetTotLen(seq_src) > 0)
     pub(super) fn sort_by_evalue_for_positive_totlen(&mut self) {
         self.lists.sort_by(compare_result_lists);
     }
@@ -492,7 +484,7 @@ fn query_hsp_lists_merge(
                 }
                 let end_diag = old[index1].hsp.q_end - old[index1].hsp.s_end;
                 let start_diag = candidate.hsp.q_start - candidate.hsp.s_start;
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537: #define OVERLAP_DIAG_CLOSE 10
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537
                 if (end_diag - start_diag).abs() < 10
                     && super::search_gapped::merge_two_chunk_hsps(
                         &mut old[index1].hsp,
@@ -541,7 +533,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // core/blast_hits.c:3420-3437:
-    //     while ((hsp_list = BlastCompo_HeapPop(heap)) != NULL)
     #[test]
     fn saved_multi_query_result_updates_follow_ncbi_query_order() {
         let trace = std::fs::read_to_string(concat!(
@@ -636,7 +627,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // core/blast_hits.c:3243-3297,3420-3437:
-    // while (NULL != (hsp_list = BlastCompo_HeapPop(heap)))
     #[test]
     fn saved_local_kappa_pop_hitlist_update_and_reverse_match_ncbi() {
         for (trace, hitlist_size) in [

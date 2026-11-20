@@ -1552,8 +1552,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:95-103 and
     // c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474,515-520
-    // static unsigned char ctable[16] = {0xFF,0,1,0xFF,2,0xFF,0xFF,0xFF,
-    //                                    3,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
     // else { int pick = random.GetRand() % bitcount; /* pick a set bit */ }
     // The uncompressed ncbi4na sequence is retained by SetupSubjects_OMF for
     // traceback reevaluation; these resolved bases are preliminary-search input.

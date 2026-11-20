@@ -506,8 +506,6 @@ def frozen_id(row: dict[str, str]) -> str:
 COPY_PREFIX = "COPY"
 COPY_OUTFMTS = ("0", "5", "6", "7")
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-88, 135-137
-#     case eBlastp:
-#     default:
 BLASTP_BATCH_SIZE = 10000
 # A full hit list does not limit a copy row. The composition-based redo ends the remaining matches early only while
 # the heap of every query of the batch is full (below), and it takes the matches in the order of their queries
@@ -515,13 +513,9 @@ BLASTP_BATCH_SIZE = 10000
 # match of an original query is ended early, only the copy's can be (the batch's last query), and its report is cut
 # out. LOSAT ends no match early with unified P-values (`BlastCompoHeap::without_early_end`).
 # NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1565-1566, 1575-1577
-#         } else {
 # The query chunks of a BLASTP batch: CHUNK_SIZE (else 10000) and OVERLAP_CHUNK_SIZE (else 100) residues.
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61, 91-93
-#         case eBlastp:
-#         default:
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:53-57
-#     // used for experimentation purposes
 BLASTP_CHUNK_SIZE = 10000
 QUERY_CHUNK_OVERLAP = 100
 # The variables that a copy row's oracle run may set in place of the row's own: only those that place the queries in
@@ -570,7 +564,7 @@ def query_batches(lengths: list[int], batch_size: int) -> list[list[int]]:
     their lengths is below `batch_size`; the query that brings it to `batch_size` or more is the batch's last.
 
     NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140, 163, 170
-            retval->AddQuery(q);"""
+            """
     batches: list[list[int]] = []
     current: list[int] = []
     size = 0
@@ -595,10 +589,7 @@ def query_chunks(length: int, env: dict[str, str]) -> int:
 
     NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:124-131
 
-        // Only one chunk, just return;
-        if (num_chunks <= 1) {
-           *chunk_size = concatenated_query_length;
-           return 1;"""
+           """
     chunk, overlap = (int(env.get(name, "").strip() or default) for name, default in
                       (("CHUNK_SIZE", BLASTP_CHUNK_SIZE), ("OVERLAP_CHUNK_SIZE", QUERY_CHUNK_OVERLAP)))
     return max(length // (chunk - overlap) if chunk > overlap else 0, 1)

@@ -26,7 +26,6 @@ pub(super) struct InitHsp {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65,162-175
-// if (ewp->diag_table->offset >= INT4_MAX / 4) { ... clear ... }
 pub(super) struct Diagonals {
     entries: XDiagCells,
     mask: i32,
@@ -480,14 +479,12 @@ impl<'a> XTwoHit<'a> {
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560-579:
-            //     query_info->contexts[curr_context].query_offset) continue;
             let context = self.context_offsets.partition_point(|&offset| offset <= q) - 1;
             if q - diff < self.context_offsets[context] {
                 cell.set_last_hit(s + diagonals.offset);
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
-            // s_BlastAaExtendTwoHit(matrix, ..., wordsize, ...);
             let reference = || {
                 extend_two_hit(
                     self.matrix,
@@ -521,7 +518,6 @@ impl<'a> XTwoHit<'a> {
                 continue;
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
-            // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
             if result.ungapped_data.score >= self.cutoff_scores[context] {
                 hits.push(InitHsp {
                     frame,
@@ -1068,7 +1064,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
     // The saved natural multi-query fixture has score 20 in context 0 and
     // score 393 in context 1, so equality and just-above cutoffs are distinct.
     #[test]
@@ -1125,7 +1120,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:562-590:
-    // s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
     // The comparison-only real call changes context 1 x-drop from 16 to 1.
     #[test]
     fn real_wordfinder_distinct_context_xdrop_matches_ncbi() {
@@ -1196,7 +1190,6 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831
     // subject->seq_ranges[i].left = CONV_NUCL2PROT_COORDINATES(...);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-614
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
     #[test]
     fn lowercase_mask_init_hsps_match_ncbi_scores_and_internal_offsets() {
         let root = concat!(
@@ -1245,7 +1238,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-614
     // score = s_BlastAaExtendTwoHit(...);
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
     #[test]
     fn ambiguity_spectrum_init_hsp_matches_ncbi() {
         let root = concat!(
@@ -1285,9 +1277,7 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234,575-614
     // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:747-775
-    // BLAST_GetAllTranslations(..., subject->gen_code_string, ...);
     #[test]
     fn code32_api_oracle_init_hsps_match_scores_internal_offsets_and_order() {
         let fixture = concat!(
@@ -1340,7 +1330,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234,575-614
     // score = s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
     #[test]
     fn saved_init_hsps_match_ncbi_fixture_scores_and_internal_offsets() {
         let root = concat!(
@@ -1450,7 +1439,6 @@ mod tests {
         let (query, subject, expected) = long_chunk_case();
         let query = &query;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 28.
         let actual = preliminary_stages(
             &[query],
@@ -1607,7 +1595,6 @@ mod tests {
             })
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 28.
         let actual = preliminary_stages(
             &[query],
@@ -1711,7 +1698,6 @@ mod tests {
             })
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 30.
         let actual = preliminary_stages(
             &[query],

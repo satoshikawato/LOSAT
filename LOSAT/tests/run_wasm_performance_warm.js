@@ -6,7 +6,6 @@ const crypto = require("crypto");
 const { unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1410-1413:
-// while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF)
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832:
 // ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) { ... tabinfo.Print(); }
 // Each command performs a complete unchanged search. Only the compiled module

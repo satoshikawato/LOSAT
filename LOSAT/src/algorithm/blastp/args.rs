@@ -300,7 +300,6 @@ pub struct BlastpArgs {
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
-    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
     #[arg(long)]
     pub lcase_masking: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:803-806
@@ -910,9 +909,9 @@ impl BlastpArgs {
                 BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
             },
             max_target_seqs_given: self.max_target_seqs.is_some(),
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-315: if (args[kArgQueryCovHspPerc])
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-315
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit_value(),
             ungapped: self.ungapped,

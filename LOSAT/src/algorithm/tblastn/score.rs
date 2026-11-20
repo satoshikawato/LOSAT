@@ -217,7 +217,6 @@ impl TbnScore for MatrixScore {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
-    // max_offset = BlastGetStartForGappedAlignment(query_tmp.sequence,
     //     subject->sequence, gap_align->sbp, q_start, length, s_start, length);
     #[inline(always)]
     fn gapped_start(

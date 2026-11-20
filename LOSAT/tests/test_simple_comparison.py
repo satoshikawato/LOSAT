@@ -18,7 +18,6 @@ import plot_overall_trend as overall
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-# "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
 ROW = "q\ts\t100.000\t30\t0\t0\t1\t30\t1\t30\t1e-10\t50\n"
 
 
@@ -361,7 +360,6 @@ else:
         self.oracle = self.root / "blastp"
         shutil.copy2(self.binary, self.oracle)
         # NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:236-247
-        # arg_desc->AddFlag("parse_seqids", ...);
         # Synthetic DB files test harness routing without an NCBI dependency.
         self.makeblastdb = self.root / "makeblastdb"
         self.makeblastdb.write_text(f'''#!{sys.executable}
@@ -489,7 +487,6 @@ else:
     # A required DB build must fail before any oracle search, without -subject fallback.
     def test_database_failure_stops_before_oracle_search(self):
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
-        #     (program == eTblastn || program == eTblastx)) { ... }
         cases = self.scripts / "comparison_cases.tsv"
         cases.write_text(cases.read_text().replace("blastp\t", "tblastx\t"))
         self.makeblastdb.write_text("#!/bin/bash\nexit 9\n")

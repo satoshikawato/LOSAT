@@ -97,7 +97,6 @@ TIMING_FIELDS = {
 }
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40,109-116
-#     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
 # SFormatSpec("length", "Alignment length", eAlignmentLength),
 # SFormatSpec("pident", "Percentage of identical matches", ePercentIdentical),
 

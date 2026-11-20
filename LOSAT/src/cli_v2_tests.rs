@@ -1,6 +1,5 @@
 //! Frozen CLI v2 grammar and configuration boundary.
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-207,332-420,838-883,3158-3163
-// AddOptionalKey(kArgWordSize, ...); AddOptionalKey(kArgMaxHSPsPerSubject, ...);
 
 use crate::algorithm::blastp::args::parse_comp_based_stats;
 use crate::blastinput::value_parsers::{
@@ -165,7 +164,7 @@ fn canonical_options_for_every_program() {
                 assert_eq!(a.evalue, 0.001);
                 assert_eq!(a.max_target_seqs, Some(9));
             }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:55-62: SetTask(kDefaultTask);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:55-62
             // blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);
             Commands::Tblastn(a) => {
                 assert_eq!(a.num_threads, 4);

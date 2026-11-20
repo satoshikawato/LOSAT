@@ -86,7 +86,6 @@ CUSTOM_PALETTE = dict(zip(
 MODE_ORDER = ["TBLASTX", "Megablast", "BLASTN", "BLASTP"]
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-#     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
 COLUMNS = "qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore".split()
 
 
@@ -152,7 +151,6 @@ def distribution_result_paths(case, extension="out"):
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 # ITERATE(list<ETabularField>, iter, m_FieldsToShow) { ... x_PrintField(*iter); }
-# m_Ostream << "\\n";
 # Evidence binds successful status to the exact ordered output of this invocation.
 def sha256(path):
     with Path(path).open("rb") as handle:
@@ -241,7 +239,6 @@ def record_cli(argv):
     record_path = stem.with_suffix(stem.suffix + ".run.json")
     if action == "database":
         # NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:236-247
-        # arg_desc->AddFlag("parse_seqids", ...);
         source, executable, dbtype = rest[1:]
         if dbtype not in {"nucl", "prot"}:
             raise ValueError(f"Unknown database molecule type: {dbtype}")

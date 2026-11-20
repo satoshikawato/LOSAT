@@ -186,7 +186,6 @@ impl CompoHeap {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,1565-1566,1576-1579,
 // 1560-1580:
-//         if (evalue <= EVALUE_STRETCH * significantMatches[i].ecutoff)
 #[allow(dead_code)] // Used by TBLASTN Kappa before each redo in the gated D pipeline.
 pub(super) fn compo_early_termination(evalue: f64, heaps: &[CompoHeap]) -> bool {
     for heap in heaps {

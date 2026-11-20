@@ -427,7 +427,6 @@ impl GreedyNonAffineMem {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:548-550,666-678
-    // else last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool, ...);
     // Consecutive rows are disjoint. Borrow them only within one distance;
     // no reference survives the next pool allocation (which may move its Vec).
     fn row_pair_mut(

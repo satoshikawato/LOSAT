@@ -872,9 +872,6 @@ pub(super) fn render(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1266-1338:
-// x_PrintQueryAndDbNames(...);
-// if (align_set) { if (num_hits != 0) PrintFieldNames(...);
-//                 m_Ostream << "# " << num_hits << " hits found\n"; }
 // CBlastTabularInfo::PrintNumProcessed appends the final query count.
 #[allow(clippy::too_many_arguments)]
 fn write_tabular(
@@ -934,7 +931,6 @@ fn write_tabular(
                 writeln!(writer, "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score")?;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
-            //                    sa_vec.push_back(tmp_align); }
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1266-1338:
             // if (align_set) { m_Ostream << "# " << num_hits << " hits found\n"; }
             // A skipped search has a null alignment set, so the count line
@@ -1006,7 +1002,6 @@ fn write_tabular(
                 let bits = format_bitscore_ncbi(payload.bit_score);
                 let evalue = format_evalue_ncbi_tabular(linked.evalue);
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108:
-                //     // Add tab in front of field, except for the first field.
                 // One printed row is one HSP; the probe marks it without changing it.
                 if let Some(probe) = probe.as_mut() {
                     writer.flush()?;
@@ -1037,7 +1032,6 @@ fn write_tabular(
                     s_end,
                     evalue,
                     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-993:
-                    // snprintf(bit_score_buf, ..., kBitScoreFormat, bit_score);
                     // kBitScoreFormat is "%4.1lf", retaining width for scores below ten.
                     bits,
                 )?;
@@ -1186,7 +1180,6 @@ fn pairwise_hits(
     for (q_idx, hitlist) in hitlists.iter().enumerate() {
         let query = query_records[q_idx].seq();
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1541-1557:
-        // CDisplaySeqalign(..., &masklocs, ...);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:294
         // A PSSM query's search (`CPsiBlastImpl::Run`, psiblast_impl.cpp:120-170) never sets the
         // filtered regions: its alignments show no masks.

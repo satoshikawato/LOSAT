@@ -304,7 +304,6 @@ struct LocalBatchSetup {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1011-1024;
 // c++/src/algo/blast/format/blast_format.cpp:445-477:
-// BLAST_CalcEffLengths(...); BlastHitSavingParametersUpdate(...);
 // Formatting consumes the same initial context lengths computed before search.
 #[cfg(test)]
 pub(super) fn run_local_for_report(
@@ -842,10 +841,6 @@ pub(super) fn x_search_batches<'p>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905;
 // c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736,2494-2515;
 // c++/src/algo/blast/core/blast_traceback.c:1763-1776:
-// BLAST_LinkHsps(...); s_Blast_HSPListReapByPrelimEvalue(...);
-// BlastCompo_EarlyTermination(...); Blast_RedoOneMatch(...);
-// s_HitlistReapContained(...); s_HitlistEvaluateAndPurge(...);
-// BlastCompo_HeapInsert(...); Blast_HitListUpdate(...);
 
 #[allow(dead_code)] // This internal path is compared before the public CLI is enabled.
 pub(super) fn run_local_mode2_sum_stats(
@@ -865,7 +860,6 @@ pub(super) fn run_local_mode2_sum_stats(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501,1644-1707:
-// if (ext_params->options->compositionBasedStats > 0) Blast_RedoAlignmentCore_MT(...);
 // else Blast_TracebackFromHSPList(...); Blast_HSPResultsInsertHSPList(...);
 #[allow(dead_code)]
 pub(super) fn run_local_mode0_no_sum_stats(
@@ -967,7 +961,6 @@ pub(super) fn run_local_mode0_no_sum_stats_with_scoring(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501:
-// if (compositionBasedStats > 0) Blast_RedoAlignmentCore_MT(...);
 // else Blast_TracebackFromHSPList(...);
 fn run_local_search(
     queries: &[Vec<u8>],
@@ -1045,9 +1038,7 @@ impl Drop for XSearchTimer {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
-//                                  seq_arg.seq, lookup_wrap, gap_align,
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
-// BLAST_LinkHsps(...); s_Blast_HSPListReapByPrelimEvalue(...);
 // Preliminary work uses one immutable subject; linking and stream writes follow OID order.
 fn run_local_search_with_pool(
     queries: &[Vec<u8>],
@@ -1186,7 +1177,6 @@ fn run_local_search_with_pool(
     }
     *setup = Some(batch_setup);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
-    //     // Search was not run, but we send back an empty CSearchResultSet.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327:
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2815-2824:
     // Preserve the parameter/validity state for reporting, then skip subject
@@ -1255,8 +1245,6 @@ fn run_local_search_with_pool(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70;
     // c++/src/algo/blast/core/hspfilter_collector.c:105-161:
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70:
-    // if (compositionBasedStats) ... 1050 or 2*hitlist+50;
-    // else if (gapped_calculation)
     // The size is NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`); a size that is
     // not positive (NCBI crashes) is rejected with the options (`args.rs`).
     let prelim_size = usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
@@ -1415,12 +1403,8 @@ fn run_local_search_with_pool(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2352-2384,2418-2479,
     // 3099-3110,3290-3302:
-    // s_RecordInitialSearch(...); s_GetAlignParams(...);
-    // BlastCompo_HeapInitialize(..., hitlist_size, inclusion_ethresh);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-624;
     // c++/src/algo/blast/core/blast_kappa.c:2309-2337,3244-3248,515-526:
-    // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-    // s_GetQueryInfo(queryBlk->sequence, queryInfo, ...);
     // For TBLASTN s_ComputeNumIdentities passes the working query sequence.
     // Stage C uses these same hard-masked bytes for extension and traceback.
     let encoded: Vec<Vec<u8>> = working_frames
@@ -1537,9 +1521,6 @@ fn run_local_search_with_pool(
         }
         let mut hsp_values: Vec<_> = converted.iter().map(|h| (h.context, h.hsp)).collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3661-3706:
-        // s_HSPListFromDistinctAlignments(...); s_HitlistReapContained(...);
-        // s_HitlistEvaluateAndPurge(...); s_HSPListNormalizeScores(...);
-        // s_ComputeNumIdentities(...);
         let survivor_indices = reap_contained_postredo_hsps(&mut hsp_values);
         let mut slots: Vec<_> = converted.into_iter().map(Some).collect();
         let survivors: Vec<_> = survivor_indices
@@ -1547,7 +1528,6 @@ fn run_local_search_with_pool(
             .map(|index| slots[index].take().expect("unique containment survivor"))
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:411-427,364-368:
-        // if (hitParams->do_sum_stats) BLAST_LinkHsps(...);
         // else Blast_HSPListGetEvalues(..., s_GetSubjectLength(...), ..., 1.0);
         let mut postredo = if let Some(link) = post_link.as_ref() {
             link_preliminary_hsps(
@@ -1833,7 +1813,6 @@ fn run_local_search_with_pool(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
-    // while ((hsp_list = BlastCompo_HeapPop(heap)) != NULL)
     // Blast_HSPResultsSortByEvalue(results); /* positive local TotLen */
     let mut results = Vec::with_capacity(queries.len());
     for (context, heap) in heaps.iter_mut().enumerate() {
@@ -2133,7 +2112,6 @@ pub(super) fn lookup_threshold(word_size: usize, threshold: f64) -> i32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:302-383,455-463:
-// BlastInitialWordParametersNew(...); BlastExtensionParametersNew(...);
 // The word and extension parameters of the preliminary stage of a query set.
 fn preliminary_profile<'a>(
     profile: LocalStageDProfile<'a>,
@@ -2364,7 +2342,6 @@ impl LocalParameterRecipe<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
-// BlastSetUp_MaskQuery(...); BlastSetup_ScoreBlkInit(...); BLAST_CalcEffLengths(...);
 // BlastHitSavingParametersNew(...); the score block, effective lengths and cutoffs of a
 // query set. `eff_searchsp_override` is the options' effective search spaces that NCBI sets
 // from the whole batch before it searches a query chunk (`SplitQuery_SetEffectiveSearchSpace`).
@@ -2392,8 +2369,6 @@ fn query_set_setup<'a>(
     let _ = pool;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803;
     // c++/src/algo/blast/core/blast_setup.c:770-847:
-    // if (Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]))
-    // if (query_info->contexts[index].is_valid) BLAST_CalcEffLengths(...);
     // Reuse the Stage C score-frequency calculation on the query bytes after
     // BlastSetUp_MaskQuery, which precedes BlastSetup_ScoreBlkInit at
     // pinned blast_setup.c:614-654.
@@ -2449,7 +2424,6 @@ fn query_set_setup<'a>(
     let working_frames: Vec<_> = queries.iter().map(|q| encode(q, marked)).collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803;
     // c++/src/algo/blast/core/lookup_wrap.c:91-100:
-    // BlastAaLookupTableNew(..., lookup_options->word_size, ...);
     // The active matrix determines context validity; the active word size
     // determines the lookup state used by Stage C.
     // Only the contexts are used here (graduated 2026-10-22, was LOSAT_X_LUTSPLIT).
@@ -2549,8 +2523,6 @@ fn query_set_setup<'a>(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024;
     // c++/src/algo/blast/core/blast_parameters.c:457-463:
-    // BlastHitSavingParametersNew(..., min_subject_length,
-    //     options->compositionBasedStats, ...);
     let options = LocalParameterOptions {
         expect_value: inputs.profile.expect_value,
         do_sum_stats: inputs.do_sum_stats,
@@ -2758,7 +2730,6 @@ fn run_preliminary_subjects_into(
     sink: &mut (dyn PreliminarySink + Send),
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905,1469-1475:
-    //                                  seq_arg.seq, lookup_wrap, gap_align,
     // Finish search, link/direct E-value and preliminary reap inside one subject
     // job, before its OID-ordered list enters the shared collector.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
@@ -2922,8 +2893,6 @@ fn run_preliminary_subjects_into(
             )?,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
-        // BLAST_LinkHsps(..., hsp_list_out, ...);
-        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
         // Even an allocated empty subject list enters link/E-value. The query contexts of a
         // subject whose units ran on the pool are linked there side by side (LOSAT_X_TBNLINKCTX).
         let mut linked = if let Some(link) = inputs.link {
@@ -2939,7 +2908,6 @@ fn run_preliminary_subjects_into(
             )?
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-            // Blast_HSPListGetEvalues(..., stat_length, ...);
             let stat_length = initial_translated_stat_length(subject.len());
             direct_local_evalues(
                 &preliminary,
@@ -2962,7 +2930,6 @@ fn run_preliminary_subjects_into(
         })
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
-    //                                  seq_arg.seq, lookup_wrap, gap_align,
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-188:
     crate::utils::threading::report_stage(
         "tblastn",
@@ -3030,7 +2997,6 @@ fn run_preliminary_subjects_into(
     let mut reduce_subjects = || -> Result<()> {
         for oid in 0..subjects.count() {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
-            // BLAST_LinkHsps(..., subject->length, ...);
             #[cfg(feature = "parallel")]
             let (preliminary, linked) = if parallel_selected {
                 if parallel_batch.is_empty() {
@@ -3062,8 +3028,6 @@ fn run_preliminary_subjects_into(
             #[cfg(not(feature = "parallel"))]
             let (preliminary, linked) = subject_core_oid(oid)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
-            // BLAST_LinkHsps(..., hsp_list_out, ...);
-            // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
             // The comparison-only trace retains pre-link HSP bytes by OID.
             if let Some(ref mut trace) = observer {
                 trace.preliminary.push((oid, preliminary.clone()));
@@ -3125,7 +3089,6 @@ fn run_preliminary_subjects_into(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-// Blast_HSPListGetEvalues(..., stat_length, ...);
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:508-527,1070-1101:
 // frame_offsets[context+1] = offset after the translated frame and sentinel.
 // The final nonempty frame in the six-frame loop supplies stat_length.
@@ -3139,7 +3102,6 @@ fn initial_translated_stat_length(nt_length: usize) -> usize {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:141-144,1811-1926:
 // Blast_HSPNew() uses calloc, so num remains zero without BLAST_LinkHsps.
 // hsp->evalue = BLAST_SpougeStoE(score, kbp, sbp->gbp,
-//   query_info->contexts[hsp->context].query_length, subject_length);
 fn direct_local_evalues(
     input: &[(usize, super::search_gapped::GappedHsp)],
     query_lengths: &[i32],
@@ -3156,7 +3118,6 @@ fn direct_local_evalues(
             hsp,
             num: 0,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1870-1895:
-            // if (sbp->gbp) BLAST_SpougeStoE(...);
             evalue: if let Some(gumbel) = gumbel {
                 blast_spouge_stoe(
                     hsp.score,
@@ -3185,8 +3146,6 @@ fn direct_local_evalues(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:200-251,675-721,
 // 1644-1707,1763-1776; core/blast_hits.c:1811-1935,3243-3297:
-// Blast_TracebackFromHSPList(...); s_HSPListPostTracebackUpdate(...);
-// Blast_HSPResultsInsertHSPList(...); Blast_HSPResultsSortByEvalue(...);
 fn finish_local_mode0_no_sum_stats(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
@@ -3295,7 +3254,6 @@ fn finish_local_mode0_no_sum_stats(
         }
         let input: Vec<_> = traced.iter().map(|row| (context, row.hsp)).collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:213-250,717-719:
-        // if (hit_params->link_hsp_params) BLAST_LinkHsps(..., stat_length);
         // else Blast_HSPListGetEvalues(..., stat_length, ...);
         let mut post = if let Some(link) = link {
             let mut post_link = *link;
@@ -3427,7 +3385,6 @@ fn finish_local_mode0_no_sum_stats(
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1776:
-    // if (BlastSeqSrcGetTotLen(seq_src) > 0)
     // Otherwise the lists keep the order of their insertion above, by OID, then the heap's
     // (`KappaResultHitList::update`): NCBI's one-thread traceback.
     if profile.subject_set.sorts_results() {
@@ -3504,8 +3461,6 @@ mod tests {
     // c++/src/algo/blast/core/blast_parameters.c:208-223,335-347:
     // sbp->kbp = sbp->kbp_std; x_dropoff_init uses kbp[context]->Lambda.
     // c++/src/algo/blast/core/aa_ungapped.c:570-590:
-    // s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
     // For BDT63307, NCBI's query-specific x-drop is 15; using the matrix
     // average's 16 changes which gapped seed survives into Kappa traceback.
     #[test]
@@ -3572,7 +3527,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
-    //     // Search was not run, but we send back an empty CSearchResultSet.
     // The pinned NCBI no-hit probe records context valid=0 for this query.
     #[test]
     fn all_invalid_query_skips_subject_search_and_returns_empty_hitlist() {
@@ -4052,7 +4006,6 @@ mod tests {
         assert_eq!(rows, expected_rows);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2510;
         // c++/src/algo/blast/core/blast_hits.c:3243-3297:
-        // s_HSPListNormalizeScores(...); s_ComputeNumIdentities(...);
         // Compare the unformatted per-HSP values after the full local path.
         let trace = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),
             "/../docs/evidence/tlosan_stage_d/kappa_result_order_20260925/multi_query_20260924_default.tsv")).unwrap();
@@ -5959,7 +5912,6 @@ mod tests {
         );
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2510;
         // c++/src/algo/blast/core/blast_hits.c:1437-1456,3243-3297:
-        // Blast_HSPInit(..., &editScript, &new_hsp);
         // The max-112 run retains each of the 12 alignments recorded by the
         // independent max-2 redo trace, including the one max-2 heap rejected.
         let redo_trace =
@@ -6255,7 +6207,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:224-273,3658-3689:
-    // if (hsp_list->hspcnt > 1)
     // The pinned local fixture naturally redos two same-frame alignments;
     // the smaller one is contained, leaving one postredo link input.
     #[test]

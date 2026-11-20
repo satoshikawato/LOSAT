@@ -2,7 +2,6 @@
 """PR01 explicit-artifact baseline; frozen hashes are never learned from LOSAT.
 
 NCBI 2.17.0 c++/src/algo/blast/format/blast_format.cpp:794-808,828-832:
-  tabinfo.PrintHeader(strProgVersion, ..., dbname, ...);
   ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) { ... tabinfo.Print(); }
 c++/src/objtools/align_format/tabular.cpp:1098-1108:
   x_PrintField(*iter); ... m_Ostream << "\n";

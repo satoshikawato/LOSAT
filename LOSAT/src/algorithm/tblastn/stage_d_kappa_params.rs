@@ -20,12 +20,9 @@ use crate::utils::matrix::BLASTAA_SIZE;
 // 2433-2479,3099-3110; composition_adjustment/redo_alignment.c:1014-1050:
 // near_identical_cutoff = (1.74 * NCBIMATH_LN2)
 // cutoff_s = do_link_hsps ?
-//     (int)(hitParams->cutoff_score_min * context->localScalingFactor) : 1;
 // localScalingFactor = (compo_adjust_mode != eNoCompositionBasedStats)
 //                      ? SCALING_FACTOR : 1.0;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463:
-//     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
-//         params->gap_x_dropoff);
 pub(super) fn local_extension_final_xdrop(
     prelim_bits: f64,
     final_bits: f64,
@@ -102,7 +99,6 @@ pub(super) fn local_kappa_redo_params(
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2369-2378,2439-2448:
     // for (i=0; i<num_queries; i++) if (kbp_gap[i] != NULL &&
-    // for (index=first_context; index<=last_context; ++index)
     //     if (contexts[index].is_valid) { near_identical_cutoff =
     //         (1.74*NCBIMATH_LN2)/kbp_gap[index]->Lambda; break; }
     let active = gapped
@@ -116,7 +112,6 @@ pub(super) fn local_kappa_redo_params(
     let scaled_lambda = min_lambda / scale;
     let first_valid_scaled_lambda = first_valid_lambda / scale;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2372-2384:
-    //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
     let redo_xdrop =
         crate::core::x_drop::redo_x_dropoff(final_xdrop_bits, scaled_lambda, extension_final_xdrop);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2852;
@@ -136,7 +131,6 @@ pub(super) fn local_kappa_redo_params(
     // composition_adjustment/redo_alignment.c:1028-1043:
     // near_identical_cutoff = (1.74 * NCBIMATH_LN2) / kbp_gap[index]->Lambda;
     // cutoff_s = do_link_hsps ?
-    //     (int)(hitParams->cutoff_score_min * localScalingFactor) : 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1037-1037
     Ok(BlastRedoAlignParams {
         matrix_info,
@@ -174,7 +168,6 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2369-2382,
     // 2439-2448:
     // for (i=0; i<num_queries; i++) if (kbp_gap[i] != NULL &&
-    // for (index=first_context; index<=last_context; ++index)
     //     if (contexts[index].is_valid) { near_identical_cutoff =
     //         (1.74*NCBIMATH_LN2)/kbp_gap[index]->Lambda; break; }
     #[test]
@@ -255,8 +248,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463:
-    //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
-    //         params->gap_x_dropoff);
     #[test]
     fn extension_final_xdrop_uses_option_bits_and_previous_cutoff() {
         let lambda = 0.267;

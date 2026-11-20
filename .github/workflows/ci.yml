@@ -60,6 +60,13 @@ jobs:
         run: python3 LOSAT/tests/check_lint_allow_ratchet.py --root .
       - name: Lint-allow ratchet tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_lint_allow_ratchet.py'
+      # No NCBI counterpart: comments quote only NCBI's public-domain source; another project's
+      # code (libstdc++, glibc, Microsoft's C runtime, LMDB, Boost, crates, ...) is cited by file and
+      # lines, not quoted (maintainer, 2026-11-20). The tables of the check are the one list.
+      - name: Foreign-quote check
+        run: python3 LOSAT/tests/check_foreign_quotes.py --root .
+      - name: Foreign-quote check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_foreign_quotes.py'
       # No reference between the programs under LOSAT/src/algorithm/ that
       # LOSAT/tests/program_edges.tsv does not list, and none up the layering
       # common < blastn < tblastx < blastp < tblastn < blastx (SWEBOK 2026-11-04 audit, KA3).

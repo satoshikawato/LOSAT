@@ -530,15 +530,11 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
         ) -> Result<()>,
     ) -> Result<usize>;
     /// What each query batch's set-up of the search writes into NCBI's options handle beyond the
-    /// batch's search space (`rps_search::volumes::search_sets`; `-searchsp` and `-dbsize` as
-    /// given), which the requests of the archive and of the search strategy hold (the archive's of a batch
-    /// after its set-up, the strategy's after the first batch's).
-    fn handle_sets(
-        &self,
-        database: Option<&super::database::BlastxDatabase>,
-        searchsp: Option<i64>,
-        dbsize: Option<i64>,
-    ) -> Vec<crate::report::archive::options::Param>;
+    /// batch's search space (`rps_search::volumes::search_sets`), which the requests of the archive
+    /// and of the search strategy hold (the archive's of a batch after its set-up, the strategy's
+    /// after the first batch's): the search that `for_database` returned for a run that writes
+    /// one knows it.
+    fn handle_sets(&self) -> Vec<crate::report::archive::options::Param>;
     /// Whether the batches' results are merged over a database of several volumes, as NCBI's
     /// `CLocalRPSBlast` merges them: the merge keeps only NCBI's messages of error severity (no
     /// query warning, `report::query_warning`) and gives a batch that was not searched an empty
@@ -606,13 +602,21 @@ impl ResolvedOptions {
             .is_some_and(|search| search.merges_volumes())
     }
 
-    /// The hit list size to which the writers cut the lists of a merge of several volumes
-    /// (`ReportedSubjects::for_batch`'s `cut`: the merge keeps each volume's lists,
-    /// `s_MergeAlignSet`, and NCBI's formatter cuts them to the hit list size after counting
-    /// their hits (as rpsblast's `psiblast_hits_found`), by subjects); `None` otherwise.
-    pub(crate) fn merged_cut(&self) -> Option<usize> {
-        self.merged_volumes()
-            .then(|| usize::try_from(self.hitlist_size).unwrap_or(0))
+    /// The number of a query's lists that the reports NCBI's formatter cuts write: the merge of
+    /// several volumes keeps each volume's lists (`s_MergeAlignSet`), which the formatter cuts to
+    /// the hit list size (`BatchResults::shown_lists`): `PruneSeqalign` before the tabular
+    /// reports (outfmt 7 counts their hits before it, as rpsblast's `psiblast_hits_found`) and
+    /// the Seq-annots (8, 9, 12), `TrimSeqAlign` before BLAST XML, XML2 and JSON (5, 13 to 16);
+    /// the archive (11) and the organism report (18) take every list. All of them otherwise.
+    /// RPSTBLASTN writes only the pairwise and tabular reports until item PS15a
+    /// (`rpsblast::args::check_rps_outfmt` refuses the rest), so the cut of the structured
+    /// reports is the writers' rule for when it does.
+    pub(crate) fn shown_lists(&self) -> usize {
+        if self.merged_volumes() {
+            usize::try_from(self.hitlist_size).unwrap_or(0)
+        } else {
+            usize::MAX
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:184 (blastx_app.cpp:247-249

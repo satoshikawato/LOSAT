@@ -1174,7 +1174,6 @@ pub(super) fn documents_may_refuse(
                 || documents().any(|&outfmt| {
                     crate::algorithm::common::database::report_sum_refusal(
                         pairwise.num_sequences,
-                        pairwise.total_letters,
                         pairwise.total_letters_overflow,
                         outfmt,
                     )
@@ -1410,15 +1409,31 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         }
         _ => None,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-711
+    // ```c++
+    //     } else if (m_FormatType == CFormattingArgs::eXml) {
+    //         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
+    //         res->TrimSeqAlign(m_HitlistSize);
+    //         m_AccumulatedResults.push_back(res);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2358-2362
+    // ```c++
+    // void CBlastFormat::x_PrintXML2Report(const blast::CSearchResults& results,
+    //         							 CConstRef<blast::CBlastQueryVector> queries)
+    // {
+    // 	CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
+    //     res->TrimSeqAlign(m_HitlistSize);
+    // ```
+    // Every document writes the lists of each query that the cut to the hit list size keeps
+    // (`TrimSeqAlign` counts following Seq-aligns of matching subject ids as one, as
+    // `PruneSeqalign`): RPSTBLASTN's merged lists of several volumes, cut once per query
+    // (`BatchResults::shown_lists`); every list otherwise.
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
+        for qidx in 0..batch.queries.len() {
             if texts.len() == reports {
                 break;
             }
-            // Several volumes: the merged lists cut once per query (`TrimSeqAlign`).
-            let lists = &lists[..lists
-                .len()
-                .min(shown.shown_lists(batch.query_ordinal + qidx))];
+            let lists = batch.shown_lists(qidx, options);
             if let (
                 Some(scopes),
                 ShownSubjects::Database {
@@ -1474,10 +1489,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut texts = texts.iter();
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
-            let lists = &lists[..lists
-                .len()
-                .min(shown.shown_lists(batch.query_ordinal + qidx))];
+        for qidx in 0..batch.queries.len() {
+            // The lists that the cut keeps, as above.
+            let lists = batch.shown_lists(qidx, options);
             let query = &queries[batch.query_ordinal + qidx];
             let Some(text) = texts.next() else {
                 // The held report that is never written (`written_queries`); the one held before

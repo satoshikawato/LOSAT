@@ -96,6 +96,9 @@ const ROW_SLOTS: usize = 256;
 /// The letter of a forbidden cell (`forbid_cells`): its slot of `ScanRow` holds `i32::MIN`.
 const FORBIDDEN_LETTER: u8 = u8::MAX;
 
+// No letter of the alphabet reads the forbidden slot: the build fails if the alphabet reaches it.
+const _: () = assert!(FORBIDDEN_LETTER as usize >= BLASTAA_SIZE);
+
 /// The score row that a scan reads: the row's `BLASTAA_SIZE` scores, then zeros, one slot for each
 /// value of a byte, so that a letter of `SwScratch::scan` (below `BLASTAA_SIZE`, `row_column`)
 /// reads its own column with no bound check and no mask. One local array for each scan, whose
@@ -104,9 +107,12 @@ const FORBIDDEN_LETTER: u8 = u8::MAX;
 ///
 /// The slot of `FORBIDDEN_LETTER` holds `i32::MIN`: a forbidden cell's diagonal is then
 /// `prev + i32::MIN` for the score `prev` of the column in the row before, which is never
-/// negative, so the diagonal is negative without overflow and `max(diagonal, 0)` is 0, as NCBI's
-/// `max(COMPO_SCORE_MIN, 0)` of a forbidden cell (quoted at `cell`). Every row of a scan, with
-/// forbidden ranges or without, runs the same cell with no test.
+/// negative, so the diagonal is negative without overflow and `max(diagonal, 0)` is 0. NCBI gives
+/// a forbidden cell the diagonal `COMPO_SCORE_MIN` before the same floor at 0, so the cell's
+/// value is the same. Every row of a scan, with forbidden ranges or without, runs the same cell
+/// with no test.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:303-317
 struct ScanRow([i32; ROW_SLOTS]);
 
 impl ScanRow {
@@ -165,9 +171,11 @@ type SwScan<'a> = (&'a mut [u8], &'a mut [SwGapInfo]);
 
 /// Writes `FORBIDDEN_LETTER` (`forbid` true) at the subject positions that the forbidden ranges
 /// `ranges` of one query position hold, or the subject's own letters back (false), so that the
-/// row's cells read `i32::MIN` there (`ScanRow`) where NCBI's test every range (`forbidden = TRUE`
-/// where `ranges[2f] <= matchSeqPos <= ranges[2f + 1]`, quoted at `cell`): the same cells are
-/// forbidden.
+/// row's cells read `i32::MIN` there (`ScanRow`). NCBI's cell instead tests its subject position
+/// against each range of the query position, both ends included; a position in any range is
+/// forbidden. The ranges here are the same, so the same cells are forbidden.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:303-317
 fn forbid_cells(letters: &mut [u8], subject: &[u8], ranges: &[(i32, i32)], forbid: bool) {
     let last = letters.len() as i64 - 1;
     for &(start, end) in ranges {
@@ -362,8 +370,14 @@ impl CellValue for i32 {
 /// `pmaxsd` (ports 0 and 1) where `cmov_max` takes a `cmp` and a `cmovl` (`cmovl` on ports 0 and 6
 /// only), so the cells' operations share the ALU ports less. The scalar cell is bound by its ALU
 /// operations (ws, X4-mt kernel benchmark, 230.7 million cells: about 2.85 of them a cycle in every
-/// form of the cell tried), and this one takes 1.090 G cycles where `i32`'s takes 1.387 G. Made
-/// only in `score_only_avx2` and `find_start_avx2`, which run where the CPU has AVX2.
+/// form of the cell tried), and this one takes 1.090 G cycles where `i32`'s takes 1.387 G.
+///
+/// Invariant: a `Lane0` is made only where the CPU has AVX2, in `score_only_avx2` and
+/// `find_start_avx2` (which run only where `is_x86_feature_detected!("avx2")` holds) or in a test
+/// under the same detection. Its cells need SSE4.1 (`pmaxsd`) at least; AVX2 is the gate because
+/// it is the one x86-64 fast level of the project's SIMD policy (2026-10-14), so each scan has one
+/// compiled form for it, and only CPUs with AVX2 were measured. A CPU with SSE4.1 or AVX but not
+/// AVX2 runs the `i32` cells, with the same values.
 #[cfg(target_arch = "x86_64")]
 #[derive(Debug, Clone, Copy)]
 struct Lane0(core::arch::x86_64::__m128i);
@@ -390,10 +404,8 @@ impl CellValue for Lane0 {
 
     #[inline(always)]
     fn larger(self, other: Self) -> Self {
-        // SAFETY: `pmaxsd` is SSE4.1, which AVX2 includes; `Lane0` values are made only in
-        // `score_only_avx2` and `find_start_avx2`, which run only where
-        // `is_x86_feature_detected!("avx2")` holds (`smith_waterman_score_only`,
-        // `smith_waterman_find_start`).
+        // SAFETY: `pmaxsd` is SSE4.1, which AVX2 includes, and a `Lane0` exists only where the
+        // CPU has AVX2 (the type's invariant).
         Self(unsafe { core::arch::x86_64::_mm_max_epi32(self.0, other.0) })
     }
 }

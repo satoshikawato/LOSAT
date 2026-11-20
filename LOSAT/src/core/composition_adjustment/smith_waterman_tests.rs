@@ -382,7 +382,8 @@ fn the_score_only_scan_equals_the_whole_matrix_recurrence() {
 
 /// The scans as they were before the gap along the row was carried alone (dev e6e9a61ad): each
 /// cell takes the gap along the row from the score of the cell before it, in NCBI's order of the
-/// cell's terms. The reference of the kernel's cell (`cell`) in the tests below.
+/// cell's terms. The reference of the kernel's cell (`cell`) in the tests below; its maxima are
+/// `i32::max`, not the kernel's `cmov_max`, so that the reference shares no operation of the cell.
 mod before_k1 {
     use super::*;
 
@@ -429,20 +430,17 @@ mod before_k1 {
         new_gap_cost: i32,
         gap_extend: i32,
     ) {
-        *prev_score_gap_match_seq = cmov_max(
-            *prev_score_gap_match_seq - gap_extend,
-            *new_score - new_gap_cost,
-        );
-        let continue_gap_score =
-            cmov_max(column.gap_exists - gap_extend, column.no_gap - new_gap_cost);
+        *prev_score_gap_match_seq =
+            (*prev_score_gap_match_seq - gap_extend).max(*new_score - new_gap_cost);
+        let continue_gap_score = (column.gap_exists - gap_extend).max(column.no_gap - new_gap_cost);
         let diagonal = match substitution {
             None => COMPO_SCORE_MIN,
             Some(substitution) => *prev_score_no_gap_match_seq + substitution,
         };
-        let score = cmov_max(
-            cmov_max(cmov_max(diagonal, 0), continue_gap_score),
-            *prev_score_gap_match_seq,
-        );
+        let score = diagonal
+            .max(0)
+            .max(continue_gap_score)
+            .max(*prev_score_gap_match_seq);
         *prev_score_no_gap_match_seq = column.no_gap;
         column.no_gap = score;
         column.gap_exists = continue_gap_score;
@@ -663,7 +661,7 @@ fn random_rows(
             .map(|_| std::array::from_fn(|_| score(random)))
             .collect();
         (0..count)
-            .map(|_| matrix[1 + random.below(24) as usize])
+            .map(|_| matrix[random.below(BLASTAA_SIZE as u64) as usize])
             .collect()
     } else {
         (0..count)
@@ -789,7 +787,9 @@ fn the_k1_cell_gives_every_value_of_the_cell_before() {
             (-9, 7, 1)
         };
         let rows = random_rows(&mut random, m, square, range);
-        let subject: Vec<u8> = (0..n).map(|_| 1 + random.below(24) as u8).collect();
+        let subject: Vec<u8> = (0..n)
+            .map(|_| random.below(BLASTAA_SIZE as u64) as u8)
+            .collect();
         let gaps = if case % 4 == 0 {
             GAP_COSTS[(case / 4) % GAP_COSTS.len()]
         } else {
@@ -807,12 +807,16 @@ fn the_k1_cell_gives_every_value_of_the_cell_before() {
         let m = 150 + random.below(400) as usize;
         let n = 150 + random.below(400) as usize;
         let rows = random_rows(&mut random, m, case % 2 == 0, (-4, 11, 32));
-        let mut subject: Vec<u8> = (0..n).map(|_| 1 + random.below(24) as u8).collect();
+        let mut subject: Vec<u8> = (0..n)
+            .map(|_| random.below(BLASTAA_SIZE as u64) as u8)
+            .collect();
         // A stretch that scores well against the rows, so that the best cell is far from the ends.
         let stretch = m.min(n) / 3;
         for (offset, letter) in subject.iter_mut().skip(n / 4).take(stretch).enumerate() {
             let row = &rows[m / 4 + offset];
-            let best = (1..=24u8).max_by_key(|&l| row[usize::from(l)]).unwrap_or(1);
+            let best = (0..BLASTAA_SIZE as u8)
+                .max_by_key(|&l| row[usize::from(l)])
+                .unwrap_or(1);
             if random.below(10) < 7 {
                 *letter = best;
             }
@@ -899,7 +903,6 @@ fn the_conditional_move_is_the_maximum() {
 fn forbidden_cells_floor_at_zero_and_leave_the_letters() {
     let slots = ScanRow::new();
     assert_eq!(slots.0[usize::from(FORBIDDEN_LETTER)], i32::MIN);
-    assert!(usize::from(FORBIDDEN_LETTER) >= BLASTAA_SIZE);
     for prev in [0, 1, 32767, 1 << 30, i32::MAX] {
         assert_eq!((prev + i32::MIN).max(0), COMPO_SCORE_MIN.max(0), "{prev}");
     }

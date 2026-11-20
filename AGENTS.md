@@ -137,6 +137,18 @@ authoritative, current guidance for agent behavior in LOSAT.
    - Every code change must include NCBI C/C++ reference comments with file path
      and line numbers.
    - Include the relevant NCBI snippet immediately above the Rust code.
+   - Quote source text only from NCBI's own files, which carry NCBI's PUBLIC
+     DOMAIN NOTICE. Cite the code of any other project only by
+     `<project> <version>: <path>:<lines>`, without quoting it: GPL and LGPL
+     code (libstdc++, glibc), Microsoft's sources, permissively licensed code
+     (LMDB, Boost, BitMagic, Rust crates), and the copies of such code in
+     NCBI's tree (`LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/...`;
+     never "NCBI reference" for them). Use no GPL-mixed code: none taken from
+     GPL or LGPL sources (libstdc++, glibc) or from Microsoft source whose
+     license does not allow redistribution (maintainer, 2026-11-20).
+     `LOSAT/tests/check_foreign_quotes.py` (CI `rust lint`) fails on a quote
+     of another project and holds the one list of what in NCBI's tree is not
+     NCBI's.
    - If you cannot add the NCBI reference comments, do not write the code.
 
 5. No unauthorized features.

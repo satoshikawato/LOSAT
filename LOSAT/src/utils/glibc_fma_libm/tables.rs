@@ -1,6 +1,15 @@
-//! The data tables of glibc 2.35's `exp`, `log` and `pow` (libm.so.6 of Ubuntu 2.35-0ubuntu3.18,
-//! x86-64, read from the library file: `__exp_data`, `__log_data`, `__pow_log_data`; the same data as
-//! sysdeps/ieee754/dbl-64/e_exp_data.c, e_log_data.c and e_pow_log_data.c), as bit patterns.
+// The tables of Arm Optimized Routines (math/exp_data.c, log_data.c, pow_log_data.c at
+// commit 11253b0b9d6b), which glibc 2.35 and musl also carry:
+//
+// Copyright (c) 2018, Arm Limited.
+// SPDX-License-Identifier: MIT
+//
+// The MIT License text is in THIRD_PARTY_NOTICES, section 4 (Arm Optimized Routines).
+
+//! The data tables of `exp`, `log` and `pow` (`__exp_data`, `__log_data`, `__pow_log_data` of Arm
+//! Optimized Routines, notice above), as bit patterns read from glibc 2.35's library file
+//! (libm.so.6 of Ubuntu 2.35-0ubuntu3.18, x86-64), which holds the same data (Arm Optimized
+//! Routines' math/exp_data.c, log_data.c and pow_log_data.c).
 
 // __exp_data: invln2N, shift, negln2hiN, negln2loN, poly[4], exp2_shift, exp2_poly[5], tab[256].
 pub(super) const EXP_HEAD: [u64; 14] = [

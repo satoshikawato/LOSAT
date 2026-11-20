@@ -333,18 +333,17 @@ pub(super) fn local_parameters_for_blocks(
         // if (options->longest_intron == 0)
         //     longest_intron = (DEFAULT_LONGEST_INTRON - 2) / 3;
         // else if ((options->longest_intron - 2)/3 <= 0) linking is disabled.
-        let intron = if options.max_intron_length == 0 {
-            (122 - 2) / 3
-        } else {
-            (options.max_intron_length - 2) / 3
-        };
-        (intron > 0).then_some(LocalLinkParameters {
-            gap_decay_rate: 0.1,
-            gap_size: 40,
-            overlap_size: 9,
-            longest_intron: intron,
-            cutoff_small_gap: 0,
-        })
+        // The conversion has one owner, shared with BLASTX; TBLASTN's search is gapped
+        // (`-ungapped` is refused), so the value is positive or the linking is off.
+        crate::core::link_hsps::translated_longest_intron(options.max_intron_length, true).map(
+            |intron| LocalLinkParameters {
+                gap_decay_rate: 0.1,
+                gap_size: 40,
+                overlap_size: 9,
+                longest_intron: intron,
+                cutoff_small_gap: 0,
+            },
+        )
     } else {
         None
     };

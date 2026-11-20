@@ -80,7 +80,6 @@ pub(super) fn local_kappa_redo_params(
     max_query_length: i32,
     mode: BlastCompoAdjustMode,
     unified_p: bool,
-    do_sum_stats: bool,
     final_xdrop_bits: f64,
     extension_final_xdrop: i32,
 ) -> Result<BlastRedoAlignParams> {
@@ -107,10 +106,23 @@ pub(super) fn local_kappa_redo_params(
             .all(|(p, &valid)| !valid || p.lambda > 0.0),
         "TBLASTN Kappa lambda must be positive"
     );
-    ensure!(
-        !do_sum_stats || initial.link.is_some(),
-        "TBLASTN Kappa linking parameters are missing"
-    );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2428,2450-2457
+    // ```c
+    //     Boolean do_link_hsps = (hitParams->do_sum_stats);
+    //     if (do_link_hsps) {
+    //         ASSERT(hitParams->link_hsp_params != NULL);
+    //         cutoff_s =
+    //             (int) (hitParams->cutoff_score_min * context->localScalingFactor);
+    //     } else {
+    //         /* There is no cutoff score; we consider e-values instead */
+    //         cutoff_s = 1;
+    //     }
+    // ```
+    // `hitParams->do_sum_stats` is the flag of the hit-saving parameters, which a
+    // `-max_intron_length` of 1 to 4 clears while the option `-sum_stats` stays on
+    // (blast_parameters.c:802-806, `core::link_hsps::translated_longest_intron`): the redo
+    // links exactly when the search has linking parameters.
+    let do_link_hsps = initial.link.is_some();
     let scale = if mode == BlastCompoAdjustMode::NoCompositionBasedStats {
         1.0
     } else {
@@ -178,12 +190,12 @@ pub(super) fn local_kappa_redo_params(
         ccat_query_length: max_query_length,
         query_is_translated: false,
         subject_is_translated: true,
-        cutoff_score: if do_sum_stats {
+        cutoff_score: if do_link_hsps {
             ((initial.hit_cutoff_min as f64) * scale) as i32
         } else {
             1
         },
-        do_link_hsps: do_sum_stats,
+        do_link_hsps,
     })
 }
 
@@ -239,7 +251,6 @@ mod tests {
             120,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            true,
             30.0,
             70,
         )

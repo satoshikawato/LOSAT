@@ -63,6 +63,67 @@ pub(crate) const BLAST_GAP_DECAY_RATE_GAPPED: f64 = 0.1;
 /// `BLAST_GAP_DECAY_RATE`, the gap decay rate of an ungapped search.
 pub(crate) const BLAST_GAP_DECAY_RATE: f64 = 0.5;
 
+/// The largest gap of the uneven-gap linking (`BlastLinkHSPParameters::longest_intron`, in letters
+/// of the translated sequence) that a search with sum statistics gets from `-max_intron_length`
+/// (`BlastHitSavingOptions::longest_intron`, in nucleotides), for the translated searches other
+/// than TBLASTX (BLASTX, TBLASTN and its `-in_pssm` search). `None`: NCBI frees the linking
+/// parameters and clears `params->do_sum_stats`, so the search runs as it does without sum
+/// statistics (a gapped search with a value of 1 to 4). 0 (an ungapped search with a value up to
+/// 4): the even-gap linking (`BLAST_LinkHsps`, link_hsps.c:1779 `longest_intron <= 0`).
+///
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:77-78
+/// ```c
+/// /** Default value for the longest intron length, in nucleotides */
+/// #define DEFAULT_LONGEST_INTRON 122
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:788-814
+/// ```c
+///           /* The program may use Blast_UnevenGapLinkHSPs find significant
+///              collections of distinct alignments */
+///           Int4 max_protein_gap; /* the largest gap permitted in the
+///                                * translated sequence */
+///
+///           max_protein_gap = (options->longest_intron - 2)/3;
+///           if(gapped_calculation) {
+///               if(options->longest_intron == 0) {
+///                   /* a zero value of longest_intron invokes the
+///                    * default behavior, which for gapped calculation is
+///                    * to set longest_intron to a predefined value. */
+///                   params->link_hsp_params->longest_intron =
+///                       (DEFAULT_LONGEST_INTRON - 2) / 3;
+///               } else if(max_protein_gap <= 0) {
+///                   /* A nonpositive value of max_protein_gap disables linking */
+///                   params->link_hsp_params =
+///                       BlastLinkHSPParametersFree(params->link_hsp_params);
+///                   params->do_sum_stats = FALSE;
+///               } else { /* the value of max_protein_gap is positive */
+///                   params->link_hsp_params->longest_intron = max_protein_gap;
+///               }
+///           } else { /* This is an ungapped calculation. */
+///               /* For ungapped calculations, we preserve the old behavior
+///                * of the longest_intron parameter to maintain
+///                * backward-compatibility with older versions of BLAST. */
+///               params->link_hsp_params->longest_intron =
+///                 MAX(max_protein_gap, 0);
+///           }
+/// ```
+/// The option is not negative (the command line refuses a negative value, as NCBI's does), so
+/// `longest_intron - 2` cannot pass the range of `Int4`; C's division truncates toward zero, as
+/// Rust's does.
+pub(crate) fn translated_longest_intron(max_intron_length: i32, gapped: bool) -> Option<i32> {
+    const DEFAULT_LONGEST_INTRON: i32 = 122;
+    let max_protein_gap = (max_intron_length - 2) / 3;
+    if !gapped {
+        Some(max_protein_gap.max(0))
+    } else if max_intron_length == 0 {
+        Some((DEFAULT_LONGEST_INTRON - 2) / 3)
+    } else if max_protein_gap <= 0 {
+        None
+    } else {
+        Some(max_protein_gap)
+    }
+}
+
 /// The linking parameters (`BlastLinkHSPParameters`) of a protein search with sum statistics and
 /// even-gap linking: a gapped one (`preliminary`, `traceback`; psiblast) or an ungapped one
 /// (`ungapped`; BLASTX), and whether the query is translated.
@@ -1578,6 +1639,42 @@ fn next_larger(lh_helper: &[Helper], h_index: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI blast_parameters.c:788-814 with `DEFAULT_LONGEST_INTRON` 122: the values of
+    // `-max_intron_length` on both sides of each branch.
+    #[test]
+    fn the_longest_intron_of_a_translated_search_follows_ncbis_branches() {
+        for (option, gapped) in [
+            (0, Some(40)),
+            (1, None),
+            (2, None),
+            (4, None),
+            (5, Some(1)),
+            (7, Some(1)),
+            (8, Some(2)),
+            (121, Some(39)),
+            (122, Some(40)),
+            (123, Some(40)),
+            (125, Some(41)),
+            (i32::MAX, Some(715_827_881)),
+        ] {
+            assert_eq!(translated_longest_intron(option, true), gapped, "{option}");
+        }
+        for (option, ungapped) in [
+            (0, 0),
+            (1, 0),
+            (4, 0),
+            (5, 1),
+            (125, 41),
+            (i32::MAX, 715_827_881),
+        ] {
+            assert_eq!(
+                translated_longest_intron(option, false),
+                Some(ungapped),
+                "{option}"
+            );
+        }
+    }
 
     fn context() -> LinkContext {
         // BLOSUM62 11/1 gapped Lambda and K (blast_stat.c), a query of 300 letters.

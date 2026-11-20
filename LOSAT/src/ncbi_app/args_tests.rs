@@ -36,8 +36,13 @@ fn messages(line: &[&str]) -> (&'static str, Vec<String>) {
     }
 }
 
+/// The texts as LOSAT writes them: the expected texts are NCBI's (`(m_Pos = <n>)` and the like),
+/// in LOSAT's words (`crate::wording::losat_text`).
 fn strings(texts: &[&str]) -> Vec<String> {
-    texts.iter().map(|text| text.to_string()).collect()
+    texts
+        .iter()
+        .map(|text| crate::wording::losat_text(text).into_owned())
+        .collect()
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129, 351-360, 383-390 (quoted at

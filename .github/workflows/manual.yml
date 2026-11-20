@@ -9,6 +9,12 @@ on:
   pull_request:
     paths:
       - "docs/manual/**"
+      - "docs/release/v0.2.0.md"
+      - "README.md"
+      - "LOSAT/README.md"
+      - "python/README.md"
+      - "web/packages/losat/README.md"
+      - "benchmarks/**"
       - ".github/workflows/manual.yml"
       - "scripts/check_manual_links.py"
       - "tests/test_check_manual_links.py"
@@ -16,6 +22,12 @@ on:
     branches: [dev]
     paths:
       - "docs/manual/**"
+      - "docs/release/v0.2.0.md"
+      - "README.md"
+      - "LOSAT/README.md"
+      - "python/README.md"
+      - "web/packages/losat/README.md"
+      - "benchmarks/**"
       - ".github/workflows/manual.yml"
       - "scripts/check_manual_links.py"
       - "tests/test_check_manual_links.py"
@@ -45,7 +57,16 @@ jobs:
       - name: Test the source check
         run: python3 -m unittest tests/test_check_manual_links.py
       - name: Check links between pages
-        run: python3 scripts/check_manual_links.py docs/manual/src
+        run: |
+          python3 scripts/check_manual_links.py docs/manual/src \
+            --repo-root . \
+            --repo-readme README.md \
+            --repo-readme benchmarks/README.md \
+            --repo-readme benchmarks/v0.2.0/README.md \
+            --repo-readme docs/release/v0.2.0.md \
+            --package-readme LOSAT/README.md \
+            --package-readme python/README.md \
+            --package-readme web/packages/losat/README.md
       - name: Build
         run: mdbook build docs/manual
       - name: Keep the built site

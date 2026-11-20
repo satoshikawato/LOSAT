@@ -1,40 +1,43 @@
-//! No NCBI counterpart: a guard that README.md's section "What LOSAT refuses" names every option
-//! that this parser refuses by name, per program, and every NCBI BLAST+ 2.17.0 executable that
-//! LOSAT does not provide.
+//! No NCBI counterpart: a guard that the user manual's page "What LOSAT refuses"
+//! (docs/manual/src/refusals.md, the one list of refusals that users read) names every option that
+//! this parser refuses by name, per program, and every NCBI BLAST+ 2.17.0 executable that LOSAT
+//! does not provide.
 //!
-//! The README is read at compile time. The lists under test are the ones that
+//! The page is read at compile time. The lists under test are the ones that
 //! `unknown_option_error` consults (`UNPORTED_*_ARGS`) and
 //! `crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS`. Refusals of a value (`-word_size 4`) or
 //! of an input (a database sequence) are in no list and are not checked here.
 //!
-//! How the README is read (kept simple on purpose):
-//! - The section is the text from `### What LOSAT refuses` to the next `---` or `## ` line.
-//! - A line that starts with `**` opens a heading: the text between the first two pairs of `**`
-//!   (`**psiblast** runs ...` is the heading `psiblast`). The lines that follow, up to the next
-//!   heading, belong to it.
-//! - The headings `psiblast`, `rpsblast`, `rpsbproc` and `makeblastdb` are the programs' own
-//!   paragraphs. All other lines are general bullets.
+//! How the page is read (kept simple on purpose):
+//! - A line that starts with `## ` opens a section; its heading is the rest of the line. The lines
+//!   that follow, up to the next `## ` line, belong to it.
+//! - A section is a program's own when the first word of its heading, without backticks, is the
+//!   program (`## tblastn with `-in_pssm`` is tblastn's).
 //! - An option `-name` is named on a line when the line holds `-name` that is neither preceded
 //!   nor followed by a letter, digit, `_` or `-` (so `-version` is not found in `-version-full`).
-//! - A refusal of `-name` by a program is documented when its own paragraph names the option,
-//!   or a general line names the option and the program (the program's name as a word, the
-//!   same rule), or, for the five search programs, says `all five programs` or `all programs`.
-//!   psiblast also takes what is documented for blastp when blastp's list holds the name, as its
-//!   paragraph says ("It also refuses the `blastp` entries above that apply to it").
+//! - A refusal of `-name` by a program is documented when a line of the program's own section
+//!   names the option, or, for the five search programs, a line of the section `All five search
+//!   programs` does, or any line names the option and the program (the program's name as a word,
+//!   the same rule) or says `all programs` (or, for the five search programs, `all five search
+//!   programs`).
 //! - The NCBI executables are covered when `ENTRY_NAMES` holds them or a backticked name in the
-//!   headings `Programs LOSAT does not provide` and `Out of scope` is theirs.
+//!   sections `Programs LOSAT does not provide`, `On the list for a later release` and `Out of
+//!   scope...` is theirs.
 //! - blast_formatter's refusals (`crate::blast_formatter::refusals`, one list) are documented when
-//!   the lines of the heading `blast_formatter` hold the words of each one.
+//!   the lines of the section `blast_formatter` hold the words of each one.
 
 use super::*;
 
-const README: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../README.md"));
+const PAGE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../docs/manual/src/refusals.md"
+));
 
-/// The programs that "all five programs" stands for in the README.
+/// The programs of the section `All five search programs`.
 const FIVE_PROGRAMS: [&str; 5] = ["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 
-/// The programs whose README paragraph is their own.
-const OWN_PARAGRAPHS: [&str; 4] = ["psiblast", "rpsblast", "rpsbproc", "makeblastdb"];
+/// The heading of the section that holds the refusals of the five search programs.
+const FIVE_SECTION: &str = "All five search programs";
 
 /// The programs that `try_parse_from` reads, which answer the NCBI C++ Toolkit options.
 const TOOLKIT_PROGRAMS: [&str; 10] = [
@@ -83,28 +86,30 @@ const NCBI_EXECUTABLES: [&str; 28] = [
     "windowmasker",
 ];
 
-/// The lines of the README's refusal section with the heading each belongs to ("" before the
-/// first one).
+/// The lines of the page with the heading of the section each belongs to ("" before the first).
 fn refusal_lines() -> Vec<(&'static str, &'static str)> {
-    let start = README
-        .find("### What LOSAT refuses")
-        .expect("README.md has the section `### What LOSAT refuses`");
     let mut heading = "";
     let mut lines = Vec::new();
-    for line in README[start..].lines().skip(1) {
-        if line.starts_with("---") || line.starts_with("## ") {
-            break;
-        }
-        if let Some(rest) = line.strip_prefix("**") {
-            heading = rest.split("**").next().unwrap_or("");
+    for line in PAGE.lines() {
+        if let Some(rest) = line.strip_prefix("## ") {
+            heading = rest.trim();
         }
         lines.push((heading, line));
     }
     assert!(
-        !lines.is_empty(),
-        "the refusal section of README.md is empty"
+        lines.iter().any(|&(heading, _)| heading == FIVE_SECTION),
+        "refusals.md has no section `## {FIVE_SECTION}`"
     );
     lines
+}
+
+/// The program whose own section `heading` opens: the heading's first word without backticks.
+fn section_program(heading: &str) -> &str {
+    heading
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches('`')
 }
 
 fn is_name_char(c: char) -> bool {
@@ -125,27 +130,21 @@ fn names_option(line: &str, name: &str) -> bool {
     has_word(line, &format!("-{name}"))
 }
 
-/// Whether the README documents the refusal of `-name` by `program` (see the module comment).
+/// Whether the page documents the refusal of `-name` by `program` (see the module comment).
 fn documented(lines: &[(&str, &str)], program: &str, name: &str) -> bool {
-    let own = OWN_PARAGRAPHS.contains(&program);
-    let general = |line: &str| {
-        has_word(line, program)
-            || (FIVE_PROGRAMS.contains(&program)
-                && (line.contains("all five programs") || line.contains("all programs")))
-    };
-    let direct = lines.iter().any(|&(heading, line)| {
+    let five = FIVE_PROGRAMS.contains(&program);
+    lines.iter().any(|&(heading, line)| {
         names_option(line, name)
-            && ((own && heading == program)
-                || (!OWN_PARAGRAPHS.contains(&heading) && general(line)))
-    });
-    direct
-        || (program == "psiblast"
-            && is_unported_blastp_arg(name)
-            && documented(lines, "blastp", name))
+            && (section_program(heading) == program
+                || (five && heading == FIVE_SECTION)
+                || has_word(line, program)
+                || line.contains("all programs")
+                || (five && line.contains("all five search programs")))
+    })
 }
 
 #[test]
-fn every_refused_option_is_in_the_readme_for_its_program() {
+fn every_refused_option_is_in_the_manual_for_its_program() {
     let lines = refusal_lines();
     let psiblast: Vec<&str> = UNPORTED_PSIBLAST_OWN_ARGS
         .iter()
@@ -171,7 +170,7 @@ fn every_refused_option_is_in_the_readme_for_its_program() {
         for name in names {
             if !documented(&lines, program, name) {
                 missing.push(format!(
-                    "{program}: the option -{name} is refused by LOSAT but README.md's \"What LOSAT refuses\" does not name it for {program}"
+                    "{program}: the option -{name} is refused by LOSAT but the manual's refusals.md does not name it for {program}"
                 ));
             }
         }
@@ -181,7 +180,7 @@ fn every_refused_option_is_in_the_readme_for_its_program() {
 
 // `-version` and the full versions are answered on the command line before the parser
 // (`ncbi_version_request`; blastdbcmd, dustmasker and segmasker in `ncbi_app::run_with`), so
-// they are no refusal and the README lists none of them (line RG item E3).
+// they are no refusal and the manual lists none of them (line RG item E3).
 #[test]
 fn the_versions_are_answered_by_every_program() {
     for program in TOOLKIT_PROGRAMS {
@@ -193,7 +192,7 @@ fn the_versions_are_answered_by_every_program() {
         ] {
             assert!(
                 ncbi_version_request(["losat", program, word]).is_some(),
-                "{program} {word} is not answered, so it is a refusal that README.md must list"
+                "{program} {word} is not answered, so it is a refusal that refusals.md must list"
             );
         }
     }
@@ -205,7 +204,9 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
     let listed: Vec<&str> = lines
         .iter()
         .filter(|(heading, _)| {
-            matches!(*heading, "Programs LOSAT does not provide" | "Out of scope")
+            *heading == "Programs LOSAT does not provide"
+                || *heading == "On the list for a later release"
+                || heading.starts_with("Out of scope")
         })
         .map(|&(_, line)| line)
         .collect();
@@ -223,7 +224,7 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
         .collect();
     assert!(
         !not_provided.is_empty(),
-        "README.md's \"Programs LOSAT does not provide\" lists nothing"
+        "refusals.md's \"Programs LOSAT does not provide\" lists nothing"
     );
     let mut wrong = Vec::new();
     for executable in NCBI_EXECUTABLES {
@@ -233,12 +234,12 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
             .any(|line| backticked(line).iter().any(|name| name == executable));
         if provided && not_provided.iter().any(|name| name == executable) {
             wrong.push(format!(
-                "{executable}: LOSAT provides it but README.md lists it under \"Programs LOSAT does not provide\""
+                "{executable}: LOSAT provides it but refusals.md lists it under \"Programs LOSAT does not provide\""
             ));
         }
         if !provided && !named {
             wrong.push(format!(
-                "{executable}: an executable of NCBI BLAST+ 2.17.0 that LOSAT does not provide and README.md does not list under \"Programs LOSAT does not provide\""
+                "{executable}: an executable of NCBI BLAST+ 2.17.0 that LOSAT does not provide and refusals.md does not list under \"Programs LOSAT does not provide\""
             ));
         }
     }
@@ -253,7 +254,7 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
 }
 
 #[test]
-fn every_blast_formatter_refusal_is_in_its_readme_paragraph() {
+fn every_blast_formatter_refusal_is_in_its_manual_section() {
     let paragraph: Vec<&str> = refusal_lines()
         .into_iter()
         .filter(|(heading, _)| *heading == "blast_formatter")
@@ -261,7 +262,7 @@ fn every_blast_formatter_refusal_is_in_its_readme_paragraph() {
         .collect();
     assert!(
         !paragraph.is_empty(),
-        "README.md's \"What LOSAT refuses\" has no paragraph **blast_formatter**"
+        "the manual's \"What LOSAT refuses\" has no section `## blast_formatter`"
     );
     let mut missing = Vec::new();
     for refusal in crate::blast_formatter::refusals::documented() {
@@ -270,7 +271,7 @@ fn every_blast_formatter_refusal_is_in_its_readme_paragraph() {
             .expect("a refusal that a release has");
         if !paragraph.iter().any(|line| line.contains(&words)) {
             missing.push(format!(
-                "blast_formatter: {refusal:?} ({words}) is refused by LOSAT but README.md's paragraph **blast_formatter** does not name it"
+                "blast_formatter: {refusal:?} ({words}) is refused by LOSAT but the manual's section `## blast_formatter` does not name it"
             ));
         }
     }

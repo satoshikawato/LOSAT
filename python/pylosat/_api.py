@@ -391,7 +391,7 @@ class Search:
     not options here: the inputs are `Sequences`, `Database` and `Pssm` (the PSSM query of psiblast
     and tblastn); psiblast's PSSM files (`out_pssm`, `out_ascii_pssm`) are written where the
     command line writes them. The search itself
-    is `run`, `batches` or `run_to_file`. The NCBI C++ Toolkit's `-logfile`, `-conffile` and
+    is `run`, `batches` or `run_to_file`. `-logfile`, `-conffile` and
     `-dryrun` work as on the command line (`from_argv`): each search opens the file of `-logfile`
     and loads the file of `-conffile`, and `dry_run` tells a search that searches nothing.
     """

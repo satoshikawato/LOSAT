@@ -313,7 +313,7 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                     assert_eq!(output.status.code(), Some(1), "{program} {words:?}");
                     assert!(
                         stderr.contains(&format!(
-                            "the NCBI C++ Toolkit option {word} runs on the command line of LOSAT's {} only: the library API and the Web engine do not write NCBI's version text",
+                            "the option {word} runs on the command line of LOSAT's {} only: the library API and the Web engine do not write NCBI's version text",
                             program.to_ascii_uppercase()
                         )),
                         "{program} {words:?}: {stderr}"

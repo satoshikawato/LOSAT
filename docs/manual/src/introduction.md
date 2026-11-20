@@ -19,17 +19,23 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Search | [`psiblast`](programs/psiblast.md) | Position-specific iterated search, from a protein query or a PSSM. |
 | Search | [`rpsblast`](programs/rpsblast.md) | Protein queries against a database of profiles such as CDD. |
 | Search | [`rpstblastn`](programs/rpstblastn.md) | Translated nucleotide queries against a database of profiles. |
-| Databases and masks | [`makeblastdb`](programs/makeblastdb.md) | Builds a BLAST database from FASTA. |
+| Databases and masks | [`makeblastdb`](programs/makeblastdb.md) | Builds a BLAST database (version 5 by default, or 4) from FASTA, also from a `.gz`, `.bz2` or `.zst` file. |
 | Databases and masks | [`blastdbcmd`](programs/blastdbcmd.md) | Reads a BLAST database: information, sequences, masks. |
 | Databases and masks | [`dustmasker`](programs/dustmasker.md) | Finds low-complexity regions in nucleotide sequences. |
 | Databases and masks | [`segmasker`](programs/segmasker.md) | Finds low-complexity regions in protein sequences. |
 | Databases and masks | [`convert2blastmask`](programs/convert2blastmask.md) | Turns lower-case masking in FASTA into masking information for `makeblastdb`. |
 | Archives | [`blast_formatter`](programs/blast_formatter.md) | Writes the reports of a search again from its `-outfmt 11` BLAST archive, without searching again. |
-| Domain annotation | [`rpsbproc`](programs/rpsbproc.md) | Annotates conserved domains from the `-outfmt 11` results of NCBI's `rpsblast` and `rpstblastn` (see its page). |
+| Domain annotation | [`rpsbproc`](programs/rpsbproc.md) | Annotates conserved domains, sites and motifs from the `-outfmt 11` results of NCBI's `rpsblast` and `rpstblastn` (see its page). |
 
 The search programs read BLAST databases (`-db`) and, except `rpsblast` and `rpstblastn` (as in NCBI), FASTA subjects (`-subject`). Each can read its query from the standard input (`-query -`).
 
 On the release test set, LOSAT's output is the same as NCBI BLAST+ 2.17.0's, byte for byte. The few places where it differs, on purpose, are listed in [Differences from NCBI BLAST+](differences.md). Options LOSAT does not implement are refused with an error, never ignored; see [What LOSAT refuses](refusals.md).
+
+## Where to get it
+
+LOSAT v0.2.0 is published as pre-built files for Linux, macOS, Windows and WASI on [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases), as packages for Linux and macOS on [Bioconda](https://anaconda.org/bioconda/losat), and as the crate `losat` on [crates.io](https://crates.io/crates/losat), which `cargo install` builds. See [Installation](installation.md).
+
+The Rust library (`losat::api`) is the same crate, and the Python binding `pylosat` is on [PyPI](https://pypi.org/project/pylosat/). The WebAssembly engine for web pages is built from the repository. See [Using LOSAT as a library](library.md).
 
 ## What is not in v0.2.0
 
@@ -47,16 +53,17 @@ Options that need NCBI's servers or its GI and IPG databases are not available: 
 
 ## How this manual is organised
 
-- **Getting started.** [Installation](installation.md), a five-minute [Quick start](quick-start.md), and two pages for people who already use another version: [Coming from NCBI BLAST+](from-ncbi-blast.md) and [Coming from LOSAT v0.1.0](from-losat-v0-1.md).
+- **Getting started.** [Installation](installation.md), a five-minute [Quick start](quick-start.md), recipes for everyday tasks in [Common workflows](workflows.md), and two pages for people who already use another version: [Coming from NCBI BLAST+](from-ncbi-blast.md) and [Coming from LOSAT v0.1.0](from-losat-v0-1.md).
 - **Programs.** One page for each program, with its options, input, output and examples.
-- **Reference.** [BLAST databases](databases.md), [Output formats](output-formats.md), [Threads, speed and memory](performance.md), [Platforms and WebAssembly](platforms.md), [Differences from NCBI BLAST+](differences.md), [What LOSAT refuses](refusals.md), [Using LOSAT as a library](library.md) and [Troubleshooting](troubleshooting.md).
+- **Libraries and WebAssembly.** [Using LOSAT as a library](library.md), with pages for [Python (`pylosat`)](libraries/python.md), [Rust (`losat`)](libraries/rust.md) and [WebAssembly and Browser](libraries/webassembly.md).
+- **Reference.** [BLAST databases](databases.md), [Output formats](output-formats.md), [Environment variables](environment.md), [Threads, speed and memory](performance.md), [Platforms and WebAssembly](platforms.md), [Differences from NCBI BLAST+](differences.md), [What LOSAT refuses](refusals.md) and [Troubleshooting](troubleshooting.md).
 
 Every program also describes itself: `losat <program> -help` prints the options of the version you have installed.
 
 ## Reporting problems
 
-If LOSAT fails, or its output differs from NCBI BLAST+ 2.17.0 for the same command, open an issue at [github.com/satoshikawato/LOSAT/issues](https://github.com/satoshikawato/LOSAT/issues). Include the exact command line, the output of `losat --version`, and a small input that shows the problem. See [Troubleshooting](troubleshooting.md) for what else helps. Do not post confidential data. Report a security vulnerability privately, through the repository's Security tab, not in a public issue.
+If LOSAT fails, or its output differs from NCBI BLAST+ 2.17.0 for the same command in a case that [Differences from NCBI BLAST+](differences.md) and [What LOSAT refuses](refusals.md) do not list, open an issue at [github.com/satoshikawato/LOSAT/issues](https://github.com/satoshikawato/LOSAT/issues). Include the exact command line, the output of `losat --version`, and a small input that shows the problem. See [Troubleshooting](troubleshooting.md) for what else helps. Do not post confidential data. Report a security vulnerability privately, through the repository's Security tab, not in a public issue.
 
 ## License
 
-LOSAT is released under the MIT License.
+LOSAT is released under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE).

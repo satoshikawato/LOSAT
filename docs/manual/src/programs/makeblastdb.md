@@ -68,6 +68,8 @@ To search a database with `-db_soft_mask` or `-db_hard_mask`, or to read masked 
 
 A mask finds its sequence by the same id as in NCBI BLAST+. Build with `-parse_seqids` when the mask file names accessions. Several masks go in one comma-separated list; give `-mask_id` as many names as there are mask files (a different count stops with `the size of mask_id does not match that of mask_data`).
 
+A mask file that is damaged stops with makeblastdb's own error and exit status. A text in it with a byte outside the visible ASCII range is stored with `#` in the byte's place, and the run reports it, as makeblastdb does.
+
 ### Hash index
 
 `-hash_index` writes the sequence hash index (`.phi`/`.phd`, `.nhi`/`.nhd`). `blastdbcmd -outfmt %h` prints the hash of each sequence.

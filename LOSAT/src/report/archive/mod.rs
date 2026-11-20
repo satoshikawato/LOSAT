@@ -883,13 +883,14 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // `Run`: BLASTN's database mask that the database lacks (`DbMaskOption::validate_at_open`,
     // review 1 F1 of M4a-2a) and PSIBLAST's PSSM options (`IPssmInputData`; LOSAT's PSIBLAST
     // refuses `-outfmt 11`).
-    const PREFIXES: [&str; 6] = [
+    // (An exception report, `Error: ` and NCBI's `what()` in LOSAT's words, has exit status 255:
+    // `catch_all` below, `cli::NativeError::exception`.)
+    const PREFIXES: [&str; 5] = [
         "BLAST query error:",
         "BLAST Database error:",
         "BLAST engine error:",
         "BLAST options error:",
         "BLAST query/options error:",
-        "Error: NCBI C++ Exception:",
     ];
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
     // ```c++
@@ -930,12 +931,13 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         );
     }
     // One diagnostic per `ERR_POST`: the text of an error is one message even when it has
-    // several lines (an exception's chain), and the macro of an invalid input posts the line
-    // "Please refer to the BLAST+ user manual." as a second one.
-    const REFER: &str = "Please refer to the BLAST+ user manual.";
+    // several lines (an exception's chain), and the macro of an invalid input posts the user
+    // manual footer (`USER_MANUAL_FOOTER`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) as a
+    // second one.
+    let refer_line = crate::wording::USER_MANUAL_FOOTER;
     let text = native.message.trim_end_matches('\n');
-    let (first, refer) = match text.strip_suffix(REFER) {
-        Some(head) if head.ends_with('\n') => (head, Some(REFER)),
+    let (first, refer) = match text.strip_suffix(refer_line) {
+        Some(head) if head.ends_with('\n') => (head, Some(refer_line)),
         _ => (text, None),
     };
     Some(

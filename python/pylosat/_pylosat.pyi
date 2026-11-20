@@ -31,10 +31,12 @@ class Hsp:
         """psiblast's round that found the HSP (1-based); 1 in a search without rounds."""
     @property
     def query_id(self) -> str:
-        """`qaccver`."""
+        """`qaccver`, as text: its bytes with one U+FFFD per maximal ill-formed subpart, as
+        `bytes.decode("utf-8", "replace")` gives; `report.bytes[report.spans[hsp.index]]` holds
+        the row with the exact bytes."""
     @property
     def subject_id(self) -> str:
-        """`saccver`."""
+        """`saccver`, as text, as `query_id`."""
     @property
     def raw_score(self) -> int:
         """`score`."""
@@ -120,6 +122,10 @@ class HspTable:
     Any Arrow consumer reads a table without a copy: `pyarrow.table(hsps)`,
     `polars.DataFrame(hsps)`, `pandas.DataFrame.from_arrow(hsps)`. The columns have the names of
     `-outfmt`, the default report's first.
+
+    The ids (`qaccver`, `saccver`) are text, with one U+FFFD per maximal ill-formed subpart of
+    their bytes, as `bytes.decode("utf-8", "replace")` gives; the exact bytes are those of the
+    HSP's row in a report, `report.bytes[report.spans[hsp.index]]`.
     """
 
     def __new__(cls, ipc_stream: bytes) -> HspTable: ...

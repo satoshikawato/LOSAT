@@ -9,6 +9,8 @@ use std::path::Path;
 use crate::blastinput::value_parsers::SegSpec;
 use crate::cli::NativeError;
 
+use crate::wording::USER_MANUAL_FOOTER;
+
 /// An error that NCBI raises as `CInputException` (an option handler or `Validate`).
 ///
 /// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-176
@@ -19,12 +21,12 @@ use crate::cli::NativeError;
 ///         exit_code = BLAST_INPUT_ERROR;                                      \
 ///     }                                                                       \
 /// ```
+/// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12): directs users to
+/// `USER_MANUAL_FOOTER` ("Please refer to the LOSAT user manual.").
 pub fn options_error(message: &str) -> anyhow::Error {
     NativeError {
         exit: 1,
-        message: format!(
-            "BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n"
-        ),
+        message: format!("BLAST query/options error: {message}\n{USER_MANUAL_FOOTER}\n"),
     }
     .into()
 }
@@ -1265,7 +1267,7 @@ mod tests {
             .contains("Delimiter format is invalid"));
         assert_eq!(
             message(parse_formatting_string("abc").unwrap_err()),
-            "1 BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n"
+            "1 BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
         );
         assert_eq!(
             message(parse_formatting_string("22").unwrap_err()),
@@ -1442,11 +1444,8 @@ mod tests {
             spec: String::new(),
             delimiter: String::new(),
         };
-        let options = |text: &str| {
-            format!(
-                "1 BLAST query/options error: {text}\nPlease refer to the BLAST+ user manual.\n"
-            )
-        };
+        let options =
+            |text: &str| format!("1 BLAST query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
         for program in PROGRAMS {
             let sam = formatting_handler_check(&choice(SAM), program);
             if program.is_sam() {
@@ -1577,9 +1576,10 @@ mod tests {
             assert_eq!(native.exit, 255, "{text:?}");
             assert_eq!(
                 native.message,
-                format!(
+                // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
+                crate::wording::losat_text(&format!(
                     "Error: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{text}' to {kind} (m_Pos = {pos})\n\n"
-                ),
+                )),
                 "{text:?}"
             );
         }

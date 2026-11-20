@@ -6,6 +6,7 @@
 
 - [Installation](installation.md)
 - [Quick start](quick-start.md)
+- [Common workflows](workflows.md)
 - [Coming from NCBI BLAST+](from-ncbi-blast.md)
 - [Coming from LOSAT v0.1.0](from-losat-v0-1.md)
 
@@ -27,13 +28,20 @@
 - [convert2blastmask](programs/convert2blastmask.md)
 - [blast_formatter](programs/blast_formatter.md)
 
+# Libraries and WebAssembly
+
+- [Using LOSAT as a library](library.md)
+  - [Python (`pylosat`)](libraries/python.md)
+  - [Rust (`losat`)](libraries/rust.md)
+  - [WebAssembly and Browser](libraries/webassembly.md)
+
 # Reference
 
 - [BLAST databases](databases.md)
 - [Output formats](output-formats.md)
+- [Environment variables](environment.md)
 - [Threads, speed and memory](performance.md)
 - [Platforms and WebAssembly](platforms.md)
 - [Differences from NCBI BLAST+](differences.md)
 - [What LOSAT refuses](refusals.md)
-- [Using LOSAT as a library](library.md)
 - [Troubleshooting](troubleshooting.md)

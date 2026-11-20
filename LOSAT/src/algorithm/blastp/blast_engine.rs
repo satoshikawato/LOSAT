@@ -2703,25 +2703,10 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.scoring.gap_extend
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:431-435
-    // ```c
-    //         if ((0 <= pvalueForThisPair) && (pvalueForThisPair <= 1)) {
-    //             s_AdjustEvaluesForComposition(hsp_list, pvalueForThisPair, seqSrc,
-    //                                           subject_length,
-    //                                           &queryInfo->contexts[context_index],
-    //                                           LambdaRatio, subject_id);
-    // ```
-    // NCBI 2.17.0's redo passes it the context of the next query (`context_index` has gone past
-    // the query's frames, blast_kappa.c:3590-3592,3680): each query's E-values take the next
-    // query's lengths and search space, and the last query's are read past the contexts, so one
-    // search gives different reports from run to run (DECISIONS 23 a of line NP; memory "No NCBI
-    // bug repro"). A search that IDENTITY resets to mode 0 has no unified P-values
-    // (`identity_cbs_reset`).
-    if args.comp_based_stats.unified_p {
-        bail!(
-            "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 adjusts each query's e-values with the lengths of the next query, and reads past its data for the last one)"
-        );
-    }
+    // Unified P-values (a `u` after the mode, BLASTP only) run in the composition-based redo
+    // (`kappa::evalue_adjust_contexts`: each query's E-values take the lengths and the search
+    // space that NCBI 2.17.0 reads, the next query's of the batch; item X5 of line RG). A search
+    // that IDENTITY resets to mode 0 has none (`identity_cbs_reset`).
     // Every composition mode runs (item SC5 of line NP). Mode 0 runs BLASTP's ordinary traceback
     // (`traceback.rs`), psiblast's first round of a FASTA query too (with psiblast's hit list
     // size, `traceback_hitlist_size`), and the PSSM's of psiblast `-in_pssm` and of its later
@@ -11380,6 +11365,16 @@ fn run_call(
     // Each query's batch (`redo_run::kappa_query_batches`): the heaps that its redo's early
     // termination test reads.
     let kappa_query_batches = redo_run::kappa_query_batches(query_ids.len(), &query_batches);
+    // Each query's context of the E-value adjustment with a composition P-value: the next
+    // query's of its batch, or its own (`kappa::evalue_adjust_contexts`). With unified P-values a
+    // batch whose adjustment NCBI makes with a search space of 0 is refused there.
+    let evalue_adjust_contexts = kappa::evalue_adjust_contexts(
+        &contexts,
+        &search_spaces,
+        &kappa_query_batches,
+        args.searchsp.unwrap_or(0),
+        args.comp_based_stats.unified_p.then(|| args.app.name()),
+    )?;
     // What the redo's plan and its paths read (`redo_run::RedoInputs`).
     let redo = redo_run::RedoInputs {
         args: &args,
@@ -11391,6 +11386,7 @@ fn run_call(
         gapped_params: &gapped_params,
         gapped_gumbel: &gapped_gumbel,
         kappa_query_batches: &kappa_query_batches,
+        evalue_adjust_contexts: &evalue_adjust_contexts,
         build_redo_align_params: &build_redo_align_params,
         x_win_expand,
         ordinary_traceback,
@@ -13628,12 +13624,14 @@ mod tests {
     //     (ECompoAdjustModes) extendParams->options->compositionBasedStats;
     // ```
     #[test]
-    fn test_validate_requested_blastp_support_rejects_unified_p_mode() {
-        let mut args = make_blastp_args();
-        args.comp_based_stats = "2u".to_string();
-        let resolved = args.resolve().expect("resolved blastp args");
-        let err = validate_requested_blastp_support(&resolved).expect_err("unsupported unified p");
-        assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
+    fn test_validate_requested_blastp_support_takes_unified_p_modes() {
+        for value in ["1u", "2u", "3U", "Du", "tu"] {
+            let mut args = make_blastp_args();
+            args.comp_based_stats = value.to_string();
+            let resolved = args.resolve().expect("resolved blastp args");
+            assert!(resolved.comp_based_stats.unified_p, "{value}");
+            validate_requested_blastp_support(&resolved).expect(value);
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-156 (IDENTITY is

@@ -315,6 +315,9 @@ pub(super) struct RedoInputs<'a, P> {
     pub(super) gapped_params: &'a KarlinParams,
     pub(super) gapped_gumbel: &'a Option<BlastGumbelBlk>,
     pub(super) kappa_query_batches: &'a [Range<usize>],
+    /// Each query's context of the E-value adjustment with a composition P-value
+    /// (`kappa::evalue_adjust_contexts`).
+    pub(super) evalue_adjust_contexts: &'a [kappa::EvalueAdjustContext],
     pub(super) build_redo_align_params: &'a P,
     pub(super) x_win_expand: bool,
     pub(super) ordinary_traceback: bool,
@@ -622,6 +625,7 @@ where
         gapped_params,
         gapped_gumbel,
         kappa_query_batches,
+        evalue_adjust_contexts,
         build_redo_align_params,
         x_win_expand,
         blastp_num_threads,
@@ -637,6 +641,7 @@ where
         search_spaces,
         subjects,
         query_batches: kappa_query_batches,
+        evalue_adjust_contexts,
         matrix: args.scoring.matrix,
         gapped_params,
         gapped_gumbel: gapped_gumbel.as_ref(),
@@ -689,6 +694,7 @@ where
         gapped_params,
         gapped_gumbel,
         kappa_query_batches,
+        evalue_adjust_contexts,
         build_redo_align_params,
         ..
     } = *redo;
@@ -770,6 +776,7 @@ where
                             ctx.aa_len as i32,
                             search_spaces[q_idx].length_adjustment as i32,
                             search_spaces[q_idx].effective_space,
+                            evalue_adjust_contexts[q_idx],
                         )
                     });
                     let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new(None);
@@ -879,6 +886,7 @@ where
         gapped_params,
         gapped_gumbel,
         kappa_query_batches,
+        evalue_adjust_contexts,
         build_redo_align_params,
         ..
     } = *redo;
@@ -1006,6 +1014,7 @@ where
                     ctx.aa_len as i32,
                     search_spaces[q_idx].length_adjustment as i32,
                     search_spaces[q_idx].effective_space,
+                    evalue_adjust_contexts[q_idx],
                 );
                 let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
                     return Ok((q_idx, redone_match, kept_for_replay));
@@ -1240,6 +1249,7 @@ where
         gapped_params,
         gapped_gumbel,
         kappa_query_batches,
+        evalue_adjust_contexts,
         build_redo_align_params,
         ..
     } = *redo;
@@ -1318,6 +1328,7 @@ where
             ctx.aa_len as i32,
             search_spaces[q_idx].length_adjustment as i32,
             search_spaces[q_idx].effective_space,
+            evalue_adjust_contexts[q_idx],
         );
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:133-151

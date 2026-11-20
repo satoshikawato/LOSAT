@@ -2118,6 +2118,91 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
   await expect(heading).toBeInViewport({ ratio: 1 });
 });
 
+// Long option names (line WQA's sweep 2, S2-1, 2026-11-20): a name was one box that could not break, so that at 320 and
+// 360 px -min_raw_gapped_score made Run details' Arguments and the results' Options line wider than the window (in the
+// three engines; -max_target_seqs in Chromium). A name stays whole where its line holds it, goes whole to the next line
+// where that one does, and breaks at its line's end only where it is longer than a line, never after its hyphen.
+test('long option names: from 320 to 1280 px the results are no wider than the window, and a name is whole where its line holds it', async ({
+  page,
+}) => {
+  // -export_search_strategy and -logfile are not in the FakeEngine's description. The file of -logfile is shown under its
+  // option's name, with its own (long) name.
+  const extra = `-min_raw_gapped_score 20 -off_diagonal_range 0${BUILD_HAS_ENGINE ? ' -export_search_strategy strategy.asn -logfile a_log_file_name_longer_than_a_line.log' : ''}`;
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${S1}\n`);
+  await openParameters(page);
+  await page.getByTestId('param-max_target_seqs').selectOption('10');
+  await page.getByTestId('param-extra').fill(extra);
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await run(page, 1);
+  await openRun(page, 1);
+  const longNames = ['-max_target_seqs', '-min_raw_gapped_score', '-off_diagonal_range', ...(BUILD_HAS_ENGINE ? ['-export_search_strategy', '-logfile'] : [])];
+  await expect(page.getByTestId('results-run-options').locator('.option-name')).toHaveText(longNames);
+  for (const width of [320, 360, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const tab of ['hits', 'details', 'outputs', ...(BUILD_HAS_ENGINE ? ['run files' as const] : [])] as const) {
+      if (tab === 'run files') await page.getByTestId('format-run-files').click();
+      else await show(page, tab);
+      const state = `${tab} at ${width} px`;
+      await expectNoSideScroll(page, state);
+      // Each option name shown: the width of its line (its block's content box), its own width on one line, the lines
+      // it takes, and whether its hyphen and first letter share a line.
+      const names = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('.option-name')]
+          .filter((name) => name.getClientRects().length > 0)
+          .map((name) => {
+            let block = name.parentElement!;
+            while (getComputedStyle(block).display.startsWith('inline') || getComputedStyle(block).display === 'contents') block = block.parentElement!;
+            const style = getComputedStyle(block);
+            const line = block.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+            const probe = document.createElement('span');
+            probe.textContent = name.textContent;
+            probe.style.cssText = 'position: absolute; visibility: hidden; white-space: nowrap';
+            name.parentElement!.append(probe);
+            const own = probe.getBoundingClientRect().width;
+            probe.remove();
+            // The lines of a range: the tops of its characters' boxes.
+            const linesOf = (range: Range) => new Set([...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top))).size;
+            const range = document.createRange();
+            range.selectNodeContents(name);
+            const lines = linesOf(range);
+            // The hyphen and the letter after it, wherever their text nodes are.
+            const texts: Text[] = [];
+            const walker = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
+            for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) texts.push(node as Text);
+            const at = (offset: number): [Text, number] => {
+              let rest = offset;
+              for (const text of texts) {
+                if (rest <= text.length) return [text, rest];
+                rest -= text.length;
+              }
+              return [texts.at(-1)!, texts.at(-1)!.length];
+            };
+            range.setStart(...at(0));
+            range.setEnd(...at(2));
+            const hyphen = linesOf(range);
+            const box = name.getBoundingClientRect();
+            return { text: name.textContent ?? '', line, own, lines, hyphen, right: box.right };
+          }),
+      );
+      const inner = await page.evaluate(() => window.innerWidth);
+      for (const name of names) {
+        const which = `${state}: ${name.text} (${Math.round(name.own)} px in a line of ${Math.round(name.line)} px)`;
+        expect(name.right, `${which} reaches beyond the window`).toBeLessThanOrEqual(inner + 0.5);
+        expect(name.hyphen, `${which} is broken after its hyphen`).toBe(1);
+        if (name.own <= name.line) expect(name.lines, `${which} is broken although its line holds it`).toBe(1);
+      }
+      expect(names.map((name) => name.text)).toEqual(expect.arrayContaining(longNames));
+    }
+  }
+  // The command as text, its lines broken on a phone, keeps its words on one line (a copy of it can be pasted into a shell).
+  await page.setViewportSize({ width: 320, height: 800 });
+  await show(page, 'details');
+  const argv = page.getByTestId('run-argv');
+  expect((await argv.innerText()).trim()).toBe(((await argv.textContent()) ?? '').trim());
+});
+
 test('the Outputs view lays out blocks of lines near the view, and shows, finds and selects every line', async ({ page, browserName }) => {
   test.skip(!BUILD_HAS_ENGINE, 'an output of many lines');
   await openSearch(page);

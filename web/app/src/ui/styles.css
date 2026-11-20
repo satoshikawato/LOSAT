@@ -469,6 +469,13 @@ input[type='radio'] {
   overflow-wrap: anywhere;
 }
 
+/* The file of -logfile has the name the user gave it, as long as they made it: its line and its button (line WQA's
+   sweep 2, S2-1, 2026-11-20: a name of 46 characters made the Outputs 414 px wide in a 320 px window). */
+.run-file-name,
+.run-file > button {
+  overflow-wrap: anywhere;
+}
+
 .tabs button[aria-selected='true'],
 .tabs button[aria-selected='true']:hover:not(:disabled) {
   border-color: var(--accent);
@@ -493,8 +500,16 @@ input[type='radio'] {
   gap: 0 24px;
 }
 
-/* An option name is not broken after its leading hyphen (S13 screen review L2). */
+/* An option's name (OptionName.vue): a line takes it whole or leaves it whole to the next line, and only a name
+   longer than its line breaks, at the line's end; its lead (the hyphen and the letter after it) never does (S13
+   screen review L2). With the whole name unbreakable, -min_raw_gapped_score made Run details and the results' Options
+   line wider than a 320 or 360 px window (line WQA's sweep 2, S2-1, 2026-11-20). An inline-block name would have let
+   a line break between the name and the ':' or ')' after it in the notices' sentences. */
 .option-name {
+  overflow-wrap: anywhere;
+}
+
+.option-lead {
   white-space: nowrap;
 }
 

@@ -181,4 +181,4 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
 
 ## License
 
-[MIT License](LICENSE). Citation metadata: [CITATION.cff](CITATION.cff).
+LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). Citation metadata: [CITATION.cff](CITATION.cff).

@@ -2241,6 +2241,11 @@
     "default": "1"
    },
    {
+    "flag": "-max_intron_length",
+    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]",
+    "takes_value": true
+   },
+   {
     "flag": "-max_target_seqs",
     "help": "Maximum number of aligned sequences to keep (default: 500)",
     "takes_value": true
@@ -2289,6 +2294,11 @@
    {
     "flag": "-soft_masking",
     "help": "Apply filtering locations as soft masks [default: false]",
+    "takes_value": true
+   },
+   {
+    "flag": "-sum_stats",
+    "help": "Use sum statistics [default: true]",
     "takes_value": true
    },
    {
@@ -2394,6 +2404,7 @@
      "-num_descriptions": "500",
      "-seg": "12 2.2 2.5",
      "-soft_masking": "false",
+     "-sum_stats": "true",
      "-threshold": "13",
      "-window_size": "40",
      "-word_size": "3",

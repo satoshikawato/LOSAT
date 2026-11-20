@@ -60,6 +60,13 @@ jobs:
         run: python3 LOSAT/tests/check_lint_allow_ratchet.py --root .
       - name: Lint-allow ratchet tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_lint_allow_ratchet.py'
+      # No NCBI counterpart: comments quote only NCBI's public-domain source; another project's
+      # code (libstdc++, glibc, Microsoft's C runtime, LMDB, Boost, crates, ...) is cited by file and
+      # lines, not quoted (maintainer, 2026-11-20). The tables of the check are the one list.
+      - name: Foreign-quote check
+        run: python3 LOSAT/tests/check_foreign_quotes.py --root .
+      - name: Foreign-quote check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_foreign_quotes.py'
       # No reference between the programs under LOSAT/src/algorithm/ that
       # LOSAT/tests/program_edges.tsv does not list, and none up the layering
       # common < blastn < tblastx < blastp < tblastn < blastx (SWEBOK 2026-11-04 audit, KA3).
@@ -98,6 +105,17 @@ jobs:
         run: python3 LOSAT/tests/check_tests_in_ci.py --root .
       - name: Tests-in-CI checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_tests_in_ci.py'
+      # No NCBI counterpart: the license texts of the code in LOSAT's binaries. THIRD_PARTY_LICENSES is
+      # generated from the three Cargo.lock files, the Rust standard library inputs and wasi-libc
+      # (scripts/third_party_licenses.py); a dependency change that leaves it stale fails here, and so
+      # does a copy of LICENSE or THIRD_PARTY_NOTICES (LOSAT/, python/) that differs from the root file.
+      # It runs `cargo fetch --locked` (network) for the crates' license files.
+      - name: Third-party licenses are up to date
+        run: python3 scripts/third_party_licenses.py --check
+      - name: Third-party licenses script tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_third_party_licenses.py'
+      - name: Wheel smoke license check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_wheel_smoke_licenses.py'
       - name: Public API checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_public_api.py'
       - name: Release-candidate tooling tests
@@ -134,8 +152,7 @@ jobs:
       # tests run stand-in runners; the tool also calls node and git (both on the runner image).
       - name: WASI benchmark tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_benchmark_wasm_threading.py'
-      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-      # result *= expl(-z * z) / z;
+      # Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143 (a long-double product)
       # LOSAT's one mul_add emulates that long-double line; nothing else may fuse or
       # reassociate floating-point operations (docs/agents/diagnostics.md, "Floating-point contract").
       - name: Floating-point contract (sources and cargo configuration)
@@ -156,6 +173,12 @@ jobs:
         run: python3 LOSAT/tests/ncbi_unit_case_ledger.py check --root .
       - name: Ledger checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ncbi_unit_case_ledger.py'
+      # NCBI's Linux build: makeblastdb's dates come from glibc's localtime. The unit tests of
+      # LOSAT/src/writedb/local_offset.rs compare LOSAT's local time with the fixture
+      # LOSAT/tests/unit/local_time_glibc_vectors.tsv; this compares the fixture with this runner's
+      # glibc (every form of TZ and TZDIR of the fixture, under a second, 2026-11-20).
+      - name: Local time is glibc's
+        run: python3 -I scripts/local_time_glibc_vectors.py --check
       # No NCBI counterpart: release bookkeeping. Pending CHANGELOG entries are one file per pull
       # request (changelog.d/README.md), so two pull requests never conflict in CHANGELOG.md.
       - name: Changelog fragments

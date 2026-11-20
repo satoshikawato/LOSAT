@@ -625,20 +625,9 @@ fn composition_tokens_follow_ncbis_first_character_rule() {
         else {
             unreachable!("blastp")
         };
-        // LOSAT's BLASTP runs every mode (modes 1 and 3 since series SC, SC5) and rejects
-        // unified P-values (DECISIONS 23 a of line NP).
-        let checked = crate::algorithm::blastp::blast_engine::check_options(&args);
-        if !unified {
-            checked.unwrap();
-        } else {
-            assert!(
-                checked
-                    .unwrap_err()
-                    .to_string()
-                    .contains("not supported by LOSAT's BLASTP"),
-                "{token}"
-            );
-        }
+        // LOSAT's BLASTP runs every mode (modes 1 and 3 since series SC, SC5), with unified
+        // P-values too (item X5 of line RG).
+        crate::algorithm::blastp::blast_engine::check_options(&args).unwrap();
     }
     assert!(ncbi_cbs("2", true, true)
         .unwrap_err()

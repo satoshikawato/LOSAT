@@ -13,3 +13,10 @@
   command line, where the Web refused the input. ABI v2 is version 5 (`losat_web2_scan_begin` and
   `losat_web2_register` take the input's program, role and data loaders; `losat_web2_validate`
   gives the data loaders of the argv).
+- LOSAT Web: an input that is still being read when the program or the data loaders of `-conffile`
+  change is read again as the new setting reads it, where its card could keep what the old
+  setting read (a refusal, or records).
+- LOSAT Web: the card of an input whose first line may be a sequence identifier says that the
+  browser reads `DATA_LOADERS` from the file of `-conffile`, not from `.ncbirc`, and gives its
+  remedies ("Put '>' before the first line", the sentence on Fetch) also when the engine's check
+  refuses the input after `-conffile` is taken away.

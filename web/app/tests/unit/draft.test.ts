@@ -478,6 +478,96 @@ describe('SearchDraft inputs', () => {
     expect(checks.at(-1)).toBe('tblastx|query|true');
   });
 
+  // An index that is running when the reader changes ends with the old reader's records or refusal; the input is read
+  // again with the reader in force, whatever the order (line WQA's D13 round 2, M1, 2026-11-20; the review's probe).
+  describe('an index that is running when its reader changes reads the input again with the reader in force', () => {
+    const seqId = (program: string) =>
+      `the first line of the query ("2HHB") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's ${program.toUpperCase()} (start the query with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)`;
+    const until = async (condition: () => boolean): Promise<void> => {
+      for (let i = 0; i < 400 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(condition()).toBe(true);
+    };
+
+    it('-conffile turns the data loaders off while a refused first line is read with them on', async () => {
+      const { draft, data } = setup({
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
+        validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
+      });
+      const readers: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const indexSource = data.indexSource.bind(data);
+      data.indexSource = async (sourceId, reader) => {
+        readers.push(`${reader.program}|${reader.dataLoaders}`);
+        // A large input: the reader with the loaders on takes a while, then refuses the first line.
+        if (reader.dataLoaders) {
+          await gate;
+          throw new Error(seqId(reader.program));
+        }
+        return indexSource(sourceId, reader);
+      };
+      draft.setPaste('query', '2HHB\nMKLV\n');
+      await until(() => readers.length === 1);
+      draft.setExtra('-conffile nol.ini');
+      draft.setConffile(file('nol.ini', '[BLAST]\nDATA_LOADERS=none\n'));
+      await until(() => draft.state.get().dataLoaders === false);
+      release();
+      await draft.idle();
+      expect(readers).toEqual(['blastn|true', 'blastn|false']);
+      expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', name: 'query.fa' });
+      expect(sourceOf(draft, 'query').error).toBeUndefined();
+    });
+
+    it('the program changes while the input is read', async () => {
+      const { draft, data } = setup();
+      const readers: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      data.indexSource = async (_sourceId, reader) => {
+        readers.push(`${reader.program}|${reader.dataLoaders}`);
+        if (reader.program === 'blastn') await gate;
+        throw new Error(seqId(reader.program));
+      };
+      draft.setPaste('query', '2HHB\nACGT\n');
+      await until(() => readers.length === 1);
+      draft.setProgram('tblastx');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      release();
+      await draft.idle();
+      expect(readers).toEqual(['blastn|true', 'tblastx|true']);
+      expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: seqId('tblastx') });
+    });
+
+    it('records read with the loaders off, ending after they turned on again, are read again (and refused)', async () => {
+      const { draft, data } = setup({
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
+        validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
+      });
+      draft.setExtra('-conffile nol.ini');
+      draft.setConffile(file('nol.ini', '[BLAST]\nDATA_LOADERS=none\n'));
+      await draft.idle();
+      expect(draft.state.get().dataLoaders).toBe(false);
+      const readers: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const indexSource = data.indexSource.bind(data);
+      data.indexSource = async (sourceId, reader) => {
+        readers.push(`${reader.program}|${reader.dataLoaders}`);
+        if (reader.dataLoaders) throw new Error(seqId(reader.program));
+        await gate;
+        return indexSource(sourceId, reader);
+      };
+      draft.setPaste('query', '2HHB\nMKLV\n');
+      await until(() => readers.length === 1);
+      draft.setExtra('');
+      await until(() => draft.state.get().dataLoaders);
+      release();
+      await draft.idle();
+      expect(readers).toEqual(['blastn|false', 'blastn|true']);
+      expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: seqId('blastn') });
+    });
+  });
+
   it('reads a text pasted just before a program change once, with the new kind', async () => {
     const { draft, data } = setup();
     const kinds: number[] = [];

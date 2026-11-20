@@ -53,7 +53,7 @@ import { describedSections, formControlOf, formParameters, setFields, type Field
 import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/programs';
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
 import { withUnit } from '../domain/units';
-import type { DataGateway } from '../ports/data';
+import type { DataGateway, SourceRef } from '../ports/data';
 import { failureText, withRemedy } from './availability';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
 import { registryName, unreadableConffile } from './conffile';
@@ -1297,9 +1297,14 @@ export class SearchDraft {
   private async index(role: InputRole, key: string, file: File, parser: FastaParserKind, known?: string): Promise<void> {
     const task = `${role}:${key}`;
     const generation = this.nextGeneration(task);
-    // The engine's reader of the input now: a change of the program or of the data loaders indexes it again.
+    // The engine's reader of the input now. What it finds (the records, or its refusal) stands only while it is the
+    // reader in force: an index that ends after the program or the data loaders changed reads the input again
+    // (`readAgain`), whatever the order of the change and the index (line WQA's D13 round 2, M1, 2026-11-20).
     const reader = this.readerOf(role);
     const current = () => this.generations.get(task) === generation;
+    let ref: SourceRef | undefined;
+    let sourceId: string | undefined;
+    let head: string | undefined;
     // The index holds its source until the form shows it; a superseded or failed index lets it go.
     const holder = `index:${task}:${generation}`;
     const started = this.deps.now();
@@ -1307,20 +1312,23 @@ export class SearchDraft {
     let lead: InputLead | undefined;
     try {
       // The source is added once: its other kind's index reads the same data (no second inflation of a .gz).
-      const ref = known === undefined ? await this.deps.data.addSource(file) : undefined;
-      const sourceId = known ?? ref!.sourceId;
-      this.refs.set(holder, [sourceId]);
+      ref = known === undefined ? await this.deps.data.addSource(file) : undefined;
+      const id = known ?? ref!.sourceId;
+      sourceId = id;
+      this.refs.set(holder, [id]);
       const preview =
-        ref === undefined ? undefined : await this.deps.data.previewSource(sourceId, HEAD_BYTES).catch(() => undefined);
-      const head = preview === undefined ? undefined : headText(preview);
+        ref === undefined ? undefined : await this.deps.data.previewSource(id, HEAD_BYTES).catch(() => undefined);
+      head = preview === undefined ? undefined : headText(preview);
       lead = preview === undefined ? undefined : inputLead(preview, preview.length >= ref!.size);
-      const base = await this.deps.data.indexSource(sourceId, reader);
+      const base = await this.deps.data.indexSource(id, reader);
       if (!current()) return;
+      if (this.readAgain(role, key, file, parser, reader, { ref, sourceId, head, lead })) return;
+      const added = ref;
       this.updateSource(role, key, (source) => ({
         ...source,
         // A file named .gz is inflated by addSource: the card shows its plain name and inflated size.
-        ...(ref === undefined ? {} : { name: ref.name, size: ref.size }),
-        sourceId,
+        ...(added === undefined ? {} : { name: added.name, size: added.size }),
+        sourceId: id,
         status: 'ready',
         base,
         excluded: [],
@@ -1329,11 +1337,12 @@ export class SearchDraft {
         ...(head === undefined ? {} : { head }),
         ...(lead === undefined ? {} : { lead }),
       }));
-      this.noteRevision(sourceId, base.revisionId);
+      this.noteRevision(id, base.revisionId);
       this.scheduleCheck(role, key, 0);
       void this.askAgain();
     } catch (error) {
       if (!current()) return;
+      if (this.readAgain(role, key, file, parser, reader, { ref, sourceId, head, lead })) return;
       this.updateSource(role, key, (source) => ({
         ...source,
         status: 'failed',
@@ -1345,6 +1354,34 @@ export class SearchDraft {
       this.refs.release(holder);
       this.scheduleValidation();
     }
+  }
+
+  /**
+   * Reads the input of a source again when the reader that an index of it used (`reader`) is no longer the reader in
+   * force: the program or the data loaders changed while it was read, and what that reader found (its records or its
+   * refusal) is not what the run's reader finds. The name, the first lines and the lead of the first read stay with the
+   * source; the data layer's source (`sourceId`) is read again, or added again if the first read could not add it.
+   */
+  private readAgain(
+    role: InputRole,
+    key: string,
+    file: File,
+    parser: FastaParserKind,
+    reader: FastaReader,
+    first: { ref: SourceRef | undefined; sourceId: string | undefined; head: string | undefined; lead: InputLead | undefined },
+  ): boolean {
+    const inForce = this.readerOf(role);
+    if (inForce.program === reader.program && inForce.dataLoaders === reader.dataLoaders) return false;
+    const { ref, sourceId, head, lead } = first;
+    this.updateSource(role, key, (source) => ({
+      ...source,
+      ...(ref === undefined ? {} : { name: ref.name, size: ref.size }),
+      ...(head === undefined ? {} : { head }),
+      ...(lead === undefined ? {} : { lead }),
+    }));
+    // The new index holds the data layer's source before this one lets it go (its holder is set synchronously).
+    this.track(this.index(role, key, file, parser, sourceId));
+    return true;
   }
 
   private scheduleCheck(role: InputRole, key: string, delay?: number): void {

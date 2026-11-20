@@ -466,6 +466,8 @@ function fakeAbi(
     discard?: Uint8Array;
     warnings?: readonly Uint8Array[];
     messages?: Uint8Array | 'none';
+    /** The data loaders that `validate` finds in the argv's registry (on when not given). */
+    dataLoaders?: () => boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -486,7 +488,7 @@ function fakeAbi(
     freeChunkBuffer: () => void calls.push('free buffer'),
     validate: (argv: readonly string[]) => {
       calls.push(`validate ${argv.join(' ')}`);
-      return { ok: true, dataLoaders: true };
+      return { ok: true, dataLoaders: options.dataLoaders?.() ?? true };
     },
     // The start of an argv: -parse_deflines reads the inputs of the run together (line WQA's sweep, D7, 2026-11-19).
     start: (argv: readonly string[]) => ({
@@ -655,6 +657,35 @@ describe("the Engine worker's runtime and the files of a run", () => {
     expect((await runtime.run(again.run, () => undefined)).subjectRetained).toBe(false);
     again.close();
     expect(calls.slice(-5)).toEqual(['validate tblastx -query q.fa -subject s.fa -num_threads 1', 'register query', 'register subject', 'run', 'release 105']);
+  });
+
+  // line WQA's D13 round 2, L1, 2026-11-20: the instance keeps a subject for the next run of the same subject only when
+  // it was read as that run reads it. Read with the data loaders off, it is not what a run with them on reads (that
+  // reader refuses a first line that is not a definition line), so the run registers it again; read with them on, it
+  // serves a run without them.
+  it('serves a retained subject read with the data loaders off only to runs without them', async () => {
+    let loaders = false;
+    const { abi, calls } = fakeAbi({ dataLoaders: () => loaders });
+    const runtime = runtimeWith(abi);
+    const once = async () => {
+      const one = workerRun([]);
+      const { subjectRetained } = await runtime.run(one.run, () => undefined);
+      one.close();
+      return subjectRetained;
+    };
+    const subjects = () => calls.filter((call) => call === 'register subject').length;
+    expect(await once()).toBe(false);
+    expect(await once()).toBe(true);
+    expect(subjects()).toBe(1);
+    expect(calls).not.toContain('release 102');
+    loaders = true;
+    expect(await once()).toBe(false);
+    expect(subjects()).toBe(2);
+    // The subject read with the loaders off (handle 102) was let go before the new one was read.
+    expect(calls.slice(calls.lastIndexOf('register query'))).toEqual(['register query', 'release 102', 'register subject', 'run', 'release 104']);
+    loaders = false;
+    expect(await once()).toBe(true);
+    expect(subjects()).toBe(2);
   });
 
   it("forwards the engine's discard of an output (stream 9) to the Data worker with where its error is, between the chunks in their order", async () => {

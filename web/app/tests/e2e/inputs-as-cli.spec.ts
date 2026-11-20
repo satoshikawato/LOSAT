@@ -142,6 +142,9 @@ const SEQ_ID_SUBJECT = { name: 'subject.fa', bytes: `>s\n${PROTEIN}\n` };
 /** The CLI's refusal of the query's first line `2HHB` with the data loaders on (the engine's reader, `seq_id.rs`). */
 const SEQ_ID_REFUSAL =
   "the first line of the query (\"2HHB\") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's BLASTP (start the query with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)";
+/** The card's sentence after the CLI's, on where the browser reads DATA_LOADERS (line WQA's D13 round 2, L3, 2026-11-20). */
+const LOADERS_HINT =
+  'In the browser, LOSAT reads this setting from the file of -conffile, not from .ncbirc: add -conffile NAME to Additional options, and choose a file whose [BLAST] section has DATA_LOADERS=none.';
 
 // D13 (c): the CLI refuses the input too (LOSAT does not fetch); the card gives the CLI's sentence.
 test('a first line that may be a Seq-id is refused with the CLI\'s words', async ({ page, browserName }, testInfo) => {
@@ -150,6 +153,8 @@ test('a first line that may be a Seq-id is refused with the CLI\'s words', async
   await paste(page, 'subject', SEQ_ID_SUBJECT.bytes);
   await shownThen(page, 'query', 'seq-id-words', browserName, async () => {
     await expect(page.getByTestId('query-source-0-error')).toHaveText(`This input cannot be read: ${SEQ_ID_REFUSAL}`);
+    // The CLI's sentence names .ncbirc, which the browser has not: the card says where the setting goes here.
+    await expect(page.getByTestId('query-source-0-loaders-hint')).toHaveText(LOADERS_HINT);
   });
   // The press that puts '>' before the line stays (the sentence's own remedy).
   await expect(page.getByTestId('query-source-0-put-defline-mark')).toBeVisible();
@@ -191,4 +196,41 @@ test('with -conffile setting DATA_LOADERS=none, a first line that may be a Seq-i
   const check = page.getByTestId('query-source-0-check');
   await expect(check).toHaveAttribute('data-check', 'refused', { timeout: 30_000 });
   await expect(check).toContainText(SEQ_ID_REFUSAL);
+  // The check's refusal gets the press that puts '>' before the line, as the reader's does (line WQA's D13 round 2, L2).
+  await expect(page.getByTestId('query-source-0-put-defline-mark')).toBeVisible();
+});
+
+// line WQA's D13 round 2, L2, 2026-11-20: an input read with the data loaders off of `-conffile`, which the engine's check
+// refuses once the option is gone, gets the card's remedies of a Seq-id first line, as an input that the reader refuses
+// gets them: the sentence on Fetch for an accession, and the press that puts '>' before the line, after which the
+// engine reads the line as a defline and accepts the input. The CLI reads `A0A023GPI8` (an accession of UniProt) with
+// the data loaders off as data (the letters A, A, G, P and I; LOSAT's CLI, probe of 2026-11-20) and refuses it with them on.
+test("an input that the engine's check refuses for a first line that may be a Seq-id gets the card's remedies", async ({
+  page,
+  browserName,
+}) => {
+  const settings = '[BLAST]\nDATA_LOADERS=none\n';
+  await program(page, 'blastp');
+  await paste(page, 'query', `A0A023GPI8\n${PROTEIN}\n`);
+  await paste(page, 'subject', SEQ_ID_SUBJECT.bytes);
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('-conffile nol.ini');
+  await page.getByTestId('param-conffile-file').setInputFiles({ name: 'nol.ini', mimeType: 'text/plain', buffer: Buffer.from(settings) });
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  const check = page.getByTestId('query-source-0-check');
+  await expect(check).toHaveAttribute('data-check', 'ok', { timeout: 30_000 });
+  await page.getByTestId('param-extra').fill('');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await shownThen(page, 'query', 'seq-id-check-refused', browserName, async () => {
+    await expect(check).toHaveAttribute('data-check', 'refused', { timeout: 30_000 });
+    await expect(check).toContainText('the first line of the query ("A0A023GPI8") is not a defline and may be a sequence identifier');
+    await expect(page.getByTestId('query-source-0-fetch-hint')).toHaveText('To fetch accessions, put only the accessions in the box, one per line.');
+    await expect(page.getByTestId('query-source-0-put-defline-mark')).toHaveText("Put '>' before the first line");
+    await expect(page.getByTestId('query-source-0-loaders-hint')).toHaveText(LOADERS_HINT);
+  });
+  await page.getByTestId('query-source-0-put-defline-mark').click();
+  await expect(page.getByTestId('query-input')).toHaveValue(`>A0A023GPI8\n${PROTEIN}\n`);
+  await expect(check).toHaveAttribute('data-check', 'ok', { timeout: 30_000 });
+  await expect(page.getByTestId('query-source-0-summary')).toHaveText(`1 record · ${PROTEIN.length} aa`);
+  await expect(page.getByTestId('query-source-0-loaders-hint')).toHaveCount(0);
 });

@@ -12,7 +12,7 @@ import type { Compression } from '../../ports/inflate.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
 export const ABI_VERSION = 5;
-/** Stream 2: the JSON response of describe, register, register_inputs, scan_end, inflate_begin, start and file_end. */
+/** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
 export const INFLATED_STREAM = 5;

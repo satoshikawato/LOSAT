@@ -49,9 +49,9 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
       <pre v-if="engineWarnings !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>
     </div>
     <p v-else-if="reason === 'no-tabular-hits'" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
-      <OptionName name="-num_alignments" /> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved"
-      error<template v-if="tabularError !== undefined">, <PlaceWords :parts="tabularError" /></template>), so this run has no HSP records; outfmt 0 is written as BLAST+
-      writes it.
+      <OptionName name="-num_alignments" /> 0 leaves the hit list of outfmt 6 and 7 empty (the "No hits are being saved"
+      error<template v-if="tabularError !== undefined">, <PlaceWords :parts="tabularError" /></template>), so this run has no HSP records; outfmt 0 is still
+      written.
     </p>
     <p v-else-if="reason === 'no-tabular-output'" class="notice" data-testid="results-notice" data-kind="no-tabular-output">
       {{ NO_HSP_TEXT['no-tabular-output'] }} Their error is <PlaceWords :parts="tabularError ?? []" />.
@@ -90,7 +90,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
         outfmt 0 shows the alignments of the first {{ plural(state.outfmt0Subjects, 'subject') }} of this query<template v-if="sorted">
           in its order of <OptionName name="-sorthits" /></template
         >
-        (BLAST+'s <OptionName name="-num_alignments" />: 250, or <OptionName name="-max_target_seqs" /> when it is
+        (<OptionName name="-num_alignments" />: 250, or <OptionName name="-max_target_seqs" /> when it is
         given). The other subjects' HSPs are in outfmt 6 and 7.
       </p>
       <p
@@ -103,7 +103,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
           >outfmt 0's alignments are linked to {{ formatCount(state.outfmt0Subjects) }} of this query's {{ plural(totals.subjects, 'subject') }}<template
             v-if="outfmt0.alignments !== undefined"
           >
-            (BLAST+'s <OptionName name="-num_alignments" />: {{ formatCount(outfmt0.alignments) }})</template
+            (<OptionName name="-num_alignments" />: {{ formatCount(outfmt0.alignments) }})</template
           >. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
             ({{ plural(outfmt0.hitList, 'subject') }} per query)</template
           >, because <OptionName name="-num_descriptions" /> and <OptionName name="-num_alignments" /> give it another
@@ -113,7 +113,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
           >outfmt 0 shows the alignments of {{ plural(state.outfmt0Subjects, 'subject') }} of this query's {{ formatCount(totals.subjects) }}<template
             v-if="outfmt0.alignments !== undefined"
           >
-            (BLAST+'s <OptionName name="-num_alignments" />: {{ formatCount(outfmt0.alignments) }})</template
+            (<OptionName name="-num_alignments" />: {{ formatCount(outfmt0.alignments) }})</template
           >.
         </template>
         The other subjects' HSPs are in outfmt 6 and 7.

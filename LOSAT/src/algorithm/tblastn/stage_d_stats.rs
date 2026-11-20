@@ -328,12 +328,9 @@ pub(super) fn local_parameters_for_blocks(
         LocalParameterCall::Update { subject_length } => (subject_length, 0),
     };
     let mut link = if options.do_sum_stats {
-        // NCBI c++/src/algo/blast/core/blast_parameters.c:774-815;
-        // c++/include/algo/blast/core/blast_def.h:77-78:
-        // if (options->longest_intron == 0)
-        //     longest_intron = (DEFAULT_LONGEST_INTRON - 2) / 3;
-        // else if ((options->longest_intron - 2)/3 <= 0) linking is disabled.
-        // The conversion has one owner, shared with BLASTX; TBLASTN's search is gapped
+        // NCBI c++/src/algo/blast/core/blast_parameters.c:774-815: the conversion of
+        // `-max_intron_length` has one owner, shared with BLASTX
+        // (`translated_longest_intron`, with NCBI's lines); TBLASTN's search is gapped
         // (`-ungapped` is refused), so the value is positive or the linking is off.
         crate::core::link_hsps::translated_longest_intron(options.max_intron_length, true).map(
             |intron| LocalLinkParameters {

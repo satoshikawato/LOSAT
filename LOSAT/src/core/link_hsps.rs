@@ -73,10 +73,10 @@ pub(crate) const BLAST_GAP_DECAY_RATE: f64 = 0.5;
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:77-78
 /// ```c
-/// /** Default value for the longest intron length, in nucleotides */
+/// #ifndef DEFAULT_LONGEST_INTRON
 /// #define DEFAULT_LONGEST_INTRON 122
 /// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:788-814
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:788-815
 /// ```c
 ///           /* The program may use Blast_UnevenGapLinkHSPs find significant
 ///              collections of distinct alignments */

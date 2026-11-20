@@ -264,6 +264,28 @@ mod tests {
             (((30.0 * std::f64::consts::LN_2) / (0.2 / 32.0)) as i32).max(70)
         );
         assert_eq!(params.cutoff_score, 800);
+        assert!(params.do_link_hsps);
+        // NCBI blast_kappa.c:2428,2450-2457: without linking parameters (`-sum_stats false`,
+        // or a `-max_intron_length` of 1 to 4) the redo does not link and its cutoff is 1.
+        let params = local_kappa_redo_params(
+            ScoringMatrix::Blosum62,
+            11,
+            1,
+            &gapped,
+            &[false, true, true],
+            &LocalSubjectParameters {
+                link: None,
+                ..initial
+            },
+            120,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
+            false,
+            30.0,
+            70,
+        )
+        .unwrap();
+        assert_eq!(params.cutoff_score, 1);
+        assert!(!params.do_link_hsps);
     }
 
     // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:457-463:

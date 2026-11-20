@@ -437,3 +437,47 @@ fn a_hit_of_zero_percent_takes_the_order_of_ncbi_s_calls() {
     ];
     assert_eq!(sorted(by(Some(3), None), false, &hits).hits, vec![0, 1, 2]);
 }
+
+// NCBI BLAST+ 2.17.0 (the same options) printed one subject's HSPs of 51 % (E-value 5e-14), 0 %
+// (1e-06) and 80 % (2e-04), in that E-value order, as 80 %, 51 %, 0 % with -sorthsps 3, and three
+// subjects of one such HSP each (E-values 3e-15, 8e-08, 2e-05) as 80 %, 51 %, 0 % with -sorthits
+// 3. Both lists are cycles of the comparator that the list sort's calls move: a stable sort by the
+// comparator, or a merge in another order, leaves another order.
+#[test]
+fn cycles_move_as_ncbi_s_calls_move_them() {
+    let hsps = vec![
+        hsp(53.1, 5e-14, 20, 39, (30, 68), 0),
+        hsp(32.3, 1e-6, 0, 24, (70, 93), 77),
+        hsp(25.8, 2e-4, 8, 10, (100, 109), 132),
+    ];
+    assert_eq!(
+        sorted(by(None, Some(3)), false, &[hsps]).hsps,
+        vec![vec![2, 0, 1]]
+    );
+    let hits = vec![
+        vec![hsp(53.1, 3e-15, 20, 39, (30, 68), 0)],
+        vec![hsp(32.3, 8e-8, 0, 24, (70, 93), 0)],
+        vec![hsp(25.8, 2e-5, 8, 10, (100, 109), 0)],
+    ];
+    assert_eq!(sorted(by(Some(3), None), false, &hits).hits, vec![2, 0, 1]);
+}
+
+// Two more cycles of SortHspByPercentIdentityDescending (HSPs in E-value order, one without
+// identities), in the orders that g++ 13's std::list::sort leaves them.
+#[test]
+fn hsp_cycles_take_the_order_of_the_list_sort_s_calls() {
+    let first = vec![
+        hsp(100.0, 1e-20, 7, 30, (0, 29), 0),
+        hsp(90.0, 1e-14, 0, 30, (40, 69), 40),
+        hsp(80.0, 1e-10, 4, 10, (80, 89), 80),
+    ];
+    let second = vec![
+        hsp(80.0, 1e-5, 0, 20, (0, 19), 0),
+        hsp(90.0, 1e-20, 7, 10, (30, 39), 30),
+        hsp(70.0, 1e-3, 29, 30, (50, 79), 50),
+    ];
+    assert_eq!(
+        sorted(by(None, Some(3)), false, &[first, second]).hsps,
+        vec![vec![2, 0, 1], vec![2, 1, 0]]
+    );
+}

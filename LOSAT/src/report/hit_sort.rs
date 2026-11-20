@@ -268,12 +268,13 @@ fn list_sort(list: &mut [usize], mut less: impl FnMut(&usize, &usize) -> bool) {
             size *= 2;
         }
     }
-    let (mut start, mut left) = (len, len);
-    while left != 0 {
-        let size = left & left.wrapping_neg();
+    // The runs in front of `start` have the lengths of the binary digits of `start`, the shortest
+    // last; the merged back part runs from `start` to the end.
+    let mut start = len;
+    while start != 0 {
+        let size = start & start.wrapping_neg();
         merge_runs(list, start - size, start, len, &mut front_run, &mut less);
         start -= size;
-        left -= size;
     }
 }
 

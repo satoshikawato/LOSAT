@@ -6692,6 +6692,7 @@ fn call_batches<'a>(
         both_strands: report.both_strands,
         minus_strand: report.minus_strand,
         spans: report.batch_spans,
+        gapped: !report.ungapped,
     }
 }
 
@@ -7696,6 +7697,7 @@ fn post_process_hits_and_write(
                 let subjects = report_write::subject_names_of(report);
                 write_blastn_seqalign(
                     serial,
+                    !report.ungapped,
                     &hit_lists,
                     &QueryNames {
                         records: report.queries,
@@ -8926,12 +8928,14 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
-        // (`BLASTUngappedHspListToSeqAlign`: a subject's Seq-align of Dense-diags, and
-        // objtools/align_format/sam.cpp:66-80 for SAM's one line per subject)
-        // O4a-1 writes the formats that need no Seq-align of Dense-diags: 8, 9, 11, 12 (the
-        // Seq-align formats) and 17 (SAM) of an ungapped search are refused (O4a-2).
-        if args.ungapped && matches!(choice.number, 8 | 9 | 11 | 12 | 17) {
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/sam.cpp:66-80
+        // (SAM's one line per subject of an ungapped search, `-outfmt 17`)
+        // The Seq-aligns of an ungapped search (8, 9, 11, 12) are Dense-diags, which
+        // `report::serial::seqalign::write_seq_align_dendiag` writes (NCBI reference:
+        // ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1274-1311,
+        // `x_UngappedHSPToDenseDiag`); SAM's line of a subject that joins its HSPs (O4a-2) is
+        // not written yet.
+        if args.ungapped && choice.number == 17 {
             anyhow::bail!(
                 "output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
                 choice.number

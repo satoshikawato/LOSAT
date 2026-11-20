@@ -35,7 +35,7 @@ pub(crate) mod xml_reader;
 pub use seqalign::SerialFormat;
 pub(crate) use seqalign::{write_hit_list_seqaligns, write_query_to};
 #[cfg(test)]
-pub use seqalign::{write_query, SeqAlignError};
+pub use seqalign::write_query;
 
 #[cfg(test)]
 mod asn_ber_tests;

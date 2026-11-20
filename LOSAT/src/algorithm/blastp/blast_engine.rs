@@ -5775,7 +5775,7 @@ pub fn run(
     if (stream.failed || badbit) && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
-            message: "BLAST failed to write output\n".to_string(),
+            message: "BLAST failed to write output\n".into(),
         }
         .into());
     }
@@ -6495,12 +6495,12 @@ fn search_pssm_query(
     )
 }
 
-/// Whether the query of `args` is a PSSM (psiblast's `-in_pssm`): a run of the records' entries
+/// Whether the query of `args` is a PSSM (psiblast's `-in_pssm` or `-in_msa`): a run of the records' entries
 /// with no query record then has a query (`ReportOutputs::finish_archive`).
 fn pssm_query(args: &BlastpArgs) -> bool {
     args.psiblast_pssm
         .as_ref()
-        .is_some_and(|options| options.in_pssm.is_some())
+        .is_some_and(|options| options.in_pssm.is_some() || options.in_msa.is_some())
 }
 
 /// Before the search of the FASTA queries `records`: the refusal of a PSSM file that LOSAT cannot
@@ -9070,7 +9070,7 @@ fn write_pairwise_prologs(
                 &mut writer,
                 crate::NCBI_BLAST_VERSION,
                 args.app.ncbi_name(),
-                &blastp_database_name(args, subject_label),
+                blastp_database_name(args, subject_label).as_bytes(),
                 num_sequences,
                 total_letters,
                 pairwise_database.as_ref(),
@@ -9186,7 +9186,7 @@ fn write_reports_without_queries(
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
                     version: crate::NCBI_BLAST_VERSION.to_string(),
-                    database_name: blastp_database_name(args, subject_label),
+                    database_name: blastp_database_name(args, subject_label).into(),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,
                     // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:194-229

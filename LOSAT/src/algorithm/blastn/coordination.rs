@@ -8,10 +8,11 @@
 
 use super::args::{BlastnArgs, QueryStrand};
 use super::constants::{
-    LUT_WIDTH_11_THRESHOLD_10, LUT_WIDTH_11_THRESHOLD_8, MAX_DIRECT_LOOKUP_WORD_SIZE,
-    MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN,
-    MIN_UNGAPPED_SCORE_MEGABLAST, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, X_DROP_GAPPED_FINAL,
-    X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_NUCL, X_DROP_UNGAPPED,
+    BLAST_PENALTY, BLAST_REWARD, LUT_WIDTH_11_THRESHOLD_10, LUT_WIDTH_11_THRESHOLD_8,
+    MAX_DIRECT_LOOKUP_WORD_SIZE, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST,
+    MIN_UNGAPPED_SCORE_BLASTN, MIN_UNGAPPED_SCORE_MEGABLAST, SCAN_RANGE_BLASTN,
+    SCAN_RANGE_MEGABLAST, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_NUCL,
+    X_DROP_UNGAPPED,
 };
 use super::disc_lookup::DiscWordType;
 use super::lookup::{
@@ -32,8 +33,16 @@ enum LookupTableKind {
 /// Task-specific configuration for BLASTN
 pub struct TaskConfig {
     pub effective_word_size: usize,
+    /// The option pair (`-reward`/`-penalty`, else the task's): the reports and the
+    /// endpoint re-evaluation of the traceback read it.
     pub reward: i32,
     pub penalty: i32,
+    /// NCBI's matrix-only scoring: the option pair is 0/0 (`-task rmblastn`).
+    pub matrix_only: bool,
+    /// The engine pair: the matrix, the score table and the Karlin-Altschul statistics
+    /// score with it (1/-3 under matrix-only scoring, else the option pair).
+    pub score_reward: i32,
+    pub score_penalty: i32,
     pub gap_open: i32,
     pub gap_extend: i32,
     pub min_ungapped_score: i32,
@@ -372,6 +381,21 @@ fn task_defaults(task: &str) -> TaskDefaults {
             template_type: DiscWordType::Coding,
             template_length: 0,
         },
+        // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:365-370
+        // ```c++
+        //         }else if ( !NStr::CompareNocase(task, "rmblastn") )
+        //         {
+        //             // -RMH- This blastn only supports full matrix scoring.
+        //             opts->SetMatchReward(0);
+        //             opts->SetMismatchPenalty(0);
+        //         }
+        // ```
+        // The blastn handle with reward 0 and penalty 0 (matrix-only scoring).
+        "rmblastn" => TaskDefaults {
+            reward: 0,
+            penalty: 0,
+            ..task_defaults("blastn")
+        },
         _ => TaskDefaults {
             word_size: 11,
             reward: 2,
@@ -558,10 +582,49 @@ pub fn determine_window_size(args: &BlastnArgs) -> usize {
         })
 }
 
+/// The matrix-only flag and the engine pair of an option pair (reward, penalty).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:359-368
+/// ```c
+///         if ( scoring_options->penalty == 0 && scoring_options->reward == 0 )
+///         {
+///            sbp->matrix_only_scoring = TRUE;
+///            sbp->penalty = BLAST_PENALTY;
+///            sbp->reward = BLAST_REWARD;
+///         }else {
+///            sbp->penalty = scoring_options->penalty;
+///            sbp->reward = scoring_options->reward;
+///         }
+/// ```
+/// (`BLAST_REWARD`/`BLAST_PENALTY`: constants.rs.) The Karlin-Altschul blocks (blast_setup.c:90-96) and alpha/beta (blast_setup.c:796-799)
+/// take the same 1/-3 under matrix-only scoring.
+pub fn engine_scoring_pair(reward: i32, penalty: i32) -> (bool, i32, i32) {
+    if matrix_only_scoring(reward, penalty) {
+        (true, BLAST_REWARD, BLAST_PENALTY)
+    } else {
+        (false, reward, penalty)
+    }
+}
+
+/// Whether an option pair (reward, penalty), as NCBI holds them (16-bit), is matrix-only scoring:
+/// the one test of the concept, for the search (`engine_scoring_pair`), the option checks and the
+/// report's introduction, which NCBI's formatter decides from the same two option values.
+///
+/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:168-170
+/// ```c++
+///     if ( m_Program == "blastn" &&
+///          options.GetMatchReward() == 0 &&
+///          options.GetMismatchPenalty() == 0 )
+/// ```
+pub fn matrix_only_scoring(reward: i32, penalty: i32) -> bool {
+    penalty == 0 && reward == 0
+}
+
 /// Configure task-specific parameters
 pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     let effective_word_size = determine_effective_word_size(args);
     let (reward, penalty, gap_open, gap_extend) = determine_scoring_params(args);
+    let (matrix_only, score_reward, score_penalty) = engine_scoring_pair(reward, penalty);
 
     let min_ungapped_score = match args.task.as_str() {
         "megablast" => MIN_UNGAPPED_SCORE_MEGABLAST,
@@ -660,6 +723,9 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         effective_word_size,
         reward,
         penalty,
+        matrix_only,
+        score_reward,
+        score_penalty,
         gap_open,
         gap_extend,
         min_ungapped_score,
@@ -1619,6 +1685,54 @@ mod tests {
             40
         );
         assert_eq!(determine_window_size(&blastn_args(&["-task", "blastn"])), 0);
+    }
+
+    #[test]
+    fn rmblastn_is_blastn_with_matrix_only_scoring() {
+        // NCBI blast_options_handle.cpp:365-370: rmblastn is the blastn handle with reward 0 and
+        // penalty 0; blast_setup.c:359-368: the engine then scores with BLAST_REWARD and
+        // BLAST_PENALTY (1/-3) while the options keep 0/0.
+        assert_eq!(engine_scoring_pair(0, 0), (true, 1, -3));
+        assert_eq!(engine_scoring_pair(2, -3), (false, 2, -3));
+        assert_eq!(engine_scoring_pair(0, -2), (false, 0, -2));
+        let blastn = configure_task(&blastn_args(&["-task", "blastn"]));
+        for words in [
+            &["-task", "rmblastn"][..],
+            &["-task", "blastn", "-reward", "0", "-penalty", "0"],
+        ] {
+            let args = blastn_args(words);
+            let config = configure_task(&args);
+            assert_eq!((config.reward, config.penalty), (0, 0), "{words:?}");
+            assert!(config.matrix_only, "{words:?}");
+            assert_eq!((config.score_reward, config.score_penalty), (1, -3));
+            assert_eq!(
+                (
+                    config.effective_word_size,
+                    config.gap_open,
+                    config.gap_extend
+                ),
+                (11, 5, 2)
+            );
+            assert!(config.use_dp);
+            assert_eq!(
+                (
+                    config.x_drop_ungapped,
+                    config.x_drop_gapped,
+                    config.x_drop_final
+                ),
+                (20.0, 30.0, 100.0)
+            );
+            assert_eq!(
+                (config.min_diag_separation, config.window_size),
+                (blastn.min_diag_separation, blastn.window_size)
+            );
+            assert_eq!(determine_evalue(&args), 10.0);
+        }
+        assert!(task_dust_by_default("rmblastn"));
+        assert!(!task_uses_megablast_chunks("rmblastn"));
+        // The other tasks keep the option pair as the engine's.
+        assert!(!blastn.matrix_only);
+        assert_eq!((blastn.score_reward, blastn.score_penalty), (2, -3));
     }
 
     #[test]

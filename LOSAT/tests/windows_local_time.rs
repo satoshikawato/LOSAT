@@ -264,6 +264,7 @@ fn now() -> i64 {
 /// Runs makeblastdb and blastdbcmd -info in `dir` with `TZ`; returns the log's current time,
 /// the database's date and the seconds the run took place in.
 fn build(dir: &Path, tz: Option<&[u16]>) -> (String, String, Vec<i64>) {
+    // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
     std::fs::write(dir.join("in.fa"), ">p1\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     let losat = env!("CARGO_BIN_EXE_losat");
     let mut command = Command::new(losat);

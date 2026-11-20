@@ -792,11 +792,11 @@ fn defaults_and_task_overrides_remain_distinct() {
     for program in ["blastn", "tblastx"] {
         parse(program, &["-outfmt", "6"]).unwrap();
     }
-    // NCBI blast_options_handle.cpp:344-380: dc-megablast and blastn-short are tasks of
-    // blastn (Session SD); rmblastn stays an explicit rejection.
+    // NCBI blast_options_handle.cpp:344-370: dc-megablast, blastn-short (Session SD) and rmblastn
+    // (blastn with reward 0 and penalty 0, line RG X6) are tasks of blastn.
     parse("blastn", &["-outfmt", "6", "-task", "dc-megablast"]).unwrap();
     parse("blastn", &["-outfmt", "6", "-task", "blastn-short"]).unwrap();
-    assert!(parse("blastn", &["-outfmt", "6", "-task", "rmblastn"]).is_err());
+    parse("blastn", &["-outfmt", "6", "-task", "rmblastn"]).unwrap();
     // NCBI blast_args.cpp:708-730: -template_type and -template_length require each other
     // and take coding/optimal/coding_and_optimal and 16/18/21.
     parse(
@@ -1029,13 +1029,15 @@ fn numeric_values_are_validated_before_io() {
         unreachable!("blastn")
     };
     assert_eq!(args.gap_open, Some(0));
-    // NCBI's other blastn tasks are rejected explicitly (AGENTS.md rule 2). (`-version` is the
-    // command line's, which the parser's callers refuse by name: line RG item E3,
-    // `version_words_in_an_option_value_are_read_as_ncbi_reads_them`.)
-    let error = crate::cli::render_message(
-        &parse("blastn", &["-outfmt", "6", "-task", "rmblastn"]).unwrap_err(),
-    );
-    assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+    // NCBI's rmblastn task is blastn with reward 0 and penalty 0 (matrix-only scoring,
+    // blast_options_handle.cpp:365-370); every task of NCBI's blastn parses.
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-task", "rmblastn"])
+        .unwrap()
+        .command
+    else {
+        unreachable!("blastn")
+    };
+    assert_eq!(args.task, "rmblastn");
     // `-ungapped` is NCBI's flag (blast_args.cpp:917) and LOSAT's BLASTN searches with it (O4a).
     let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-ungapped"])
         .unwrap()
@@ -1447,7 +1449,7 @@ fn output_formats_follow_the_format_table() {
         formatting_handler_check, parse_formatting_string, report_format, xinclude_check,
     };
     let native = |error: anyhow::Error| match error.downcast::<crate::cli::NativeError>() {
-        Ok(native) => (native.exit, native.message),
+        Ok(native) => (native.exit, String::from_utf8(native.message).unwrap()),
         Err(other) => panic!("not NCBI's error: {other}"),
     };
     for &(programs, value, out, expected) in OUTFMT_ROWS {

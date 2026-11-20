@@ -108,6 +108,7 @@ mod tests {
         use crate::utils::seg::{SegMasker, SegParams};
         let masker =
             |data: &[u8]| SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).mask_sequence(data);
+        // Test protein: made from the first residues of E. coli AsnA (RefSeq NP_418200.1) and other letters.
         let subjects: Vec<Vec<u8>> = [
             "MKTAYIAKQRQISFVKSHFSRQAAAAAAAAAAAAAAAAAPPPPPPPGGGGGSLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ",
             "MSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVYLLPRRGPRLGVRATRKTSERSQPRGRRQPIPKARRPEGRTWAQPGYPWPLYG",

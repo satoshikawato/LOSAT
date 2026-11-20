@@ -138,11 +138,15 @@ impl BlastpDbMasking<'_> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:476-584
 // Each hard chunk is searched alone: its scan, its gapped stage, the purge of the HSPs with
 // common endpoints and the sort by score; its HSPs move by the chunk's offset
-// (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`). A protein's
-// chunks start at their range's left (overlap 0) and no HSP reaches past its chunk, so no HSP is
-// in the merge's overlap strip and the merge appends the chunk's HSPs and sorts the list by score
-// (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766; no limit on the HSPs of a list in the
-// preliminary stage).
+// (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`). NCBI's
+// overlap there is not 0: it compares the chunk's offset with the left of the range after it
+// (the chunker has already moved to it, blast_engine.c:254-258, 579-580) and takes the chunk
+// overlap of 100. The merge only looks at the HSPs of the joined list that end past the new
+// chunk's offset (blast_hits.c:2888-2899); a chunk ends where its range does and no HSP reaches
+// into the mask after it, so there are none, and the merge appends the chunk's HSPs and sorts
+// the list by score (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766; no limit on the
+// HSPs of a list in the preliminary stage). TBLASTN's and TBLASTX's chunks of a long range
+// overlap; this reason does not carry over.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:869-899
 // After the chunks, the E-values of the sequence's HSPs with its whole length and the reap by
 // the preliminary E-value.
@@ -151,8 +155,8 @@ impl BlastpDbMasking<'_> {
 /// word holds no hit of the two-hit scan (the word NCBI's scan reads at its start has no other
 /// hit on its diagonal within the window) and is skipped; the one-hit scan refuses such a chunk
 /// before the search (`HardMaskShape::ShortChunk`), as it refuses a mask that runs to the end
-/// after the chunk from the start (`HardMaskShape::TailMask`) and a range longer than
-/// `MAX_DBSEQ_LEN` (`HardMaskShape::LongRange`).
+/// after the chunk from the start (`HardMaskShape::TailMask`), a mask past the sequence's end
+/// (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN` (`HardMaskShape::LongRange`).
 fn hard_chunks(
     kernel: &BlastpPrelimKernel<'_>,
     scratch: &mut BlastpSubjectScratch,

@@ -915,27 +915,7 @@ pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
 //     return retval;
 // ```
 pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) -> Vec<Hsp> {
-    let mut removed = vec![false; hsps.len()];
-    for i in 0..hsps.len().saturating_sub(1) {
-        if removed[i] {
-            continue;
-        }
-        let a = &hsps[i].hsp;
-        let begin = (a.q_start - 3).max(0);
-        // `if (e < 0) e = hsp_array[i]->query.end;` (blast_hits.c:2569): only the end of an
-        // HSP of length -4 or less near the start of its context (the one-hit word finder with
-        // `-window_size 0`, aa_ungapped.c:1054,1083) lies below -3.
-        let mut end = a.q_end + 3;
-        if end < 0 {
-            end = a.q_end;
-        }
-        for j in i + 1..hsps.len() {
-            let b = &hsps[j].hsp;
-            if !removed[j] && a.context == b.context && b.q_start >= begin && b.q_end <= end {
-                removed[j] = true;
-            }
-        }
-    }
+    let removed = subject_besthit_removed(hsps, |h| &h.hsp);
     let mut discarded = Vec::new();
     let mut i = 0;
     hsps.retain(|h| {
@@ -947,6 +927,45 @@ pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) -> Vec<Hsp> {
         keep
     });
     discarded
+}
+
+/// `subject_besthit` of a list of preliminary HSPs sorted by score: the list of a sequence with
+/// `-db_hard_mask` after each of its chunks joins it (`search_db_masked.rs`; series NP, M4b).
+pub(crate) fn subject_besthit_preliminary(hsps: &mut Vec<PreliminaryHsp>) {
+    let removed = subject_besthit_removed(hsps, |h| h);
+    let mut i = 0;
+    hsps.retain(|_| {
+        let keep = !removed[i];
+        i += 1;
+        keep
+    });
+}
+
+/// Which HSPs of `hsps` (sorted by score; `hsp` gives each one's preliminary HSP) the filter of
+/// `subject_besthit` deletes: one owner of the rule for both lists.
+fn subject_besthit_removed<T>(hsps: &[T], hsp: impl Fn(&T) -> &PreliminaryHsp) -> Vec<bool> {
+    let mut removed = vec![false; hsps.len()];
+    for i in 0..hsps.len().saturating_sub(1) {
+        if removed[i] {
+            continue;
+        }
+        let a = hsp(&hsps[i]);
+        let begin = (a.q_start - 3).max(0);
+        // `if (e < 0) e = hsp_array[i]->query.end;` (blast_hits.c:2569): only the end of an
+        // HSP of length -4 or less near the start of its context (the one-hit word finder with
+        // `-window_size 0`, aa_ungapped.c:1054,1083) lies below -3.
+        let mut end = a.q_end + 3;
+        if end < 0 {
+            end = a.q_end;
+        }
+        for j in i + 1..hsps.len() {
+            let b = hsp(&hsps[j]);
+            if !removed[j] && a.context == b.context && b.q_start >= begin && b.q_end <= end {
+                removed[j] = true;
+            }
+        }
+    }
+    removed
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:399-421

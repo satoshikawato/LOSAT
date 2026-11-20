@@ -2149,8 +2149,20 @@ makeblastdb -in proth.faa -dbtype prot -out phmv -title "seg masks, volumes" -ma
 for c in mid head adjacent gap2 tiny neartail two_tail tail unsorted; do
   makeblastdb -in prot.faa -dbtype prot -out pe_$c -title "edge $c" -mask_data edge_$c.asnt
 done
+makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3a -title "parsed ids, p5 masked in the middle" -mask_data l3_mid.asnt
+makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3b -title "parsed ids, p5 masked at the head" -mask_data l3_head.asnt
+blastdb_aliastool -dblist "ph5 phmv" -dbtype prot -out pal -title "alias of ph5 and phmv"
+python3 ../make_dbmaskp_pbh.py WORK $NCBI_BIN OLD NEW .   # pbh.faa, edge_pbh.asnt, qbh.fna, pbh
 rm -f *.pjs
 ```
+
+The review of PR 1 added `pl3a` and `pl3b` (parsed Seq-ids; `l3_mid.asnt` and `l3_head.asnt` are `edge_mid.asnt` and
+`edge_head.asnt` with `local str "p5"` and one algorithm text, so that the two databases share the Seq-id `p5` under
+different masks), the alias file `pal`, and `pbh` with the blastx query `qbh.fna`: subjects that hold a weaker copy of a
+query stretch, a still weaker one starting a little before it, a hard-masked stretch, and a close copy of the stretch,
+on which `-subject_besthit` after every chunk (NCBI) and once after the merge differ. `make_dbmaskp_pbh.py` (seed 20261121)
+draws rounds of 400 such subjects and keeps the first three on which LOSAT before and after the fix differ (OLD and NEW
+are those two builds; NCBI 2.17.0's rows equal NEW's).
 
 `ps5`, `ph5` and `ph4` have the algorithms 21 (seg, defaults) and 22 (seg `-window 8 -locut 1.8 -hicut 2.1`); `phmv`
 (several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, so its `-db_hard_mask` rows are LOSAT's

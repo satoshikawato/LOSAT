@@ -550,8 +550,8 @@ pub enum HardScan {
     /// start is refused at every word (the Owner's question Q1 of M4b: NCBI BLAST+ 2.17.0 crashes
     /// on some of these sequences and gives rows that differ from the near input's on others,
     /// M/m4b/SURVEY.md §4.1); a hard range longer than `MAX_DBSEQ_LEN`, which NCBI cuts into
-    /// chunks that its merge joins across their overlap, is refused (`HardMaskShape::LongRange`);
-    /// and in a one-hit scan (`-window_size 0`), whose word of a chunk shorter than the word can
+    /// chunks that its merge joins across their overlap, is refused (`HardMaskShape::LongRange`),
+    /// as is a mask that ends past the sequence (`HardMaskShape::PastEnd`); and in a one-hit scan (`-window_size 0`), whose word of a chunk shorter than the word can
     /// start an extension from letters past the chunk, a chunk shorter than `one_hit_word` is
     /// refused (`HardMaskShape::ShortChunk`; in a two-hit scan that word's hit has no other hit
     /// on its diagonal within the window, so it extends nothing).
@@ -605,6 +605,12 @@ pub enum HardMaskShape {
     /// into chunks that overlap and joins their HSPs across the overlap, which LOSAT's protein
     /// programs do not port.
     LongRange { left: i32, right: i32 },
+    /// A mask `[start, end)` that ends past the sequence's `length` letters, in a protein program
+    /// (`HardScan::Protein`; series NP, M4b; review L1 of PR 1). makeblastdb does not write such
+    /// a mask (it refuses one, writedb_impl.cpp:1376-1384), so only a database written by another
+    /// tool, or a damaged one, has it; where such a mask starts past the end, NCBI's chunk before
+    /// it runs past the sequence's letters (blast_engine.c:254-258).
+    PastEnd { start: u32, end: u32, length: usize },
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268 (quoted at
@@ -767,8 +773,9 @@ impl HardMaskShape {
     /// The protein programs' scan (`HardScan::Protein`, series NP, M4b) has chunks that start at
     /// their range's left, so that `ShortLastMask` (a residual before the final chunk's range)
     /// never occurs, every chunk scans a word, a mask that runs to the end after the chunk from the
-    /// start is `TailMask` at every word, and a hard range longer than `MAX_DBSEQ_LEN` is
-    /// `LongRange`.
+    /// start is `TailMask` at every word, a mask that ends past the sequence is `PastEnd` (before
+    /// its chunks: its last hard range would be inverted), and a hard range longer than
+    /// `MAX_DBSEQ_LEN` is `LongRange`.
     pub fn of_scan(
         masks: &[(u32, u32)],
         bounds: Option<(usize, usize)>,
@@ -813,10 +820,15 @@ impl HardMaskShape {
         use crate::core::subject_split::{
             complement_masks, HardChunk, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN,
         };
+        if matches!(scan, HardScan::Protein { .. }) {
+            if let Some(&(start, end)) = masks.iter().find(|&&(_, end)| end as usize > length) {
+                return Some(HardMaskShape::PastEnd { start, end, length });
+            }
+        }
         let mut ranges = std::mem::take(&mut split.ranges);
         complement_masks(masks, length, &mut ranges);
         if matches!(scan, HardScan::Protein { .. }) {
-            // The masks are sorted: no range is inverted.
+            // The masks are sorted and end within the sequence: no range is inverted.
             if let Some(&(left, right)) = ranges
                 .iter()
                 .find(|&&(left, right)| (right - left) as usize > MAX_DBSEQ_LEN)
@@ -913,6 +925,11 @@ impl HardMaskShape {
                 "has a range between its masks, [{left}, {right}), longer than the 5,000,000 \
                  letters of NCBI BLAST+ 2.17.0's chunks, whose overlapping chunks NCBI joins by a \
                  merge across their overlap"
+            ),
+            HardMaskShape::PastEnd { start, end, length } => format!(
+                "has a mask, [{start}, {end}), ending past its {length} letters, which \
+                 makeblastdb does not write (NCBI BLAST+ 2.17.0's chunk before a mask that \
+                 starts past the end reads past the sequence)"
             ),
         }
     }

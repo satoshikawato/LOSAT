@@ -1,0 +1,19 @@
+case	mode_label	threads	commit	native_s	wasm_s	ncbi_s	native_speedup	wasm_speedup	wasm_overhead	native_mib	wasm_mib	ncbi_mib	note
+bp	blastp	1	7f7db49c	41.86	63.38	132.48	3.1648	2.0902	1.5141	31.0	118.8	76.8	commit_7f7db49c
+bp	blastp	16	7f7db49c	2.876	4.234	9.016	3.1349	2.1294	1.4722	56.5	272.1	131.0	commit_7f7db49c
+bpff	blastp-fast	1	7f7db49c	51.31	80.72	210.99	4.1121	2.6139	1.5732	89.2	205.6	94.8	commit_7f7db49c
+bpff	blastp-fast	16	7f7db49c	4.253	7.064	14.703	3.4571	2.0814	1.6609	104.5	343.5	599.5	commit_7f7db49c
+mb	megablast	1	7f7db49c	62.47	82.82	111.21	1.7802	1.3428	1.3258	47.5	173.5	139.5	commit_7f7db49c
+mb	megablast	16	7f7db49c	4.191	6.597	10.301	2.4579	1.5615	1.5741	69.8	290.9	140.2	commit_7f7db49c
+bn	blastn	1	7f7db49c	53.53	85.05	262.0	4.8945	3.0805	1.5888	62.7	211.9	126.9	commit_7f7db49c
+bn	blastn	16	7f7db49c	4.599	7.999	18.354	3.9909	2.2945	1.7393	110.1	332.2	1876.0	commit_7f7db49c
+dc	dc-megablast	1	7f7db49c	14.34	22.02	46.64	3.2524	2.1181	1.5356	97.4	240.8	150.3	commit_7f7db49c
+dc	dc-megablast	16	7f7db49c	1.296	3.06	3.111	2.4005	1.0167	2.3611	122.7	391.8	671.3	commit_7f7db49c
+bns	blastn-short	1	7f7db49c	28.26	35.43	29.32	1.0375	0.8275	1.2537	106.7	197.2	389.9	commit_7f7db49c
+bns	blastn-short	16	7f7db49c	1.607	2.367	29.178	18.1568	12.327	1.4729	141.1	430.3	411.9	commit_7f7db49c
+tbn	tblastn	1	7f7db49c	12.17	17.76	44.94	3.6927	2.5304	1.4593	120.5	239.8	1088.1	commit_7f7db49c
+tbn	tblastn	16	7f7db49c	0.898	1.387	3.994	4.4477	2.8796	1.5445	694.7	1040.7	5534.0	commit_7f7db49c
+bx	blastx	1	7f7db49c	7.52	11.66	17.62	2.3431	1.5111	1.5505	15.0	106.3	94.8	commit_7f7db49c
+bx	blastx	16	7f7db49c	0.523	1.233	1.641	3.1377	1.3309	2.3576	16.0	269.4	95.5	commit_7f7db49c
+tbx	tblastx	1	7f7db49c	61.64	83.6				1.3563	150.5	280.1		commit_7f7db49c
+tbx	tblastx	16	7f7db49c	4.485	10.145				2.262	541.4	618.6		commit_7f7db49c

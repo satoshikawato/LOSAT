@@ -94,6 +94,9 @@ def kind_of_args(args: str, aliases: dict[str, tuple[str, str]]) -> Optional[str
         return "Octets"
     if "(ENUM," in args:
         return "Enumerated|Integer"
+    if re.search(r"\bBigInt\b", args):
+        # `SERIAL_TYPE_BigInt()` is `Int8` (serial/serialimpl.hpp:114-116).
+        return "Integer"
     if re.search(r"\bC_\w+", args):
         return "class:anon"
     m = re.search(r"STD, \(([^)]*)\)", args)
@@ -149,10 +152,29 @@ def kind_agrees(mine: str, ncbi: str) -> bool:
     return ncbi.startswith("?") and mine.replace("String:", "") in ncbi
 
 
+BASE_CLASS = re.compile(r"^class (?:NCBI_\w+ )?C(\w+)_Base\b", re.M)
+HEADERS_BY_CLASS: dict[str, list[Path]] = {}
+
+
+def generated_headers(include: Path, type_name: str) -> list[Path]:
+    """The generated headers of `type_name`: `<Type>_.hpp`, or, for a name that datatool shortens
+    in its file names (`Blast4-queue-search-request`: `Blast4_queue_search_reques_.hpp`), the
+    header that declares its class `C<Type>_Base`."""
+    base = type_name.replace("-", "_")
+    found = sorted(include.glob(f"*/{base}_.hpp"))
+    if found:
+        return found
+    if not HEADERS_BY_CLASS:
+        for path in sorted(include.glob("*/*_.hpp")):
+            for m in BASE_CLASS.finditer(path.read_text(encoding="latin-1")):
+                HEADERS_BY_CLASS.setdefault(m.group(1), []).append(path)
+    return HEADERS_BY_CLASS.get(base, [])
+
+
 def header_constants(include: Path, type_name: str) -> dict[str, int]:
     """The enum constants (`eRepr_raw = 2`) of the generated header of `type_name`."""
     out: dict[str, int] = {}
-    for path in include.glob(f"*/{type_name.replace('-', '_')}_.hpp"):
+    for path in generated_headers(include, type_name):
         for m in ENUM_CONST.finditer(path.read_text(encoding="latin-1")):
             out.setdefault(m.group(1), int(m.group(2)))
     return out
@@ -186,7 +208,7 @@ def blocks_by_key(objects: Path) -> tuple[
 def header_typedefs(include: Path, type_name: str) -> dict[str, set[str]]:
     """`T<Member>` -> the C++ types of its typedefs in the generated header of `type_name`."""
     out: dict[str, set[str]] = {}
-    for path in include.glob(f"*/{type_name.replace('-', '_')}_.hpp"):
+    for path in generated_headers(include, type_name):
         for m in TYPEDEF.finditer(path.read_text(encoding="latin-1")):
             out.setdefault(m.group(2), set()).add(m.group(1).strip())
     return out

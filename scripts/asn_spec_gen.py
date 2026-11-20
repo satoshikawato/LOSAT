@@ -3,8 +3,10 @@
 
 A maintainer tool: LOSAT's build does not run it, and users need nothing of it. It reads NCBI's
 ASN.1 modules (`c++/src/objects/**/*.asn`) and the storage overrides of their `.def` files, takes
-the closure of the types that a root type reaches (by default NCBI-ScoreMat's
-`PssmWithParameters`, the PSSM file of psiblast and tblastn `-in_pssm`), and writes the table that
+the closure of the types that the root types reach (by default NCBI-ScoreMat's
+`PssmWithParameters`, the PSSM file of psiblast and tblastn `-in_pssm`, and NCBI-Blast4's
+`Blast4-archive`, `Blast4-request` and `Blast4-get-search-strategy-reply`, the BLAST archive of
+`-outfmt 11` and the search strategy files), and writes the table that
 LOSAT's generic ASN.1 text reader runs on (`report::serial::asn_types`). Its companion check,
 `asn_spec_check.py`, compares the table with the type information that NCBI's datatool generated
 (`*_.cpp`, `*_.hpp`) and must pass whenever the table is regenerated.
@@ -26,7 +28,7 @@ What the table holds, per type (named, or anonymous at its place of use):
 
 The storage of an INTEGER is NCBI's C++ type, from the `.def` files: `TSeqPos` and `unsigned` are
 Uint4, `TSignedSeqPos` and `int` Int4, `TGi`, `TEntrezId`, `TIntId` and `Int8` Int8 (NCBI_INT8_GI,
-corelib/ncbimisc.hpp:981-982), `Int2` Int2.
+corelib/ncbimisc.hpp:981-982), `Int2` Int2; datatool's `BigInt` is an INTEGER of Int8 storage.
 """
 from __future__ import annotations
 
@@ -489,6 +491,12 @@ class Table:
                 raise KeyError(typ.name)
             return self.named_type(target, typ.name)
         if isinstance(typ, Prim):
+            if typ.name == "BigInt":
+                # datatool's 64-bit INTEGER (`SERIAL_TYPE_BigInt()` is `Int8`, serial/serialimpl.hpp:
+                # 114-116): its type information reads it as the INTEGER of an Int8 (`CParent::Read`,
+                # serial/stdtypes.cpp:1276-1288); only the binary writer may tag it otherwise, and
+                # not by default (`m_CStyleBigInt(false)`, objostrasnb.cpp:75).
+                return Entry(-1, "Integer", storage=storage or "Int8")
             kinds = {
                 "INTEGER": ("Integer", ""), "BOOLEAN": ("Boolean", ""), "NULL": ("Null", ""),
                 "REAL": ("Real", ""), "VisibleString": ("String", "Visible"),
@@ -660,7 +668,13 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     return "\n".join(out)
 
 
-DEFAULT_ROOTS = [("NCBI-ScoreMat", "PssmWithParameters")]
+# The PSSM's root first: the types it reaches keep their indices when roots are added after it.
+DEFAULT_ROOTS = [
+    ("NCBI-ScoreMat", "PssmWithParameters"),
+    ("NCBI-Blast4", "Blast4-archive"),
+    ("NCBI-Blast4", "Blast4-request"),
+    ("NCBI-Blast4", "Blast4-get-search-strategy-reply"),
+]
 
 
 def build_table(source: Path, roots: list[tuple[str, str]]) -> Table:

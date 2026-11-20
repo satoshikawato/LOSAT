@@ -53,7 +53,7 @@ Each release from v0.2.0 on lists eight items on the [Releases](https://github.c
 | WASI threads | `wasm32-wasip1-threads` | `.tar.gz` | `losat.wasm` |
 | Source crate | none | `.crate` | none |
 
-The archives keep the name `LOSAT` of v0.1.0, for example `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz`. The program inside is `losat`. The source crate is `losat-0.2.0.crate`. An archive unpacks into a folder of its own name that holds the program, `LICENSE`, `README.md` and `RELEASE-METADATA.json`.
+The archives keep the name `LOSAT` of v0.1.0, for example `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz`. The program inside is `losat`. The source crate is `losat-0.2.0.crate`. An archive unpacks into a folder of its own name that holds the program, `LICENSE`, `THIRD_PARTY_NOTICES` and `THIRD_PARTY_LICENSES` (the notices and licenses of the code from other projects), `README.md` and `RELEASE-METADATA.json`.
 
 The release also carries `SHA256SUMS`, a software bill of materials (`LOSAT-0.2.0.cdx.json`) and GitHub artifact attestations for the eight files.
 

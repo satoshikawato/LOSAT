@@ -1,5 +1,5 @@
 #!/bin/bash
-# Evidence of PD-LOSAT-NCBI-DEFECTS exception 16 and of the rule-2 items of version 1.53:
+# Evidence of PD-LOSAT-NCBI-DEFECTS exception 16 and of the rule-2 items of version 1.54:
 # BLASTP unified P-values (-comp_based_stats 1u, 2u, 3u) in NCBI BLAST+ 2.17.0.
 #
 # usage: probe.sh NCBI_BIN REPO WORK [LOSAT]

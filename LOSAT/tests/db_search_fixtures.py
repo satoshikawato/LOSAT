@@ -87,11 +87,15 @@ LOSAT/tests/db_search (README.md there says how they were built).
   <row_id>.out by `freeze` (which runs NCBI for such a row and keeps only its stdout) and checked
   against `stdout_sha256`. Its `rc` and stderr are LOSAT's. Where NCBI crashes on such a row, the frozen
   stdout is the part of the report that LOSAT writes before it refuses; `freeze` keeps it when NCBI's
-  stdout stops earlier or later but agrees up to that point (`frozen_stdout`). A rejection row whose covers
-  cell has `ncbi-near: ROW_ID` expects as its stdout the frozen stdout of the `ncbi` row ROW_ID of the same
-  outfmt (for example a copy row whose query file is the batches that LOSAT writes before it refuses, where
-  NCBI's own run of the row reads past its array in those batches): `freeze` runs nothing for it and copies
-  ROW_ID's stdout cells (`stdout_sha256`, `stdout_bytes`); it has no frozen file of its own.
+  stdout stops earlier or later but agrees up to that point (`frozen_stdout`). A rejection row whose
+  `covers` cell has `ncbi-near: ROW_ID` takes its stdout from the `ncbi` row ROW_ID of the same outfmt,
+  NCBI's run of a near input that writes the bytes LOSAT writes before it refuses: an input that fails at
+  the same step where NCBI crashes on the row's own (line RG item X4: the failed batch of a
+  Smith-Waterman redo), or the query batches before the batch that LOSAT refuses and NCBI searches on
+  (X4: the negative CHUNK_SIZE pair whose chunks leave gaps; X5: a copy row whose query file holds the
+  batches that LOSAT writes before it refuses, where NCBI's own run of the row reads past its array
+  there). `freeze` runs nothing for such a row and copies ROW_ID's stdout columns, `check` reads
+  ROW_ID's frozen stdout (`frozen_id`), and the row keeps its own rc and stderr (LOSAT's).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -963,6 +967,7 @@ def freeze(args: argparse.Namespace) -> int:
         source = by_id.get(near)
         if source is None or source["kind"] != "ncbi" or near_row_id(source) or source["outfmt"] != row["outfmt"]:
             raise SystemExit(f"{row['row_id']}: ncbi-near {near} is not an ncbi row of its own run with the same outfmt")
+        # A rejection row keeps its own rc and stderr (LOSAT's) and takes the near run's stdout.
         keys = ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256") if row["kind"] == "ncbi" \
             else ("stdout_sha256", "stdout_bytes")
         row.update({key: source[key] for key in keys})

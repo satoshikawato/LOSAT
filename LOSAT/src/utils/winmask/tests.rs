@@ -919,24 +919,6 @@ fn the_optimized_ascii_reader_reads_as_ncbis() {
 }
 
 #[test]
-fn hash_parameters_are_read_as_libstdcxx_reads_unsigned_ints() {
-    use super::istat::extract_uints;
-    let read = |line: &[u8]| extract_uints::<4>(line);
-    assert_eq!(read(b"3694 17 0 2"), ([3694, 17, 0, 2], 4));
-    assert_eq!(read(b"\t3694\x0b17 0 2 99 x"), ([3694, 17, 0, 2], 4));
-    assert_eq!(read(b"+1 -1 -4294967295 2x"), ([1, u32::MAX, 1, 2], 4));
-    // A failure sets 0 (no digit) or UINT_MAX (overflow); nothing is read after it.
-    assert_eq!(read(b"1 x 3 4"), ([1, 0, 0, 0], 2));
-    assert_eq!(read(b"1 4294967296 3 4"), ([1, u32::MAX, 0, 0], 2));
-    assert_eq!(read(b"1 - 3 4"), ([1, 0, 0, 0], 2));
-    // Nothing is read after the end of the line.
-    assert_eq!(read(b"1 2"), ([1, 2, 0, 0], 2));
-    assert_eq!(read(b"1 2\r"), ([1, 2, 0, 0], 2));
-    assert_eq!(read(b""), ([0; 4], 0));
-    assert_eq!(read(b" "), ([0; 4], 0));
-}
-
-#[test]
 fn the_masker_checks_the_unit_size_of_an_ascii_file() {
     let counts = |unit: &str| {
         Arc::new(

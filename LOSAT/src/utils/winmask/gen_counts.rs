@@ -49,9 +49,9 @@ pub trait GenomeSource {
     fn read(&mut self, f: &mut dyn FnMut(&[u8])) -> Result<(), Self::Error>;
     /// Posts again what the last `read` posted: a read of the same input that NCBI makes and
     /// LOSAT does not repeat.
-    fn repeat_posts(&mut self);
+    fn repeat_posts(&mut self) -> Result<(), Self::Error>;
     /// `LOG_POST( line )`.
-    fn log(&mut self, line: &str);
+    fn log(&mut self, line: &str) -> Result<(), Self::Error>;
 }
 
 /// Why the generator wrote no counts.
@@ -79,7 +79,9 @@ pub fn generate<S: GenomeSource>(
     if unit_size == 0 {
         let mut genome = settings.genome_size;
         if genome == 0 {
-            source.log("computing the genome length");
+            source
+                .log("computing the genome length")
+                .map_err(GenError::Source)?;
             let mut total = 0u64;
             source
                 .read(&mut |letters| total = total.wrapping_add(letters.len() as u64))
@@ -96,7 +98,7 @@ pub fn generate<S: GenomeSource>(
     let mut stats = Stats::new(settings);
     let mut counter = UnitCounter::new(unit_size, prefix_size)?;
     let prefixes = 1u32 << (2 * prefix_size);
-    source.log("pass 1");
+    source.log("pass 1").map_err(GenError::Source)?;
     let shared = prefix_size == 0 && !stats.no_extra_pass;
     for prefix in 0..prefixes {
         counter.count(prefix, source).map_err(GenError::Source)?;
@@ -110,10 +112,10 @@ pub fn generate<S: GenomeSource>(
     let index = stats.first_pass_statistics(writer);
     if !stats.no_extra_pass {
         stats.prepare_second_pass(&index);
-        source.log("pass 2");
+        source.log("pass 2").map_err(GenError::Source)?;
         for prefix in 0..prefixes {
             if shared {
-                source.repeat_posts();
+                source.repeat_posts().map_err(GenError::Source)?;
             } else {
                 counter.count(prefix, source).map_err(GenError::Source)?;
             }

@@ -9,12 +9,13 @@
 
 use rustc_hash::FxHashMap;
 
+use crate::ncbi_app::files::Ostream;
 use crate::ncbi_app::Diag;
 use crate::seqid::label::both_version;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::ParsedSeqId;
 
-use super::counts::GenomeInput;
+use super::counts::{post_after_output, GenomeInput};
 use super::work::Failure;
 
 /// The length of a sample.
@@ -84,7 +85,12 @@ impl Tracker<'_> {
     /// `report_match`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_dup_table.cpp:374-387
-    fn report_match(&self, run: &Run, diag: &mut Diag) {
+    fn report_match(
+        &self,
+        run: &Run,
+        out: &mut Ostream<'_>,
+        diag: &mut Diag,
+    ) -> Result<(), Failure> {
         let s_off = run.s_offset as u64 + u64::from(SAMPLE_SKIP);
         let q_off = u64::from(run.loc.1);
         let span = u64::from(run.count.wrapping_mul(SAMPLE_SKIP));
@@ -103,24 +109,32 @@ impl Tracker<'_> {
             )
             .as_bytes(),
         );
-        diag.post_bytes(&text);
+        post_after_output(out, diag, &text)
     }
 
     /// The end of a run: reported when it has enough samples.
-    fn end(&self, run: &Run, diag: &mut Diag) {
+    fn end(&self, run: &Run, out: &mut Ostream<'_>, diag: &mut Diag) -> Result<(), Failure> {
         if run.count >= MIN_MATCH_COUNT {
-            self.report_match(run, diag);
+            self.report_match(run, out, diag)?;
         }
+        Ok(())
     }
 
     /// A run whose next sample was not at `subject_offset`: ended when the offset has passed
     /// it, else kept.
-    fn pass(&mut self, run: Run, subject_offset: usize, diag: &mut Diag) {
+    fn pass(
+        &mut self,
+        run: Run,
+        subject_offset: usize,
+        out: &mut Ostream<'_>,
+        diag: &mut Diag,
+    ) -> Result<(), Failure> {
         if run.s_offset + SAMPLE_SKIP as usize + MAX_OFFSET_ERROR < subject_offset {
-            self.end(&run, diag);
+            self.end(&run, out, diag)?;
         } else {
             self.aux_list.push(run);
         }
+        Ok(())
     }
 
     /// `tracker::operator()`: the sample at `subject_offset` was found at `locs` (in order):
@@ -129,7 +143,13 @@ impl Tracker<'_> {
     /// place starts or continues a run.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_dup_table.cpp:408-500
-    fn track(&mut self, subject_offset: usize, locs: &[SampleLoc], diag: &mut Diag) {
+    fn track(
+        &mut self,
+        subject_offset: usize,
+        locs: &[SampleLoc],
+        out: &mut Ostream<'_>,
+        diag: &mut Diag,
+    ) -> Result<(), Failure> {
         let main = std::mem::take(&mut self.main_list);
         let (mut r, mut it) = (0, 0);
         let start = |loc: SampleLoc, count| Run {
@@ -145,7 +165,7 @@ impl Tracker<'_> {
                 self.aux_list.push(start(locs[it], 1));
                 it += 1;
             } else if it == locs.len() || locs[it] > main[r].loc {
-                self.pass(main[r], subject_offset, diag);
+                self.pass(main[r], subject_offset, out, diag)?;
                 r += 1;
             } else if locs[it] < main[r].loc {
                 self.aux_list.push(start(locs[it], 1));
@@ -158,7 +178,7 @@ impl Tracker<'_> {
                     if subject_offset < expected - MAX_OFFSET_ERROR {
                         self.aux_list.push(run);
                     } else if subject_offset > expected + MAX_OFFSET_ERROR {
-                        self.end(&run, diag);
+                        self.end(&run, out, diag)?;
                     } else {
                         count = run.count + 1;
                     }
@@ -169,15 +189,17 @@ impl Tracker<'_> {
             }
         }
         self.main_list = std::mem::take(&mut self.aux_list);
+        Ok(())
     }
 
     /// `~tracker`: the runs left, reported when they have enough samples.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_dup_table.cpp:390-405
-    fn finish(&self, diag: &mut Diag) {
+    fn finish(&self, out: &mut Ostream<'_>, diag: &mut Diag) -> Result<(), Failure> {
         for run in &self.main_list {
-            self.end(run, diag);
+            self.end(run, out, diag)?;
         }
+        Ok(())
     }
 }
 
@@ -195,16 +217,16 @@ fn best_id_label(ids: &[ParsedSeqId]) -> Vec<u8> {
 }
 
 /// `CheckDuplicates` over the input of `-mk_counts`: one read of every file, the reader's
-/// posts and the reports in the order NCBI makes them.
+/// posts and the reports in the order NCBI makes them, each after the output written so far.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_dup_table.cpp:540-583
-pub(super) fn check_duplicates(input: &mut GenomeInput<'_, '_, '_>) -> Result<(), Failure> {
+pub(super) fn check_duplicates(input: &mut GenomeInput<'_, '_, '_, '_>) -> Result<(), Failure> {
     let mut table = DupTable::default();
-    input.each_record(&mut |record, diag| {
+    input.each_record(&mut |record, out, diag| {
         let data = &record.iupac;
         let length = data.len() as u32;
         if length < MIN_SEQ_LENGTH {
-            return;
+            return Ok(());
         }
         let id = best_id_label(&record.ids);
         let data_len = (length - SAMPLE_SKIP) as usize;
@@ -217,7 +239,7 @@ pub(super) fn check_duplicates(input: &mut GenomeInput<'_, '_, '_>) -> Result<()
         if !table.samples.is_empty() {
             for i in 0..data_len {
                 if let Some(locs) = table.samples.get(&data[i..i + SAMPLE_LENGTH]) {
-                    tracker.track(i, locs, diag);
+                    tracker.track(i, locs, out, diag)?;
                 }
             }
         }
@@ -230,6 +252,6 @@ pub(super) fn check_duplicates(input: &mut GenomeInput<'_, '_, '_>) -> Result<()
             main_list,
             aux_list: Vec::new(),
         };
-        tracker.finish(diag);
+        tracker.finish(out, diag)
     })
 }

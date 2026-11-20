@@ -41,6 +41,64 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
     }
 }
 
+/// The first read of the database `database` (`-db`), where NCBI reads it, in the preliminary
+/// search of the first batch with a valid context (`search`): its stream, or the read's error (a
+/// database without sequences, a Gumbel block's shortest length that leaves no residue, a sequence
+/// file that cannot be read; with `-in_pssm`, SeqDB's own error), and whether that error comes
+/// before the batch's setup checks (`PsiSearchReadFailure::precedes_setup_checks`). One owner for
+/// the search and the set-up of a refused batch (`refused_batch_stop`).
+fn first_database_read<'d>(
+    database: &'d TblastnDatabase,
+    resolved: &ResolvedTblastnArgs,
+    subject_set: &SubjectSetNumbers,
+) -> (
+    Result<crate::algorithm::common::x_db_stream::XDbStream<'d>>,
+    bool,
+) {
+    // `-in_pssm` (PSI-TBLASTN): `CPsiBlast` reads the database without `CLocalBlast`'s
+    // catch, so its first read gives SeqDB's own error (`OID not found`, a sequence file
+    // not found; `shared::PsiSearchReadFailure`, psiblast's rule), where a FASTA query
+    // gets `Database memory map file error`.
+    let pssm_failure = resolved
+        .pssm
+        .as_ref()
+        .and_then(|_| database.pssm_search_read_failure());
+    let before_setup = pssm_failure
+        .as_ref()
+        .is_some_and(|failure| failure.precedes_setup_checks());
+    let read = if database.first_oid_read_fails() {
+        Err(match pssm_failure {
+            Some(failure) => failure.error("TBLASTN"),
+            None => PreliminaryReadError("Database memory map file error").into(),
+        })
+    } else if !subject_set.old_fsc
+        && crate::stats::setup::setup_subject_length(
+            0,
+            1,
+            Some((database.numbers().min_length, true)),
+        )
+        .is_none()
+    {
+        Err(PreliminaryReadError("The average subject length is too short").into())
+    } else if let Some(failure) = pssm_failure {
+        Err(failure.error("TBLASTN"))
+    } else {
+        database.x_stream(resolved.num_threads)
+    };
+    (read, before_setup)
+}
+
+/// What NCBI's engine error is of a failed first read of the database (`first_database_read`)
+/// in a batch with a valid context: the preliminary search's text, or SeqDB's own error with
+/// `-in_pssm` (`TblastnDatabase::pssm_search_read_failure`); `Err`: LOSAT's refusal.
+fn database_read_failure(error: anyhow::Error) -> Result<anyhow::Error> {
+    match error.downcast::<PreliminaryReadError>() {
+        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.0)),
+        Err(error) if error.is::<crate::cli::NativeError>() => Ok(error),
+        Err(error) => Err(error),
+    }
+}
+
 impl TblastnArgs {
     // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
     // results = lcl_blast.Run();
@@ -1700,8 +1758,80 @@ fn search(
                     outputs.formats.iter().map(|format| format.outfmt),
                 ),
             "TBLASTN",
-        ),
+        )
+        .map(|scopes| scopes.with_refusal(args.scope_refusal.clone())),
     );
+    // The batch of LOSAT's refusal stops with NCBI's error of its set-up where NCBI's set-up of the
+    // batch fails for the subjects, in the one form of every program
+    // (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
+    // `-export_search_strategy` the refusal (no request of the batch: `stop_batch` stays `None`),
+    // else the error of the set-up of the batch's records that are first in their scope
+    // (`stage_d_pipeline::set_up_batch`, then the first read of the database, as the search of a
+    // batch fails below), else the refusal. NCBI's errors of the batches before come first: their
+    // searches fail before the stop is acted on.
+    let mut batches = batches;
+    if let Some((warnings, refusal)) = batches.stop.take_if(|_| batches.scope_refusal) {
+        let (input_done, searched_done) = (batches.input_done, batches.searched_done);
+        let error = crate::blastinput::query_batch::refused_batch_error(
+            refusal,
+            args.strategy.is_some(),
+            |first| {
+                let queries: Vec<usize> = (searched_done..searched_queries.len())
+                    .take_while(|&query| query_input.ordinal(query) < input_done + first.len())
+                    .filter(|&query| first[query_input.ordinal(query) - input_done])
+                    .collect();
+                let letters: Vec<Vec<u8>> = queries
+                    .iter()
+                    .map(|&query| searched_queries[query].seq().to_vec())
+                    .collect();
+                let whole: Vec<(&[u8], usize)> = queries
+                    .iter()
+                    .map(|&query| {
+                        (
+                            input_records[query_input.ordinal(query)].seq(),
+                            query_input.placements.offset(query),
+                        )
+                    })
+                    .collect();
+                let seg = resolved.seg.params();
+                let profile = LocalStageDProfile {
+                    seg: seg.as_ref(),
+                    soft_masking: resolved.soft_masking,
+                    mask_lowercase: resolved.lcase_masking,
+                    genetic_code: resolved.db_gencode,
+                    expect_value: resolved.evalue,
+                    max_target_seqs: resolved.hitlist_size,
+                    query_records: &whole,
+                    subject_set,
+                    engine_positives,
+                    culling_limit: resolved.culling_limit,
+                    pssm: None,
+                    fetch_excluded: None,
+                };
+                let setup = super::stage_d_pipeline::set_up_batch(
+                    &letters,
+                    match database {
+                        Some(_) => SubjectLetters::Packed(&[]),
+                        None => subject_letters,
+                    },
+                    profile,
+                    compo_adjust_mode,
+                    resolved.sum_stats,
+                    scoring,
+                );
+                match setup {
+                    Err(error) => batch_failure(error).ok(),
+                    Ok(validity) if !validity.iter().any(|&valid| valid) => None,
+                    Ok(_) => match first_database_read(database?, &resolved, &subject_set).0 {
+                        Ok(_) => None,
+                        Err(error) => database_read_failure(error).ok(),
+                    },
+                }
+            },
+        );
+        batches.scope_refusal = !error.is::<crate::cli::NativeError>();
+        batches.stop = Some((warnings, error));
+    }
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch, and
     // LOSAT's limits of the search apply where it searches (`check_search_limits`): a run that
     // stops at its first batch (or before it, `pssm_stop` above) gives NCBI's error.
@@ -1813,35 +1943,12 @@ fn search(
                 // catch, so its first read gives SeqDB's own error (`OID not found`, a sequence file
                 // not found; `shared::PsiSearchReadFailure`, psiblast's rule), where a FASTA query
                 // gets `Database memory map file error`.
-                let pssm_failure = resolved
-                    .pssm
-                    .as_ref()
-                    .and_then(|_| database.pssm_search_read_failure());
-                read_before_setup = pssm_failure
-                    .as_ref()
-                    .is_some_and(|failure| failure.precedes_setup_checks());
-                let read = if database.first_oid_read_fails() {
-                    Err(match pssm_failure {
-                        Some(failure) => failure.error("TBLASTN"),
-                        None => PreliminaryReadError("Database memory map file error").into(),
-                    })
-                } else if !subject_set.old_fsc
-                    && crate::stats::setup::setup_subject_length(
-                        0,
-                        1,
-                        Some((database.numbers().min_length, true)),
-                    )
-                    .is_none()
-                {
-                    Err(PreliminaryReadError("The average subject length is too short").into())
-                } else if let Some(failure) = pssm_failure {
-                    Err(failure.error("TBLASTN"))
-                } else {
-                    database.x_stream(resolved.num_threads).map(|stream| {
-                        x_stream = Some(stream);
-                        Vec::new()
-                    })
-                };
+                let (read, before_setup) = first_database_read(database, &resolved, &subject_set);
+                read_before_setup = before_setup;
+                let read = read.map(|stream| {
+                    x_stream = Some(stream);
+                    Vec::new()
+                });
                 match read {
                     Ok(stores) => (stores, None),
                     Err(error) => (Vec::new(), Some(error)),
@@ -2108,12 +2215,7 @@ fn search(
             // refusal stops the run.
             if batch_validity.iter().any(|&valid| valid) {
                 if let Some(error) = stores_error.take() {
-                    let error = match error.downcast::<PreliminaryReadError>() {
-                        Ok(read_error) => app::engine_error(read_error.0),
-                        Err(error) if error.is::<crate::cli::NativeError>() => error,
-                        Err(error) => return Err(error),
-                    };
-                    failed = Some((range, error));
+                    failed = Some((range, database_read_failure(error)?));
                     break;
                 }
             }

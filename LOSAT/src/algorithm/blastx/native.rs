@@ -702,9 +702,10 @@ fn run_inner(
     let mut stops_after = None;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5
     // and 13 to 16 the read before the search makes them (`QueryScopes::read_ahead`), else the
-    // batches add theirs as the reader delivers them (`render_batch`). Either way LOSAT's refusal
-    // of two queries with one id comes where the search adds the batch of the second, after the
-    // reports of the batches before (line WQA D10 round 4, 2026-11-20).
+    // batches add theirs where the loop takes them (`take`, `add_batch_scope`). Either way LOSAT's
+    // refusal of two queries with one id comes where the loop takes the batch of the second, after
+    // the reports of the batches before (line WQA D10 round 4, 2026-11-20), before the batch's
+    // request and search (round 5, `add_batch_scope`).
     let query_scopes_of = || {
         crate::blastinput::query_batch::QueryScopes::of_search(
             args.parse_deflines,
@@ -1037,12 +1038,6 @@ fn run_inner(
                 archive::batch_searched_space(results, &options),
             )?;
         }
-        if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
-            scopes.add_batch_ids(
-                queries.iter().filter_map(|record| record.believed()),
-                queries_before,
-            )?;
-        }
         if let (Some(handle), Some(archive_requests)) = (&archive, &archive_requests) {
             return ArchiveBatch {
                 handle,
@@ -1201,10 +1196,23 @@ fn run_inner(
     // NCBI's posts of the bytes that its stream replaced in the request go to the run's
     // diagnostics (`diagnostics`, where the loop takes the batch: after the batch's reader
     // messages, before its search) and are messages of the archive (`StrategyExport::take_posts`).
+    // The batch that the loop takes joins the scopes of the queries first (`add_batch_scope`).
+    let scope_taken = std::cell::Cell::new(None);
     let mut take = |diagnostics: &mut dyn Write,
                     queries: &[FastaRecord],
                     queries_before: usize|
      -> Result<()> {
+        add_batch_scope(
+            &query_scopes,
+            &scope_taken,
+            queries,
+            queries_before,
+            batch_size,
+            strategy.is_some(),
+            &options,
+            search_subjects,
+            &search_error,
+        )?;
         let (Some(strategy), Some(requests)) = (&strategy, &requests) else {
             return Ok(());
         };
@@ -1876,6 +1884,73 @@ pub(crate) type BatchRender<'r> = dyn FnMut(
         Option<&crate::utils::threading::SearchPool<'_>>,
     ) -> Result<()>
     + 'r;
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264 (quoted at `run_inner`'s
+// `take`: the batch's query factory, then its request, before its search)
+/// The add of the reader batch `queries` (its first query `queries_before` of the run) to the
+/// scopes of the queries (`query_scopes`), where the loop takes the batch: once per batch
+/// (`taken`: the batch taken last, whose units the loop takes one by one), after the batch's reader
+/// messages and the reports of the batches before, before the batch's request and search. LOSAT's
+/// refusal of two queries of one scope with one id stops the run there, in the one form of every
+/// program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
+/// `-export_search_strategy` (`export`) no request of the batch is written; else NCBI's error of
+/// the set-up of the batch's records that NCBI's set-up surely reads with their own letters
+/// (`reader_batch::set_up_error`, as `search_error` makes the search's), or the refusal.
+/// RPSTBLASTN's set-up reads its database's files first: refused. (Round 4 added the batch after
+/// its search, and wrote its request.) The reader delivers a batch once it holds `batch_size`
+/// letters of whole records, or at the end of the input (`reached_size`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn add_batch_scope(
+    query_scopes: &std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScopes>>,
+    taken: &std::cell::Cell<Option<usize>>,
+    queries: &[FastaRecord],
+    queries_before: usize,
+    batch_size: usize,
+    export: bool,
+    options: &super::args::ResolvedOptions,
+    subjects: Subjects<'_>,
+    search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
+) -> Result<()> {
+    if taken.replace(Some(queries_before)) == Some(queries_before) {
+        return Ok(());
+    }
+    let Some(scopes) = query_scopes.borrow_mut().as_mut().map(|scopes| {
+        scopes.add_batch_ids(
+            queries
+                .iter()
+                .map(|record| (record.believed(), record.placement().length)),
+            queries_before,
+            reached_size(queries, batch_size),
+        )
+    }) else {
+        return Ok(());
+    };
+    scopes.map_err(|refusal| {
+        crate::blastinput::query_batch::refused_batch_error(refusal, export, |first| {
+            if options.rpstblastn.is_some() {
+                return None;
+            }
+            let records: Vec<FastaRecord> = queries
+                .iter()
+                .zip(first)
+                .filter(|&(_, &first)| first)
+                .map(|(record, _)| record.clone())
+                .collect();
+            super::reader_batch::set_up_error(&records, options, subjects).map(search_error)
+        })
+    })
+}
+
+/// Whether BLASTX's reader batch `queries` reached `batch_size` (`input::emit_fasta_batch`,
+/// `local::reader_batches`): the whole letters of its records, those that a range skips adding
+/// none, as NCBI's `size_read`; a batch that did not ends with the input.
+pub(super) fn reached_size(queries: &[FastaRecord], batch_size: usize) -> bool {
+    queries
+        .iter()
+        .map(|record| record.placement().length)
+        .sum::<usize>()
+        >= batch_size
+}
 
 /// The query batches of a run: each reader batch from `read` is searched with `options` against
 /// `search_subjects` (with 2+ threads, on one pool for the whole run) and handed to `render` with

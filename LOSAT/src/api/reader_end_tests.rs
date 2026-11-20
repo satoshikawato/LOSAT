@@ -461,10 +461,11 @@ fn a_batch_that_ncbi_fails_adds_nothing_to_the_scope() {
     );
 }
 
-// TBLASTX refuses two queries with one id once it has searched the batch of the second, after the
-// reports of the batches before (before line WQA D10 round 4, 2026-11-20: without them); an error of
-// that batch's search comes first (review M-b, 2026-11-20): `run_batches` searches the batches up
-// to it as the command line does.
+// TBLASTX refuses two queries with one id at the batch of the second, after the reports of the
+// batches before (before line WQA D10 round 4, 2026-11-20: without them); NCBI's error of that
+// batch's set-up for its subjects comes first (review M-b, 2026-11-20; since round 5 from the
+// set-up of the batch's records with new ids, before its search, `query_batch::refused_batch_error`),
+// in `run_batches` as on the command line.
 #[test]
 fn tblastx_refuses_two_queries_of_one_id_after_their_batch() {
     let protein = |length| letters(b"ACDEFGHIKLMNPQRSTVWY", length, 7);
@@ -569,6 +570,73 @@ fn an_error_of_ncbi_before_the_refusal_comes_first() {
         let (rows, error) = batches_with(program, &text, subjects, &options);
         assert_eq!((rows, error.as_deref()), (0, Some(ncbi)), "{name}");
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 (`BLAST_GapAlignSetUp`,
+// quoted at `query_batch::refused_batch_error`)
+// The batch of a repeated id stops at one point in every program, on the command line, in the
+// library's run and in `run_batches` (line WQA D10 round 5, 2026-11-20; review 3 of D10, M1): where
+// the batch's records with new ids have a valid context, NCBI's error of the batch's set-up for
+// its subjects comes in place of LOSAT's refusal, as NCBI BLAST+ 2.17.0 gives it on that very input
+// (`q1`, `q2`, `q1` in one batch; subjects of 2, 0 and 0 letters with `-searchsp 1000`: exit 3,
+// rows `db.pd.q1c.*.avgdup.subj.6`); before, BLASTP and TBLASTN refused. Where they have none
+// (a first `q1` of only `N`), NCBI sets up no valid context and exits 0 with the repeat read as the
+// first's letters, so LOSAT refuses; before, BLASTX gave the subjects' error.
+#[test]
+fn the_batch_of_a_repeated_id_stops_at_one_point_in_every_program() {
+    let ncbi = "BLAST engine error: The average subject length is too short";
+    let refusal = "two query records have the Seq-id lcl|q1";
+    let options = ["-parse_deflines", "-searchsp", "1000"];
+    let protein = |length, seed| letters(b"ACDEFGHIKLMNPQRSTVWY", length, seed);
+    let nucleotide = |length, seed| letters(b"ACGT", length, seed);
+    let named = |name: &str, sequence: &[u8]| fasta_named(&[name.to_string()], sequence);
+    let (protein_subjects, nucleotide_subjects) = (b">s1\nMK\n>s2\n>s3\n", b">s1\nAC\n>s2\n>s3\n");
+    for program in [
+        Program::Blastp,
+        Program::Tblastn,
+        Program::Blastn,
+        Program::Blastx,
+        Program::Tblastx,
+    ] {
+        let name = program.name();
+        let protein_query = matches!(program, Program::Blastp | Program::Tblastn);
+        let record = |seed| {
+            if protein_query {
+                protein(300, seed)
+            } else {
+                nucleotide(900, seed)
+            }
+        };
+        let subjects: &[u8] = match program {
+            Program::Blastp | Program::Blastx => protein_subjects,
+            _ => nucleotide_subjects,
+        };
+        let mut text = named("q1", &record(11));
+        text.extend_from_slice(&named("q2", &record(12)));
+        text.extend_from_slice(&named("q1", &record(13)));
+        let (cli_report, cli_error) = command_line_with(program, &text, subjects, &options, "6");
+        assert_eq!(cli_error.as_deref(), Some(ncbi), "{name}");
+        assert!(cli_report.is_empty(), "{name}: NCBI writes no report");
+        let (report, error) = library_with(program, &text, subjects, &options, "6");
+        assert_eq!(
+            (report.is_empty(), error.as_deref()),
+            (true, Some(ncbi)),
+            "{name}"
+        );
+        let (rows, error) = batches_with(program, &text, subjects, &options);
+        assert_eq!((rows, error.as_deref()), (0, Some(ncbi)), "{name}");
+    }
+    // BLASTX: a first `q1` of only `N` and a `q2` of only `N` (no valid context; NCBI exits 0).
+    let mut text = named("q1", &[b'N'; 90]);
+    text.extend_from_slice(&named("q2", &[b'N'; 120]));
+    text.extend_from_slice(&named("q1", &nucleotide(60, 14)));
+    let (_, cli_error) = command_line_with(Program::Blastx, &text, protein_subjects, &options, "6");
+    let cli_error = cli_error.expect("the refusal");
+    assert!(cli_error.contains(refusal), "{cli_error}");
+    let (_, error) = library_with(Program::Blastx, &text, protein_subjects, &options, "6");
+    assert_eq!(error.as_deref(), Some(cli_error.as_str()));
+    let (rows, error) = batches_with(Program::Blastx, &text, protein_subjects, &options);
+    assert_eq!((rows, error.as_deref()), (0, Some(cli_error.as_str())));
 }
 
 // The batches of `run_batches` end alike: the batches before, then the error in the batch that

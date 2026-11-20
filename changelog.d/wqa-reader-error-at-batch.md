@@ -16,10 +16,8 @@
   the batches before; `read_inputs` is unchanged. Under `-parse_deflines` with `-subject`, a query
   ID repeated in a batch that NCBI fails (the reader's error, queries without letters, psiblast's
   batch of two queries) no longer takes the place of that batch's error, in BLASTX's `run` and in
-  every program's `run_batches`. BLASTX's `run` and BLASTN's and BLASTX's `run_batches` refuse a
-  repeated ID after the batches before it in outfmt 6, and TBLASTX's `run_batches` once it has
-  searched the batch of the second ID, an error of a batch up to it coming first, as each command
-  line does.
+  every program's `run_batches`. Every program's `run_batches` stops at the batch of a repeated ID
+  in the command line's form, after the batches before it.
 - Under `-parse_deflines`, a query ID repeated in a later query batch is now refused at that batch,
   after the reports of the batches before (in the first batch, after the prologs), in every program
   and output format, as the command line writes them when NCBI BLAST+ stops at that batch. An error
@@ -28,3 +26,10 @@
   `-searchsp`, which LOSAT refused before with the repeated ID. Before, LOSAT wrote nothing before
   the refusal in BLASTP, TBLASTN, PSIBLAST and TBLASTX (TBLASTX's outfmt 0: its prolog only), and in
   BLASTN's and BLASTX's XML and JSON reports. The library's `run` and `run_batches` do the same.
+- The batch of a repeated query ID now stops at one point in every program. Where the batch of
+  NCBI BLAST+ 2.17.0 holds the same queries as LOSAT's (NCBI counts the repeated query into its
+  batch by the first query's letters), an error of NCBI that does not depend on the repeated
+  query's letters now comes instead of the refusal, as NCBI gives it: for example subjects too
+  short for `-searchsp`, where `blastp` and `tblastn` refused. With `-export_search_strategy`,
+  `blastn`, `blastx` and `tblastx` no longer write a search strategy for the refused batch; with
+  one batch the file stays empty, as when NCBI stops at that batch.

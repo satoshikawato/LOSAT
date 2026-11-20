@@ -7111,6 +7111,108 @@ fn psiblast_stop_at_invalid_query(
     batches
 }
 
+/// The stop of the query batch of LOSAT's refusal of two queries of one scope with one id
+/// (`QueryBatches::scope_refusal`), in the one form of every program
+/// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
+/// `-export_search_strategy` the refusal (no request of the batch is written: `stop_batch` stays
+/// `None`), else NCBI's error of the set-up of the batch's records that are first in the scope
+/// (`refused_batch_setup_error`), else the refusal. NCBI's errors of the batches before come
+/// first: their searches fail before the stop is acted on.
+fn refused_batch_stop(
+    args: &ResolvedBlastpArgs,
+    database: Option<&database::BlastpDatabase>,
+    subject_records: &[FastaRecord],
+    searched: &[FastaRecord],
+    input: &seq_range::QueryInput,
+    mut batches: crate::blastinput::query_batch::QueryBatches,
+) -> crate::blastinput::query_batch::QueryBatches {
+    if !batches.scope_refusal {
+        return batches;
+    }
+    let Some((warnings, refusal)) = batches.stop.take() else {
+        return batches;
+    };
+    let (input_done, searched_done) = (batches.input_done, batches.searched_done);
+    let error = crate::blastinput::query_batch::refused_batch_error(
+        refusal,
+        args.strategy.is_some(),
+        |first| {
+            // psiblast's batch holds the repeated query alone; rpsblast's set-up reads its
+            // database's files first (`rps_hooks::RpsEngineError`): both refuse.
+            if args.app != BlastpApp::Blastp {
+                return None;
+            }
+            let batch: Vec<usize> = (searched_done..searched.len())
+                .take_while(|&query| input.ordinal(query) < input_done + first.len())
+                .collect();
+            let lengths: Vec<usize> = batch
+                .iter()
+                .map(|&query| searched[query].seq().len())
+                .collect();
+            let queries: Vec<FastaRecord> = batch
+                .iter()
+                .filter(|&&query| first[input.ordinal(query) - input_done])
+                .map(|&query| searched[query].clone())
+                .collect();
+            refused_batch_setup_error(args, database, subject_records, &lengths, &queries)
+        },
+    );
+    batches.scope_refusal = !error.is::<crate::cli::NativeError>();
+    batches.stop = Some((warnings, error));
+    batches
+}
+
+/// BLASTP's set-up of the query records `queries` of a batch whose searched queries have the
+/// lengths `batch_lengths` (`refused_batch_stop`): NCBI's error where a context of theirs is valid
+/// and the set-up fails for the subjects, as `run_call` fails the first searched batch (a database
+/// without sequences, `Database memory map file error`; the average subject length against
+/// `-searchsp` or `OLD_FSC`); `None` where it passes, where no context is valid, and for a batch
+/// that NCBI splits into chunks (each chunk is set up apart, `search_split_query_batches`), which
+/// is refused.
+fn refused_batch_setup_error(
+    args: &ResolvedBlastpArgs,
+    database: Option<&database::BlastpDatabase>,
+    subject_records: &[FastaRecord],
+    batch_lengths: &[usize],
+    queries: &[FastaRecord],
+) -> Option<anyhow::Error> {
+    let split = protein_query_split_sizes(10000).map_or(true, |sizes| {
+        crate::algorithm::blastp::protein_query_split::split_protein_batch(batch_lengths, sizes)
+            .is_some()
+    });
+    if split {
+        return None;
+    }
+    // `call_setup::call_lookup`'s validity: a context without letters is invalid.
+    let contexts = pssm_hooks::psi_contexts(args, &blastp_query_frames(args, queries));
+    if !contexts
+        .iter()
+        .any(|context| context.is_valid && context.aa_len > 0)
+    {
+        return None;
+    }
+    if database.is_some_and(database::BlastpDatabase::first_oid_read_fails) {
+        return Some(crate::blastinput::app::engine_error(
+            "Database memory map file error",
+        ));
+    }
+    let encoded: Vec<EncodedProtein> = match database {
+        Some(_) => Vec::new(),
+        None => subject_records
+            .iter()
+            .map(|record| encode_protein_sequence(record.seq()))
+            .collect(),
+    };
+    let extent = call_setup::db_extent(args, database, &encoded).ok()?;
+    crate::stats::setup::setup_subject_length(
+        extent.total_db_len,
+        extent.num_subjects,
+        (!args.old_fsc).then_some((extent.cutoff_subject_length, false)),
+    )
+    .is_none()
+    .then(|| crate::blastinput::app::engine_error("The average subject length is too short"))
+}
+
 /// psiblast: LOSAT's refusal of a subject set (`-subject`) none of whose sequences has letters
 /// (records without residues, `-subject_loc` intervals that start just past their records' ends).
 /// NCBI's psiblast checks its subjects as one sequence block when it sets them up, after the
@@ -7405,7 +7507,8 @@ fn search(
                 outputs.formats.iter().map(|format| format.outfmt),
             ),
         args.app.name(),
-    );
+    )
+    .map(|scopes| scopes.with_refusal(args.scope_refusal.clone()));
     let batches = match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
         // ```c++
@@ -7446,6 +7549,16 @@ fn search(
     // (`QueryBatches::scope_refusal`): the run writes the reports of the batches before, unless
     // NCBI stops at one of them first (line WQA D10 round 4, 2026-11-20).
     let batches = psiblast_stop_at_pssm_query(&args, database, batches);
+    // The batch of LOSAT's refusal stops with NCBI's error of its set-up where NCBI's set-up of the
+    // batch fails for the subjects (`refused_batch_stop`; line WQA D10 round 5, 2026-11-20).
+    let batches = refused_batch_stop(
+        &args,
+        database,
+        &subjects.records,
+        &searched_queries,
+        &query_input,
+        batches,
+    );
     // LOSAT's limits come where NCBI starts the search, after its checks: a run that stops at its
     // first batch (`batches.starts` empty: a reader's error, NCBI's check of a PSSM, the object
     // manager's stop as a PSSM's query joins the scope) never searches, and gives NCBI's error
@@ -12648,6 +12761,7 @@ mod tests {
             gap_trigger: None,
             sum_stats: false,
             first_query_ordinal: 0,
+            scope_refusal: None,
             psiblast_pssm: None,
             formatting: Default::default(),
             rps: None,

@@ -93,4 +93,46 @@ write('ka_ps_s.faa', [('s1', P)])
 write('avg_s.faa', [('s1', 'MK'), ('s2', ''), ('s3', '')])
 write('avg_bp.faa', [('q1', rand_aa(10500)), ('q2', rand_aa(300)), ('q1', rand_aa(300))])
 write('avg_bx.fna', [('q1', rand_nt2(10500)), ('q2', rand_nt2(900)), ('q1', rand_nt2(900))])
+# ...and the batch of the second q1 itself (line WQA D10 round 5, rows db.pd.q1c.*.avgdup.*, .avgdup2.*, .avglong.*,
+# .kadup.*): subjects too short for -searchsp 1000 give NCBI's error of the batch's set-up whatever the repeat's letters
+# (q1, q2, q1 in one batch; with BATCH_SIZE=30 a first batch of a q1 of only X, then the second q1 with q2), but in BLASTN
+# with a repeat longer than its first record (NCBI reads past the first's letters), and with a first q1 of only N NCBI
+# sets up no valid context and exits 0, so LOSAT refuses.
+rnd3 = random.Random(202611205)
+
+
+def rand_aa3(n):
+    return ''.join(rnd3.choice('ACDEFGHIKLMNPQRSTVWY') for _ in range(n))
+
+
+def rand_nt3(n):
+    return ''.join(rnd3.choice('ACGT') for _ in range(n))
+
+
+write('avg_s.fna', [('s1', 'AC'), ('s2', ''), ('s3', '')])
+write('avgdup_bp.faa', [('q1', rand_aa3(300)), ('q2', rand_aa3(300)), ('q1', rand_aa3(300))])
+write('avgdup_bn.fna', [('q1', rand_nt3(900)), ('q2', rand_nt3(900)), ('q1', rand_nt3(900))])
+write('avgdup2_bp.faa', [('q1', 'X' * 30), ('q1', rand_aa3(20)), ('q2', rand_aa3(40))])
+write('avglong_bp.faa', [('q1', rand_aa3(20)), ('q2', rand_aa3(100)), ('q1', rand_aa3(300))])
+write('avglong_bn.fna', [('q1', rand_nt3(60)), ('q2', rand_nt3(300)), ('q1', rand_nt3(900))])
+write('kadup_bx.fna', [('q1', 'N' * 90), ('q2', 'N' * 120), ('q1', rand_nt3(60))])
+# NCBI's reader counts a repeated record into its batch by the letters of its first record (line WQA D10 round 5r, rows
+# .avgearly.*, .avgmid.*). BATCH_SIZE=600: a first batch of a q1 of only X or N (not searched), then q2 and a second q1 of
+# fewer letters that end the input: NCBI's batch is LOSAT's, and its set-up fails for the subjects (blastn, which reads the
+# repeat's own interval in letters LOSAT does not hold, refuses). BATCH_SIZE=55: q1 of only X, a second q1 of 20 letters
+# that NCBI counts as 30 and so ends its batch there (not searched: q1's warning twice), then q2: refused.
+rnd4 = random.Random(202611207)
+
+
+def rand_aa4(n):
+    return ''.join(rnd4.choice('ACDEFGHIKLMNPQRSTVWY') for _ in range(n))
+
+
+def rand_nt4(n):
+    return ''.join(rnd4.choice('ACGT') for _ in range(n))
+
+
+write('avgearly_bp.faa', [('q1', 'X' * 600), ('q2', rand_aa4(300)), ('q1', rand_aa4(200))])
+write('avgearly_bn.fna', [('q1', 'N' * 600), ('q2', rand_nt4(300)), ('q1', rand_nt4(200))])
+write('avgmid_bp.faa', [('q1', 'X' * 30), ('q1', rand_aa4(20)), ('q2', rand_aa4(40))])
 print(sorted(os.listdir(out)))

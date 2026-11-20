@@ -190,6 +190,7 @@ fn search_records(
         true,
         xml_matrix,
         args.parse_deflines,
+        args.scope_refusal.as_ref(),
     )?;
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     // The environment of a search of subject records, after the subjects' warnings
@@ -240,6 +241,7 @@ fn search_records(
             search_subjects: Subjects::Fasta(&subjects),
             serial_batches: args.parse_deflines,
             parse_deflines: args.parse_deflines,
+            scope_refusal: args.scope_refusal.as_ref(),
             database: None,
             archive,
             out: args.out.as_deref(),
@@ -303,6 +305,8 @@ struct RunReports<'a> {
     serial_batches: bool,
     /// `-parse_deflines` (`query_batch::QueryScopes`).
     parse_deflines: bool,
+    /// `BlastxArgs::scope_refusal`: the library's refusal of the call's batch.
+    scope_refusal: Option<&'a crate::blastinput::query_batch::ScopeRefusal>,
     database: Option<DatabaseReports<'a>>,
     /// The BLAST archive (outfmt 11), when it is requested.
     archive: Option<&'a crate::report::archive::ArchiveHandle>,
@@ -342,6 +346,7 @@ fn scan_xml_titles(
     subject_set: bool,
     xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
     parse_deflines: bool,
+    scope_refusal: Option<&crate::blastinput::query_batch::ScopeRefusal>,
 ) -> Result<super::blast_xml::QueryScan> {
     let structured: Vec<u8> = resolved
         .iter()
@@ -353,7 +358,8 @@ fn scan_xml_titles(
         subject_set,
         structured.contains(&5),
         "BLASTX",
-    );
+    )
+    .map(|scopes| scopes.with_refusal(scope_refusal.cloned()));
     // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
     // any report is written (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`): no title is
     // checked, and the queries are read for their scopes alone.
@@ -367,6 +373,7 @@ fn scan_xml_titles(
         &resolved[0],
         holds_back,
         xml_matrix.is_none(),
+        batch_size,
         query_scopes,
         &mut |deliver| {
             reader_batches(
@@ -642,6 +649,7 @@ fn write_run(
         search_subjects,
         serial_batches,
         parse_deflines,
+        scope_refusal,
         ref database,
         archive,
         search_error,
@@ -651,11 +659,11 @@ fn write_run(
     } = run;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5 and
     // 13 to 16 the read before the search made them (`scan_xml_titles`, `QueryScopes::read_ahead`),
-    // whose refusal comes where the search adds its batch; else the batches add theirs as the
-    // reader delivers them (`render`), as the command line's (`native::run_inner`). Either way a
-    // batch that a reader error ends adds none (review M3, 2026-11-20), and LOSAT's refusal of two
-    // queries with one id stops the run at the batch of the second, after the reports of the
-    // batches before (line WQA D10 round 4, 2026-11-20).
+    // whose refusal comes where the loop takes its batch; else the batches add theirs where the loop
+    // takes them (`native::add_batch_scope`), as the command line's (`native::run_inner`). Either
+    // way a batch that a reader error ends adds none (review M3, 2026-11-20), and LOSAT's refusal of
+    // two queries with one id stops the run at the batch of the second, after the reports of the
+    // batches before (line WQA D10 round 4, 2026-11-20), in the form of every program (round 5).
     let xml = choices.iter().any(|choice| choice.number == 5);
     let query_scopes = std::cell::RefCell::new(read_ahead_scopes.or_else(|| {
         crate::blastinput::query_batch::QueryScopes::of_search(
@@ -664,7 +672,9 @@ fn write_run(
             xml,
             "BLASTX",
         )
+        .map(|scopes| scopes.with_refusal(scope_refusal.cloned()))
     }));
+    let scope_taken = std::cell::Cell::new(None);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
     //         formatter.PrintProlog();
@@ -751,12 +761,6 @@ fn write_run(
                       queries_before: usize,
                       pool: Option<&crate::utils::threading::SearchPool<'_>>|
      -> Result<()> {
-        if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
-            scopes.add_batch_ids(
-                queries.iter().filter_map(|record| record.believed()),
-                queries_before,
-            )?;
-        }
         // Every format and the hit list read the lists in the order of the reports.
         report::sort_lists(results);
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (quoted at
@@ -989,8 +993,22 @@ fn write_run(
         &mut **diagnostics,
         search_error,
         &mut render,
-        // The library and LOSAT Web write no search strategy (`api::search::file_options`).
-        &mut |_, _, _| Ok(()),
+        // The library and LOSAT Web write no search strategy (`api::search::file_options`): the
+        // batch the loop takes joins the scopes of the queries (`native::add_batch_scope`), as the
+        // command line's (line WQA D10 round 5, 2026-11-20).
+        &mut |_, queries, queries_before| {
+            super::native::add_batch_scope(
+                &query_scopes,
+                &scope_taken,
+                queries,
+                queries_before,
+                batch_size,
+                false,
+                search_options,
+                search_subjects,
+                search_error,
+            )
+        },
     )
     .map_err(input_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
@@ -1220,6 +1238,7 @@ fn search_database(
         false,
         xml_matrix,
         args.parse_deflines,
+        args.scope_refusal.as_ref(),
     )?;
     report_batches(
         RunReports {
@@ -1235,6 +1254,7 @@ fn search_database(
             search_subjects,
             serial_batches: args.parse_deflines,
             parse_deflines: args.parse_deflines,
+            scope_refusal: args.scope_refusal.as_ref(),
             database: Some(DatabaseReports {
                 database: &database,
                 pairwise: &pairwise,

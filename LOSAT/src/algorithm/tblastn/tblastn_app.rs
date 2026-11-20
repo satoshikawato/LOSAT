@@ -88,6 +88,87 @@ fn first_database_read<'d>(
     (read, before_setup)
 }
 
+/// NCBI's error of the set-up of the records of a refused batch that are first in their scope
+/// (`first`, by input record from `input_done`; the batch's searched queries start at
+/// `searched_done`), where NCBI's set-up of the batch fails for the subjects
+/// (`stage_d_pipeline::set_up_batch`, then the first read of the database, as the search of a
+/// batch fails in `search`), in the one form of every program (`query_batch::refused_batch_error`;
+/// line WQA D10 round 5, 2026-11-20); `None` where it succeeds, so that the refusal comes. NCBI's
+/// errors of the batches before come first: their searches fail before the stop is acted on.
+/// `queries`: the input records, the searched ones and how they map (`QueryInput`).
+fn refused_batch_setup_error(
+    first: &[bool],
+    (input_done, searched_done): (usize, usize),
+    queries: (
+        &[FastaRecord],
+        &[FastaRecord],
+        &crate::blastinput::seq_range::QueryInput,
+    ),
+    resolved: &ResolvedTblastnArgs,
+    subject_set: SubjectSetNumbers,
+    engine_positives: bool,
+    database: Option<&TblastnDatabase>,
+    subject_letters: SubjectLetters<'_>,
+    (compo_adjust_mode, scoring): (
+        crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode,
+        super::stage_d_pipeline::LocalStageDScoring,
+    ),
+) -> Option<anyhow::Error> {
+    let (input_records, searched_queries, query_input) = queries;
+    let queries: Vec<usize> = (searched_done..searched_queries.len())
+        .take_while(|&query| query_input.ordinal(query) < input_done + first.len())
+        .filter(|&query| first[query_input.ordinal(query) - input_done])
+        .collect();
+    let letters: Vec<Vec<u8>> = queries
+        .iter()
+        .map(|&query| searched_queries[query].seq().to_vec())
+        .collect();
+    let whole: Vec<(&[u8], usize)> = queries
+        .iter()
+        .map(|&query| {
+            (
+                input_records[query_input.ordinal(query)].seq(),
+                query_input.placements.offset(query),
+            )
+        })
+        .collect();
+    let seg = resolved.seg.params();
+    let profile = LocalStageDProfile {
+        seg: seg.as_ref(),
+        soft_masking: resolved.soft_masking,
+        mask_lowercase: resolved.lcase_masking,
+        genetic_code: resolved.db_gencode,
+        expect_value: resolved.evalue,
+        max_target_seqs: resolved.hitlist_size,
+        query_records: &whole,
+        subject_set,
+        engine_positives,
+        culling_limit: resolved.culling_limit,
+        pssm: None,
+        fetch_excluded: None,
+        max_intron_length: resolved.max_intron_length,
+    };
+    let setup = super::stage_d_pipeline::set_up_batch(
+        &letters,
+        match database {
+            Some(_) => SubjectLetters::Packed(&[]),
+            None => subject_letters,
+        },
+        profile,
+        compo_adjust_mode,
+        resolved.sum_stats,
+        scoring,
+    );
+    match setup {
+        Err(error) => batch_failure(error).ok(),
+        Ok(validity) if !validity.iter().any(|&valid| valid) => None,
+        Ok(_) => match first_database_read(database?, resolved, &subject_set).0 {
+            Ok(_) => None,
+            Err(error) => database_read_failure(error).ok(),
+        },
+    }
+}
+
 /// What NCBI's engine error is of a failed first read of the database (`first_database_read`)
 /// in a batch with a valid context: the preliminary search's text, or SeqDB's own error with
 /// `-in_pssm` (`TblastnDatabase::pssm_search_read_failure`); `Err`: LOSAT's refusal.
@@ -1739,9 +1820,11 @@ fn search(
         input_records,
     );
     // LOSAT's refusal of two queries of one scope with one id is the stop of their batch
-    // (`QueryBatches::scope_refusal`): the run writes the reports of the batches before, unless
-    // NCBI stops at one of them first (line WQA D10 round 4, 2026-11-20).
-    let batches = crate::blastinput::query_batch::read_query_batches(
+    // (`QueryBatches::scope_refusal`), after the reports of the batches before unless NCBI stops at
+    // one of them first (line WQA D10 round 4, 2026-11-20): with `-export_search_strategy` the
+    // refusal (no request of the batch: `stop_batch` stays `None`), else NCBI's error of the
+    // batch's set-up where it fails (`refused_batch_setup_error`), else the refusal.
+    let mut batches = crate::blastinput::query_batch::read_query_batches(
         input_records,
         &searched_queries,
         &query_input,
@@ -1759,73 +1842,23 @@ fn search(
         )
         .map(|scopes| scopes.with_refusal(args.scope_refusal.clone())),
     );
-    // The batch of LOSAT's refusal stops with NCBI's error of its set-up where NCBI's set-up of the
-    // batch fails for the subjects, in the one form of every program
-    // (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
-    // `-export_search_strategy` the refusal (no request of the batch: `stop_batch` stays `None`),
-    // else the error of the set-up of the batch's records that are first in their scope
-    // (`stage_d_pipeline::set_up_batch`, then the first read of the database, as the search of a
-    // batch fails below), else the refusal. NCBI's errors of the batches before come first: their
-    // searches fail before the stop is acted on.
-    let mut batches = batches;
     if let Some((warnings, refusal)) = batches.stop.take_if(|_| batches.scope_refusal) {
-        let (input_done, searched_done) = (batches.input_done, batches.searched_done);
+        let done = (batches.input_done, batches.searched_done);
         let error = crate::blastinput::query_batch::refused_batch_error(
             refusal,
             args.strategy.is_some(),
             |first| {
-                let queries: Vec<usize> = (searched_done..searched_queries.len())
-                    .take_while(|&query| query_input.ordinal(query) < input_done + first.len())
-                    .filter(|&query| first[query_input.ordinal(query) - input_done])
-                    .collect();
-                let letters: Vec<Vec<u8>> = queries
-                    .iter()
-                    .map(|&query| searched_queries[query].seq().to_vec())
-                    .collect();
-                let whole: Vec<(&[u8], usize)> = queries
-                    .iter()
-                    .map(|&query| {
-                        (
-                            input_records[query_input.ordinal(query)].seq(),
-                            query_input.placements.offset(query),
-                        )
-                    })
-                    .collect();
-                let seg = resolved.seg.params();
-                let profile = LocalStageDProfile {
-                    seg: seg.as_ref(),
-                    soft_masking: resolved.soft_masking,
-                    mask_lowercase: resolved.lcase_masking,
-                    genetic_code: resolved.db_gencode,
-                    expect_value: resolved.evalue,
-                    max_target_seqs: resolved.hitlist_size,
-                    query_records: &whole,
+                refused_batch_setup_error(
+                    first,
+                    done,
+                    (input_records, &searched_queries, &query_input),
+                    &resolved,
                     subject_set,
                     engine_positives,
-                    culling_limit: resolved.culling_limit,
-                    pssm: None,
-                    fetch_excluded: None,
-                    max_intron_length: resolved.max_intron_length,
-                };
-                let setup = super::stage_d_pipeline::set_up_batch(
-                    &letters,
-                    match database {
-                        Some(_) => SubjectLetters::Packed(&[]),
-                        None => subject_letters,
-                    },
-                    profile,
-                    compo_adjust_mode,
-                    resolved.sum_stats,
-                    scoring,
-                );
-                match setup {
-                    Err(error) => batch_failure(error).ok(),
-                    Ok(validity) if !validity.iter().any(|&valid| valid) => None,
-                    Ok(_) => match first_database_read(database?, &resolved, &subject_set).0 {
-                        Ok(_) => None,
-                        Err(error) => database_read_failure(error).ok(),
-                    },
-                }
+                    database,
+                    subject_letters,
+                    (compo_adjust_mode, scoring),
+                )
             },
         );
         batches.scope_refusal = !error.is::<crate::cli::NativeError>();

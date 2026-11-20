@@ -140,7 +140,7 @@ the diagram leaves out also close the cycle: `core` → `common` (`GapEditOp`), 
 
 | Directory | Command line | Library and Web | Notes |
 | :--- | :--- | :--- | :--- |
-| `blastn` | `blast_engine::run` | `run_local`, `run_local_database` | megablast, blastn, dc-megablast, blastn-short; `blast_engine/run.rs` holds the search |
+| `blastn` | `blast_engine::run` | `run_local`, `run_local_database` | megablast, blastn, dc-megablast, blastn-short, rmblastn; `blast_engine/run.rs` holds the search |
 | `blastp` | `blast_engine::run` | `run_local`, `run_local_database` | also the driver of psiblast and rpsblast (`args::BlastpApp`) |
 | `blastx` | `BlastxArgs::run` → `native::run` | `local::run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | its own FASTA reader in `input.rs` |
 | `tblastn` | `TblastnArgs::run` | `run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | |

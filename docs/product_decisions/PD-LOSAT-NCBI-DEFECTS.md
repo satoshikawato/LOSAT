@@ -1068,6 +1068,15 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   no hits, a deterministic result), stays an explicit rejection too.
 - Subjects of 2^31 letters or more in total: NCBI's 32-bit total wraps.
 - megablast gap costs above 32767: NCBI's 32-bit greedy distance arithmetic can wrap.
+- Reward 0 and penalty 0 (matrix-only scoring, the scores of `-task rmblastn`) with the greedy
+  extension of `-task megablast` (line RG X6, 2026-11-20, Owner-delegated): with gap costs 0
+  and 0 (megablast's own) NCBI divides by zero in the greedy set-up (`blast_gapalign.c:209`,
+  SIGFPE, exit status 136, also with `-ungapped`); with other gap costs the greedy alignment
+  converts an infinite quotient to `Int4` (`greedy_align.c:981`, undefined behaviour) and does
+  not finish on pairs of 60-100 kb. LOSAT refuses it where it checks the greedy gap costs (a
+  batch with a valid query), so a batch of invalid queries ends with NCBI's warning as in NCBI.
+  It differs from NCBI where NCBI finishes with other gap costs because no seed reaches the
+  greedy alignment (small inputs). `-no_greedy` and `-ungapped` with other gap costs run.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` that splits a query batch
   (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's `size_t` chunk ranges
   wrap; NCBI stops as in exception 1 where a chunk would be split again, and otherwise

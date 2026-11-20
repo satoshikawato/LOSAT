@@ -1450,6 +1450,46 @@ fn write_first_batch_prologs(
     Ok(())
 }
 
+/// The traceback's filters of a batch's final hit lists, one per query of `queries`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
+// `-max_hsps`, `-qcov_hsp_perc` and `-subject_besthit` filter the batch's final hit
+// lists (each query's context is its searched letters), which the search has sorted by
+// e-value where NCBI sorts the results (a positive `BlastSeqSrcGetTotLen`); the sort is
+// a total order (best e-value, first score, OID), so sorting again after the filter
+// gives NCBI's order, and where NCBI does not sort the lists keep their order.
+// `-culling_limit` runs NCBI's culling pipe first on each query's hit list
+// (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
+// hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
+// sort by e-value here is NCBI's after the pipes, where it sorts.
+fn filter_final_hitlists(
+    batch_results: &mut [super::stage_d_results::KappaResultHitList],
+    queries: &[Vec<u8>],
+    resolved: &ResolvedTblastnArgs,
+    sorts_results: bool,
+) -> Result<()> {
+    if resolved.max_hsps > 0
+        || resolved.query_cov_hsp_perc > 0.0
+        || resolved.culling_limit > 0
+        || resolved.subject_besthit
+    {
+        for (hitlist, query) in batch_results.iter_mut().zip(queries) {
+            if resolved.culling_limit > 0 {
+                hitlist.cull(resolved.culling_limit, query.len())?;
+            }
+            if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
+                hitlist.filter_results(resolved.max_hsps, resolved.query_cov_hsp_perc, query.len());
+            }
+            if resolved.subject_besthit {
+                hitlist.subject_besthit();
+            }
+            if sorts_results {
+                hitlist.sort_by_evalue_for_positive_totlen();
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The search of `run_local` and of the CLI, after NCBI's checks of the options, the
 /// reading of the subjects and the steps before the prolog (`before_prolog`): LOSAT's
 /// limits and the environment, then the query batches (`read_query_batches`), the search of
@@ -2117,52 +2157,12 @@ fn search(
             //                                                   seqinfo_src,
             //                                                   search_msgs));
             // ```
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
-            // ```c++
-            //     if(hit_params->options->query_cov_hsp_perc > 0 || hit_params->options->max_hsps_per_subject > 0 ||
-            //        (hit_params->options->hsp_filt_opt != NULL && hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
-            //     	s_FilterBlastResults(results, hit_params->options, query_info, program_number);
-            //     }
-            //
-            //     /* Re-sort the hit lists according to their best e-values, because they
-            //        could have changed. Only do this for a database search. */
-            //     if (BlastSeqSrcGetTotLen(seq_src) > 0) {
-            //         Blast_HSPResultsSortByEvalue(results);
-            //     }
-            // ```
-            // `-max_hsps`, `-qcov_hsp_perc` and `-subject_besthit` filter the batch's final hit
-            // lists (each query's context is its searched letters), which the search has sorted by
-            // e-value where NCBI sorts the results (a positive `BlastSeqSrcGetTotLen`); the sort is
-            // a total order (best e-value, first score, OID), so sorting again after the filter
-            // gives NCBI's order, and where NCBI does not sort the lists keep their order.
-            // `-culling_limit` runs NCBI's culling pipe first on each query's hit list
-            // (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
-            // hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
-            // sort by e-value below is NCBI's after the pipes, where it sorts.
-            if resolved.max_hsps > 0
-                || resolved.query_cov_hsp_perc > 0.0
-                || resolved.culling_limit > 0
-                || resolved.subject_besthit
-            {
-                for (hitlist, query) in batch_results.iter_mut().zip(&query_seqs[range.clone()]) {
-                    if resolved.culling_limit > 0 {
-                        hitlist.cull(resolved.culling_limit, query.len())?;
-                    }
-                    if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
-                        hitlist.filter_results(
-                            resolved.max_hsps,
-                            resolved.query_cov_hsp_perc,
-                            query.len(),
-                        );
-                    }
-                    if resolved.subject_besthit {
-                        hitlist.subject_besthit();
-                    }
-                    if subject_set.sorts_results() {
-                        hitlist.sort_by_evalue_for_positive_totlen();
-                    }
-                }
-            }
+            filter_final_hitlists(
+                &mut batch_results,
+                &query_seqs[range.clone()],
+                &resolved,
+                subject_set.sorts_results(),
+            )?;
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI
             // makes the batch's Seq-aligns (`database::read_titles`); a header file that NCBI
             // cannot read fails this batch, after the reports of the batches before.

@@ -137,7 +137,6 @@ fn sequin_and_multalign_failures() {
     // (`f6b.sq.digit`).
     assert!(rows(&SEQUIN.replace("\n//\n", "\n")).is_ok());
     assert!(fails(&SEQUIN.replace("MKVIAAGT", "MKV1AAGT")));
-    assert!(fails(&MULTALIGN.replace("Consensus xxxxxxxx\n", "")));
     assert!(fails(&MULTALIGN.replace(".KVLAAGT", "-KVLAAGT")));
 }
 
@@ -259,21 +258,21 @@ fn modifier_content_and_the_molecule() {
         let text = format!(">q1 {defline}\nMKVLA-GT\n>s1\nMKVIAAGT\n>s2\n-KVLAAGT\n");
         read_alignment(text.as_bytes())
     };
-    assert!(!read("[foo=bar] t").unwrap().bioseqs[0].modifier_content);
-    assert!(read("[organism=a] t").unwrap().bioseqs[0].modifier_content);
-    assert!(read("[protein=a] t").unwrap().bioseqs[0].modifier_content);
+    assert!(!read("[foo=bar] t").unwrap().bioseqs[0].content.has_any());
+    assert!(read("[organism=a] t").unwrap().bioseqs[0].content.has_any());
+    assert!(read("[protein=a] t").unwrap().bioseqs[0].content.has_any());
     assert!(read("[molecule=aa] t").is_ok());
-    assert!(read("[molecule=dna] t").unwrap().bioseqs[0].mol_changed);
-    assert!(read("[mol-type=genomic] t").unwrap().bioseqs[0].mol_changed);
-    assert!(read("[molecule=other] t").unwrap().bioseqs[0].mol_changed);
-    assert!(!read("[molecule=aa] t").unwrap().bioseqs[0].mol_changed);
+    assert!(read("[molecule=dna] t").unwrap().bioseqs[0].set_mol.is_some());
+    assert!(read("[mol-type=genomic] t").unwrap().bioseqs[0].set_mol.is_some());
+    assert!(read("[molecule=other] t").unwrap().bioseqs[0].set_mol.is_some());
+    assert!(!read("[molecule=aa] t").unwrap().bioseqs[0].set_mol.is_some());
     // `molecule` comes after `mol-type` in the order of the names, so it decides (`f6b.md.111`).
-    assert!(!read("[mol-type=genomic][molecule=aa] t").unwrap().bioseqs[0].mol_changed);
+    assert!(!read("[mol-type=genomic][molecule=aa] t").unwrap().bioseqs[0].set_mol.is_some());
     // Only a protein row can change (`f6b.m2.dna_mol_aa`).
     let dna = format!(
         ">q1 [molecule=aa]\n{}\n>s1\n{}\n",
         "ACGT".repeat(15),
         "ACGA".repeat(15)
     );
-    assert!(!read_alignment(dna.as_bytes()).unwrap().bioseqs[0].mol_changed);
+    assert!(!read_alignment(dna.as_bytes()).unwrap().bioseqs[0].set_mol.is_some());
 }

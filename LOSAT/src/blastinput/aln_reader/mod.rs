@@ -49,6 +49,7 @@
 //! (No report of the readers has that text, so the branch never runs.)
 
 mod base;
+pub(crate) mod descr;
 mod clustal;
 mod fasta_gap;
 mod format_guess;
@@ -92,13 +93,12 @@ pub(crate) struct AlnBioseq {
     pub(crate) letters: Vec<u8>,
     /// The title descriptor that the row's defline gives (`x_AddMods`, `x_AddTitle`).
     pub(crate) title: Option<Vec<u8>>,
-    /// Whether the defline's modifiers set anything but the title on the Bioseq (descriptors,
-    /// features, Seq-inst members): LOSAT writes none of it, so the run refuses where the
-    /// Bioseq is written with them (`in_msa::pssm_from_msa`).
-    pub(crate) modifier_content: bool,
-    /// The defline's modifiers set the molecule of a protein row to a nucleotide kind (or
-    /// `other`): NCBI carries that into the search of the run where this Bioseq is the query.
-    pub(crate) mol_changed: bool,
+    /// What the defline's modifiers set on the Bioseq besides the title: descriptors, the protein
+    /// feature and Seq-inst members (`in_msa::pssm_from_msa` writes them with the PSSM's query).
+    pub(crate) content: descr::Content,
+    /// The molecule that the defline's modifiers set on the Bioseq of a protein row where it is
+    /// not protein (`molecule`, `mol-type`): NCBI carries it into the PSSM's query and the search.
+    pub(crate) set_mol: Option<SetMol>,
 }
 
 /// What `CAlnReader` gives `CPsiBlastInputClustalW`: `GetSeqs()` (the rows as in the file, with
@@ -124,6 +124,12 @@ pub(crate) enum AlnError {
     /// A modifier of a defline is an error (`CObjReaderParseException` of `CDefaultModErrorReporter`,
     /// "BLAST query error"), after the warnings that NCBI posted before it.
     Modifier(mods::ModsFailure),
+    /// An exception that nothing in the reader catches, thrown while a defline's modifiers are
+    /// applied, after the warnings that NCBI posted before it.
+    ModifierException(Vec<Vec<u8>>, crate::ncbi_exception::NcbiException),
+    /// A `std::exception` of the reader that nothing catches (`what()`): `Error: ` and its text,
+    /// exit status 255.
+    StdException(String),
     /// NCBI's reader does something here that LOSAT does not reproduce (it crashes, reads memory
     /// that the input does not give, or ends with an exception that nothing catches and LOSAT
     /// does not print): the cause of the refusal.
@@ -206,6 +212,7 @@ pub(crate) fn read_alignment(bytes: &[u8]) -> Result<Alignment, AlnError> {
         base::ScanFailure::Failed => AlnError::NotAvailable,
         base::ScanFailure::Undefined(cause) => AlnError::Undefined(cause),
         base::ScanFailure::Exception(exception) => AlnError::Exception(exception),
+        base::ScanFailure::StdException(what) => AlnError::StdException(what),
     })?;
     let ids = verify_alignment_info(&scanned)?;
     entries(scanned, ids)
@@ -425,8 +432,8 @@ fn entries(scanned: base::Scanned, ids: Vec<Vec<ParsedSeqId>>) -> Result<Alignme
             mol,
             letters,
             title: None,
-            modifier_content: false,
-            mol_changed: false,
+            content: descr::Content::default(),
+            set_mol: None,
         });
     }
     // `x_AddMods` of each row's defline (`TruncateSpaces` of what the scanner kept): after every
@@ -443,15 +450,22 @@ fn entries(scanned: base::Scanned, ids: Vec<Vec<ParsedSeqId>>) -> Result<Alignme
                         failure.warnings = all;
                         AlnError::Modifier(failure)
                     }
+                    mods::ModsStop::Exception(exception, mut posted) => {
+                        let mut all = std::mem::take(&mut warnings);
+                        all.append(&mut posted);
+                        AlnError::ModifierException(all, exception)
+                    }
                     mods::ModsStop::Undefined(cause) => AlnError::Undefined(cause),
                 })?;
             warnings.extend(applied.warnings);
             bioseq.title = applied.title;
-            bioseq.modifier_content = applied.effects.non_title;
+            bioseq.content = applied.effects.content;
             // A nucleotide row stays what its letters are (its Bioseq ends the run alike, whatever
             // the modifiers say: `f6b.m2.dna_mol_aa`).
-            bioseq.mol_changed =
-                bioseq.mol == Mol::Aa && applied.effects.mol.is_some_and(|set| set != SetMol::Aa);
+            bioseq.set_mol = applied
+                .effects
+                .mol
+                .filter(|set| bioseq.mol == Mol::Aa && *set != SetMol::Aa);
         }
     }
     Ok(Alignment {
@@ -461,9 +475,3 @@ fn entries(scanned: base::Scanned, ids: Vec<Vec<ParsedSeqId>>) -> Result<Alignme
     })
 }
 
-/// The cause of the refusal of a query whose defline has a modifier that sets the molecule to a
-/// nucleotide kind (`molecule`, `mol-type`): NCBI BLAST+ 2.17.0 then stops with an engine error
-/// ("Nucleotide Bioseq specified in program which expects protein query", with the PSSM files
-/// written) or, for `other`, with an uncaught exception, and LOSAT does not follow.
-pub(crate) const MOLECULE_CHANGED: &str =
-    "a modifier (molecule, mol-type) of the query's defline sets its molecule to a nucleotide kind or to other, where NCBI BLAST+ 2.17.0 stops with an engine error or an uncaught exception that LOSAT does not follow";

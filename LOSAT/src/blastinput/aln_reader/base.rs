@@ -24,6 +24,9 @@ pub(crate) enum ScanFailure {
     /// An exception of NCBI's toolkit that no `catch` of `CAlnReader` or `x_ReadAsciiMsa` takes
     /// (`CStringException` of `NStr::StringToInt`): it ends the run as any uncaught exception.
     Exception(crate::ncbi_exception::NcbiException),
+    /// A `std::exception` that no `catch` of the reader takes: psiblast's `CATCH_ALL` writes
+    /// `Error: ` and its text, exit status 255.
+    StdException(String),
 }
 
 pub(crate) type Scan<T> = Result<T, ScanFailure>;
@@ -150,15 +153,14 @@ pub(crate) fn process_defline(line: &[u8]) -> Scan<(Vec<u8>, Vec<u8>)> {
     // NCBI takes `defLine.substr(dataStart)` of the string it already cut at `dataStart`: the
     // start is past the end (`std::out_of_range`) when the id part is shorter than that.
     if data_start > def_line.len() {
-        return Err(ScanFailure::Undefined(OUT_OF_RANGE));
+        return Err(ScanFailure::StdException(format!(
+            "basic_string::substr: __pos (which is {data_start}) > this->size() (which is {})",
+            def_line.len()
+        )));
     }
     let (id, info, _) = split_in_two(&def_line[data_start..], b" \t", true);
     Ok((id.to_vec(), info.to_vec()))
 }
-
-/// The cause of the refusal of a `std::out_of_range` that NCBI's reader does not catch.
-pub(crate) const OUT_OF_RANGE: &str =
-    "NCBI BLAST+ 2.17.0 stops with an uncaught std::out_of_range in the alignment reader";
 
 /// `AlnUtil::CheckId`: the id of a data line against the ids in order (`id_count` is the row
 /// the line belongs to), in the first block or after it. Every branch that does not return throws.

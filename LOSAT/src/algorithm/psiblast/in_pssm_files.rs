@@ -48,6 +48,7 @@ use crate::core::psi::KarlinBlk;
 use crate::report::serial::pssm::{PssmWithParameters, SeqData, SeqEntry};
 
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
+use crate::report::serial::encoder::ReplacedChar;
 #[cfg(test)]
 use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
 use crate::algorithm::pssm_search::in_pssm::InPssmFile;
@@ -285,6 +286,10 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
     }
 }
 
+/// The files of the input PSSM: its ASN.1 text, its ASCII PSSM and NCBI's posts of the bytes that
+/// the ASN.1 text's stream replaces.
+pub(crate) type InputFiles = (Option<Vec<u8>>, Option<Vec<u8>>, Vec<ReplacedChar>);
+
 impl InPssmRounds {
     /// LOSAT's refusal of the input PSSM's files (`rounds_input`), made once the database is opened
     /// for a run that searches (`blastp::blast_engine` `search_cli`).
@@ -297,22 +302,23 @@ impl InPssmRounds {
 
     /// The files of the input PSSM at the start of round 1 (`SavePssmToFile`): its ASN.1 text and
     /// its ASCII PSSM, as requested.
-    pub(crate) fn files(
-        &self,
-        request: &PssmRequest,
-    ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>)> {
+    ///
+    /// The third value is NCBI's post of each byte that its ASN.1 text stream replaces in the
+    /// file (a query title outside the visible ASCII range; `pssm::file_posts`).
+    pub(crate) fn files(&self, request: &PssmRequest) -> Result<InputFiles> {
         let Some(object) = self.object.as_ref() else {
-            return Ok((None, None));
+            return Ok((None, None, Vec::new()));
         };
-        let asn = match request.asn_path {
-            Some(_) => Some(
-                crate::report::serial::pssm::asn_text(object)
-                    .map_err(|error| anyhow::anyhow!("{error}"))?,
-            ),
-            None => None,
+        let (asn, posts) = match request.asn_path {
+            Some(_) => {
+                let (asn, posts) = crate::report::serial::pssm::asn_text_posting(object)
+                    .map_err(|error| anyhow::anyhow!("{error}"))?;
+                (Some(asn), posts)
+            }
+            None => (None, Vec::new()),
         };
         let ascii = request.ascii_path.as_ref().map(|_| ascii_pssm(object));
-        Ok((asn, ascii))
+        Ok((asn, ascii, posts))
     }
 
     /// The ASN.1 text of the input PSSM after round 1's K/A write-back (`ungapped`: `kbp_psi[0]`,
@@ -349,9 +355,9 @@ impl InPssmRounds {
         request: &PssmRequest,
         ungapped: KarlinBlk,
         gapped: KarlinBlk,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<(Option<Vec<u8>>, Vec<ReplacedChar>)> {
         let (Some(object), Some(_)) = (self.object.as_ref(), request.asn_path.as_ref()) else {
-            return Ok(None);
+            return Ok((None, Vec::new()));
         };
         // The six values are written in place of the object's (no copy of the object).
         let karlin = crate::report::serial::pssm::FinalKarlin {
@@ -362,8 +368,8 @@ impl InPssmRounds {
             kappa_ungapped: ungapped.k,
             h_ungapped: ungapped.h,
         };
-        crate::report::serial::pssm::asn_text_with_karlin(object, Some(karlin))
-            .map(Some)
+        crate::report::serial::pssm::asn_text_posting_with_karlin(object, Some(karlin))
+            .map(|(asn, posts)| (Some(asn), posts))
             .map_err(|error| anyhow::anyhow!("{error}"))
     }
 }
@@ -675,7 +681,7 @@ mod tests {
             &request(true, false),
         ))
         .unwrap();
-        let (asn, _) = input.files(&request(true, false)).unwrap();
+        let (asn, _, _) = input.files(&request(true, false)).unwrap();
         let asn = String::from_utf8(asn.unwrap()).unwrap();
         assert!(
             asn.contains("comment \"x\"")
@@ -769,6 +775,7 @@ mod tests {
         let text = input
             .written_back(&request(true, false), ungapped, GAPPED)
             .unwrap()
+            .0
             .unwrap();
         let read = crate::blastinput::pssm_text::read_pssm_with_parameters(&text).unwrap();
         let data = read.pssm.final_data.unwrap();
@@ -780,7 +787,8 @@ mod tests {
         assert_eq!(
             input
                 .written_back(&request(false, true), ungapped, GAPPED)
-                .unwrap(),
+                .unwrap()
+                .0,
             None
         );
     }

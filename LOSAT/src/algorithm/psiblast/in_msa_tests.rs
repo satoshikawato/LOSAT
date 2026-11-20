@@ -148,7 +148,6 @@ fn scoring(matrix_name: &str, gap_open: i32, gap_extend: i32) -> MsaScoring<'_> 
         gap_open,
         gap_extend,
         save_ascii_pssm: false,
-        descriptors_observed: false,
     }
 }
 

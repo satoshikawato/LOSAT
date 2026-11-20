@@ -947,6 +947,15 @@ pub(crate) fn psi_search_and_object_of(
         .is_none()
         .then(|| crate::report::query_warnings::invalid_residues_error(&residues.invalid))
         .flatten();
+    // A nucleotide Bioseq (`mol` dna, rna or na) is the query set-up's first error
+    // (`SetupQueries_OMF` checks each query's molecule before its letters), also for a PSSM of
+    // frequency ratios only, whose engine sets the query up first too.
+    let nucleotide_query = matches!(query.inst.mol.1, 1 | 2 | 4);
+    let invalid_residues = if nucleotide_query && validation_error.is_none() {
+        Some("Nucleotide Bioseq specified in program which expects protein query".to_string())
+    } else {
+        invalid_residues
+    };
     let (mut scores_error, setup_error) = if ratios_only {
         (invalid_residues, None)
     } else {
@@ -1100,7 +1109,7 @@ pub(crate) fn psi_search_and_object_of(
             .map_or(0, |last| last + 1);
         title[..end].to_vec()
     };
-    if query.inst.mol.1 != 3 || query.inst.repr.1 != 2 {
+    if !matches!(query.inst.mol.1, 1 | 2 | 3 | 4) || query.inst.repr.1 != 2 {
         return Err(reader.refuse(format!(
             "a PSSM query whose Seq-inst is not a raw protein (repr {}, mol {})",
             query.inst.repr.0, query.inst.mol.0

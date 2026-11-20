@@ -15,6 +15,7 @@
 //!   run refuses there) and the molecule (where the Bioseq stops being protein, the run refuses).
 
 use crate::ncbi_str::{string_to_int, string_to_int8, string_to_uint, truncate_spaces};
+use super::descr::{self, Content};
 use std::collections::BTreeMap;
 
 /// `CModData`: a modifier as the defline gave it.
@@ -44,9 +45,8 @@ impl SetMol {
 /// What the modifiers did to the Bioseq besides its title.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ModEffects {
-    /// A descriptor (BioSource, MolInfo, GB-block, user object, comment, publication), a feature
-    /// (protein) or a Seq-inst member (strand, topology, history) that the modifiers set.
-    pub(crate) non_title: bool,
+    /// The descriptors, the protein feature and the Seq-inst members that the modifiers set.
+    pub(crate) content: Content,
     /// The molecule, where a modifier set one (`molecule`, `mol-type`).
     pub(crate) mol: Option<SetMol>,
 }
@@ -73,6 +73,9 @@ pub(crate) struct ModsFailure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ModsStop {
     Failure(ModsFailure),
+    /// An exception of NCBI's toolkit that nothing in the reader catches, after the warnings that
+    /// NCBI posted before it.
+    Exception(crate::ncbi_exception::NcbiException, Vec<Vec<u8>>),
     /// NCBI's reader does something here that LOSAT does not reproduce.
     Undefined(&'static str),
 }
@@ -270,117 +273,72 @@ const ORGMOD: &[&[u8]] = &[
     b"specific-host",
 ];
 
-/// `BioSource.genome` values by `g_GetNormalizedModVal`.
-const GENOME: &[&[u8]] = &[
-    b"unknown",
-    b"genomic",
-    b"chloroplast",
-    b"chromoplast",
-    b"kinetoplast",
-    b"mitochondrion",
-    b"plastid",
-    b"macronuclear",
-    b"extrachrom",
-    b"plasmid",
-    b"transposon",
-    b"insertionseq",
-    b"cyanelle",
-    b"proviral",
-    b"virion",
-    b"nucleomorph",
-    b"apicoplast",
-    b"leucoplast",
-    b"proplastid",
-    b"endogenousvirus",
-    b"hydrogenosome",
-    b"chromosome",
-    b"chromatophore",
-    b"plasmidinmitochondrion",
-    b"plasmidinplastid",
-    b"mitochondrial",
-    b"provirus",
-    b"extrachromosomal",
-    b"insertionsequence",
-];
-
-/// `BioSource.origin` values by `g_GetNormalizedModVal`.
-const ORIGIN: &[&[u8]] = &[
-    b"unknown",
-    b"natural",
-    b"natmut",
-    b"mut",
-    b"artificial",
-    b"synthetic",
-    b"other",
-    b"naturalmutant",
-    b"mutant",
-];
 
 /// `g_BiomolStringToEnum` and what `g_BiomolEnumToMolEnum` makes of each.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/mod_to_enum.cpp:181-232
-const BIOMOL: &[(&[u8], SetMol)] = &[
-    (b"crna", SetMol::Rna),
-    (b"dna", SetMol::Dna),
-    (b"genomic", SetMol::Dna),
-    (b"genomicdna", SetMol::Dna),
-    (b"genomicrna", SetMol::Dna),
-    (b"mrna", SetMol::Rna),
-    (b"ncrna", SetMol::Rna),
-    (b"noncodingrna", SetMol::Rna),
-    (b"othergenetic", SetMol::Other),
-    (b"precursorrna", SetMol::Rna),
-    (b"ribosomalrna", SetMol::Rna),
-    (b"rrna", SetMol::Rna),
-    (b"transcribedrna", SetMol::Rna),
-    (b"transfermessengerrna", SetMol::Rna),
-    (b"tmrna", SetMol::Rna),
-    (b"transferrna", SetMol::Rna),
-    (b"trna", SetMol::Rna),
+const BIOMOL: &[(&[u8], &str, SetMol)] = &[
+    (b"crna", "cRNA", SetMol::Rna),
+    (b"dna", "genomic", SetMol::Dna),
+    (b"genomic", "genomic", SetMol::Dna),
+    (b"genomicdna", "genomic", SetMol::Dna),
+    (b"genomicrna", "genomic", SetMol::Dna),
+    (b"mrna", "mRNA", SetMol::Rna),
+    (b"ncrna", "ncRNA", SetMol::Rna),
+    (b"noncodingrna", "ncRNA", SetMol::Rna),
+    (b"othergenetic", "other-genetic", SetMol::Other),
+    (b"precursorrna", "pre-RNA", SetMol::Rna),
+    (b"ribosomalrna", "rRNA", SetMol::Rna),
+    (b"rrna", "rRNA", SetMol::Rna),
+    (b"transcribedrna", "transcribed-RNA", SetMol::Rna),
+    (b"transfermessengerrna", "tmRNA", SetMol::Rna),
+    (b"tmrna", "tmRNA", SetMol::Rna),
+    (b"transferrna", "tRNA", SetMol::Rna),
+    (b"trna", "tRNA", SetMol::Rna),
 ];
 
 /// `s_TechStringToEnum`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/descr_mod_apply.cpp:77-104
-const TECH: &[&[u8]] = &[
-    b"?",
-    b"barcode",
-    b"both",
-    b"compositewgshtgs",
-    b"concepttrans",
-    b"concepttransa",
-    b"derived",
-    b"est",
-    b"flicdna",
-    b"geneticmap",
-    b"htc",
-    b"htgs0",
-    b"htgs1",
-    b"htgs2",
-    b"htgs3",
-    b"physicalmap",
-    b"seqpept",
-    b"seqpepthomol",
-    b"seqpeptoverlap",
-    b"standard",
-    b"sts",
-    b"survey",
-    b"targeted",
-    b"tsa",
-    b"wgs",
+const TECH: &[(&[u8], &str)] = &[
+    (b"?", "unknown"),
+    (b"barcode", "barcode"),
+    (b"both", "both"),
+    (b"compositewgshtgs", "composite-wgs-htgs"),
+    (b"concepttrans", "concept-trans"),
+    (b"concepttransa", "concept-trans-a"),
+    (b"derived", "derived"),
+    (b"est", "est"),
+    (b"flicdna", "fli-cDNA"),
+    (b"geneticmap", "genemap"),
+    (b"htc", "htc"),
+    (b"htgs0", "htgs-0"),
+    (b"htgs1", "htgs-1"),
+    (b"htgs2", "htgs-2"),
+    (b"htgs3", "htgs-3"),
+    (b"physicalmap", "physmap"),
+    (b"seqpept", "seq-pept"),
+    (b"seqpepthomol", "seq-pept-homol"),
+    (b"seqpeptoverlap", "seq-pept-overlap"),
+    (b"standard", "standard"),
+    (b"sts", "sts"),
+    (b"survey", "survey"),
+    (b"targeted", "targeted"),
+    (b"tsa", "tsa"),
+    (b"wgs", "wgs"),
 ];
 
 /// `s_CompletenessStringToEnum`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/descr_mod_apply.cpp:107-116
-const COMPLETENESS: &[&[u8]] = &[
-    b"complete",
-    b"hasleft",
-    b"hasright",
-    b"noends",
-    b"noleft",
-    b"noright",
-    b"partial",
+const COMPLETENESS: &[(&[u8], &str)] = &[
+    (b"complete", "complete"),
+    (b"hasleft", "has-left"),
+    (b"hasright", "has-right"),
+    (b"noends", "no-ends"),
+    (b"noleft", "no-left"),
+    (b"noright", "no-right"),
+    (b"partial", "partial"),
 ];
 
 /// The protein qualifiers of `CFeatModApply::Apply`.
@@ -392,12 +350,12 @@ fn is_space(c: u8) -> bool {
 }
 
 /// `NStr::IsBlank`.
-fn is_blank(text: &[u8]) -> bool {
+pub(super) fn is_blank(text: &[u8]) -> bool {
     text.iter().all(|&c| is_space(c))
 }
 
 /// `NStr::Split(.., delims, fSplit_Tokenize)`: the non-empty runs between delimiters.
-fn tokenize<'a>(text: &'a [u8], delims: &[u8]) -> Vec<&'a [u8]> {
+pub(super) fn tokenize<'a>(text: &'a [u8], delims: &[u8]) -> Vec<&'a [u8]> {
     text.split(|c| delims.contains(c))
         .filter(|token| !token.is_empty())
         .collect()
@@ -436,7 +394,7 @@ fn canonical_name(name: &[u8]) -> Vec<u8> {
 /// `g_GetNormalizedModVal`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/mod_to_enum.cpp:35-64
-fn normalized_value(value: &[u8]) -> Vec<u8> {
+pub(super) fn normalized_value(value: &[u8]) -> Vec<u8> {
     let edge = |c: &u8| matches!(c, b' ' | b'\t' | b'"' | b'\'' | b'-' | b'_');
     let start = value.iter().position(|c| !edge(c));
     let trimmed: &[u8] = match start {
@@ -633,128 +591,219 @@ impl Adder {
             }))
         };
         let value = Self::single_value(values);
+        let texts = || -> Vec<Vec<u8>> { values.iter().map(|m| m.value.clone()).collect() };
+        let split_all = |delims: &[u8]| -> Vec<Vec<u8>> {
+            values
+                .iter()
+                .flat_map(|modifier| tokenize(&modifier.value, delims))
+                .map(<[u8]>::to_vec)
+                .collect()
+        };
+        let content = &mut self.effects.content;
         match canonical {
             b"location" => {
-                if !GENOME.contains(&normalized_value(value).as_slice()) {
+                let key = normalized_value(value);
+                let Some(name) = descr::biosource_enum(
+                    "genome",
+                    &key,
+                    &[
+                        (b"mitochondrial", "mitochondrion"),
+                        (b"provirus", "proviral"),
+                        (b"extrachromosomal", "extrachrom"),
+                        (b"insertion sequence", "insertion-seq"),
+                    ],
+                ) else {
                     return fail(&values[0], b"");
-                }
-                self.effects.non_title = true;
+                };
+                content.set_genome(name);
             }
             b"origin" => {
-                if !ORIGIN.contains(&normalized_value(value).as_slice()) {
+                let key = normalized_value(value);
+                let Some(name) = descr::biosource_enum(
+                    "origin",
+                    &key,
+                    &[(b"natural mutant", "natmut"), (b"mutant", "mut")],
+                ) else {
                     return fail(&values[0], b"");
-                }
-                self.effects.non_title = true;
+                };
+                content.set_origin(name);
             }
             b"focus" => {
                 if value.eq_ignore_ascii_case(b"true") {
-                    self.effects.non_title = true;
+                    content.set_focus();
                 } else if value.eq_ignore_ascii_case(b"false") {
                     return fail(&values[0], b"");
                 }
             }
-            b"fwd-primer-name" | b"fwd-primer-seq" => self.effects.non_title = true,
-            b"rev-primer-name" | b"rev-primer-seq" => {
-                if values
-                    .iter()
-                    .any(|modifier| !tokenize(&modifier.value, b",").is_empty())
-                {
-                    self.effects.non_title = true;
-                }
-            }
-            b"taxname" | b"common" | b"dbxref" | b"lineage" | b"division" => {
-                self.effects.non_title = true
-            }
+            b"fwd-primer-name" => content.set_primers(true, true, &texts()),
+            b"fwd-primer-seq" => content.set_primers(true, false, &texts()),
+            b"rev-primer-name" => content.set_primers(false, true, &texts()),
+            b"rev-primer-seq" => content.set_primers(false, false, &texts()),
+            b"taxname" => content.set_taxname(value),
+            b"common" => content.set_common(value),
+            b"dbxref" => content.set_dbxref(&texts()),
+            b"lineage" => content.set_lineage(value),
+            b"division" => content.set_division(value),
             b"taxid" => {
-                if string_to_int(value, 0).is_err() {
+                let Ok(id) = string_to_int(value, 0) else {
                     return fail(&values[0], b"Integer value expected.");
-                }
-                self.effects.non_title = true;
+                };
+                content.set_taxid(i64::from(id));
             }
             b"gcode" | b"mgcode" | b"pgcode" => {
-                if string_to_int(value, 0).is_err() {
+                let Ok(code) = string_to_int(value, 0) else {
                     return fail(&values[0], b"Integer value expected.");
-                }
-                self.effects.non_title = true;
+                };
+                content.set_code(canonical, i64::from(code));
             }
-            b"sra" | b"bioproject" | b"biosample" | b"keyword" => {
-                if values
-                    .iter()
-                    .any(|modifier| !tokenize(&modifier.value, b",; \t").is_empty())
-                {
-                    self.effects.non_title = true;
+            b"sra" | b"bioproject" | b"biosample" => {
+                let label: &[u8] = match canonical {
+                    b"sra" => b"Sequence Read Archive",
+                    b"biosample" => b"BioSample",
+                    _ => b"BioProject",
+                };
+                let all = split_all(b",; \t");
+                if !all.is_empty() {
+                    content.set_dblink(label, all);
+                }
+            }
+            b"keyword" => {
+                let all = split_all(b",; \t");
+                if !all.is_empty() {
+                    content.set_keywords(all);
                 }
             }
             b"mol-type" => {
-                let Some((_, mol)) = BIOMOL
-                    .iter()
-                    .find(|(key, _)| *key == normalized_value(value).as_slice())
+                let key = normalized_value(value);
+                let Some((_, biomol, mol)) = BIOMOL.iter().find(|(k, _, _)| *k == key.as_slice())
                 else {
                     return fail(&values[0], b"");
                 };
-                self.effects.non_title = true;
+                let name = descr::enum_name(
+                    crate::report::serial::asn_types::table::named::MOLINFO,
+                    "biomol",
+                    biomol.as_bytes(),
+                )
+                .expect("a biomol of the table");
+                content.set_biomol(name);
                 self.mol = *mol;
                 self.mol_set = true;
             }
             b"completeness" => {
-                if !COMPLETENESS.contains(&normalized_value(value).as_slice()) {
+                let key = normalized_value(value);
+                let Some((_, name)) = COMPLETENESS.iter().find(|(k, _)| *k == key.as_slice())
+                else {
                     return fail(&values[0], b"");
-                }
-                self.effects.non_title = true;
+                };
+                content.set_completeness(name);
             }
             b"tech" => {
-                if !TECH.contains(&normalized_value(value).as_slice()) {
+                let key = normalized_value(value);
+                let Some((_, name)) = TECH.iter().find(|(k, _)| *k == key.as_slice()) else {
                     return fail(&values[0], b"");
-                }
-                self.effects.non_title = true;
+                };
+                content.set_tech(name);
             }
             b"primary-accession" => {
+                let mut accessions: Vec<Vec<u8>> = Vec::new();
                 for modifier in values {
-                    if std::str::from_utf8(&modifier.value).is_err() {
-                        return Err(ModsStop::Undefined(INVALID_UTF8));
-                    }
-                }
-                if values
-                    .iter()
-                    .any(|modifier| !tokenize(&modifier.value, b",; \t").is_empty())
-                {
-                    self.effects.non_title = true;
-                }
-            }
-            b"secondary-accession" => return Err(ModsStop::Undefined(SECONDARY_ACCESSION)),
-            b"project" => {
-                let mut any = false;
-                for modifier in values {
+                    // `CUtf8::AsUTF8` of a token that is not UTF-8 throws, and the modifier is
+                    // reported as an invalid value.
                     let tokens = tokenize(&modifier.value, b",; \t");
-                    if tokens.iter().any(|token| string_to_uint(token).is_err()) {
+                    if tokens.iter().any(|token| std::str::from_utf8(token).is_err()) {
                         return fail(modifier, b"");
                     }
-                    any |= !tokens.is_empty();
+                    accessions.extend(tokens.into_iter().map(<[u8]>::to_vec));
                 }
-                if any {
-                    self.effects.non_title = true;
+                if !accessions.is_empty() {
+                    content.set_tpa(accessions);
                 }
             }
-            b"comment" | b"ft-map" | b"ft-mod" => self.effects.non_title = true,
-            b"pmid" => {
+            b"secondary-accession" => {
+                let ids = secondary_ids(values)?;
+                content.set_extra_accessions(ids.clone());
+                // `CModAdder::x_SetHist`: a Seq-id of each (`CSeq_id(string)`), whose failure
+                // is an exception that nothing in the reader catches.
+                if !ids.is_empty() {
+                    let mut parsed = Vec::with_capacity(ids.len());
+                    for id in &ids {
+                        match crate::seqid::parse::seq_id_from_text(
+                            id,
+                            crate::seqid::accguide::parse_flags::ANY_RAW,
+                            &mut |_| {},
+                        ) {
+                            Ok(parsed_id) => parsed.push(parsed_id),
+                            Err(error) => return Err(ModsStop::Exception(error.exception(), Vec::new())),
+                        }
+                    }
+                    content.replaces = Some(parsed);
+                }
+            }
+            b"project" => {
+                let mut ids: Vec<i64> = Vec::new();
                 for modifier in values {
-                    if string_to_int8(&modifier.value, 0).is_err() {
-                        return fail(&values[0], b"Expected integer value.");
+                    for token in tokenize(&modifier.value, b",; \t") {
+                        match string_to_uint(token) {
+                            Ok(id) => ids.push(i64::from(id)),
+                            Err(_) => return fail(modifier, b""),
+                        }
                     }
                 }
-                self.effects.non_title = true;
+                if !ids.is_empty() {
+                    content.set_genome_projects(ids);
+                }
+            }
+            b"comment" => {
+                for modifier in values {
+                    content.add_comment(&modifier.value);
+                }
+            }
+            b"ft-map" | b"ft-mod" => {
+                let label: &[u8] = if canonical == b"ft-map" {
+                    b"Map-FileTrackURL"
+                } else {
+                    b"BaseModification-FileTrackURL"
+                };
+                for modifier in values {
+                    content.add_file_track(label, &modifier.value);
+                }
+            }
+            b"pmid" => {
+                for modifier in values {
+                    match string_to_int8(&modifier.value, 0) {
+                        Ok(pmid) => content.add_pmid(pmid),
+                        Err(_) => return fail(&values[0], b"Expected integer value."),
+                    }
+                }
             }
             name if SUBSOURCE.contains(&name) => {
-                if NEEDS_NO_TEXT.contains(&name) {
+                let kind = match name {
+                    b"sub-clone" => &b"subclone"[..],
+                    b"lat-long" | b"latitude-longitude" => b"lat-lon",
+                    b"note" | b"notes" => b"other",
+                    other => other,
+                };
+                let kind = descr::enum_name(descr::subsource_type(), "subtype", kind)
+                    .expect("a subsource subtype of the table");
+                if NEEDS_NO_TEXT.contains(&kind.as_bytes()) {
                     for modifier in values {
                         if !modifier.value.eq_ignore_ascii_case(b"true") {
                             return fail(modifier, b"");
                         }
                     }
                 }
-                self.effects.non_title = true;
+                content.add_subsources(kind, &texts());
             }
-            name if ORGMOD.contains(&name) => self.effects.non_title = true,
+            name if ORGMOD.contains(&name) => {
+                let kind = match name {
+                    b"subspecies" => &b"sub-species"[..],
+                    b"host" | b"specific-host" => b"nat-host",
+                    other => other,
+                };
+                let kind = descr::enum_name(descr::orgmod_type(), "subtype", kind)
+                    .expect("an orgmod subtype of the table");
+                content.add_orgmods(kind, &texts());
+            }
             _ => return Ok(false),
         }
         Ok(true)
@@ -773,11 +822,13 @@ impl Adder {
         };
         match canonical {
             b"strand" => {
-                if ![&b"single"[..], b"double", b"mixed", b"other"].contains(&normalized.as_slice())
-                {
-                    return fail();
-                }
-                self.effects.non_title = true;
+                self.effects.content.strand = Some(match normalized.as_slice() {
+                    b"single" => "ss",
+                    b"double" => "ds",
+                    b"mixed" => "mixed",
+                    b"other" => "other",
+                    _ => return fail(),
+                });
             }
             b"molecule" => {
                 let mol = match normalized.as_slice() {
@@ -792,12 +843,13 @@ impl Adder {
                 self.mol_set = true;
             }
             b"topology" => {
-                if ![&b"linear"[..], b"circular", b"tandem", b"other"]
-                    .contains(&normalized.as_slice())
-                {
-                    return fail();
-                }
-                self.effects.non_title = true;
+                self.effects.content.topology = Some(match normalized.as_slice() {
+                    b"linear" => "linear",
+                    b"circular" => "circular",
+                    b"tandem" => "tandem",
+                    b"other" => "other",
+                    _ => return fail(),
+                });
             }
             _ => return Ok(false),
         }
@@ -818,20 +870,117 @@ impl Adder {
             ]));
             self.skipped.extend(values.iter().cloned());
         } else {
-            self.effects.non_title = true;
+            let prot = self.effects.content.protein();
+            let texts = || -> Vec<Vec<u8>> { values.iter().map(|m| m.value.clone()).collect() };
+            match canonical {
+                b"protein-desc" => prot.desc = Some(Self::single_value(values).to_vec()),
+                b"protein" => prot.name = Some(texts()),
+                b"ec-number" => prot.ec = Some(texts()),
+                _ => prot.activity = Some(texts()),
+            }
         }
         true
     }
 }
 
-/// The cause of the refusal of a secondary accession (`x_SetHist` makes a Seq-id of each value
-/// and an invalid one throws a `CSeqIdException` that no `catch` of the reader takes).
-pub(crate) const SECONDARY_ACCESSION: &str =
-    "NCBI BLAST+ 2.17.0 turns the values of a secondary-accession modifier into Seq-ids, and what it does with one that is not an accession is not followed by LOSAT";
+/// The cause of the refusal of a secondary accession whose range runs backwards by more than
+/// one: `std::list::insert` over the range's iterators then counts up from the range's start
+/// past `INT_MAX` (signed overflow), and NCBI BLAST+ 2.17.0 runs until its memory or time is
+/// gone (probe `f6b.m2.028`: no answer in 280 s).
+pub(crate) const BACKWARD_RANGE: &str =
+    "NCBI BLAST+ 2.17.0 reads a secondary-accession range that runs backwards (AB000003-AB000001) as a loop past the largest integer, which does not end";
 
-/// The cause of the refusal of a primary accession that is not UTF-8.
-pub(crate) const INVALID_UTF8: &str =
-    "NCBI BLAST+ 2.17.0 converts the values of a primary-accession modifier to UTF-8, and what it does with one that is not UTF-8 is not followed by LOSAT";
+/// The cause of the refusal of a secondary-accession range that is not an `int`: its start or
+/// stop overflows the signed integer of `SSeqIdRange` (undefined behavior in NCBI's code).
+pub(crate) const RANGE_OVERFLOW: &str =
+    "NCBI BLAST+ 2.17.0 reads the numbers of a secondary-accession range into a signed integer, and one that does not fit is undefined behavior that LOSAT does not follow";
+
+/// The cause of the refusal of a secondary-accession range of more than a million accessions.
+pub(crate) const RANGE_TOO_LONG: &str =
+    "a secondary-accession range of more than a million accessions, which NCBI BLAST+ 2.17.0 expands into as many Seq-ids and LOSAT does not follow";
+
+/// `SSeqIdRange` of one value, and its accessions: `None` where the constructor throws (the
+/// value is then taken as it is).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3602-3642
+fn seq_id_range(value: &[u8]) -> Result<Option<Vec<Vec<u8>>>, ModsStop> {
+    let alpha = |c: u8| c.is_ascii_alphabetic();
+    let n = value.len();
+    let mut pos = 0;
+    while pos < n && alpha(value[pos]) {
+        pos += 1;
+    }
+    let prefix = &value[..pos];
+    let mut start: i64 = 0;
+    let mut digits = 0usize;
+    let int = |number: i64| -> Result<i64, ModsStop> {
+        if number > i64::from(i32::MAX) {
+            Err(ModsStop::Undefined(RANGE_OVERFLOW))
+        } else {
+            Ok(number)
+        }
+    };
+    while pos < n && value[pos].is_ascii_digit() {
+        start = int(start * 10 + i64::from(value[pos] - b'0'))?;
+        digits += 1;
+        pos += 1;
+    }
+    let stop;
+    if pos == n {
+        stop = start;
+    } else {
+        if value[pos] != b'-' {
+            return Ok(None);
+        }
+        pos += 1;
+        let second = pos;
+        while pos < n && alpha(value[pos]) {
+            pos += 1;
+        }
+        let second = &value[second..pos];
+        if !second.is_empty() && second != prefix {
+            return Ok(None);
+        }
+        if pos + digits != n {
+            return Ok(None);
+        }
+        let mut number: i64 = 0;
+        while pos < n && value[pos].is_ascii_digit() {
+            number = int(number * 10 + i64::from(value[pos] - b'0'))?;
+            pos += 1;
+        }
+        stop = number;
+    }
+    if start > stop + 1 {
+        return Err(ModsStop::Undefined(BACKWARD_RANGE));
+    }
+    if stop + 1 - start > 1_000_000 {
+        return Err(ModsStop::Undefined(RANGE_TOO_LONG));
+    }
+    let mut ids = Vec::new();
+    for number in start..=stop {
+        let mut id = prefix.to_vec();
+        id.extend_from_slice(format!("{number:0digits$}").as_bytes());
+        ids.push(id);
+    }
+    Ok(Some(ids))
+}
+
+/// The ids of a `secondary-accession` modifier (`x_SetGBblockIds`, `x_SetHist`): the values split
+/// at `,; \t`, each trimmed, a range spelled out.
+fn secondary_ids(values: &[ModData]) -> Result<Vec<Vec<u8>>, ModsStop> {
+    let mut ids = Vec::new();
+    for modifier in values {
+        for token in tokenize(&modifier.value, b",; \t") {
+            let value = truncate_spaces(token);
+            match seq_id_range(value)? {
+                Some(range) => ids.extend(range),
+                None => ids.push(value.to_vec()),
+            }
+        }
+    }
+    Ok(ids)
+}
 
 /// `CAlnReader::x_AddMods` of one defline: its title and what the modifiers did.
 ///
@@ -881,6 +1030,7 @@ pub(crate) fn apply_defline(defline: &[u8], protein: bool) -> Result<ModsApplied
                     warnings: adder.warnings,
                     message: failure.message,
                 }),
+                ModsStop::Exception(exception, _) => ModsStop::Exception(exception, adder.warnings),
                 other => other,
             });
         }

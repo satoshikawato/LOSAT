@@ -35,7 +35,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::blastinput::aln_reader::{read_alignment, Alignment, AlnBioseq, AlnError, Mol};
+use crate::blastinput::aln_reader::{read_alignment, Alignment, AlnBioseq, AlnError, Mol, SetMol};
 use crate::blastinput::app::{engine_error, query_error};
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
 use crate::core::psi::{
@@ -69,11 +69,6 @@ pub(crate) struct MsaScoring<'a> {
     pub(crate) gap_extend: i32,
     /// `-out_ascii_pssm` is given (`PSIDiagnosticsRequestNewEx(SaveAsciiPssm())`).
     pub(crate) save_ascii_pssm: bool,
-    /// The run writes the query's Bioseq with its descriptors: the input PSSM (`-out_pssm`
-    /// without `-save_pssm_after_last_round`, `-save_each_pssm`) or the search strategy
-    /// (`-export_search_strategy`). The modifiers of a defline set descriptors that LOSAT does
-    /// not write, so the run refuses where they would show.
-    pub(crate) descriptors_observed: bool,
 }
 
 // What the PSSM engine reads from `CPsiBlastInputClustalW`: an empty matrix name and a gap cost
@@ -764,9 +759,6 @@ fn longer_row_above_master(master_index: Option<i32>, row: usize) -> anyhow::Err
     )
 }
 
-/// The cause of the refusal of a modifier that sets more than the title where the run writes the
-/// query's Bioseq with its descriptors.
-const MODIFIER_CONTENT: &str = "a modifier of the query's defline sets a descriptor, a feature or a sequence member (BioSource, MolInfo, comment, publication, protein, strand, topology, ...) that the run would write with the query's Bioseq (-out_pssm without -save_pssm_after_last_round, -save_each_pssm, -export_search_strategy), and LOSAT writes only the title";
 
 /// LOSAT's refusal of a run whose alignment reader reached a state that no input gives (S3 of
 /// the PS6 review: the reader's two preconditions on the Seq-ids, `aln_reader::verify_alignment_info`).
@@ -799,6 +791,19 @@ pub(crate) fn pssm_from_msa(
         Err(AlnError::Modifier(failure)) => {
             post_warnings(diagnostics, &failure.warnings)?;
             return Err(query_error(&String::from_utf8_lossy(&failure.message)));
+        }
+        Err(AlnError::ModifierException(warnings, exception)) => {
+            post_warnings(diagnostics, &warnings)?;
+            return Err(anyhow::Error::from(crate::cli::NativeError::exception(
+                &exception,
+            )));
+        }
+        Err(AlnError::StdException(what)) => {
+            return Err(crate::cli::NativeError {
+                exit: 255,
+                message: format!("Error: {what}\n").into_bytes(),
+            }
+            .into())
         }
         Err(AlnError::Undefined(cause)) => return Err(refused_cause(cause)),
         Err(AlnError::Exception(exception)) => {
@@ -901,28 +906,47 @@ pub(crate) fn pssm_from_msa(
     // ```
     // The Bioseq is the alignment's own: its ids, its letters as IUPACaa, its title (the text of the
     // defline outside its modifiers).
-    if bioseq.is_some_and(|bioseq| bioseq.mol_changed) {
-        return Err(refused_cause(
-            crate::blastinput::aln_reader::MOLECULE_CHANGED,
-        ));
-    }
-    if scoring.descriptors_observed && bioseq.is_some_and(|bioseq| bioseq.modifier_content) {
-        return Err(refused_cause(MODIFIER_CONTENT));
-    }
     let entry = bioseq.map(|bioseq| {
+        let mut descr: Vec<Seqdesc> = bioseq
+            .content
+            .descriptors()
+            .into_iter()
+            .map(Seqdesc::Other)
+            .collect();
+        if let Some(title) = &bioseq.title {
+            descr.push(Seqdesc::Title(title.clone()));
+        }
+        let mol = match bioseq.set_mol {
+            None | Some(SetMol::Aa) => ("aa", 3),
+            Some(SetMol::Dna) => ("dna", 1),
+            Some(SetMol::Rna) => ("rna", 2),
+            Some(SetMol::Na) => ("na", 4),
+            Some(SetMol::Other) => ("other", 255),
+        };
+        let mut inst = SeqInst::new(
+            ("raw", 2),
+            mol,
+            Some(bioseq.letters.len() as u32),
+            Some(SeqData::Iupacaa(bioseq.letters.clone())),
+        );
+        inst.hist = bioseq.content.hist();
+        inst.topology = bioseq.content.topology.map(|name| match name {
+            "linear" => 1,
+            "circular" => 2,
+            "tandem" => 3,
+            _ => 255,
+        });
+        inst.strand = bioseq.content.strand.map(|name| match name {
+            "ss" => 1,
+            "ds" => 2,
+            "mixed" => 3,
+            _ => 255,
+        });
         SeqEntry::Seq(Box::new(PssmQuery {
             ids: bioseq.ids.clone(),
-            descr: bioseq
-                .title
-                .clone()
-                .map(|title| vec![Seqdesc::Title(title)]),
-            inst: SeqInst::new(
-                ("raw", 2),
-                ("aa", 3),
-                Some(bioseq.letters.len() as u32),
-                Some(SeqData::Iupacaa(bioseq.letters.clone())),
-            ),
-            annot: None,
+            descr: (!descr.is_empty()).then_some(descr),
+            inst,
+            annot: bioseq.content.annot(&bioseq.ids),
         }))
     });
     Ok(msa_pssm_with_parameters(

@@ -54,8 +54,9 @@ fn strand_name(strand: Option<Strand>) -> Option<&'static str> {
 /// The table of `hsps`.
 pub fn of_records(hsps: &[HspRecord]) -> RecordBatch {
     RecordBatch::try_from_iter_with_nullable([
-        // The columns of `-outfmt 6`, in its order. The ids are text here: a byte that is not
-        // UTF-8 becomes U+FFFD (`AccVer::to_string_lossy`); the reports keep it.
+        // The columns of `-outfmt 6`, in its order. The ids are text here: one U+FFFD per
+        // maximal ill-formed subpart of their bytes (`Id::to_string_lossy`); the reports keep
+        // the bytes.
         (
             "qaccver",
             texts(hsps, |hsp| Some(hsp.query_id.to_string_lossy())),
@@ -180,6 +181,10 @@ fn runs<T: PartialEq + Copy>(values: &[T]) -> impl Iterator<Item = (T, usize, us
 /// A table has `len`, indexing (an `Hsp`), slicing (a table) and iteration, and any Arrow
 /// consumer reads it without a copy through `__arrow_c_stream__`: `pyarrow.table(hsps)`,
 /// `polars.DataFrame(hsps)`, `pandas.DataFrame.from_arrow(hsps)`.
+///
+/// The ids (`qaccver`, `saccver`) are text, with one U+FFFD per maximal ill-formed subpart of
+/// their bytes, as `bytes.decode("utf-8", "replace")` gives; the exact bytes are those of the
+/// HSP's row in a report, `report.bytes[report.spans[hsp.index]]`.
 #[pyclass(frozen, module = "pylosat._pylosat")]
 pub struct HspTable {
     batch: Arc<RecordBatch>,
@@ -423,11 +428,15 @@ impl Hsp {
         self.int("round")
     }
 
+    /// `qaccver`, as text: its bytes with one U+FFFD per maximal ill-formed subpart, as
+    /// `bytes.decode("utf-8", "replace")` gives; `report.bytes[report.spans[hsp.index]]` holds
+    /// the row with the exact bytes.
     #[getter]
     fn query_id(&self) -> String {
         self.required_text("qaccver")
     }
 
+    /// `saccver`, as text, as `query_id`.
     #[getter]
     fn subject_id(&self) -> String {
         self.required_text("saccver")

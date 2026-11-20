@@ -56,7 +56,7 @@ export class FakeEngine implements EngineGateway {
    * inputs read together (a run of `-parse_deflines` reads its records as one without it).
    */
   async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } };
+    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, database: false } };
   }
 
   /**
@@ -91,7 +91,7 @@ export class FakeEngine implements EngineGateway {
       onPhase(phase);
       if (phase === 'preparing') this.register(request);
     }
-    if (request.query.bytes.length === 0 || request.subject.bytes.length === 0) {
+    if (request.query.bytes.length === 0 || request.subject?.bytes.length === 0) {
       // A failed run keeps the warnings written before its error, as the engine's does (stream 3,
       // then `fail`; line WQA's sweep, D3, 2026-11-19): here a marked line.
       const writer = new RunOutputWriter(output);
@@ -120,6 +120,8 @@ export class FakeEngine implements EngineGateway {
   private register(request: EngineRunRequest): void {
     for (const role of ['query', 'subject'] as const) {
       const input = request[role];
+      // A run of -db has no subject.
+      if (input === undefined) continue;
       const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes, programOf(request), role));
       if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
     }
@@ -136,7 +138,7 @@ export class FakeEngine implements EngineGateway {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
     const queries = fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200);
-    const subjects = fakeRecordKeys(request.subject.bytes, programOf(request), 'subject').slice(0, 3);
+    const subjects = fakeRecordKeys(request.subject?.bytes ?? new Uint8Array(0), programOf(request), 'subject').slice(0, 3);
     const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
     const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;

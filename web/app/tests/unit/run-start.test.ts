@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { instantiateSerial, reactorControl, reopening, WasmEngine } from 'losat';
+import { instantiateSerial, reactorControl, reopening, RunDirectory, WasmEngine } from 'losat';
 import { readStoredZip, type RegistryFile, type RunFile } from 'losat/domain';
 import { FileReadError, isFileReadError, runFilesOf, runOutputFailedOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
@@ -173,7 +173,7 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; trap
         error = "error: unexpected argument '-version' found";
         return -1;
       }
-      respond(options.start ?? '{"conffile":"c.ini","log_file":"run.log","dry_run":true,"register_inputs":false}');
+      respond(options.start ?? '{"conffile":"c.ini","log_file":"run.log","dry_run":true,"register_inputs":false,"database":false}');
       return 0;
     },
     losat_web2_validate: (ptr: number, len: number) => {
@@ -211,11 +211,11 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; trap
 
 describe('the ABI binding of the start and of a registry file', () => {
   it('reads the start JSON of an argv, or the CLI message of one that the engine cannot start', () => {
-    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false } });
+    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false, database: false } });
     // -parse_deflines: the run's inputs are read together (line WQA's sweep, D7, 2026-11-19).
-    expect(fakeExports({ start: '{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":true}' }).abi.start(['blastn', '-parse_deflines'])).toEqual({
+    expect(fakeExports({ start: '{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":true,"database":false}' }).abi.start(['blastn', '-parse_deflines'])).toEqual({
       ok: true,
-      start: { conffile: null, logFile: null, dryRun: false, registerInputs: true },
+      start: { conffile: null, logFile: null, dryRun: false, registerInputs: true, database: false },
     });
     expect(fakeExports({ start: 'fail' }).abi.start(['blastn', '-version'])).toEqual({ ok: false, message: "error: unexpected argument '-version' found" });
   });
@@ -356,7 +356,7 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
       ok: false,
       message: 'BLAST query/options error: bad',
     });
-    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false } });
+    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false, database: false } });
   });
 
   it('keeps the file away from every call of the shared instance, also from calls that wait with it for one opening of that instance', async () => {
@@ -485,7 +485,7 @@ function fakeAbi(
     // The start of an argv: -parse_deflines reads the inputs of the run together (line WQA's sweep, D7, 2026-11-19).
     start: (argv: readonly string[]) => ({
       ok: true,
-      start: { conffile: null, logFile: null, dryRun: false, registerInputs: argv.includes('-parse_deflines') },
+      start: { conffile: null, logFile: null, dryRun: false, registerInputs: argv.includes('-parse_deflines'), database: argv.includes('-db') },
     }),
     memoryBytes: () => 1,
     register: (_program: string, role: number, bytes: Uint8Array) => {
@@ -494,16 +494,18 @@ function fakeAbi(
     },
     registerInputs: (argv: readonly string[], query: Uint8Array, subject: Uint8Array) => {
       calls.push(`register inputs ${argv.join(' ')}`);
+      // A run of -db reads the query alone (ABI v2 §9 *inputs*, `subject` null).
+      const database = argv.includes('-db');
       return {
         query: { handle: ++handle, records: [{ id: 'q', length: query.length }] },
-        subject: { handle: ++handle, records: [{ id: 's', length: subject.length }] },
-        shownIds: { query: ['Q.1'], subject: ['S.1'] },
+        subject: database ? undefined : { handle: ++handle, records: [{ id: 's', length: subject.length }] },
+        shownIds: { query: ['Q.1'], subject: database ? [] : ['S.1'] },
       };
     },
     release: (h: number) => void calls.push(`release ${h}`),
     fileRelease: (file: number) => void calls.push(`file release ${file}`),
-    run: (_argv: readonly string[], _query: number, _subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
-      calls.push('run');
+    run: (_argv: readonly string[], _query: number, subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
+      calls.push(subject === 0 ? 'run without a subject' : 'run');
       if (options.messages !== 'none') sink(MESSAGES_STREAM, options.messages ?? placeSignal(3));
       sink(6, encode('q\ts\n'));
       for (const chunk of options.warnings ?? []) sink(3, chunk);
@@ -542,6 +544,7 @@ function runtimeWith(abi: ReactorAbi) {
   (runtime as unknown as { loaded: unknown }).loaded = {
     path: 'serial',
     instance: { abi, wasi: { clear: () => undefined } },
+    directory: new RunDirectory(),
     runs: 0,
     retained: undefined,
     counts: undefined,
@@ -826,6 +829,35 @@ describe("the Engine worker's runtime and the files of a run", () => {
     expect(runFilesOf(error)).toBeUndefined();
     second.close();
   });
+
+  it("runs -db with the run's files in its directory, no subject and subject handle 0 (line WQA D12a)", async () => {
+    const { abi, calls } = fakeAbi();
+    const runtime = runtimeWith(abi);
+    const { run, close } = workerRun([]);
+    const withoutSubject: WorkerRun = { ...run };
+    delete (withoutSubject as { subject?: unknown }).subject;
+    const files = [{ name: 'db/x.nal', file: new Blob(['TITLE x\n']) }];
+    const database: WorkerRun = { ...withoutSubject, argv: ['tblastx', '-query', 'q.fa', '-db', 'db/x'], files };
+    const result = await runtime.run(database, () => undefined);
+    expect(calls).toEqual(['validate tblastx -query q.fa -db db/x -num_threads 1', 'register query', 'run without a subject', 'release 101']);
+    expect(result.subjectRetained).toBe(false);
+    const loaded = (runtime as unknown as { loaded: { directory: RunDirectory } }).loaded;
+    expect(loaded.directory.list).toEqual(files);
+    // -parse_deflines reads the query alone; the shown IDs of the subjects are the database's.
+    calls.length = 0;
+    const together = await runtime.run({ ...database, argv: [...database.argv, '-parse_deflines'] }, () => undefined);
+    expect(calls).toEqual([
+      'validate tblastx -query q.fa -db db/x -parse_deflines -num_threads 1',
+      'register inputs tblastx -query q.fa -db db/x -parse_deflines -num_threads 1',
+      'run without a subject',
+      'release 102',
+    ]);
+    expect(together.shownIds).toEqual({ query: ['Q.1'], subject: [] });
+    // A subject with -db, and a run of neither: refused before the inputs are read.
+    await expect(runtime.run({ ...database, subject: run.subject! }, () => undefined)).rejects.toThrow('a run of -db has no subject: give no subject');
+    await expect(runtime.run({ ...withoutSubject }, () => undefined)).rejects.toThrow('this run needs a subject (or -db)');
+    close();
+  });
 });
 
 // --- the gateway ------------------------------------------------------------------------------------
@@ -958,7 +990,7 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const { abi } = await instantiateSerial(module!);
     expect(abi.start(['tblastx', '-conffile', 'a.ini', '-conffile=c.ini', '-logfile', 'x.log', '-dryrun'])).toEqual({
       ok: true,
-      start: { conffile: 'c.ini', logFile: 'x.log', dryRun: true, registerInputs: false },
+      start: { conffile: 'c.ini', logFile: 'x.log', dryRun: true, registerInputs: false, database: false },
     });
     expect(abi.start(['blastn', '-version'])).toMatchObject({ ok: false });
     // -parse_deflines reads the inputs of a run together, but not those of a dry run (line WQA's sweep, D7, 2026-11-19).

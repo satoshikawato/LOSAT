@@ -6,6 +6,7 @@
 // (tests/e2e/engine.spec.ts, tests/e2e/private-window.spec.ts).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InstanceUse } from '../../../packages/losat/src/infra/engine-worker/instance-use';
+import { TABLE_BYTES } from '../../../packages/losat/src/infra/reactor/run-directory';
 import {
   SLOT_FAILED,
   SLOT_PREPARING,
@@ -63,6 +64,7 @@ describe("a thread worker where the site's data is blocked", () => {
       slot: slot.buffer as SharedArrayBuffer,
       faults: link.port1,
       use: use.buffer,
+      directory: new SharedArrayBuffer(TABLE_BYTES),
     };
     scope.onmessage?.({ data: prepare } as MessageEvent<ThreadCommand>);
     await until(() => received.length === 1);
@@ -77,7 +79,8 @@ describe("a thread worker where the site's data is blocked", () => {
     Atomics.store(slot, 0, SLOT_RUNNING);
     use.startThread();
     const started = new Int32Array(new SharedArrayBuffer(4));
-    scope.onmessage?.({ data: { type: 'start', tid: 3, startArg: 0, started: started.buffer as SharedArrayBuffer } } as MessageEvent<ThreadCommand>);
+    const start: ThreadCommand = { type: 'start', tid: 3, startArg: 0, started: started.buffer as SharedArrayBuffer, files: [] };
+    scope.onmessage?.({ data: start } as MessageEvent<ThreadCommand>);
     await until(() => received.length === 2);
     expect(received[1]).toEqual({ type: 'fault', tid: 3, message: 'The engine stopped: unreachable' });
     expect(Atomics.load(slot, 0)).toBe(SLOT_FAILED);

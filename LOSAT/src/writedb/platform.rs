@@ -63,20 +63,7 @@ pub(crate) enum NcbiOs {
 // #define DEFAULT_TAXID_MAP_SIZE 300000000
 // #endif
 // ```
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:3979-4003 (mdb_env_map)
-// ```c
-// #ifdef _WIN32
-// 	...
-// 	} else {
-// 		msize = env->me_mapsize;
-// 		...
-// 		/* Windows won't create mappings for zero length files.
-// 		 * and won't map more than the file size.
-// 		 * Just set the maxsize right now.
-// 		 */
-// 		if (!(flags & MDB_WRITEMAP) && (SetFilePointer(env->me_fd, sizelo, &sizehi, 0) != (DWORD)sizelo
-// 			|| !SetEndOfFile(env->me_fd)
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3979-4003 (mdb_env_map)
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:347-351
 // ```c++
 // int CWriteDB_IndexFile::x_Overhead(const string & T,
@@ -168,12 +155,7 @@ impl LmdbPlatform {
     };
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:321,395,3969
-// ```c
-// #define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
-// #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
-// 	GET_PAGESIZE(e->me_os_psize);
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:321,395,3969
 /// LMDB's `GET_PAGESIZE` on the host: `GetSystemInfo` on Windows, `sysconf(_SC_PAGE_SIZE)`
 /// elsewhere. On Linux the C library's `sysconf` returns the kernel's `AT_PAGESZ`, which is
 /// the kernel's page size; LOSAT asks the kernel for that size directly

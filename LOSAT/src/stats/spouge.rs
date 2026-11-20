@@ -135,23 +135,7 @@ pub fn lookup_protein_gumbel_params(
 fn erfc_ncbi(z: f64) -> f64 {
     // LOSAT_X_ERFABSORB (graduated 2026-10-26, always on): for z < -6 the reference's value is
     // 2.0 whatever ErfImpl returns, so ErfImpl is not called.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59,111,207,224-229,234-235
-    // ```c
-    //         else if (z < -0.5) {
-    //             return 2.0 - ErfImpl(-z, invert);
-    // ...
-    //     else if (invert ? (z < 28.0) : (z < 5.8)) {
-    // ...
-    //             static const double Y = 0.5579090118408203125;
-    // ...
-    //             double x = 1.0 / z;
-    // ...
-    //             result = Y + p / q;
-    //             result *= expl(-z * z) / z;
-    // ...
-    //         /* Any value of z larger than 28 will underflow to zero: */
-    //         result = 0;
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:58-59,111,207,224-229,234-235
     // With x = -z >= 6, ErfImpl(x, TRUE) takes the last rational branch (x >= 4.5) or, from
     // x = 28 on, returns 0. In that branch Y + p / q lies in [0.5566, 0.5639] for 1/x in
     // (1/28, 1/6] (|p / q| <= 0.006, q >= 1), expl(-x * x) <= e^-36 (`exp_long_double_product_ncbi`
@@ -166,13 +150,7 @@ fn erfc_ncbi(z: f64) -> f64 {
     // Memo (was LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
     // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
     // for every subject of the same length; keep the last results per thread.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:252-255
-    // ```c
-    // double ErfC(double z)
-    // {
-    //     return ErfImpl(z, TRUE);
-    // }
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:252-255
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5216-5216,5223-5223,5248-5254
     // ```c
     //     P_m_F = ErfC(-m_F / sqrt(2.0)) / 2.0;
@@ -414,10 +392,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
     result
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-/// ```c
-///             result *= expl(-z * z) / z;
-/// ```
+/// Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143-143
 /// NCBI has no such helper. The long-double `expl(-z * z)` above is emulated here in
 /// double-double arithmetic, and `DoubleDouble::mul` needs the rounding error of one product.
 /// `a.mul_add(b, -product)` gives it exactly; the Dekker path gives the same number
@@ -448,10 +423,7 @@ fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
     a.mul_add(b, -product)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-// ```c
-//             result *= expl(-z * z) / z;
-// ```
+// Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143-143
 // No NCBI counterpart: 2^-900 and 2^900 bound the range in which Dekker's product is
 // exact (see `x_product_error`). Outside it `mul_add` is used.
 #[allow(dead_code)]
@@ -459,10 +431,7 @@ const X_TWO_POW_M900: f64 = f64::from_bits((1023 - 900) << 52);
 #[allow(dead_code)]
 const X_TWO_POW_900: f64 = f64::from_bits((1023 + 900) << 52);
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-// ```c
-//             result *= expl(-z * z) / z;
-// ```
+// Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143-143
 // Dekker (1971) product error with Veltkamp splitting, used in place of `mul_add` inside
 // the double-double emulation of the long-double `expl(-z * z)` above.
 #[inline(always)]
@@ -478,10 +447,7 @@ fn x_dekker_product_error(a: f64, b: f64, product: f64) -> f64 {
     ((a_hi * b_hi - product) + a_hi * b_lo + a_lo * b_hi) + a_lo * b_lo
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-// ```c
-//             result *= expl(-z * z) / z;
-// ```
+// Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
 // The argument is binary64, while expl and the following division/product
 // evaluate in C long double before the assignment back to binary64.
 // Double-double arithmetic holds expl(-z * z) to more than the 64 bits of a long double.
@@ -512,10 +478,7 @@ impl DoubleDouble {
     #[inline]
     fn mul(self, other: Self) -> Self {
         let product = self.hi * other.hi;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-        // ```c
-        //             result *= expl(-z * z) / z;
-        // ```
+        // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143-143
         // Dispatch point of the Wasm Dekker product: the reference path (`mul_add`) is the
         // double-double product that stands in for the long-double `expl` of this line. Only the
         // way the product's rounding error is obtained changes, not its value.
@@ -542,10 +505,7 @@ impl DoubleDouble {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-// ```c
-//             result *= expl(-z * z) / z;
-// ```
+// Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
 // Range reduction and the exponential Taylor series reproduce the required
 // long-double precision without a native C or NCBI runtime dependency.
 #[inline]
@@ -714,10 +674,7 @@ pub fn blast_spouge_etos(
 mod tests {
     // EXPERIMENT: Dekker's product error equals the fused one inside the range
     // in which the Wasm build uses it.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-    // ```c
-    //             result *= expl(-z * z) / z;
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143-143
     // The test checks, for 2 million random pairs, that Dekker's error term has the bits of
     // the fused multiply-add error term.
     #[test]
@@ -783,11 +740,7 @@ mod tests {
 
     // LOSAT_X_ERFABSORB (graduated 2026-10-26): the reference ErfC is 2.0 for every z < -6, and
     // `erfc_ncbi`, which does not call it there, has the reference's bits everywhere.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59
-    // ```c
-    //         else if (z < -0.5) {
-    //             return 2.0 - ErfImpl(-z, invert);
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:58-59
     // The argument of `erfc_ncbi` bounds ErfImpl(-z, TRUE) below 2.2e-17 for z <= -6; this
     // checks the reference on a grid of [-28.5, -6], on random arguments below -6 (dense next to
     // -6 and 28) and on the doubles just below -6, and that `erfc_ncbi`
@@ -914,10 +867,7 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-    // ```c
-    //             result *= expl(-z * z) / z;
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
     // x86-64 NCBI rounds the long-double product to 64 bits and then stores it to the double:
     // two roundings. For this argument (P_n_F of swissprot blastp Query_17 x P01717.2) the
     // 64-bit product 0x9.6644bd26f0b6cp-11 lies halfway between two doubles and the store rounds
@@ -928,12 +878,7 @@ mod tests {
         assert_eq!(erfc_ncbi(z).to_bits(), 0x3F72_CC89_7A4D_E16E);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:207-229
-    // ```c
-    //             static const double Y = 0.5579090118408203125;
-    //             ...
-    //             result *= expl(-z * z) / z;
-    // ```
+    // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:207-229
     // From z near 25.9 the low part of the double-double exponential is subnormal, from 26.6 its
     // high part, and from about 27.3 it is zero (NCBI's 80-bit expl is still normal there, and the
     // stored product is zero all the same). The x87 model gets subnormal and zero operands there:

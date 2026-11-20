@@ -93,6 +93,11 @@ pub use crate::api::local_blast::{
 pub use crate::report::blast_xml2::SideFileSink;
 pub use crate::report::PairwiseHit;
 
+// LOSAT's words of NCBI's messages (`wording.rs`, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12):
+// the adapter's tests compare the engine's messages with NCBI's texts through it (AGENTS.md
+// rule 8).
+pub use crate::wording::{losat_bytes, losat_text};
+
 // The output formats of the application layer (`blastinput/app.rs`, NCBI's CFormattingArgs):
 // `-outfmt` parsed and checked as the command line does. `EngineProgram` is the program of
 // these checks (the adapter has its own `Program`, and `api::Program` is another type).

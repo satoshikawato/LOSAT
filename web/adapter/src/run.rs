@@ -4067,10 +4067,10 @@ mod tests {
         // The host is told that streams 6 and 7 failed (stream 9; line WQA's sweep, D7, 2026-11-19).
         assert_eq!(discarded(&streams), [6, 7]);
         // NCBI's frozen bytes and texts in LOSAT's words (AGENTS.md rule 8).
-        assert!(ERR6_ND3_NA0.contains(&text(&losat::wording::losat_bytes(SPLIT_ND3_NA0_ERR0))));
+        assert!(ERR6_ND3_NA0.contains(&text(&losat::web_adapter::losat_bytes(SPLIT_ND3_NA0_ERR0))));
         assert_eq!(
             text(&streams[&3]),
-            losat::wording::losat_text(&format!(
+            losat::web_adapter::losat_text(&format!(
                 "{}{}",
                 text(SPLIT_ND3_NA0_ERR0),
                 "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"

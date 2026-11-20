@@ -19,10 +19,10 @@ const SEARCHES: [(&str, &str, &str); 5] = [
 /// NCBI's report of a registry file with the line `[x`, which ends the program (exit status 2).
 const SECTION_REPORT: &str = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
 
-/// Two of [`SECTION_REPORT`] (NCBI's text), in LOSAT's words (`losat::wording`, AGENTS.md rule 8),
+/// Two of [`SECTION_REPORT`] (NCBI's text), in LOSAT's words (`losat::web_adapter::losat_text`, AGENTS.md rule 8),
 /// without the last line feed.
 fn section_reports() -> String {
-    losat::wording::losat_text(&SECTION_REPORT.repeat(2))
+    losat::web_adapter::losat_text(&SECTION_REPORT.repeat(2))
         .trim_end()
         .to_string()
 }
@@ -296,8 +296,8 @@ fn the_conffile_is_a_registered_registry_file() {
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), report, "{program}");
         assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "", "{program}");
-        // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
-        let file = losat::wording::losat_text(&match program {
+        // NCBI's text in LOSAT's words (`losat::web_adapter::losat_text`, AGENTS.md rule 8).
+        let file = losat::web_adapter::losat_text(&match program {
             "tblastx" => SECTION_REPORT.repeat(2),
             _ => SECTION_REPORT.to_string(),
         })

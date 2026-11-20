@@ -327,10 +327,16 @@ pub(crate) fn matrix_error_message(records: &[FastaRecord], options: &ResolvedOp
 /// error, which `RemoveDuplicates` sorts first (`CSearchMessage::operator<`,
 /// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`).
 pub(crate) fn unknown_matrix_message(records: &[FastaRecord]) -> String {
+    unknown_matrix_message_of(records.iter().map(|record| record.sequence.is_empty()))
+}
+
+/// [`unknown_matrix_message`] of queries given by whether each has no letters (BLASTP's records
+/// are another type).
+pub(crate) fn unknown_matrix_message_of(without_letters: impl IntoIterator<Item = bool>) -> String {
     let mut message = String::new();
-    for record in records {
+    for empty in without_letters {
         message.push_str("Error: Unknown error code -1 ");
-        if record.sequence.is_empty() {
+        if empty {
             message.push_str("Warning: Sequence contains no data ");
         }
     }

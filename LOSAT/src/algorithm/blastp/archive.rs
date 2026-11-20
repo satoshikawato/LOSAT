@@ -333,8 +333,9 @@ pub(crate) fn write_blastp_archives(
     let run = RunRecord {
         program: Program::Blastp,
         db_title: call.subjects.db_title(),
-        // The value cannot differ: `-ungapped` is refused before the search
-        // (`validate_requested_blastp_support`), so every BLASTP run is gapped, as in `seqalign.rs`.
+        // The value cannot differ: an `-ungapped` search refuses the archive formats (outfmt 11
+        // and 12 hold Dense-diag Seq-aligns that LOSAT does not write, `requested_reports`), so
+        // every BLASTP run that writes one is gapped, as in `seqalign.rs`.
         gapped: true,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {

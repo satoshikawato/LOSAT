@@ -815,7 +815,8 @@ pub struct ResolvedBlastpArgs {
     /// (blast_args.cpp:303-307, blast_stat.c:921-923).
     pub searchsp: Option<i64>,
     /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP,
-    /// PSIBLAST and RPSBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`).
+    /// PSIBLAST and RPSBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`),
+    /// or an ungapped search (BLASTP's `-ungapped`: `blast_setup.c:517-527` frees the block).
     pub old_fsc: bool,
     pub task: String,
     pub evalue: f64,
@@ -889,6 +890,16 @@ pub struct ResolvedBlastpArgs {
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
     /// the name, `blast_engine.rs` `validate_requested_blastp_support`).
     pub matrix_name: String,
+    /// An ungapped search whose `-matrix` NCBI's tables do not have (`scoring.matrix` is then
+    /// BLOSUM62, which no search scores with): NCBI's set-up of the first query batch fails with
+    /// "Unknown error code -1" (`blastx/query_setup.rs` `unknown_matrix_message`,
+    /// `preliminary_search_error`).
+    pub unknown_matrix: bool,
+    /// The file that NCBI BLAST+ reads for `unknown_matrix`'s name
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line and the
+    /// library API after the options are resolved (`find_matrix_file`); `None` in LOSAT Web. The
+    /// first query batch is refused then (`blastx::query_setup::matrix_error_message`).
+    pub matrix_file: Option<PathBuf>,
     pub scoring: ProteinScoringSpec,
     /// The composition mode that the search runs: the `-comp_based_stats` value, or mode 0 when
     /// IDENTITY resets it (`identity_cbs_reset`; the archive records the value as given).
@@ -947,6 +958,25 @@ pub struct ResolvedBlastpArgs {
 }
 
 impl ResolvedBlastpArgs {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306 (quoted at
+    // `ncbi_environment::ApplicationSettings::matrix_file`: `BlastFindMatrixPath`)
+    /// Looks up the file that NCBI reads for `unknown_matrix`'s name with the settings' search
+    /// (`MatrixSearch::file`) into `matrix_file`, after the options are resolved: the command
+    /// line's search and the library's database search (`blastx::args::ResolvedOptions::
+    /// find_matrix_file`).
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+    ) -> Result<()> {
+        if self.unknown_matrix {
+            self.matrix_file = settings
+                .matrix_search
+                .file(&self.matrix_name)
+                .map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:213-224
     // ```c++
     //     // When dealing with PSI-BLAST iterations, we need to keep a larger
@@ -1355,24 +1385,42 @@ impl BlastpArgs {
                 .xdrop_ungap
                 .or_else(|| self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits)),
         })?;
+        // NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:131-166 (quoted at
+        // `blastx::args::blastx_matrix`)
+        // ```c
+        //     case 'I': case 'i':
+        //         if ( !NCBI_strncasecmp(name, "IDENTITY", 8) ) {
+        //             return &NCBISM_Identity;
+        // ```
         // `validate_protein_options` has refused a matrix that NCBI's tables do not know in a
         // gapped search (blast_options.c:907-940). An ungapped search takes any name, and NCBI
         // fails at the score block of the first query batch ("BLAST engine error: Error: Unknown
-        // error code -1 " for each query, exit 3; NCBI BLAST+ 2.17.0, line LIB P-S3); LOSAT
-        // refuses every ungapped BLASTP search before that (`blast_engine.rs`
-        // `validate_requested_blastp_support`), so no search scores with the BLOSUM62 below. The
-        // port of `-ungapped` (series NP, O4) gives NCBI's error, as BLASTX does
-        // (`blastx/query_setup.rs` `unknown_matrix_message`).
-        let matrix = match options.matrix_name.parse::<ScoringMatrix>() {
-            Ok(matrix) => matrix,
-            Err(_) => {
-                debug_assert!(
-                    self.ungapped,
-                    "validate_protein_options refuses an unknown matrix of a gapped search"
+        // error code -1 " for each query, exit 3; NCBI BLAST+ 2.17.0, line LIB P-S3): the search
+        // reads `unknown_matrix` (`blast_engine.rs` `run_call`), as BLASTX does
+        // (`blastx/query_setup.rs` `unknown_matrix_message`), so no search scores with the
+        // BLOSUM62 below. NCBI 2.17.0 crashes on a name that its matrix loader reads as IDENTITY
+        // without IDENTITY's statistics table (`IDENTITYX`, exit 139): LOSAT refuses it, as BLASTX
+        // does (`blastx::args`, ungapped searches only: a gapped one stops at NCBI's matrix error
+        // first).
+        let matrix = options.matrix_name.parse::<ScoringMatrix>().ok();
+        let unknown_matrix = matrix.is_none();
+        if unknown_matrix {
+            debug_assert!(
+                self.ungapped,
+                "validate_protein_options refuses an unknown matrix of a gapped search"
+            );
+            if options
+                .matrix_name
+                .get(..8)
+                .is_some_and(|start| start.eq_ignore_ascii_case("identity"))
+            {
+                bail!(
+                    "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's BLASTP",
+                    options.matrix_name
                 );
-                ScoringMatrix::Blosum62
             }
-        };
+        }
+        let matrix = matrix.unwrap_or(ScoringMatrix::Blosum62);
         let psi_pssm = self
             .psiblast_pssm
             .as_ref()
@@ -1420,7 +1468,9 @@ impl BlastpArgs {
             //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
             // ```
             // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307); every app reads the variable.
-            old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
+            old_fsc: self.searchsp.is_some()
+                || self.ungapped
+                || crate::blastinput::app::old_fsc_environment(),
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,
@@ -1478,6 +1528,8 @@ impl BlastpArgs {
             sum_stats: self.sum_stats,
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
+            unknown_matrix,
+            matrix_file: None,
             scoring: ProteinScoringSpec {
                 matrix,
                 gap_open: options.gap_open,
@@ -1701,6 +1753,45 @@ mod tests {
             resolved.comp_based_stats.mode,
             BlastpCompositionMode::CompositionMatrixAdjust
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-501 (an ungapped search
+    // takes any `-matrix` name; the score block of the first query batch fails for an unknown
+    // one, `unknown_matrix`). NCBI BLAST+ 2.17.0 exits 139 on `IDENTITYX` (a name that starts
+    // with IDENTITY, as BLASTX's `-matrix` refusal says), which LOSAT refuses. A gapped search
+    // stops at the matrix error of the options.
+    #[test]
+    fn ungapped_search_takes_an_unknown_matrix_name() {
+        let resolve = |extra: &[&str]| {
+            let mut words = vec!["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"];
+            words.extend_from_slice(extra);
+            let cli = parse_cli(words);
+            let TestCommand::Blastp(args) = cli.command;
+            args.resolve()
+        };
+        let unknown = resolve(&["-ungapped", "-comp_based_stats", "0", "-matrix", "FOO"])
+            .expect("an ungapped search with an unknown matrix");
+        assert!(unknown.unknown_matrix);
+        assert!(unknown.old_fsc, "no Gumbel block in an ungapped search");
+        let known = resolve(&["-ungapped", "-comp_based_stats", "0"]).expect("resolved");
+        assert!(!known.unknown_matrix);
+        assert!(known.old_fsc);
+        assert!(known.matrix_file.is_none());
+        let refused = resolve(&[
+            "-ungapped",
+            "-comp_based_stats",
+            "0",
+            "-matrix",
+            "IDENTITYX",
+        ])
+        .expect_err("IDENTITYX");
+        assert_eq!(
+            refused.to_string(),
+            "-matrix IDENTITYX is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's BLASTP"
+        );
+        // A gapped search keeps its own default: the Gumbel block.
+        let gapped = resolve(&["-comp_based_stats", "0"]).expect("resolved");
+        assert!(!gapped.old_fsc);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391

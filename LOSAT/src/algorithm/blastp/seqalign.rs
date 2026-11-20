@@ -109,6 +109,8 @@ pub(crate) fn write_blastp_seqalign(
     let run = RunRecord {
         program: Program::Blastp,
         db_title: subjects.db_title(),
+        // An `-ungapped` search refuses the Seq-align formats (outfmt 8, 9 and 11 hold
+        // Dense-diag Seq-aligns that LOSAT does not write, `requested_reports`).
         gapped: true,
     };
     write_hit_list_seqaligns(

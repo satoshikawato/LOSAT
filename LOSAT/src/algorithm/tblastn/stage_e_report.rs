@@ -1589,6 +1589,7 @@ fn write_pairwise(
         // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221);
         // `blastinput::report_counts` applies the -num_descriptions, -num_alignments and
         // -max_target_seqs values.
+        gapped: true,
         num_descriptions: report_counts.num_descriptions,
         num_alignments: report_counts.num_alignments,
     };

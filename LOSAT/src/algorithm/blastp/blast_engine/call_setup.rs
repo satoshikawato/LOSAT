@@ -71,7 +71,8 @@ use crate::report::OutputFormat;
 use crate::stats::search_space::SearchSpace;
 use crate::stats::setup::SearchSpaceOverflow;
 use crate::stats::{
-    lookup_protein_gumbel_params, lookup_protein_params, BlastGumbelBlk, KarlinParams,
+    lookup_protein_gumbel_params, lookup_protein_params, lookup_protein_params_ungapped,
+    BlastGumbelBlk, KarlinParams,
 };
 use crate::utils::threading::SearchPool;
 
@@ -171,6 +172,22 @@ pub(super) fn requested_reports(
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
+    // (`BLASTUngappedHspListToSeqAlign`: the Seq-align of an ungapped search is a Dense-diag per
+    // HSP, which outfmt 8, 9 and 12 write and outfmt 11 archives)
+    // The Seq-align formats of an ungapped search are not written yet (the Dense-diag writer of
+    // branch `feature/np-o4b-dendiag`): refused by name before the first byte, with BLASTN's
+    // wording (`blastn::blast_engine::run::process_options`).
+    if args.ungapped {
+        for (format, report) in outputs.formats.iter().zip(&requested_formats) {
+            if matches!(report, BlastpReport::Seqalign(_) | BlastpReport::Archive) {
+                bail!(
+                    "output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTP",
+                    crate::blastinput::app::parse_formatting_string(format.outfmt)?.number
+                );
+            }
+        }
+    }
     // What the requested formats need beyond outfmt 0, 6 and 7, decided once for the search
     // (`ReportNeeds`): the engine's positives of the composition-adjusted matches
     // (`engine_positives`). The engine's counts of the HSPs that the pyrrolysine recount
@@ -388,6 +405,33 @@ pub(super) fn call_subjects<'a>(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:766-769
+// ```c
+// kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1833-1839
+// ```c
+// kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
+// hsp->evalue = BLAST_KarlinStoE_simple(hsp->score, kbp[hsp->context],
+//                                       hsp_list->hspcnt ? searchsp : 1);
+// ```
+/// The one owner of the Karlin block of the search's statistics for a context (decision D3 of
+/// task O4b): the call's shared gapped block (`shared`: the matrix's gap costs row) in a gapped
+/// search, and in an ungapped one the context's own `kbp_std` (`QueryContext::karlin_params`, with
+/// the matrix's ungapped alpha and beta, `call_lookup`). The effective lengths, the cutoffs, the
+/// preliminary E-values, the bit scores, the XML statistics and the footer read it here.
+pub(super) fn context_block<'b>(
+    args: &ResolvedBlastpArgs,
+    shared: &'b KarlinParams,
+    ctx: &'b QueryContext,
+) -> &'b KarlinParams {
+    if args.ungapped {
+        &ctx.karlin_params
+    } else {
+        shared
+    }
+}
+
 /// The call's ideal ungapped Lambda (the redo's), its matrix's gapped Karlin-Altschul parameters
 /// and its gapped X-drops in raw score, preliminary and final (`call_scoring`).
 ///
@@ -438,6 +482,29 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     // hsp->evalue = BLAST_KarlinStoE_simple(hsp->score, kbp[hsp->context],
     //                                       hsp_list->hspcnt ? searchsp : 1);
     // ```
+    // An ungapped search has no gapped Karlin block (`-gapopen` and `-gapextend` are ignored,
+    // blast_setup.c:517-527), and so no gapped X-drops: its statistics are those of each
+    // context's own block (`context_block`).
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527
+    // ```c
+    //        if (scoring_options->gapped_calculation) {
+    //        ...
+    //        } else {
+    //           ASSERT(sbp->kbp_gap == NULL);
+    //           /* for ungapped cases we do not have gbp filled */
+    //           if (sbp->gbp) {
+    //               sfree(sbp->gbp);
+    //               sbp->gbp=NULL;
+    // ```
+    if args.ungapped {
+        return Ok(BlastpScoring {
+            ideal_ungapped_lambda,
+            gapped_params: KarlinParams::default(),
+            x_drop_gapped: 0,
+            x_drop_gapped_final: 0,
+        });
+    }
     let gapped_params = lookup_protein_params(&args.scoring);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:457-463
     // ```c
@@ -674,6 +741,30 @@ pub(super) fn call_lookup(
     for context in &mut contexts {
         if context.aa_len == 0 {
             context.is_valid = false;
+        }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3128-3130
+    // ```c
+    //    else if (num_values > 0) {
+    //      (*alpha) = alpha_arr[0];
+    //      (*beta) = beta_arr[0];
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:814-819
+    // ```c
+    //          BLAST_GetAlphaBeta(sbp->name, &alpha, &beta,
+    //                             scoring_options->gapped_calculation,
+    //                             scoring_options->gap_open,
+    //                             scoring_options->gap_extend,
+    //                             sbp->kbp_std[index]);
+    // ```
+    // An ungapped search's effective lengths use each context's own block (`context_block`) with
+    // the matrix's ungapped alpha and beta, the first row of its table (the contexts' blocks hold
+    // their lambda, K and H only).
+    if args.ungapped {
+        let ungapped = lookup_protein_params_ungapped(args.scoring.matrix);
+        for context in &mut contexts {
+            context.karlin_params.alpha = ungapped.alpha;
+            context.karlin_params.beta = ungapped.beta;
         }
     }
     let mut query_valid = vec![true; query_records.len()];
@@ -1040,7 +1131,7 @@ pub(super) fn call_search_spaces<'s>(
                                 ctx.aa_len as i64,
                                 eff_db_length,
                                 num_subjects,
-                                gapped_params,
+                                context_block(args, gapped_params, ctx),
                                 options_searchsp,
                                 args.app.name(),
                             )?
@@ -1062,7 +1153,7 @@ pub(super) fn call_search_spaces<'s>(
                 ctx.aa_len,
                 eff_db_length,
                 num_subjects,
-                gapped_params,
+                context_block(args, gapped_params, ctx),
                 args.app.name(),
             )?;
             exact_search_spaces.push(Some(exact));
@@ -1092,7 +1183,7 @@ pub(super) fn call_search_spaces<'s>(
             args.dbsize,
             options_searchsp,
             false,
-            gapped_params,
+            context_block(args, gapped_params, ctx),
             args.app.name(),
         )
     };
@@ -1134,7 +1225,7 @@ pub(super) fn call_search_spaces<'s>(
                         ctx.aa_len as i64,
                         eff_db_length,
                         num_subjects,
-                        gapped_params,
+                        context_block(args, gapped_params, ctx),
                         option_spaces[ctx_idx],
                         args.app.name(),
                     )?;
@@ -1156,6 +1247,32 @@ pub(super) fn call_search_spaces<'s>(
         preliminary_option_spaces,
         preliminary_spaces,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:203-209
+// ```c++
+// s_SeqDbGetAvgLength(void* seqdb_handle, void* ignoreme)
+// {
+//    Int8 total_length = s_SeqDbGetTotLen(seqdb_handle, ignoreme);
+//    Int4 num_seqs = MAX(1, s_SeqDbGetNumSeqs(seqdb_handle, ignoreme));
+//
+//    return (Int4) (total_length/num_seqs);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1372-1374
+// ```c
+//     BlastInitialWordParametersNew(program_number, word_options,
+//       hit_params, lookup_wrap, sbp, query_info,
+//       BlastSeqSrcGetAvgSeqLen(seq_src), &word_params);
+// ```
+/// `BlastSeqSrcGetAvgSeqLen` of the call's subjects, the subject length of the word cutoffs of an
+/// ungapped search (`blastp_prelim_cutoffs`): a database's (`SeqDb::average_length`), a FASTA
+/// subject set's total over its records (the multi-sequence source's average).
+fn average_subject_length(statistics: &CallStatistics<'_>) -> i32 {
+    match statistics.database {
+        Some(database) => database.statistics().average,
+        None => (statistics.total_db_len / i64::from(statistics.num_subjects.max(1))) as i32,
+    }
 }
 
 /// The preliminary stage's cutoffs (`prelim_cutoffs`): `BlastpPrelimCutoffs`' fields, the smallest
@@ -1206,6 +1323,7 @@ pub(super) fn prelim_cutoffs(
         args,
         contexts,
         cutoff_subject_length,
+        average_subject_length(statistics),
         args.comp_based_stats.mode,
         preliminary_exact_spaces,
         gapped_params,
@@ -1241,7 +1359,7 @@ pub(super) fn prelim_cutoffs(
         usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
             args.max_target_seqs,
             args.comp_based_stats.is_enabled(),
-            true,
+            !args.ungapped,
         ))
         .ok()
         .filter(|&size| size > 0)
@@ -1348,7 +1466,7 @@ pub(super) fn subject_parameters<'s>(
                 args.dbsize,
                 option_spaces[ctx_idx],
                 false,
-                gapped_params,
+                context_block(args, gapped_params, ctx),
                 args.app.name(),
             )?;
             search_spaces[ctx_idx] = SearchSpace {
@@ -1362,6 +1480,7 @@ pub(super) fn subject_parameters<'s>(
             cutoffs: blastp_prelim_cutoffs(
                 args,
                 contexts,
+                subject_length as i32,
                 subject_length as i32,
                 BlastpCompositionMode::NoCompositionBasedStats,
                 &exact_spaces,

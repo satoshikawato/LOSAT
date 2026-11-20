@@ -3313,6 +3313,7 @@ mod archive_error_tests {
             window_size: 40,
             gapped_karlin: Default::default(),
             gumbel: None,
+            gapped: true,
             num_descriptions: 500,
             num_alignments: 250,
         };

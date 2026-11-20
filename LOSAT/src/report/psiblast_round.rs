@@ -235,6 +235,7 @@ impl RoundSections<'_> {
                     query.ungapped_karlin,
                     report.gapped_karlin,
                     report.gumbel,
+                    report.gapped,
                     query.effective_search_space,
                     false,
                 )?;
@@ -520,6 +521,7 @@ impl RoundSections<'_> {
             query.ungapped_karlin,
             self.report.gapped_karlin,
             self.report.gumbel,
+            self.report.gapped,
             query.effective_search_space,
             false,
         )

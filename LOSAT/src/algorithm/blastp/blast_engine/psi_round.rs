@@ -889,6 +889,7 @@ fn write_round_epilogs(
             window_size: args.window_size as i32,
             gapped_karlin: crate::stats::lookup_protein_params(&args.scoring),
             gumbel: None,
+            gapped: true,
             num_descriptions: args.num_descriptions,
             num_alignments: args.num_alignments,
         };

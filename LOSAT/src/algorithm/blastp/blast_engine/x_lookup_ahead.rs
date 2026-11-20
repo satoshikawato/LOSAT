@@ -758,6 +758,7 @@ fn x_flat_ahead_appends(
         &contexts,
         &locations,
         false,
+        !args.ungapped,
     )
     .ok()?;
     let appends = x_bp_flat_ahead_appends(

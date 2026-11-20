@@ -95,52 +95,14 @@ impl OrdinaryTraceback<'_> {
         compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<Vec<Option<BlastpHitList>>> {
-        // (query index, the list of one subject)
-        let mut work: Vec<(usize, PrelimList)> = Vec::new();
-        for (q_idx, (full, compact)) in preliminary_hit_lists
-            .iter_mut()
-            .zip(compact_hit_lists.iter_mut())
-            .enumerate()
-        {
-            if let Some(hit_list) = compact.take() {
-                let count = hit_list.hsplist_count;
-                work.extend(
-                    hit_list
-                        .hsplist_array
-                        .into_iter()
-                        .take(count)
-                        .map(|list| (q_idx, PrelimList::Compact(list))),
-                );
-            } else if let Some(hit_list) = full.take() {
-                let count = hit_list.hsplist_count;
-                work.extend(
-                    hit_list
-                        .hsplist_array
-                        .into_iter()
-                        .take(count)
-                        .map(|list| (q_idx, PrelimList::Full(list))),
-                );
-            }
-        }
-        let mut traced = self.trace_lists(work, pool)?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (quoted
-        // at `HitList::put_in_traceback_order` of BLASTN): the traceback reads the preliminary
-        // lists by OID. Where the results are sorted at the end, the order of insertion changes
-        // nothing (the comparison is total); where they are not, it is the report's order.
-        if !self.sorts_results {
-            traced.sort_by_key(|(_, list)| list.as_ref().map_or(u32::MAX, |list| list.oid));
-        }
-        let mut hit_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
-            .take(preliminary_hit_lists.len())
-            .collect();
-        for (q_idx, hsp_list) in traced {
-            if let Some(hsp_list) = hsp_list {
-                hit_lists[q_idx]
-                    .get_or_insert_with(|| BlastpHitList::new(self.hitlist_size))
-                    .update(hsp_list);
-            }
-        }
-        Ok(hit_lists)
+        let work = prelim_lists_of_queries(preliminary_hit_lists, compact_hit_lists);
+        let traced = self.trace_lists(work, pool)?;
+        Ok(hit_lists_of_traced(
+            traced,
+            preliminary_hit_lists.len(),
+            self.hitlist_size,
+            self.sorts_results,
+        ))
     }
 
     /// Each list's traceback, in the lists' order; a preliminary list is freed when its
@@ -463,6 +425,196 @@ impl OrdinaryTraceback<'_> {
     }
 }
 
+/// The preliminary lists of every query as the final stage reads them: a query's lists are full
+/// (`preliminary_hit_lists`) or compact (`compact_hit_lists`, which are taken without being
+/// expanded); each with its query index.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1636-1639
+/// ```c
+///             /* process all the hits to this subject sequence, one list at a time */
+///             for (hsplist_itr = 0; hsplist_itr < batch->num_hsplists; hsplist_itr++) {
+///                 BlastHSPList* hsp_list = batch->hsplist_array[hsplist_itr];
+/// ```
+fn prelim_lists_of_queries(
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+) -> Vec<(usize, PrelimList)> {
+    // (query index, the list of one subject)
+    let mut work: Vec<(usize, PrelimList)> = Vec::new();
+    for (q_idx, (full, compact)) in preliminary_hit_lists
+        .iter_mut()
+        .zip(compact_hit_lists.iter_mut())
+        .enumerate()
+    {
+        if let Some(hit_list) = compact.take() {
+            let count = hit_list.hsplist_count;
+            work.extend(
+                hit_list
+                    .hsplist_array
+                    .into_iter()
+                    .take(count)
+                    .map(|list| (q_idx, PrelimList::Compact(list))),
+            );
+        } else if let Some(hit_list) = full.take() {
+            let count = hit_list.hsplist_count;
+            work.extend(
+                hit_list
+                    .hsplist_array
+                    .into_iter()
+                    .take(count)
+                    .map(|list| (q_idx, PrelimList::Full(list))),
+            );
+        }
+    }
+    work
+}
+
+/// The final hit list of each of `queries` queries from the final lists of `traced`, inserted as
+/// NCBI's results are (`Blast_HSPResultsInsertHSPList` with `hitlist_size`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (quoted
+/// at `HitList::put_in_traceback_order` of BLASTN): the traceback reads the preliminary
+/// lists by OID. Where the results are sorted at the end, the order of insertion changes
+/// nothing (the comparison is total); where they are not, it is the report's order.
+fn hit_lists_of_traced(
+    mut traced: Vec<(usize, Option<BlastpHspList>)>,
+    queries: usize,
+    hitlist_size: usize,
+    sorts_results: bool,
+) -> Vec<Option<BlastpHitList>> {
+    if !sorts_results {
+        traced.sort_by_key(|(_, list)| list.as_ref().map_or(u32::MAX, |list| list.oid));
+    }
+    let mut hit_lists: Vec<Option<BlastpHitList>> =
+        std::iter::repeat_with(|| None).take(queries).collect();
+    for (q_idx, hsp_list) in traced {
+        if let Some(hsp_list) = hsp_list {
+            hit_lists[q_idx]
+                .get_or_insert_with(|| BlastpHitList::new(hitlist_size))
+                .update(hsp_list);
+        }
+    }
+    hit_lists
+}
+
+/// What the final stage of an ungapped search reads (`-ungapped`: no traceback).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1685-1704
+/// ```c
+///                 } else {
+///                     /* traceback skipped; compute bit scores for searches
+///                        where the traceback phase is seperated from the
+///                        preliminary search. */
+///                     Blast_HSPListGetBitScores(hsp_list, FALSE, sbp);
+///                 }
+///                 ...
+///                 else {
+///                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
+///                                   hit_params->options->hitlist_size);
+///                 }
+/// ```
+pub(super) struct UngappedFinish<'a> {
+    pub(super) contexts: &'a [QueryContext],
+    pub(super) subjects: XRedoSubjects<'a>,
+    /// The search matrix, for the positives of each HSP.
+    pub(super) matrix: ScoringMatrix,
+    pub(super) hitlist_size: usize,
+    /// Whether NCBI sorts the results at the end of the traceback (`DbStatistics::sorts_results`).
+    pub(super) sorts_results: bool,
+}
+
+impl UngappedFinish<'_> {
+    /// The final hit list of each query from the preliminary lists, which it takes: each HSP is
+    /// the ungapped hit of the preliminary stage (one run of aligned letters, its E-value kept),
+    /// with its identities and positives counted on the unmasked query and its bit score from the
+    /// context's own block (`kbp_std`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1918-1928
+    /// ```c
+    ///    kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
+    ///    ...
+    ///       hsp->bit_score =
+    ///          (hsp->score*kbp[hsp->context]->Lambda -
+    ///           kbp[hsp->context]->logK) / NCBIMATH_LN2;
+    /// ```
+    /// An HSP of length 0 would have no letter to align; NCBI's bytes for it are not known, so
+    /// the search stops (open item D5 of task O4b).
+    pub(super) fn run(
+        &self,
+        preliminary_hit_lists: &mut [Option<BlastpHitList>],
+        compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    ) -> Result<Vec<Option<BlastpHitList>>> {
+        let work = prelim_lists_of_queries(preliminary_hit_lists, compact_hit_lists);
+        let mut finished = Vec::with_capacity(work.len());
+        for (q_idx, list) in work {
+            let (oid, query_index, hsps): (u32, u32, Vec<(BlastpPreliminaryHsp, f64)>) = match list
+            {
+                PrelimList::Full(list) => (
+                    list.oid,
+                    list.query_index,
+                    list.hsps
+                        .iter()
+                        .map(|hsp| (preliminary_hsp(hsp), hsp.e_value))
+                        .collect(),
+                ),
+                PrelimList::Compact(list) => (
+                    list.oid,
+                    list.query_index,
+                    list.hsps.iter().map(|hsp| (hsp.hsp, hsp.e_value)).collect(),
+                ),
+            };
+            finished.push((q_idx, self.finish_list(q_idx, oid, query_index, &hsps)?));
+        }
+        Ok(hit_lists_of_traced(
+            finished,
+            preliminary_hit_lists.len(),
+            self.hitlist_size,
+            self.sorts_results,
+        ))
+    }
+
+    /// The final list of one query and one subject; `None` when it has no HSP.
+    fn finish_list(
+        &self,
+        q_idx: usize,
+        oid: u32,
+        query_index: u32,
+        hsps: &[(BlastpPreliminaryHsp, f64)],
+    ) -> Result<Option<BlastpHspList>> {
+        let ctx = &self.contexts[q_idx];
+        let query_nomask = query_nomask_sequence(ctx);
+        let subject_read = self.subjects.read(oid)?;
+        let subject = subject_read.residues();
+        let log_k = ctx.karlin_params.k.glibc_ln();
+        let mut hsp_list = BlastpHspList {
+            oid,
+            query_index,
+            hsps: Vec::with_capacity(hsps.len()),
+            best_evalue: f64::MAX,
+        };
+        for &(hsp, e_value) in hsps {
+            let length = hsp.query_end - hsp.query_start;
+            if length <= 0 {
+                anyhow::bail!(
+                    "an ungapped alignment of length 0, whose report NCBI BLAST+ 2.17.0 does not define here, is not supported by LOSAT's BLASTP"
+                );
+            }
+            let mut final_hsp = final_hsp(
+                &hsp,
+                vec![GapEditOp::Sub(length as u32)],
+                query_nomask,
+                subject,
+                self.matrix,
+            );
+            final_hsp.e_value = e_value;
+            final_hsp.bit_score =
+                (hsp.raw_score as f64 * ctx.karlin_params.lambda - log_k) / std::f64::consts::LN_2;
+            hsp_list.hsps.push(final_hsp);
+        }
+        Ok((!hsp_list.hsps.is_empty()).then_some(hsp_list))
+    }
+}
+
 /// A preliminary list of one query and one subject, full or compact.
 enum PrelimList {
     Full(BlastpHspList),
@@ -768,6 +920,36 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:806-833 (quoted at
+    // `final_hsp`) and blast_gapalign.c:4719-4775 (`BLAST_GetUngappedHSPList`: an ungapped HSP is
+    // one run of aligned letters from `q_start`, its score the ungapped score). The final record
+    // of an ungapped HSP counts the identities and the positives of its one run on the unmasked
+    // query, with no gap.
+    #[test]
+    fn ungapped_hsp_counts_identities_and_positives_of_one_run() {
+        // NCBIstdaa S is 16 (BLOSUM62: A/S 1, W/C -2).
+        const S: u8 = 16;
+        let query = [W, A, C, A, W];
+        let subject = [C, W, A, W, S, A];
+        let mut prelim = hsp((0, 4), (1, 5));
+        prelim.raw_score = 7;
+        let record = final_hsp(
+            &prelim,
+            vec![GapEditOp::Sub(4)],
+            &query,
+            &subject,
+            ScoringMatrix::Blosum62,
+        );
+        // W/W A/A: identities; C/W: none; A/S: positive.
+        assert_eq!((record.q_start, record.q_end), (1, 4));
+        assert_eq!((record.s_start, record.s_end), (2, 5));
+        assert_eq!((record.length, record.gapopen), (4, 0));
+        assert_eq!((record.num_ident, record.num_positives), (2, 3));
+        assert_eq!(record.mismatch, 2);
+        assert_eq!(record.raw_score, 7);
+        assert!((record.identity - 50.0).abs() < 1e-12);
     }
 
     #[test]

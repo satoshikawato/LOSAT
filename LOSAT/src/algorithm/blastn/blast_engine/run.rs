@@ -6692,6 +6692,7 @@ fn call_batches<'a>(
         both_strands: report.both_strands,
         minus_strand: report.minus_strand,
         spans: report.batch_spans,
+        gapped: !report.ungapped,
     }
 }
 
@@ -7696,6 +7697,7 @@ fn post_process_hits_and_write(
                 let subjects = report_write::subject_names_of(report);
                 write_blastn_seqalign(
                     serial,
+                    !report.ungapped,
                     &hit_lists,
                     &QueryNames {
                         records: report.queries,
@@ -8367,9 +8369,13 @@ fn read_cli_subjects(
     keep_deflines: bool,
 ) -> Result<CliSubjects> {
     let Some(subject_path) = args.subject.as_deref() else {
+        // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
         return Err(crate::cli::NativeError {
             exit: 1,
-            message: "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\nPlease refer to the BLAST+ user manual.\n".to_string(),
+            message: format!(
+                "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\n{}\n",
+                crate::wording::USER_MANUAL_FOOTER
+            ),
         }
         .into());
     };
@@ -8926,12 +8932,14 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
-        // (`BLASTUngappedHspListToSeqAlign`: a subject's Seq-align of Dense-diags, and
-        // objtools/align_format/sam.cpp:66-80 for SAM's one line per subject)
-        // O4a-1 writes the formats that need no Seq-align of Dense-diags: 8, 9, 11, 12 (the
-        // Seq-align formats) and 17 (SAM) of an ungapped search are refused (O4a-2).
-        if args.ungapped && matches!(choice.number, 8 | 9 | 11 | 12 | 17) {
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/sam.cpp:66-80
+        // (SAM's one line per subject of an ungapped search, `-outfmt 17`)
+        // The Seq-aligns of an ungapped search (8, 9, 11, 12) are Dense-diags, which
+        // `report::serial::seqalign::write_seq_align_dendiag` writes (NCBI reference:
+        // ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1274-1311,
+        // `x_UngappedHSPToDenseDiag`); SAM's line of a subject that joins its HSPs (O4a-2) is
+        // not written yet.
+        if args.ungapped && choice.number == 17 {
             anyhow::bail!(
                 "output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
                 choice.number
@@ -12663,10 +12671,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     let queries = query_records.records();
     // The records' letters for the readers below (`x_query_drop::Letters`).
     let letters = query_records.letters();
-    let query_ids = queries
-        .iter()
-        .map(|record| String::from_utf8_lossy(record.shown_id()).into_owned())
-        .collect();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1312-1325
     // ```c
     // if (lookup_options->db_filter) {
@@ -12778,7 +12782,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
-    let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
+    let seq_data = prepare_sequence_data(queries, masks, subject_metadata);
 
     // The subjects as the reports show them (the outfmt 0 prolog of an error below).
     let shown = ShownSubjects::new(args, subjects);
@@ -13081,7 +13085,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     // are built (`x_query_drop.rs`). The search reads only the records' count from here on.
     let SequenceData {
         queries: _,
-        query_ids,
         query_masks,
         db_len_total,
         db_num_seqs,
@@ -13089,7 +13092,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     query_records.after_encoding();
     let seq_data = SequenceData {
         queries: query_records.records(),
-        query_ids,
         query_masks,
         db_len_total,
         db_num_seqs,
@@ -13520,21 +13522,28 @@ fn search_query_batch<const UNGAPPED: bool>(
     // one again.
     X_SORT.x_clear_idle();
     // The traceback pass over the subjects (`SubjectPasses::traceback_pass`).
-    let hit_lists = passes
-        .traceback_pass::<UNGAPPED>(prelim_lists)
-        .map_err(|error| {
-            database_search_error(
-                error,
-                first_batch,
-                reborrow_outputs(&mut outputs),
-                megablast,
-                &shown,
-            )
-        })?;
-
+    let traced = passes.traceback_pass::<UNGAPPED>(prelim_lists);
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // ```
+    // No NCBI counterpart: NCBI writes nothing to its standard error while it searches a batch.
+    // The bar moves only in the traceback pass; its end clears it
+    // (`subject_env::batch_progress_bar`) whether the pass ends or fails, before anything else is
+    // written (the batch's report, or the prologs of a database error), so nothing of it stays on
+    // the terminal.
     if let Some(bar) = progress_bar.as_ref() {
-        bar.finish();
+        bar.finish_using_style();
     }
+    let hit_lists = traced.map_err(|error| {
+        database_search_error(
+            error,
+            first_batch,
+            reborrow_outputs(&mut outputs),
+            megablast,
+            &shown,
+        )
+    })?;
     subject_space_overflow.check()?;
     let mut batch = batch_result(hit_lists, Vec::new());
     if let Some(timing) = timing.as_ref() {
@@ -15203,7 +15212,8 @@ mod tests {
             (
                 1,
                 format!(
-                    "BLAST query/options error: {text}\nPlease refer to the BLAST+ user manual.\n"
+                    "BLAST query/options error: {text}\n{}\n",
+                    crate::wording::USER_MANUAL_FOOTER
                 ),
             )
         };
@@ -15336,6 +15346,35 @@ mod tests {
                         "Warning: [blastn] Examining 5 or more matches is recommended\n"
                     );
                 }
+            }
+        }
+        // An ungapped search writes the Seq-aligns (8, 9, 11, 12: Dense-diags) and refuses only
+        // SAM (17), whose line of a subject joins its HSPs.
+        for (outfmt, refused) in [
+            ("8", false),
+            ("9", false),
+            ("11", false),
+            ("12", false),
+            ("17", true),
+            ("17 SR", true),
+        ] {
+            let mut diagnostics = Vec::new();
+            let mut sink = Vec::new();
+            let mut outputs =
+                ReportOutputs::single(outfmt, OutputSink::Writer(&mut sink), &mut diagnostics);
+            let result = process_options(
+                &mut args(&["-ungapped", "-max_target_seqs", "1"]),
+                &mut outputs,
+            );
+            drop(outputs);
+            if refused {
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "output format 17 with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
+                    "{outfmt}"
+                );
+            } else {
+                result.unwrap();
             }
         }
         // `run_local`'s formats that NCBI rejects later are left out, as the command line's

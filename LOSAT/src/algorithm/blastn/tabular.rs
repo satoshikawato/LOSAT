@@ -435,6 +435,7 @@ fn tabular_hsp<'r>(
         rows,
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
         end_gaps: true,
+        stored_gaps: [&[], &[]],
         qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
     }
 }
@@ -545,23 +546,6 @@ impl RangeCollection {
     /// collection unsorted, where the probes decide the result.
     ///
     /// libstdc++ reference (bits/stl_algobase.h, `std::__lower_bound`):
-    /// ```c++
-    ///       while (__len > 0)
-    /// 	{
-    /// 	  _DistanceType __half = __len >> 1;
-    /// 	  _ForwardIterator __middle = __first;
-    /// 	  std::advance(__middle, __half);
-    /// 	  if (__comp(__middle, __val))
-    /// 	    {
-    /// 	      __first = __middle;
-    /// 	      ++__first;
-    /// 	      __len = __len - __half - 1;
-    /// 	    }
-    /// 	  else
-    /// 	    __len = __half;
-    /// 	}
-    ///       return __first;
-    /// ```
     fn lower_bound(&self, start: usize, pos: u32) -> usize {
         let mut first = start;
         let mut len = self.0.len() - start;

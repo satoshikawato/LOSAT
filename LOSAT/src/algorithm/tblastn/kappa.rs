@@ -874,7 +874,6 @@ mod tests {
             160,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            true,
             25.0,
             local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
         )
@@ -1170,7 +1169,6 @@ mod tests {
             query.len() as i32,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            true,
             25.0,
             local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
         )
@@ -1608,7 +1606,6 @@ mod tests {
                 120,
                 BlastCompoAdjustMode::CompositionMatrixAdjust,
                 false,
-                true,
                 25.0,
                 local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
             )
@@ -2459,7 +2456,6 @@ mod tests {
                 query.len() as i32,
                 BlastCompoAdjustMode::CompositionMatrixAdjust,
                 false,
-                true,
                 25.0,
                 local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
             )
@@ -2597,7 +2593,7 @@ mod tests {
                 num_positives: stats.1,
                 report_num_ident: stats.0,
                 report_num_positives: stats.1,
-                report_mismatches: stats.3,
+                report_mismatches: i64::try_from(stats.3).unwrap(),
                 align_length: stats.2,
                 mismatches: stats.3,
                 gap_opens: stats.4,

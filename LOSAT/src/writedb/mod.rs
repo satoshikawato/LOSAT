@@ -52,6 +52,7 @@ pub mod platform;
 pub mod taxid_set;
 pub mod time;
 pub mod volume;
+mod windows_zone;
 pub mod writer;
 
 #[cfg(test)]
@@ -86,7 +87,9 @@ pub enum WriteDbError {
     /// LOSAT's own refusals (an input on which makeblastdb crashes, does not end or cannot be
     /// followed), printed after "Error: " with exit status 255, and the errors of the LMDB
     /// layer after its environment is open (`lmdb::error`, NCBI's `CSeqDBException` texts of
-    /// `CWriteDB_LMDB`), which occur only in the close and so become creation errors.
+    /// `CWriteDB_LMDB`), which occur only in the close and so become creation errors; and the
+    /// `what()` of a `std::exception` that the general handler reports the same way (the
+    /// `std::length_error` of a mask file's string longer than `std::string` holds).
     Other(String),
     /// LOSAT's refusal of an input that makeblastdb reads, raised inside the build (mask data
     /// whose ranges NCBI orders by memory addresses, `mask_data::range_set`, at the close of a

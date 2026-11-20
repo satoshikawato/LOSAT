@@ -15,6 +15,11 @@ gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
 
+The package is not published on npm. Build it from the [LOSAT repository](https://github.com/satoshikawato/LOSAT):
+make the two modules with `web/adapter/tools/build_reactors.py`, then run
+`LOSAT_WEB_REACTORS=<modules directory> npm run build` in `web/packages/losat`; `npm pack` there makes a
+file to install ([web/AGENTS.md](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/web/AGENTS.md)).
+
 ## Versions
 
 The package's version is the engine's version. `losat/abi.json` names both, together with the
@@ -81,9 +86,10 @@ The engine tells the host which outputs a run could not write, and where their e
 each, it sends stream 9 (`DISCARD_STREAM`), whose 8 bytes are that output's stream number and then
 the place of its error, each a little-endian unsigned integer (`discardSignal` reads them), and the
 host drops everything that arrived of that stream, which then stays empty. The place is where the
-run wrote the error, as the command line writes the error of that output. A BLAST+ error goes where
-the run's messages go: stream 3, or the file of `-logfile` (stream 8) in TBLASTX with
-`-logfile NAME`, or nowhere (`PLACE_NOWHERE`: TBLASTX's `-logfile ""` or `-logfile /dev/null`).
+run wrote the error, as the command line writes the error of that output. A BLAST+ error goes to
+stream 3, or nowhere (`PLACE_NOWHERE`) where the run's messages go nowhere (TBLASTX's `-logfile ""`
+or `-logfile /dev/null`). In TBLASTX with `-logfile NAME` it goes to stream 3 too: the file holds
+what the command line's file holds for the run's own `-outfmt`, which does not write that output.
 LOSAT's own refusal goes to stream 3 whatever `-logfile` is, as the command line writes it to its
 standard error. The signal comes for each output that fails on its own,
 whether or not some of its chunks were sent, and for each output of a search that fails in a run of
@@ -101,7 +107,9 @@ A host that keeps every chunk would keep output that the command line does not w
 file of `-conffile` under that name to `engine.validate(argv, registry)` and as
 `EngineRunRequest.conffile`; `reactorControl` validates it on an instance of its own, opened with its
 second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
-run fails, `runFilesOf(error)` returns it.
+run fails, `runFilesOf(error)` returns it. A run that the engine failed after it began to write ends
+its output with `fail` in place of `end` (`runOutputFailedOf(error)` is then true): the stream 3 that
+arrived holds the warnings that the command line writes to its standard error before the error.
 
 `RuntimeInfo.messages` says where the run's messages went (the warnings that the command line writes
 to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile'` (the file of
@@ -109,7 +117,10 @@ to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile
 or `-logfile /dev/null`). The engine sends it once per run, before the outputs, on stream 10
 (`MESSAGES_STREAM`): 4 bytes, the place as a little-endian unsigned integer (`messagesSignal` reads
 it). An empty stream 3 means no warnings only where it is `'diagnostics'`; where it is `'logfile'`,
-an empty file means none.
+an empty file means none. These are the warnings that the command line writes for the run's own
+`-outfmt`. What the run's other outputs add to them (their option warnings, and in a run of two
+searches the other search's warnings and errors) comes on stream 3 where it is `'diagnostics'` or
+`'logfile'`, and is not kept where it is `'nowhere'`.
 
 In a worker or in Node, the serial module can also be called directly:
 
@@ -136,4 +147,4 @@ its outfmt 6 is byte for byte what NCBI BLAST+ 2.17.0 writes for the same search
 
 ## License
 
-MIT
+LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/THIRD_PARTY_NOTICES).

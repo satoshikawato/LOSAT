@@ -215,8 +215,10 @@ impl std::error::Error for IterationThrew {}
 /// The post of an exception in an `Iteration` or one of its `Hit`s: each query is formatted by
 /// itself (`CCmdLineBlastXMLReportData` of one result), so the label is always `Q(0/1` (sic).
 fn iteration_post(at: usize, program: &str, thrown: &XmlThrow) -> DocumentPost {
-    let mut message = b"Failed s_BlastXMLAddIteration Q(0/1".to_vec();
-    message.extend_from_slice(thrown.exception().what().as_bytes());
+    let message = thrown
+        .exception()
+        .what_after("Failed s_BlastXMLAddIteration Q(0/1")
+        .into_bytes();
     DocumentPost {
         at,
         text: crate::ncbi_exception::error_post_line(None, Some(program), &message),
@@ -340,7 +342,7 @@ pub trait StructuredXml {
     /// prefix) for a query whose report raised `exception` (`CaughtException`): the XML2 and JSON
     /// documents' `GetMsg()` and `what()`.
     fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
-        format!("{}{}", exception.get_msg(), exception.what())
+        exception.what_after(exception.get_msg())
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:361-369
@@ -484,7 +486,7 @@ impl StructuredXml for BlastXmlWriter {
     /// label is always `Q(0/1` (without its `)`), then `what()`. The `Iteration` stays open after
     /// the `Hit`s written before the failed one (each written alone, `Xml5Hits`).
     fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
-        format!("Failed s_BlastXMLAddIteration Q(0/1{}", exception.what())
+        exception.what_after("Failed s_BlastXMLAddIteration Q(0/1")
     }
 
     /// Appends the `Iteration` of one query to `out` (before it the document's header, for the

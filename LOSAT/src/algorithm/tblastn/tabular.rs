@@ -55,6 +55,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
+use crate::report::row_letters::{stored_gap_columns, QueryLetters, RowSide};
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularField, TabularHsp,
     TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularTaxonomy,
@@ -115,6 +116,10 @@ pub(super) struct TblastnTabular<'a> {
     pub inputs: &'a TabularInputs,
     /// The queries (their searched letters, which the rows read).
     pub queries: &'a [FastaRecord],
+    /// The PSSM query's Bioseq letters where they are not its record's
+    /// (`PsiSearch::bioseq_letters`), which the rows read (`row_letters::QueryLetters`); a run of
+    /// such a query has no other.
+    pub query_bioseq: Option<&'a [u8]>,
     /// The letters of the subjects by subject index (`-subject`) or rank (`-db`; their lengths
     /// alone where `reads_rows` is false).
     pub letters: SubjectLetters<'a>,
@@ -507,7 +512,7 @@ pub(super) fn write_tblastn_tabular(
                     // The rows without the lower case of the masks (`CAlnVec` of the query's
                     // Bioseq, whose letters the FASTA reader made upper case).
                     aligned_sequences_into(
-                        query_letters,
+                        QueryLetters::new(query_letters, tab.query_bioseq),
                         tab.letters.nt(oid),
                         &mut x_window,
                         &code,
@@ -522,6 +527,18 @@ pub(super) fn write_tblastn_tabular(
                         &mut srow,
                     )?;
                 }
+                // The query row's gap residues (`TabularHsp::stored_gaps`; a PSSM query's).
+                let query_gaps = if rows_read {
+                    stored_gap_columns(
+                        query_letters,
+                        b'-',
+                        usize::try_from(hsp.q_start)?,
+                        &payload.edit_script,
+                        RowSide::Query,
+                    )
+                } else {
+                    Vec::new()
+                };
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1072-1084
                 // ```c++
                 //     if (kTranslated) {
@@ -577,6 +594,7 @@ pub(super) fn write_tblastn_tabular(
                     // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched
                     // length (blast_seqalign.cpp:1222-1225, `hsp_percent_coverage`).
                     end_gaps: true,
+                    stored_gaps: [&query_gaps, &[]],
                     qcovhsp: hsp_coverage(hsp.q_end - hsp.q_start, i32::try_from(searched_length)?),
                 };
                 // One printed row is one HSP; the probe marks it without changing it.

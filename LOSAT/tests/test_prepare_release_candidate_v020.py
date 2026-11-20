@@ -791,8 +791,18 @@ class AssemblyTests(unittest.TestCase):
         root = archive.name.removesuffix(".tar.gz")
         self.assertEqual(
             names,
-            [f"{root}/LICENSE", f"{root}/README.md", f"{root}/RELEASE-METADATA.json", f"{root}/losat"],
+            [
+                f"{root}/LICENSE",
+                f"{root}/README.md",
+                f"{root}/RELEASE-METADATA.json",
+                f"{root}/THIRD_PARTY_LICENSES",
+                f"{root}/THIRD_PARTY_NOTICES",
+                f"{root}/losat",
+            ],
         )
+        with tarfile.open(archive) as handle:
+            for name in release.LICENSE_DOCUMENTS:
+                self.assertEqual(handle.extractfile(f"{root}/{name}").read(), (REPO_ROOT / name).read_bytes())
 
     def test_dry_run_assembly_is_marked_unchecked(self) -> None:
         sidecar, _ = self.assemble(False)
@@ -1187,6 +1197,10 @@ class WorkflowTests(unittest.TestCase):
             checkouts = len(re.findall(r"uses: actions/checkout@", workflow))
             self.assertGreater(checkouts, 0, name)
             self.assertEqual(workflow.count(message), checkouts, f"{name}: one check per checkout")
+        # The publishing workflows check the release's tag in the same way: one script, never a checkout ref.
+        for name in ("publish-crate.yml", "python-wheels.yml"):
+            workflow = (workflows / name).read_text(encoding="utf-8")
+            self.assertIn(".github/scripts/release_tag_source.sh", workflow, name)
 
 
 if __name__ == "__main__":

@@ -4,10 +4,11 @@ version = "0.2.0"
 edition = "2021"
 rust-version = "1.92"
 autotests = false
-description = "Pure-Rust local BLAST that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions and command-WASI support"
+description = "A pure-Rust reimplementation of NCBI BLAST+ 2.17.0 that runs BLAST+ command lines, as the losat command and the losat::api library"
 license = "MIT"
+homepage = "https://satoshikawato.github.io/LOSAT/"
 repository = "https://github.com/satoshikawato/LOSAT"
-readme = "../README.md"
+readme = "README.md"
 keywords = ["blast", "bioinformatics", "alignment", "wasm", "genomics"]
 categories = ["science::bioinformatics", "command-line-utilities"]
 exclude = [
@@ -102,11 +103,8 @@ ruzstd = "0.9"
 #     x_FillBuffer((size_t) m_Sb->in_avail());
 #     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
 # ```
-# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395,3969
-# ```c
-# #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
-# 	GET_PAGESIZE(e->me_os_psize);
-# ```
+# LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:395,3969 (`GET_PAGESIZE`; LMDB's
+# notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2 (LMDB))
 # Rust system calls for the native readable-byte hint (`io`), and for the page size
 # of the LMDB files of version 5 (`writedb::platform::host_page_size`): `param`
 # (rustix's `sysconf(_SC_PAGESIZE)` on macOS and the BSDs) and `mm` (the kernel's

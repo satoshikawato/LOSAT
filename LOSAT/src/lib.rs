@@ -6,10 +6,13 @@
 //! [`api::run_collect`]), with the command line's options and the command line's reports.
 //!
 //! Every other module is the command line or the engine: NCBI's algorithms, ported function by
-//! function. They are `pub(crate)`: their items change as the port advances. Two hidden items are
-//! `pub` for the crate's own two clients, outside the compatibility promise of the version number:
-//! the `losat` binary calls the function `main_entry`, and LOSAT Web's adapter names the engine
-//! through `api` and the module `web_adapter`.
+//! function. They are `pub(crate)`: their items change as the port advances. A few hidden items are
+//! `pub` for the crate's own clients, outside the compatibility promise of the version number: the
+//! `losat` binary calls the function `main_entry`; LOSAT Web's adapter names the engine through
+//! `api` and the module `web_adapter`, reads and sets the field `FastaRecord::source` (what the
+//! BLAST archive writes besides the letters) and calls the methods of `FastaRecord`'s hidden `impl`
+//! (`believed`, `shown_id`, `subject_tabular_id` and the others there); the tests use the module
+//! `wording`.
 
 // The NCBI BLAST+ release that LOSAT's output follows, and the spellings of it that the output
 // carries. This is the one place in the code that names the release; every report, archive and
@@ -122,6 +125,11 @@ pub(crate) mod convert2blastmask;
 pub(crate) mod ncbi_app;
 // NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;
+// LOSAT's own words in place of NCBI's names and toolkit internals in messages, and the one
+// mapping of NCBI's frozen messages to LOSAT's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12):
+// hidden, outside the public API, for the tests and LOSAT Web's adapter.
+#[doc(hidden)]
+pub mod wording;
 // NCBI corelib/ncbistr.cpp: the number conversions of `NStr`.
 pub(crate) mod ncbi_str;
 // NCBI corelib/version.cpp: what `-version` and the full versions print (`CVersionAPI`).

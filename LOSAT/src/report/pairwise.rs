@@ -260,6 +260,14 @@ pub struct PairwiseHit {
     /// NCBI counts the coordinates of the rows by the Dense-seg, where these columns are
     /// residues (`write_hsp_rows`).
     pub subject_stored_gaps: Vec<u32>,
+    /// The columns (0-based) of `query_seq` whose letter is the gap residue of the query (`-` of
+    /// ncbieaa, 0 of ncbistdaa, which a PSSM query of `-in_pssm` can hold): residues of the query
+    /// that the row shows as the letter of a gap, as `subject_stored_gaps` are the subject's.
+    /// Empty when the query holds none.
+    pub query_stored_gaps: Vec<u32>,
+    /// How the reports compare the letters of `query_seq` (`row_letters::QueryCase`): a record's
+    /// row, whose lower case is a mask, or a PSSM query's Bioseq letters as they are.
+    pub(crate) query_case: super::row_letters::QueryCase,
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203
     // ```c++
     //     // Set the identity score
@@ -452,6 +460,8 @@ impl From<Hit> for PairwiseHit {
             comp_adjust_method: None,
             sum_n: None,
             subject_stored_gaps: Vec::new(),
+            query_stored_gaps: Vec::new(),
+            query_case: Default::default(),
             seqalign_num_ident,
         }
     }
@@ -1277,7 +1287,15 @@ pub fn write_alignment<W: Write>(
 
     // If we have actual sequences, display them
     if let (Some(ref qseq), Some(ref sseq)) = (&hit.query_seq, &hit.subject_seq) {
-        write_alignment_with_sequences(writer, h, qseq, sseq, &hit.subject_stored_gaps, config)?;
+        write_alignment_with_sequences(
+            writer,
+            h,
+            qseq,
+            sseq,
+            [&hit.query_stored_gaps, &hit.subject_stored_gaps],
+            hit.query_case,
+            config,
+        )?;
     } else {
         // No sequences available - show placeholder
         writeln!(
@@ -1300,13 +1318,17 @@ pub fn write_alignment<W: Write>(
 /// Write alignment with actual sequences: the rows of BLASTP, RPSBLAST, PSIBLAST and DELTABLAST
 /// (`seqalign::protein_row_segments`) and of BLASTN (`seqalign::nucleotide_row_segments`; a
 /// minus-strand HSP's Dense-seg is reversed, `query_anchored::HspAlnVec`, so its subject row runs
-/// from high to low), rows of letters (`write_hsp_rows`).
+/// from high to low), rows of letters (`write_hsp_rows`). `stored_gaps` are the columns of the
+/// query's and the subject's rows whose `-` is a residue (`PairwiseHit::query_stored_gaps`,
+/// `PairwiseHit::subject_stored_gaps`), `query_case` how the query row's letters compare
+/// (`PairwiseHit::query_case`).
 fn write_alignment_with_sequences<W: Write>(
     writer: &mut W,
     hit: &Hit,
     query_seq: &str,
     subject_seq: &str,
-    subject_stored_gaps: &[u32],
+    stored_gaps: [&[u32]; 2],
+    query_case: super::row_letters::QueryCase,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let line_len = config.line_length;
@@ -1338,11 +1360,10 @@ fn write_alignment_with_sequences<W: Write>(
     //         display.SetAlignType(CDisplaySeqalign::eNuc);
     // ```
     let nucleotide = config.program == "blastn";
-    // The rows' end gaps (`end_gap_span`; the subject's gaps stored as residues are residues).
-    let query_span = end_gap_span(&q_chars, |_| false);
-    let subject_span = end_gap_span(&s_chars, |column| {
-        subject_stored_gaps.binary_search(&(column as u32)).is_ok()
-    });
+    // The rows' end gaps (`end_gap_span`; a `-` that is a residue, the query's gap residue or a
+    // gap stored in the subject, is a residue).
+    let [query_span, subject_span] = [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
+        .map(|(row, stored)| end_gap_span(row, stored));
 
     // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2155
     // ```c++
@@ -1358,13 +1379,16 @@ fn write_alignment_with_sequences<W: Write>(
     // ```
     // The rows may carry lowercase masking, which NCBI applies only when it prints a
     // row (showalign.cpp:2495-2521), so they are compared without case, and the protein
-    // middle line shows the uppercase residue.
+    // middle line shows the uppercase residue; a PSSM query's Bioseq letters compare as they are
+    // (`row_letters::QueryCase`).
+    let compared = query_case.compared_letters();
     let write_middle = |writer: &mut W, columns: std::ops::Range<usize>| {
         let middle = q_chars[columns.clone()]
             .iter()
             .zip(s_chars[columns].iter())
-            .map(|(q, s)| {
-                let (q, s) = (q.to_ascii_uppercase(), s.to_ascii_uppercase());
+            .map(|(&q, s)| {
+                let q = char::from(compared[usize::from(q as u8)]);
+                let s = s.to_ascii_uppercase();
                 if nucleotide {
                     if q == s {
                         '|'
@@ -1742,12 +1766,16 @@ fn write_protein_middle<W: Write>(
     columns: std::ops::Range<usize>,
     matrix: ScoringMatrix,
     upper_subject: bool,
+    query_case: super::row_letters::QueryCase,
 ) -> io::Result<()> {
+    // A record's mask compares as its capital, a PSSM query's Bioseq letter as it is
+    // (`row_letters::QueryCase`).
+    let compared = query_case.compared_letters();
     let middle = query[columns.clone()]
         .iter()
         .zip(&subject[columns])
         .map(|(&q, &s)| {
-            let q = q.to_ascii_uppercase();
+            let q = compared[usize::from(q)];
             let s = if upper_subject {
                 s.to_ascii_uppercase()
             } else {
@@ -1865,8 +1893,8 @@ fn write_row_chars<W: Write>(
 /// The columns `lo..hi` of a row of a pairwise alignment between its end gaps: its columns before
 /// its first residue and after its last, which NCBI's alignment strings fill with the end
 /// character (a space in the pairwise view and in the tabular `qseq`, `sseq` and `btop`) where an
-/// inner gap is `-`. `residue_dash(column)` says whether a `-` of the row is a residue (a gap
-/// stored in the sequence). Only a Smith-Waterman alignment has end gaps (rpsblast's
+/// inner gap is `-`. `stored` holds the columns (sorted) whose `-` is a residue: a gap character
+/// of the sequence (a database's stored `-`, a PSSM query's gap residue). Only a Smith-Waterman alignment has end gaps (rpsblast's
 /// `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman start over a rectangle whose best path
 /// may start with a gap); an X-drop alignment starts and ends with a substitution. The `-` that
 /// fills a segment past a sequence's end is the gap character (alnvec.cpp:279-297): `-subject`'s
@@ -1874,10 +1902,11 @@ fn write_row_chars<W: Write>(
 /// outfmt 0 refuses (decision X2g-5 of line RG).
 pub(crate) fn end_gap_span<T: Copy + PartialEq + From<u8>>(
     row: &[T],
-    residue_dash: impl Fn(usize) -> bool,
+    stored: &[u32],
 ) -> (usize, usize) {
     let gap = T::from(b'-');
-    let end_gap = |column: usize| row[column] == gap && !residue_dash(column);
+    let end_gap =
+        |column: usize| row[column] == gap && stored.binary_search(&(column as u32)).is_err();
     let lo = (0..row.len())
         .find(|&column| !end_gap(column))
         .unwrap_or(row.len());
@@ -2714,19 +2743,7 @@ fn write_blastp_query_footer_spacing<W: Write>(
 //         m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
 //     }
 // ```
-// NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:661-670
-// ```c++
-//     inline basic_ostream<char, _Traits>&
-//     operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
-//     {
-//       if (!__s)
-// 	__out.setstate(ios_base::badbit);
-//       else
-// 	__ostream_insert(__out, __s,
-// 			 static_cast<streamsize>(_Traits::length(__s)));
-//       return __out;
-//     }
-// ```
+// libstdc++ (GCC 13): include/c++/13/ostream:661-670
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:96-103
 // ```c++
 // void
@@ -4935,6 +4952,9 @@ pub struct TblastxPairwiseReport {
     /// The sources of the others' Bioseqs by subject index, as BLASTN's
     /// (`BlastnPairwiseReport::subject_sources`).
     pub subject_sources: Vec<super::defline::SourceTaxname>,
+    /// Whether the search linked its HSPs with sum statistics (`-sum_stats`, true by default):
+    /// the description table then has its `N` column (`TblastxSections::head`).
+    pub sum_stats: bool,
 }
 
 /// The start of the TBLASTX report, which NCBI writes before it searches: the program and
@@ -5129,7 +5149,17 @@ fn write_tblastx_alignment<W: Write>(
         q.len(),
         width,
         |writer, row, columns| writer.write_all(&[q, s][row][columns]),
-        |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, false),
+        |writer, columns| {
+            write_protein_middle(
+                writer,
+                q,
+                s,
+                columns,
+                config.protein_matrix,
+                false,
+                hit.query_case,
+            )
+        },
     )
 }
 
@@ -5458,6 +5488,15 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         //         m_ShowLinkedSetSize = true;
         //     }
         // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:157 (the formatter's
+        // `use_sum_statistics`) and c++/src/algo/blast/format/blast_format.cpp:503-504
+        // ```c++
+        //                                opt.GetSumStatisticsMode(),
+        // ...
+        //     if (m_ShowLinkedSetSize)
+        //         flags |= CShowBlastDefline::eShowSumN;
+        // ```
+        // The `N` column follows `-sum_stats` (`report.sum_stats`).
         // The titles of the subjects of the records read (by subject index), as BLASTN's.
         write_blastn_description_table(
             writer,
@@ -5467,7 +5506,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             &group.subject_titles,
             &report.parsed_subjects,
             &report.subject_sources,
-            true,
+            report.sum_stats,
             false,
             self.config.sort_columns(query.query_length),
             read,
@@ -6104,8 +6143,16 @@ mod tests {
                 ..PairwiseConfig::default()
             };
             let mut output = Vec::new();
-            write_alignment_with_sequences(&mut output, &hit, "ACDeF", "ACDEW", &[], &config)
-                .unwrap();
+            write_alignment_with_sequences(
+                &mut output,
+                &hit,
+                "ACDeF",
+                "ACDEW",
+                [&[], &[]],
+                Default::default(),
+                &config,
+            )
+            .unwrap();
             String::from_utf8(output).unwrap()
         };
         let one = row_of(1);
@@ -6145,7 +6192,16 @@ mod tests {
             ..PairwiseConfig::default()
         };
         let mut output = Vec::new();
-        write_alignment_with_sequences(&mut output, &hit, "MQ", "MQ", &[], &config).unwrap();
+        write_alignment_with_sequences(
+            &mut output,
+            &hit,
+            "MQ",
+            "MQ",
+            [&[], &[]],
+            Default::default(),
+            &config,
+        )
+        .unwrap();
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "Query     M  \n          M\nSbjct     M  \n\nQuery  2  Q  2\n          Q\nSbjct  2  Q  2\n\n"
@@ -6297,7 +6353,8 @@ mod tests {
                     &blastp.hit,
                     "MRKVL",
                     "MRKVL",
-                    &[],
+                    [&[], &[]],
+                    Default::default(),
                     &PairwiseConfig {
                         program: "blastp".into(),
                         ..config(line_length)
@@ -6346,7 +6403,8 @@ mod tests {
                 &hit,
                 &letters,
                 &letters,
-                &[],
+                [&[], &[]],
+                Default::default(),
                 &PairwiseConfig {
                     line_length,
                     program: "blastp".into(),
@@ -7181,7 +7239,17 @@ fn write_tblastn_alignment<W: Write>(
         q.len(),
         width,
         |writer, row, columns| writer.write_all(&[q, s][row][columns]),
-        |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, false),
+        |writer, columns| {
+            write_protein_middle(
+                writer,
+                q,
+                s,
+                columns,
+                config.protein_matrix,
+                false,
+                hit.query_case,
+            )
+        },
     )
 }
 
@@ -8053,7 +8121,17 @@ fn write_blastx_alignment(
         q.len(),
         width,
         |writer, row, columns| writer.write_all(&[q, s][row][columns]),
-        |writer, columns| write_protein_middle(writer, q, s, columns, config.protein_matrix, true),
+        |writer, columns| {
+            write_protein_middle(
+                writer,
+                q,
+                s,
+                columns,
+                config.protein_matrix,
+                true,
+                hit.query_case,
+            )
+        },
     )
 }
 
@@ -8169,7 +8247,16 @@ mod tblastx_tests {
             ..PairwiseConfig::default()
         };
         let mut out = Vec::new();
-        write_alignment_with_sequences(&mut out, &hit, query, subject, &[], &config).unwrap();
+        write_alignment_with_sequences(
+            &mut out,
+            &hit,
+            query,
+            subject,
+            [&[], &[]],
+            Default::default(),
+            &config,
+        )
+        .unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -8257,6 +8344,8 @@ mod tblastx_tests {
             comp_adjust_method: None,
             sum_n: Some(sum_n),
             subject_stored_gaps: Vec::new(),
+            query_stored_gaps: Vec::new(),
+            query_case: Default::default(),
             seqalign_num_ident: 60,
         }
     }
@@ -8306,6 +8395,7 @@ mod tblastx_tests {
             prolog: true,
             parsed_subjects: Vec::new(),
             subject_sources: Vec::new(),
+            sum_stats: true,
         };
         // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
         let hits: Vec<PairwiseHit> = [(0, 1, 4), (0, 1, 4), (0, 2, 1), (2, 1, 1), (3, 1, 1)]

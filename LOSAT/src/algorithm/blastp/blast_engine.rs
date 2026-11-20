@@ -41,6 +41,7 @@ use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::BlastCompositionWorkspace;
 use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
+use crate::report::row_letters::RowSide;
 use crate::report::{
     write_blastp_pairwise_report, BlastpPairwiseReport, OutputConfig, OutputFormat, PairwiseConfig,
     PairwiseHit, ReportContext,
@@ -2756,12 +2757,38 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         !args.ungapped,
         program,
     )?;
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:113
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // ```c
-    // const string kArgUseSWTraceback(\"use_sw_tback\");
+    //     } else if (ext_params->options->compositionBasedStats > 0 ||
+    //                ext_params->options->eTbackExt == eSmithWatermanTbck) {
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
+    // ```c
+    //     if ((Blast_QueryIsProtein(program) || Blast_QueryIsPssm(program)) &&
+    //         extn_opts->compositionBasedStats != 0) {
+    //         hsp_stream->sort_by_score =
+    //             (SSortByScoreStruct*)calloc(1, sizeof(SSortByScoreStruct));
+    //         hsp_stream->sort_by_score->sort_on_read = sort_on_read;
+    //         hsp_stream->sort_by_score->first_query_index = 0;
+    //     } else {
+    //         hsp_stream->sort_by_score = NULL;
+    //     }
+    // ```
+    // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
+    // statistics 1 to 3 (`kappa::smith_waterman`). Without them (`-comp_based_stats 0`, and
+    // IDENTITY's reset, `identity_cbs_reset`) NCBI runs the redo too,
+    // without an adjustment, on the preliminary lists in subject order (the stream is not sorted
+    // by score), which LOSAT's redo loop does not read yet (the next item, X4-c0). psiblast's redo
+    // of a PSSM keeps its refusal (the position-based Smith-Waterman redo).
     if args.use_sw_tback {
-        bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
+        if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
+            bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
+        }
+        if !args.comp_based_stats.is_enabled() {
+            bail!(
+                "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"
+            );
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
     // ```c
@@ -3581,9 +3608,15 @@ fn mask_query_rows(hits: &mut [PairwiseHit], masks: &[Vec<(i32, i32)>]) {
             // The 0-based query position of each column that holds a residue.
             let first = hit.hit.q_start as i32 - 1;
             let last = hit.hit.q_end as i32 - 1;
+            // A `-` is a residue at a column of `query_stored_gaps` (a PSSM query's gap residue).
             let mut columns = Vec::with_capacity(bytes.len());
             for (column, &residue) in bytes.iter().enumerate() {
-                if residue != b'-' {
+                if residue != b'-'
+                    || hit
+                        .query_stored_gaps
+                        .binary_search(&(column as u32))
+                        .is_ok()
+                {
                     columns.push(column);
                 }
             }
@@ -3865,36 +3898,121 @@ enum ShownLetters<'a> {
     /// sentinels), each read as `ncbistdaa_to_ascii` gives it, as
     /// `database::ListedSubjects::read_titles` writes the letters of its records.
     Stored(&'a [u8]),
+    /// The letters of a PSSM query's Bioseq where they are not its record's
+    /// (`PsiSearch::bioseq_letters`: iupacaa letters with one in lower case), which the reports
+    /// show and compare as they are (`report::row_letters::QueryCase::Bioseq`).
+    Bioseq(&'a [u8]),
 }
 
-impl ShownLetters<'_> {
+impl<'a> ShownLetters<'a> {
+    /// A query's letters: those of its Bioseq where they are not its record's (`bioseq`,
+    /// `PsiSearch::bioseq_letters`), its record's (`record`) otherwise.
+    fn query(record: &'a [u8], bioseq: Option<&'a [u8]>) -> Self {
+        bioseq.map_or(Self::Ascii(record), Self::Bioseq)
+    }
+
     /// Whether a letter is a pyrrolysine (O).
     fn has_o(self) -> bool {
         match self {
-            Self::Ascii(letters) => letters
-                .iter()
-                .any(|letter| letter.eq_ignore_ascii_case(&b'O')),
+            // Two byte searches (memchr) instead of one case-folding loop: the same answer.
+            Self::Ascii(letters) | Self::Bioseq(letters) => {
+                letters.contains(&b'O') || letters.contains(&b'o')
+            }
             Self::Stored(residues) => residues.contains(&STORED_O),
         }
     }
 
-    /// Whether a letter is a gap character (`-`, which makeblastdb stores in a protein
-    /// database; a `-` of a FASTA input is dropped as NCBI drops it).
-    fn has_gap(self) -> bool {
+    /// Whether the reports show a letter that the search did not read: an O, which it read as X
+    /// (`displayed_letter`), or a Bioseq's letter (`Bioseq`).
+    fn shows_other_letters(self) -> bool {
+        matches!(self, Self::Bioseq(_)) || self.has_o()
+    }
+
+    /// Whether the recount (`recount_shown_identities`) counts the HSPs of these letters again:
+    /// the reports show a letter that the search did not read (`shows_other_letters`), or a gap
+    /// character, a residue that shows as the letter of a gap (`-`: makeblastdb stores it in a
+    /// protein database, a PSSM query holds it as the gap residue; a `-` of a FASTA input is
+    /// dropped as NCBI drops it). Each test is a byte search of the letters (`contains`).
+    fn recounted(self) -> bool {
         match self {
-            Self::Ascii(letters) => letters.contains(&b'-'),
-            Self::Stored(residues) => residues.contains(&STORED_GAP),
+            Self::Ascii(letters) => letters.contains(&b'-') || self.has_o(),
+            Self::Stored(residues) => {
+                residues.contains(&STORED_GAP) || residues.contains(&STORED_O)
+            }
+            Self::Bioseq(_) => true,
         }
     }
 
     /// The letter at `index` (0-based).
     fn get(self, index: usize) -> Option<u8> {
         match self {
-            Self::Ascii(letters) => letters.get(index).copied(),
+            Self::Ascii(letters) | Self::Bioseq(letters) => letters.get(index).copied(),
             Self::Stored(residues) => residues
                 .get(index)
                 .map(|&residue| ncbistdaa_to_ascii(residue) as u8),
         }
+    }
+
+    /// The letter that the reports show at `index` (0-based) where the search read `letter`
+    /// (`ncbistdaa_to_ascii`): a Bioseq's letter as it is, otherwise `displayed_letter`.
+    fn shown(self, letter: char, index: usize) -> char {
+        match self {
+            Self::Bioseq(letters) => letters
+                .get(index)
+                .map_or(letter, |&shown| char::from(shown)),
+            _ => displayed_letter(letter, self.get(index)),
+        }
+    }
+
+    /// How the reports compare a row of these letters (a query's).
+    fn case(self) -> crate::report::row_letters::QueryCase {
+        match self {
+            Self::Bioseq(_) => crate::report::row_letters::QueryCase::Bioseq,
+            Self::Ascii(_) | Self::Stored(_) => crate::report::row_letters::QueryCase::Masked,
+        }
+    }
+}
+
+/// The 0-based position of the first residue of `side` in the protein alignment `hit`.
+fn row_start(hit: &Hit, side: RowSide) -> usize {
+    match side {
+        RowSide::Query => hit.q_start.saturating_sub(1),
+        RowSide::Subject => hit.s_start.min(hit.s_end).saturating_sub(1),
+    }
+}
+
+// No NCBI counterpart: how LOSAT's reports reach the queries' letters.
+/// The queries whose letters the reports read, by query index: their records, and the letters of
+/// a PSSM query's Bioseq where they are not its record's (`bioseq`, `PsiSearch::bioseq_letters`;
+/// a run of such a query has no other query).
+#[derive(Clone, Copy)]
+struct ShownQueries<'a> {
+    records: &'a [FastaRecord],
+    bioseq: Option<&'a [u8]>,
+}
+
+impl<'a> ShownQueries<'a> {
+    /// The queries `records` of the run `args`.
+    fn of(records: &'a [FastaRecord], args: &'a ResolvedBlastpArgs) -> Self {
+        let bioseq = args
+            .psi_search
+            .as_deref()
+            .and_then(|psi| psi.bioseq_letters.as_deref());
+        Self { records, bioseq }
+    }
+
+    /// The record letters of the query `q_idx` (none past the queries).
+    fn record(self, q_idx: usize) -> &'a [u8] {
+        self.records
+            .get(q_idx)
+            .map_or(&[][..], |record| record.seq())
+    }
+
+    /// The letters of the query `q_idx` as the reports read them (`ShownLetters::query`).
+    fn letters(self, q_idx: usize) -> Option<ShownLetters<'a>> {
+        self.records
+            .get(q_idx)
+            .map(|record| ShownLetters::query(record.seq(), self.bioseq))
     }
 }
 
@@ -3947,30 +4065,39 @@ impl<'a> ShownSubjects<'a> {
 //              CBioseq_Handle::eStrand_Plus :
 //              CBioseq_Handle::eStrand_Minus);
 // ```
-/// The displayed row of an alignment from `start` (0-based) of `sequence`: the reports read
-/// the input sequence, so a pyrrolysine (O) that the search read as X is shown as O.
+/// The displayed row `row` of the `side` of the alignment `hit`, whose letters are `sequence`:
+/// the reports read the input sequence, so a pyrrolysine (O) that the search read as X is shown
+/// as O, and a PSSM query's Bioseq letters as they are (`ShownLetters::shown`). The columns of
+/// the residues are those of the alignment's operations (`RowSide::reads`), not the row's
+/// letters other than `-`: a gap character is a residue too (`recounted`).
 fn restore_displayed_o(
     row: Option<String>,
     sequence: ShownLetters<'_>,
-    start: usize,
+    hit: &Hit,
+    side: RowSide,
 ) -> Option<String> {
     let row = row?;
-    if !sequence.has_o() {
+    if !sequence.shows_other_letters() {
         return Some(row);
     }
-    let mut position = start;
-    Some(
-        row.chars()
-            .map(|column| {
-                if column == '-' {
-                    return column;
-                }
-                let shown = displayed_letter(column, sequence.get(position));
+    let implicit = [GapEditOp::Sub(hit.length as u32)];
+    let ops = hit.gap_info.as_deref().unwrap_or(&implicit);
+    let mut position = row_start(hit, side);
+    let mut columns = row.chars();
+    let mut shown = String::with_capacity(row.len());
+    for op in ops {
+        let reads = side.reads(op);
+        for column in columns.by_ref().take(op.num() as usize) {
+            if reads {
+                shown.push(sequence.shown(column, position));
                 position += 1;
-                shown
-            })
-            .collect(),
-    )
+            } else {
+                shown.push(column);
+            }
+        }
+    }
+    shown.extend(columns);
+    Some(shown)
 }
 
 /// The letter that the reports show for the searched letter `letter` (`ncbistdaa_to_ascii`) where
@@ -4013,15 +4140,19 @@ fn x_tested_once(memo: &mut Vec<u8>, index: usize, test: impl FnOnce() -> bool) 
 }
 
 /// Recounts the identities, mismatches and positives of the HSPs whose query or subject has
-/// pyrrolysine (O), or whose subject has a gap character (`-`, stored in a protein database), and
-/// of every HSP of a search that read other letters than the query record's
-/// (`searched_other_letters`: psiblast's later rounds, whose engine counts on the letters that
-/// the rounds before masked, `psi_round::RoundQuery`).
-/// The search reads O as X (`encode_protein_sequence`), but NCBI's reports compare the letters
-/// of the alignment as read, where O is identical only to O (and O and X are not identical).
-/// A stored `-` shows as the letter of a gap, so a column of a gap in the query and that
-/// residue is an identity (and a gap), and the mismatches (the columns less the identities
-/// and the gaps) can be fewer than none.
+/// pyrrolysine (O) or a gap character (`-`, stored in a protein database or a PSSM query's gap
+/// residue), or whose query shows its Bioseq's letters (`ShownQueries::bioseq`, the letters of a
+/// PSSM query's Bioseq where they are not its record's: `PsiSearch::bioseq_letters`), and of every
+/// HSP of a search that read other letters than the query
+/// record's (`searched_other_letters`: psiblast's later rounds, whose engine counts on the letters
+/// that the rounds before masked, `psi_round::RoundQuery`); `ShownLetters::recounted`.
+/// The search reads O as X (`encode_protein_sequence`) and a lower-case letter of a PSSM query as
+/// its capital, but NCBI's reports compare the letters of the alignment as read, where O is
+/// identical only to O (and O and X are not identical), and a lower-case letter to no subject
+/// letter (`report::row_letters::QueryCase::Bioseq`).
+/// A gap character shows as the letter of a gap, so a column of a gap in one sequence and that
+/// residue in the other is an identity (and a gap), and the mismatches (the columns less the
+/// identities and the gaps) can be fewer than none.
 ///
 /// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1006-1020
 /// ```c++
@@ -4044,19 +4175,14 @@ fn x_tested_once(memo: &mut Vec<u8>, index: usize, test: impl FnOnce() -> bool) 
 /// kept in `engine_counts` first.
 fn recount_shown_identities(
     hit_lists: &mut [Option<BlastpHitList>],
-    query_records: &[FastaRecord],
+    queries: ShownQueries<'_>,
     subjects: ShownSubjects<'_>,
     matrix: ScoringMatrix,
     searched_other_letters: bool,
     engine_counts: &mut super::seqalign::EngineCounts,
 ) {
-    let has_o = |sequence: &[u8]| {
-        sequence
-            .iter()
-            .any(|residue| residue.eq_ignore_ascii_case(&b'O'))
-    };
-    // EXPERIMENT (LOSAT_X_BPRECOUNTO): the answers of the tests by query (an O) and by subject index
-    // (an O or a gap character) (`x_tested_once`).
+    // EXPERIMENT (LOSAT_X_BPRECOUNTO): the answers of the tests by query and by subject index
+    // (`ShownLetters::recounted`, `x_tested_once`).
     let x_once = x_bprecounto();
     let mut x_query_o = Vec::new();
     let mut x_subject_o = Vec::new();
@@ -4077,7 +4203,7 @@ fn recount_shown_identities(
             })
         {
             let (Some(query), Some(subject)) = (
-                query_records.get(hsp.q_idx as usize),
+                queries.letters(hsp.q_idx as usize),
                 subjects.letters(hsp.s_idx as usize),
             ) else {
                 continue;
@@ -4085,12 +4211,12 @@ fn recount_shown_identities(
             // LOSAT_X_BPRECOUNTO: each query's and each subject's letters read once per call.
             let recounted = searched_other_letters
                 || if x_once {
-                    x_tested_once(&mut x_query_o, hsp.q_idx as usize, || has_o(query.seq()))
+                    x_tested_once(&mut x_query_o, hsp.q_idx as usize, || query.recounted())
                         || x_tested_once(&mut x_subject_o, hsp.s_idx as usize, || {
-                            subject.has_o() || subject.has_gap()
+                            subject.recounted()
                         })
                 } else {
-                    has_o(query.seq()) || subject.has_o() || subject.has_gap()
+                    query.recounted() || subject.recounted()
                 };
             if !recounted {
                 continue;
@@ -4102,6 +4228,7 @@ fn recount_shown_identities(
             let mut q_index = hsp.q_start.saturating_sub(1);
             let mut s_index = hsp.s_start.saturating_sub(1);
             let mut complete = true;
+            let compared = query.case().compared_letters();
             for op in ops {
                 // A deletion is a gap in the query, an insertion a gap in the subject.
                 let (in_query, in_subject) = match *op {
@@ -4111,7 +4238,7 @@ fn recount_shown_identities(
                 };
                 for _ in 0..op.num() as usize {
                     let q = if in_query {
-                        query.seq().get(q_index).copied()
+                        query.get(q_index)
                     } else {
                         Some(b'-')
                     };
@@ -4124,7 +4251,7 @@ fn recount_shown_identities(
                         complete = false;
                         break;
                     };
-                    query_row.push(q.to_ascii_uppercase() as char);
+                    query_row.push(compared[usize::from(q)] as char);
                     subject_row.push(s.to_ascii_uppercase() as char);
                     q_index += usize::from(in_query);
                     s_index += usize::from(in_subject);
@@ -4144,8 +4271,12 @@ fn recount_shown_identities(
                 .filter(|op| !op.is_sub())
                 .map(|op| op.num() as usize)
                 .sum();
-            let num_positives =
-                crate::utils::matrix::protein_display_positives(&query_row, &subject_row, matrix);
+            let num_positives = crate::report::row_letters::display_positives(
+                query_row.as_bytes(),
+                subject_row.as_bytes(),
+                matrix,
+                query.case(),
+            );
             if (num_ident, num_positives) != (hsp.num_ident, hsp.num_positives) {
                 engine_counts.save(
                     (q_idx as u32, list_index as u32, hsp_index as u32),
@@ -4164,37 +4295,17 @@ fn recount_shown_identities(
     }
 }
 
-/// The columns (0-based) of the rows of `hit` whose subject letter is a stored gap character
-/// (`STORED_GAP`) of `subject`, its stored residues (`PairwiseHit::subject_stored_gaps`).
-fn subject_stored_gap_columns(subject: &[u8], hit: &Hit) -> Vec<u32> {
-    let s_start = hit.s_start.saturating_sub(1);
-    let s_end = hit.s_end.min(subject.len());
-    if !subject
-        .get(s_start..s_end)
-        .is_some_and(|range| range.contains(&STORED_GAP))
-    {
-        return Vec::new();
-    }
+/// The columns (0-based) of the rows of `hit` whose letter on `side` is a gap character, a
+/// residue `gap` of `sequence` (`row_letters::stored_gap_columns`): the subject's stored residues
+/// and `STORED_GAP`, or the query record's letters and `-` (a PSSM query's gap residue).
+fn stored_gap_columns(sequence: &[u8], gap: u8, hit: &Hit, side: RowSide) -> Vec<u32> {
     let implicit = [GapEditOp::Sub(hit.length as u32)];
     let ops = hit.gap_info.as_deref().unwrap_or(&implicit);
-    let mut columns = Vec::new();
-    let (mut column, mut s_index) = (0u32, s_start);
-    for op in ops {
-        // An insertion is a gap in the subject; a substitution and a deletion read a residue.
-        let in_subject = !matches!(op, GapEditOp::Ins(_));
-        for _ in 0..op.num() {
-            if in_subject {
-                if subject.get(s_index) == Some(&STORED_GAP) {
-                    columns.push(column);
-                }
-                s_index += 1;
-            }
-            column += 1;
-        }
-    }
-    columns
+    crate::report::row_letters::stored_gap_columns(sequence, gap, row_start(hit, side), ops, side)
 }
 
+/// The rows of the final HSPs `hits`, which show the letters of the queries as `queries` reads them
+/// (a PSSM query's Bioseq letters where they are not its record's: `ShownQueries::letters`).
 #[allow(clippy::too_many_arguments)]
 fn build_pairwise_hits(
     hits: Vec<(Hit, u8, usize, i32)>,
@@ -4202,7 +4313,7 @@ fn build_pairwise_hits(
     subjects: &[EncodedProtein],
     matrix: ScoringMatrix,
     render_alignment: bool,
-    query_records: &[FastaRecord],
+    queries: ShownQueries<'_>,
     shown_subjects: ShownSubjects<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<Vec<PairwiseHit>> {
@@ -4249,21 +4360,16 @@ fn build_pairwise_hits(
         } else {
             (None, None)
         };
-        let query_seq = restore_displayed_o(
-            query_seq,
-            ShownLetters::Ascii(
-                query_records
-                    .get(q_idx)
-                    .map_or(&[][..], |record| record.seq()),
-            ),
-            hit.q_start.saturating_sub(1),
-        );
+        let query_record = queries.record(q_idx);
+        let query_letters = ShownLetters::query(query_record, queries.bioseq);
+        let query_seq = restore_displayed_o(query_seq, query_letters, &hit, RowSide::Query);
         let subject_seq = restore_displayed_o(
             subject_seq,
             shown_subjects
                 .letters(s_idx)
                 .unwrap_or(ShownLetters::Ascii(&[])),
-            hit.s_start.saturating_sub(1),
+            &hit,
+            RowSide::Subject,
         );
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1028
         // ```c++
@@ -4305,16 +4411,24 @@ fn build_pairwise_hits(
             let (Some(query), Some(subject)) = (&query_seq, &subject_seq) else {
                 anyhow::bail!("unimplemented BLASTP report alignment for final HSP");
             };
-            crate::utils::matrix::protein_display_positives(query, subject, matrix)
+            crate::report::row_letters::display_positives(
+                query.as_bytes(),
+                subject.as_bytes(),
+                matrix,
+                query_letters.case(),
+            )
         } else {
             hit.num_positives
         };
         hit.num_positives = positives;
         let gaps = hit.gap_letters();
-        let subject_stored_gaps = if subject_seq.is_some() {
-            subject_stored_gap_columns(subject, &hit)
+        let [query_stored_gaps, subject_stored_gaps] = if subject_seq.is_some() {
+            [
+                stored_gap_columns(query_record, b'-', &hit, RowSide::Query),
+                stored_gap_columns(subject, STORED_GAP, &hit, RowSide::Subject),
+            ]
         } else {
-            Vec::new()
+            [Vec::new(), Vec::new()]
         };
 
         Ok(PairwiseHit {
@@ -4352,6 +4466,8 @@ fn build_pairwise_hits(
             // alignment, showalign.cpp:3595-3598); an HSP outside a set has no "sum_n" score.
             sum_n: (num > 1).then_some(num),
             subject_stored_gaps,
+            query_stored_gaps,
+            query_case: query_letters.case(),
             // The Seq-align's `num_ident` (`collect_hits_and_methods_from_hit_lists`): the
             // engine's, which `hit.num_ident` holds unless the display recount replaced it
             // (`recount_shown_identities`).
@@ -6437,8 +6553,14 @@ fn search_pssm_query(
     // The PSSM files of round 1 (written back from the input PSSM, or the engine's), which a run
     // that never searches does not write (NCBI BLAST+ 2.17.0 leaves `-out_pssm` and
     // `-out_ascii_pssm` alone when the object manager ends the run: line RG D3-1 fix 3 S1, fix 4).
+    // The query set-up's stop comes after round 1's files (`PssmQueryStop::after_round_files`),
+    // so their refusals apply to it too.
     let searches = psi.searches(resolved.strategy.is_some(), database.is_some());
-    if searches {
+    let writes_round_files = psi.joins_scope()
+        && psi
+            .stop_before_search(resolved.strategy.is_some(), database.is_some())
+            .is_none_or(|stop| stop.after_round_files());
+    if writes_round_files {
         if let Some(input) = resolved
             .psi_rounds
             .as_deref()
@@ -7128,6 +7250,17 @@ fn psiblast_stop_at_invalid_query(
     database: Option<&database::BlastpDatabase>,
     mut batches: crate::blastinput::query_batch::QueryBatches,
 ) -> crate::blastinput::query_batch::QueryBatches {
+    // The PSSM search's own stops (`PsiSearch::stop_before_search`: NCBI's check of the PSSM, its
+    // scores, the query's set-up, blast_aux_priv.cpp:149-151) come before the score block whose
+    // Karlin-Altschul parameters and the database read that this function checks
+    // (`psiblast_stop_at_pssm_query` makes them; a query of invalid residues only has no valid
+    // context here, M4a-1c E probe `old_ps_lower_ncbieaa.ps.strat`).
+    if args.psi_search.as_deref().is_some_and(|psi| {
+        psi.stop_before_search(args.strategy.is_some(), database.is_some())
+            .is_some()
+    }) {
+        return batches;
+    }
     let frames: Vec<Vec<QueryFrame>> = batches
         .starts
         .iter()
@@ -8173,10 +8306,16 @@ fn search(
             //                 results = lcl_blast.Run();
             // ```
             // A header file that NCBI cannot read (or rpsblast's profile sequences, read by a
-            // batch's traceback) fails the batch whose hit lists reach it first
-            // (`database::HeaderReadError`), after the outfmt 0 prolog, the reports of the
-            // batches before (without the epilog) and that batch's reader messages. LOSAT
-            // searches all batches together: the batches before are searched again alone.
+            // batch's traceback, or blastp's `-use_sw_tback` redo whose batch's last redone match
+            // fails, `Traceback failed`, `redo_run::sw_batch_failed`) fails the batch whose
+            // hit lists reach it first (`database::HeaderReadError`), after the outfmt 0 prolog,
+            // the reports of the batches before (without the epilog) and that batch's reader
+            // messages; so do LOSAT's refusals of a step where NCBI's search of the batch stops or
+            // never ends or crashes (`redo_run::sw_endless`, `redo_run::sw_batch_failed` where the
+            // batch's first query holds a redone match, a query chunk split again or without a
+            // query in `search_split_query_batches`), as TBLASTX's and TBLASTN's
+            // (`blastinput::app::ErrorAfterBatchReports`). LOSAT searches all batches together: the
+            // batches before are searched again alone.
             let failure = match result {
                 Err(error) if error.is::<database::HeaderReadError>() => error
                     .downcast::<database::HeaderReadError>()
@@ -8321,13 +8460,18 @@ fn x_query_block_plan(
 )> {
     use super::x_query_blocks::XBlockReport;
     super::x_query_blocks::x_bp_qblock()?;
-    // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries.
-    // An ungapped search plans no blocks (`args.ungapped`).
+    // psiblast's PSSMs (`psiblast_ascii_pssms`) are written by the search of all queries. So is a
+    // `-use_sw_tback` search: a later batch's Smith-Waterman redo can fail NCBI's traceback
+    // (`redo_run::sw_batch_failed`; NCBI's crash there is LOSAT's refusal) or meet the redo that
+    // NCBI never ends (LOSAT's refusal, `redo_run::sw_endless`), which come after the reports of
+    // the batches before in the search of all queries (`search`). An ungapped search plans no
+    // blocks (`args.ungapped`).
     if args.query_range.is_some()
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
         || args.rps_search.is_some()
         || args.ungapped
+        || args.use_sw_tback
         || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
@@ -8583,7 +8727,7 @@ fn x_block_input(
 // the cause, after the rows of the blocks before:
 // - the diagonal table of all queries (`check_diag_table_window` in `call_setup::scan_shape`, with
 //   the concatenated length of all queries; a block's is shorter);
-// - the split of a long query batch (the `ensure!`s of `search_split_query_batches`);
+// - the split of a long query batch (the refusals of `search_split_query_batches`);
 // - with the compressed lookup table, a table of one of NCBI's query batches (or of a query
 //   chunk of a split batch) that fills NCBI's overflow banks: `x_word_blocks`, which the block
 //   search tests on its pool before the first block (and leaves the search to the reference path
@@ -9978,18 +10122,70 @@ fn search_split_query_batches(
             );
             continue;
         };
-        // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below
-        // it; NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171).
-        anyhow::ensure!(
-            !sizes.negative_chunk_size(),
-            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
-            args.app.name()
-        );
-        anyhow::ensure!(
-            !protein_chunk_would_be_split(&chunks, sizes),
-            "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {}",
-            args.app.name()
-        );
+        // NCBI stops in the search of the batch (its exception) after it has printed the reports of
+        // the batches before (`blastp_app.cpp:257-276`, quoted in `search`): so do the refusals
+        // below, as the batch's failure (`database::HeaderReadError`, the batch's first query;
+        // TBLASTN's and TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). psiblast searches
+        // one query at a time and NCBI's stops in the query's round 1 (it splits that round too),
+        // after the rounds of the queries before: every round of a query makes the same chunks,
+        // so a later round never reaches these refusals, and the refusal of the query's search is
+        // the plain error.
+        let batch_refusal = |refusal: anyhow::Error| -> anyhow::Error {
+            if args.psi_search.is_some() {
+                refusal
+            } else {
+                database::HeaderReadError {
+                    query: range.start,
+                    error: refusal,
+                }
+                .into()
+            }
+        };
+        // NCBI's `CQuerySplitter::Split` makes the query factory of every chunk before it sets any
+        // chunk up, and a chunk without a query has no query vector to make it from
+        // (`CCoreException::eNullPtr`), so NCBI stops there before a chunk is split again (as with
+        // a positive pair whose evened chunk size falls below the overlap, or a negative pair whose
+        // wrapped size passes the batch's length: chunk 0 covers the batch); `split_protein_batch`
+        // makes no part for such a chunk.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:234,876-879
+        // ```c++
+        //     m_SplitQueriesInChunk.assign(m_NumChunks, CRef<CBlastQueryVector>());
+        // ...
+        //         for (size_t chunk_num = 0; chunk_num < m_NumChunks; chunk_num++) {
+        //             CRef<IQueryFactory> qf
+        //                 (new CObjMgr_QueryFactory(*m_SplitQueriesInChunk[chunk_num]));
+        //             m_QueryChunkFactories.push_back(qf);
+        // ```
+        if chunks.iter().any(|chunk| chunk.queries.is_empty()) {
+            return Err(batch_refusal(anyhow::anyhow!(
+                "a query chunk without a query is not supported by LOSAT's {}",
+                args.app.name()
+            )));
+        }
+        // Every chunk holds a query: NCBI sets the chunks up one by one after the split
+        // (prelim_stage.cpp:235-244) and stops at the missing lookup table of a chunk that it would
+        // split again (prelim_search_runner.hpp:77).
+        if protein_chunk_would_be_split(&chunks, sizes) {
+            return Err(batch_refusal(anyhow::anyhow!(
+                "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {}",
+                args.app.name()
+            )));
+        }
+        // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it,
+        // and NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171, quoted at
+        // `split_protein_batch`): where the first range covers the batch, the chunks after it
+        // hold no query and NCBI stops above. Otherwise the ranges leave gaps between chunks that
+        // each hold a query and would not be split again, which NCBI searches on with the hits in
+        // the gaps lost: the maintainer kept that setting refused (PD-LOSAT-NCBI-DEFECTS version
+        // 1.1), and the refusal comes where the batch's search would start, after the reports of
+        // the batches before (the form of 1.40 for a refusal in the middle of a run).
+        if sizes.negative_chunk_size() {
+            return Err(batch_refusal(anyhow::anyhow!(
+                "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
+                args.app.name()
+            )));
+        }
         let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
         // The options' search spaces of the batch's contexts (one per query), which every chunk
         // reads by its own context index (`SplitQuery_SetEffectiveSearchSpace`, quoted at
@@ -10000,13 +10196,6 @@ fn search_split_query_batches(
             .map(option_space_of_query)
             .collect::<Result<_>>()?;
         for chunk in &chunks {
-            // NCBI fails to make the query factory of a chunk without a query ("Empty
-            // CBlastQueryVector"); `split_protein_batch` makes none.
-            anyhow::ensure!(
-                !chunk.queries.is_empty(),
-                "a query chunk without a query is not supported by LOSAT's {}",
-                args.app.name()
-            );
             let parts: Vec<FastaRecord> = chunk
                 .queries
                 .iter()
@@ -11927,7 +12116,7 @@ fn run_call(
             subjects,
             args.scoring.matrix,
             true,
-            query_records,
+            ShownQueries::of(query_records, &args),
             shown_subjects,
             x_rows_pool,
         )?;
@@ -12731,12 +12920,13 @@ mod tests {
         assert!(!ShownLetters::Stored(&without_o).has_o());
         // The row of residues 25..=27 as the search shows O (`X` where the record has O).
         let row = Some("*XJ".to_string());
+        let hit = row_hit((26, 28), (26, 28), None);
         assert_eq!(
-            restore_displayed_o(row.clone(), stored, 25),
-            restore_displayed_o(row, record, 25)
+            restore_displayed_o(row.clone(), stored, &hit, RowSide::Subject),
+            restore_displayed_o(row, record, &hit, RowSide::Subject)
         );
         assert_eq!(
-            restore_displayed_o(Some("*XJ".to_string()), stored, 25).as_deref(),
+            restore_displayed_o(Some("*XJ".to_string()), stored, &hit, RowSide::Subject).as_deref(),
             Some("*OJ")
         );
         // A subject set's records and a database's listed subjects give the same letters and
@@ -15781,5 +15971,83 @@ mod tests {
             }
         }
         assert!(above > 100, "{above}");
+    }
+
+    /// A protein alignment of query `q` and subject `s` (1-based, inclusive) with the operations
+    /// `ops` (one substitution of the query's span without).
+    fn row_hit(q: (usize, usize), s: (usize, usize), ops: Option<Vec<GapEditOp>>) -> Hit {
+        let length = ops.as_ref().map_or(q.1 - q.0 + 1, |ops| {
+            ops.iter().map(|op| op.num() as usize).sum()
+        });
+        Hit {
+            identity: 0.0,
+            length,
+            mismatch: 0,
+            gapopen: 0,
+            q_start: q.0,
+            q_end: q.1,
+            s_start: s.0,
+            s_end: s.1,
+            e_value: 1.0,
+            bit_score: 1.0,
+            num_ident: 0,
+            query_frame: 0,
+            query_length: q.1,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: 1,
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
+            gap_info: ops,
+            num_positives: 0,
+        }
+    }
+
+    // NCBI alnvec.cpp:116-121 (quoted above `restore_displayed_o`): the rows read each sequence's
+    // Bioseq at the columns of its residues, which the alignment's operations give; a gap
+    // character (a PSSM query's gap residue, a database's stored `-`) is a residue, so an O after
+    // it is the O of its own position (M4a-1c LG probes `tk_dash_o1_eaa`, `ts_dash_o1_eaa`).
+    #[test]
+    fn the_rows_read_each_residue_by_the_operations() {
+        use crate::report::row_letters::QueryCase;
+        // Query `A-OK` (record letters, `-` the gap residue) at 1..=4 against a subject of three
+        // residues: the gap residue's column is a gap of the subject (an insertion).
+        let ops = vec![GapEditOp::Sub(1), GapEditOp::Ins(1), GapEditOp::Sub(2)];
+        let hit = row_hit((1, 4), (1, 3), Some(ops));
+        let record = ShownLetters::query(b"A-OK", None);
+        assert!(record.recounted() && record.shows_other_letters());
+        // The search's row shows the gap residue as `-` and the O as X.
+        let shown = restore_displayed_o(Some("A-XK".to_string()), record, &hit, RowSide::Query);
+        assert_eq!(shown.as_deref(), Some("A-OK"));
+        assert_eq!(stored_gap_columns(b"A-OK", b'-', &hit, RowSide::Query), [1]);
+        assert_eq!(record.case(), QueryCase::Masked);
+        // A PSSM query's Bioseq letters show as they are; its record's capitals are searched.
+        let bioseq = ShownLetters::query(b"MKV", Some(b"mKv"));
+        let hit = row_hit((1, 3), (5, 7), None);
+        let shown = restore_displayed_o(Some("MKV".to_string()), bioseq, &hit, RowSide::Query);
+        assert_eq!(shown.as_deref(), Some("mKv"));
+        assert!(bioseq.recounted());
+        assert_eq!(bioseq.case(), QueryCase::Bioseq);
+        assert!(stored_gap_columns(b"MKV", b'-', &hit, RowSide::Query).is_empty());
+        // A FASTA record without O or `-` is not recounted and its row stays.
+        let plain = ShownLetters::query(b"MKV", None);
+        assert!(!plain.recounted() && !plain.shows_other_letters());
+        // A subject's stored `-` before an O: the O stays at its own position.
+        let residues = [1, STORED_GAP, STORED_O];
+        let hit = row_hit((1, 3), (1, 3), None);
+        let shown = restore_displayed_o(
+            Some("A-X".to_string()),
+            ShownLetters::Stored(&residues),
+            &hit,
+            RowSide::Subject,
+        );
+        assert_eq!(shown.as_deref(), Some("A-O"));
+        assert_eq!(
+            stored_gap_columns(&residues, STORED_GAP, &hit, RowSide::Subject),
+            [1]
+        );
     }
 }

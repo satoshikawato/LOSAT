@@ -16,10 +16,10 @@
 //! fields at `write_text`.
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
-//! (`BlastpReports`, `BlastpRanges`, `BlastpReport`, `ShownSubjects`, `query_record_masks`,
-//! `mask_query_rows`, `blastp_scan_mode_definition`, `write_blastp_tabular_hit_lists`) and its
-//! sibling modules `anchored`, `database`, `psi_round`, `pssm_hooks`, `query_rows` and
-//! `x_soft_subject`.
+//! (`BlastpReports`, `BlastpRanges`, `BlastpReport`, `ShownSubjects`, `ShownQueries`,
+//! `query_record_masks`, `mask_query_rows`, `blastp_scan_mode_definition`,
+//! `write_blastp_tabular_hit_lists`) and its sibling modules `anchored`, `database`, `psi_round`,
+//! `pssm_hooks`, `query_rows` and `x_soft_subject`.
 
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -31,7 +31,7 @@ use anyhow::Result;
 use super::{
     anchored, blastp_scan_mode_definition, database, mask_query_rows, psi_round, pssm_hooks,
     query_record_masks, query_rows, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
-    BlastpReport, BlastpReports, ShownSubjects,
+    BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -882,7 +882,7 @@ pub(super) fn write_pairwise(
             (view != crate::report::pairwise::PairwiseView::Pairwise).then(|| {
                 anchored::AnchoredSequences {
                     contexts: report_contexts,
-                    query_records,
+                    queries: ShownQueries::of(query_records, args),
                     query_placements: &ranges.query_input.placements,
                     subjects,
                     shown_subjects,

@@ -60,6 +60,13 @@ jobs:
         run: python3 LOSAT/tests/check_lint_allow_ratchet.py --root .
       - name: Lint-allow ratchet tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_lint_allow_ratchet.py'
+      # No NCBI counterpart: comments quote only NCBI's public-domain source; another project's
+      # code (libstdc++, glibc, Microsoft's C runtime, LMDB, Boost, crates, ...) is cited by file and
+      # lines, not quoted (maintainer, 2026-11-20). The tables of the check are the one list.
+      - name: Foreign-quote check
+        run: python3 LOSAT/tests/check_foreign_quotes.py --root .
+      - name: Foreign-quote check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_foreign_quotes.py'
       # No reference between the programs under LOSAT/src/algorithm/ that
       # LOSAT/tests/program_edges.tsv does not list, and none up the layering
       # common < blastn < tblastx < blastp < tblastn < blastx (SWEBOK 2026-11-04 audit, KA3).
@@ -75,6 +82,21 @@ jobs:
         run: python3 LOSAT/tests/check_manifest_sizes.py --root .
       - name: Manifest size check tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_manifest_sizes.py'
+      # No NCBI counterpart: crates.io refuses a .crate file over 10 MiB, and publish-crate.yml uploads
+      # the release's crate there. `cargo package --no-verify` packs what `cargo publish` would,
+      # without the build.
+      - name: Crate size (crates.io takes 10 MiB)
+        working-directory: LOSAT
+        run: |
+          set -euo pipefail
+          cargo package --locked --no-verify
+          crate=$(ls target/package/losat-*.crate)
+          bytes=$(stat -c %s "$crate")
+          echo "$(basename "$crate"): $bytes bytes, $((bytes * 100 / 10485760)) % of the 10 MiB that crates.io takes" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$bytes" -gt 10485760 ]; then
+            echo "::error::the crate is over the 10 MiB that crates.io takes; see .github/workflows/publish-crate.yml"
+            exit 1
+          fi
       # No NCBI counterpart: CI wiring. Every test_*.py and test_*.js file is named in a `run:`
       # command of a workflow that runs on push, pull request or schedule, or one it calls (SWEBOK
       # 2026-11-04 audit, KA5: five files and 35 tests ran in none); python/tests/ runs as a
@@ -83,6 +105,17 @@ jobs:
         run: python3 LOSAT/tests/check_tests_in_ci.py --root .
       - name: Tests-in-CI checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_tests_in_ci.py'
+      # No NCBI counterpart: the license texts of the code in LOSAT's binaries. THIRD_PARTY_LICENSES is
+      # generated from the three Cargo.lock files, the Rust standard library inputs and wasi-libc
+      # (scripts/third_party_licenses.py); a dependency change that leaves it stale fails here, and so
+      # does a copy of LICENSE or THIRD_PARTY_NOTICES (LOSAT/, python/) that differs from the root file.
+      # It runs `cargo fetch --locked` (network) for the crates' license files.
+      - name: Third-party licenses are up to date
+        run: python3 scripts/third_party_licenses.py --check
+      - name: Third-party licenses script tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_third_party_licenses.py'
+      - name: Wheel smoke license check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_wheel_smoke_licenses.py'
       - name: Public API checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_public_api.py'
       - name: Release-candidate tooling tests

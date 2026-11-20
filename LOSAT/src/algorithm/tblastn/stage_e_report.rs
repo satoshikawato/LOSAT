@@ -24,6 +24,7 @@ use crate::report::pairwise::{
     write_tblastn_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig,
     PairwiseDatabase, PairwiseHit,
 };
+use crate::report::row_letters::{stored_gap_columns, QueryLetters, RowSide};
 use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
@@ -159,20 +160,41 @@ pub(super) fn is_structured_xml(outfmt: &str) -> bool {
     format_number(outfmt) == 5 || xml2_kind(outfmt).is_some()
 }
 
+/// Whether the reports of `outputs` read the letters of the subjects
+/// (`formats_read_subject_letters`), for the PSSM query `pssm` (`-in_pssm`) when there is one
+/// (`recounts_shown_counts`). The one decision of whether the reported database sequences keep
+/// their letters (`database::reported_subjects`) and whether `render` counts again.
+pub(super) fn reads_subject_letters(
+    outputs: &ReportOutputs<'_>,
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+) -> bool {
+    formats_read_subject_letters(
+        outputs.hits.is_some(),
+        recounts_shown_counts(pssm),
+        outputs.formats.iter().map(|format| format.outfmt),
+    )
+}
+
 /// Whether the reports `outfmts` (with `hits`, the caller's hit records) read the letters of the
 /// subjects: outfmt 0 and the hit records (`pairwise_hits`), the XML family
-/// (`blast_xml::XmlReport::write`) and the tabular rows (`tabular::reads_rows`). The Seq-aligns
-/// and the archive (8, 9, 11, 12) and the other tabular reports (`write_tabular`, the default
-/// rows of 6 and 7, has no spec) read the lengths alone: their counts are the search's. A value
-/// that this does not know reads them.
-pub(super) fn reads_subject_letters<'a>(
+/// (`blast_xml::XmlReport::write`) and the tabular rows (`tabular::reads_rows`), and with
+/// `recounted` (a query whose reports count its HSPs again from their rows,
+/// `recounts_shown_counts`) every tabular report, whose identities, positives and mismatches are
+/// then the rows'. The Seq-aligns and the archive (8, 9, 11, 12) and the other tabular reports
+/// (`write_tabular`, the default rows of 6 and 7, has no spec) read the lengths alone: their
+/// counts are the search's. A value that this does not know reads them.
+fn formats_read_subject_letters<'a>(
     hits: bool,
+    recounted: bool,
     mut outfmts: impl Iterator<Item = &'a str>,
 ) -> bool {
     hits || outfmts.any(|outfmt| match format_number(outfmt) {
         8 | 9 | 11 | 12 => false,
-        6 | 7 | 10 | 20 => super::tabular::tabular_spec(outfmt)
-            .is_some_and(|spec| super::tabular::reads_rows(&spec)),
+        6 | 7 | 10 | 20 => {
+            recounted
+                || super::tabular::tabular_spec(outfmt)
+                    .is_some_and(|spec| super::tabular::reads_rows(&spec))
+        }
         // The organism report (`report::tax_report`) shows scores and definition lines.
         18 => false,
         _ => true,
@@ -328,6 +350,20 @@ pub(super) fn render(
         hitlist.sort_hsps_for_report();
         hitlist.drop_zero_score_hsps();
     }
+    // A PSSM query's Bioseq letters where they are not its record's, which the reports read; its
+    // counts are the rows' where its reports read other letters than its search and a report
+    // reads the subjects' letters (`reads_subject_letters`; the Seq-aligns keep the search's).
+    let query_bioseq = pssm.and_then(|psi| psi.bioseq_letters.as_deref());
+    if recounts_shown_counts(pssm) && reads_subject_letters(outputs, pssm) {
+        recount_shown_counts(
+            query_records,
+            query_bioseq,
+            subject_letters,
+            hitlists,
+            genetic_code,
+            scoring.matrix,
+        )?;
+    }
     let hitlists: &[KappaResultHitList] = hitlists;
     // `-in_pssm` with `-window_size 0`: an alignment whose traceback started on its frame's NULLB
     // (`search_gapped::x_traceback_start_past_frame`) is refused here, where NCBI reports it, and
@@ -415,6 +451,7 @@ pub(super) fn render(
             xml_is_xml2,
             xml_only_xml2,
             xml_taxa,
+            pssm.and_then(|psi| psi.bioseq_letters.clone()),
         )?)
     } else {
         None
@@ -536,6 +573,7 @@ pub(super) fn render(
             mask_lowercase,
             ranges,
             pssm.is_none(),
+            query_bioseq,
             anchored_formats.then_some(&mut section_masks),
         )?))
     } else {
@@ -605,6 +643,7 @@ pub(super) fn render(
         let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
         Some(super::anchored::AnchoredSequences {
             queries: query_records,
+            query_bioseq,
             query_placements: ranges.queries,
             subject_records,
             subject_letters,
@@ -725,6 +764,7 @@ pub(super) fn render(
                             spec: custom_tabular.as_ref().expect("a custom tabular report"),
                             inputs: tabular,
                             queries: query_records,
+                            query_bioseq,
                             letters: subject_letters,
                             subject_ids: &subject_ids,
                             subject_records,
@@ -1271,6 +1311,9 @@ fn pairwise_hits(
     ranges: &ReportRanges<'_>,
     // Whether the alignments show the query's masks (not a PSSM query's).
     query_masks: bool,
+    // The PSSM query's Bioseq letters where they are not its record's (`PsiSearch::bioseq_letters`),
+    // which the rows show (`QueryLetters`); a run of such a query has no other.
+    query_bioseq: Option<&[u8]>,
     // With `Some`, the masks of each query's rows (half-open, in the searched letters; none for a
     // PSSM query) are pushed in query order, for the query-anchored sections of outfmt 1 to 4,
     // which show the same masks (`render`: SEG runs once per query).
@@ -1316,8 +1359,9 @@ fn pairwise_hits(
                 // translated coordinates use three nucleotide letters per
                 // residue and reverse strand endpoints run in descending order.
                 let (s_start, s_end) = subject_endpoints(hsp, i32::try_from(subject_seq.len())?);
+                let query_letters = QueryLetters::new(query, query_bioseq);
                 let (qseq, sseq) = aligned_sequences(
-                    query,
+                    query_letters,
                     subject_seq,
                     &mut x_window,
                     &code,
@@ -1367,8 +1411,12 @@ fn pairwise_hits(
                 //                 }
                 //             }
                 // ```
-                let report_positives =
-                    crate::utils::matrix::protein_display_positives(&qseq, &sseq, scoring.matrix);
+                let report_positives = crate::report::row_letters::display_positives(
+                    qseq.as_bytes(),
+                    sseq.as_bytes(),
+                    scoring.matrix,
+                    query_letters.case(),
+                );
                 // The rows are read from the searched letters; the report prints record
                 // coordinates (`record_coordinates`).
                 let searched = (hsp.q_start + 1, hsp.q_end, s_start, s_end);
@@ -1406,7 +1454,7 @@ fn pairwise_hits(
                         0.0
                     },
                     length: payload.align_length,
-                    mismatch: payload.report_mismatches as i64,
+                    mismatch: payload.report_mismatches,
                     gapopen: payload.gap_opens,
                     q_start: usize::try_from(q_start)?,
                     q_end: usize::try_from(q_end)?,
@@ -1454,6 +1502,15 @@ fn pairwise_hits(
                     // linked count; showalign.cpp:3595-3598 prints sum_n.
                     sum_n: Some(linked.num),
                     subject_stored_gaps: Vec::new(),
+                    // A PSSM query's gap residues (`row_letters::stored_gap_columns`).
+                    query_stored_gaps: stored_gap_columns(
+                        query,
+                        b'-',
+                        usize::try_from(hsp.q_start)?,
+                        &payload.edit_script,
+                        RowSide::Query,
+                    ),
+                    query_case: query_letters.case(),
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:519-531
                     // ```c
                     //             query = query_blk->sequence +
@@ -1666,6 +1723,85 @@ fn write_pairwise(
     Ok(())
 }
 
+/// Whether the reports of the PSSM query `pssm` (`-in_pssm`) read other letters than its search
+/// (`QueryLetters::shows_other_letters`: its Bioseq's letters in lower case, or its gap residue),
+/// so that they count its HSPs again from their rows (`recount_shown_counts`).
+pub(super) fn recounts_shown_counts(
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+) -> bool {
+    pssm.is_some_and(|psi| {
+        QueryLetters::new(psi.query.seq(), psi.bioseq_letters.as_deref()).shows_other_letters()
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1022 (quoted at
+// `blastp::blast_engine::build_pairwise_hits`) and c++/include/objtools/align_format/
+// tabular.hpp:543-547
+// ```c++
+//     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
+// ```
+/// The report counts (`report_num_ident`, `report_num_positives`, `report_mismatches`) of the HSPs
+/// of `hitlists`, counted again from their rows (`aligned_sequences`) for a query whose reports
+/// read other letters than its search (`QueryLetters::shows_other_letters`: a PSSM query's Bioseq
+/// letters `query_bioseq`, or its gap residue). Stage D counts on the searched NCBIstdaa codes;
+/// NCBI's reports compare the rows' letters, where a lower-case letter is identical to no subject
+/// letter and the gap residue's `-` is identical to a gap of the subject (an identity and a gap,
+/// so the mismatches can be fewer than none). Every report then reads these counts: the default
+/// tabular rows, the custom rows without the alignment's rows, and outfmt 0's.
+fn recount_shown_counts(
+    query_records: &[FastaRecord],
+    query_bioseq: Option<&[u8]>,
+    subject_letters: SubjectLetters<'_>,
+    hitlists: &mut [KappaResultHitList],
+    genetic_code: u8,
+    matrix: crate::config::ScoringMatrix,
+) -> Result<()> {
+    let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
+    let mut x_window = Vec::new();
+    for (query, hitlist) in query_records.iter().zip(hitlists.iter_mut()) {
+        let letters = QueryLetters::new(query.seq(), query_bioseq);
+        if !letters.shows_other_letters() {
+            continue;
+        }
+        for list in hitlist.lists_mut() {
+            let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
+            let subject_seq = subject_letters.nt(oid);
+            let mut translation = TargetTranslation::of(subject_seq, &code);
+            for (linked, payload) in list.hsps.hsps.iter().zip(list.payloads.iter_mut()) {
+                let hsp = &linked.hsp;
+                let (qseq, sseq) = aligned_sequences(
+                    letters,
+                    subject_seq,
+                    &mut x_window,
+                    &code,
+                    &mut translation,
+                    hsp.frame,
+                    hsp.q_start,
+                    hsp.s_start,
+                    hsp.s_end,
+                    &payload.edit_script,
+                    &[],
+                )?;
+                let ident = qseq
+                    .bytes()
+                    .zip(sseq.bytes())
+                    .filter(|(q, s)| q == s)
+                    .count();
+                payload.report_num_ident = ident;
+                payload.report_num_positives = crate::report::row_letters::display_positives(
+                    qseq.as_bytes(),
+                    sseq.as_bytes(),
+                    matrix,
+                    letters.case(),
+                );
+                payload.report_mismatches = i64::try_from(payload.align_length)?
+                    - i64::try_from(ident + payload.gap_letters)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 // NCBI c++/src/objtools/align_format/tabular.cpp:971-1021;
 // c++/src/objtools/align_format/showalign.cpp:2122-2149:
 // alnVec->GetWholeAlnSeqString(0,m_QuerySeq);
@@ -1687,7 +1823,9 @@ fn write_pairwise(
 // or I/L; TBLASTX's `display_residue`), not taken from the search's translation.
 #[allow(clippy::too_many_arguments)]
 fn aligned_sequences(
-    query: &[u8],
+    // The query's letters as the reports read them (a PSSM query's Bioseq letters as they are,
+    // a record's in upper case).
+    query: QueryLetters<'_>,
     // EXPERIMENT (LOSAT_X_TBNSTORE): the letters, or a packed subject.
     subject: SubjectNt<'_>,
     window_buffer: &mut Vec<u8>,
@@ -1757,7 +1895,7 @@ fn aligned_sequences(
         for _ in 0..op.num() {
             match op {
                 GapEditOp::Sub(_) => {
-                    let &qa = query
+                    let qa = query
                         .get(q)
                         .context("TBLASTN report query offset overflow")?;
                     let &sa = translated
@@ -1785,7 +1923,6 @@ fn aligned_sequences(
                     //                     } else if (m_SeqLocChar==eLowerCase){
                     //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
                     // ```
-                    let qa = qa.to_ascii_uppercase();
                     let displayed = if report_masks
                         .iter()
                         .any(|&(left, right)| left <= q && q < right)
@@ -1816,7 +1953,7 @@ fn aligned_sequences(
                     s += 1;
                 }
                 GapEditOp::Ins(_) => {
-                    let &qa = query
+                    let qa = query
                         .get(q)
                         .context("TBLASTN report query offset overflow")?;
                     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:184-187
@@ -1839,7 +1976,6 @@ fn aligned_sequences(
                     //                     } else if (m_SeqLocChar==eLowerCase){
                     //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
                     // ```
-                    let qa = qa.to_ascii_uppercase();
                     let displayed = if report_masks
                         .iter()
                         .any(|&(left, right)| left <= q && q < right)
@@ -1864,7 +2000,7 @@ fn aligned_sequences(
 /// strings into the caller's.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn aligned_sequences_into(
-    query: &[u8],
+    query: QueryLetters<'_>,
     subject: SubjectNt<'_>,
     window_buffer: &mut Vec<u8>,
     code: &GeneticCode,
@@ -1908,7 +2044,10 @@ mod tests {
     // here reaches `SubjectLetters::Lengths::nt`, which panics.
     #[test]
     fn only_the_reports_that_show_letters_read_the_subjects() {
-        let reads = |outfmt: &str| reads_subject_letters(false, std::iter::once(outfmt));
+        let reads_by = |hits: bool, recounted: bool, outfmts: &[&str]| {
+            formats_read_subject_letters(hits, recounted, outfmts.iter().copied())
+        };
+        let reads = |outfmt: &str| reads_by(false, false, &[outfmt]);
         for outfmt in [
             "0",
             "5",
@@ -1945,9 +2084,18 @@ mod tests {
         ] {
             assert!(!reads(outfmt), "{outfmt}");
         }
-        assert!(reads_subject_letters(true, std::iter::once("6")));
-        assert!(!reads_subject_letters(false, std::iter::empty()));
-        assert!(reads_subject_letters(false, ["6", "0"].into_iter()));
+        assert!(reads_by(true, false, &["6"]));
+        assert!(!reads_by(false, false, &[]));
+        assert!(reads_by(false, false, &["6", "0"]));
+        // A PSSM query whose reports count its HSPs again from their rows (lower-case iupacaa,
+        // the gap residue: M4a-1c LG probe `ts_low_iupac.f1`, `ts_std0.g4`): every tabular
+        // report reads the rows; the Seq-aligns and the archive keep the search's counts.
+        for outfmt in ["6", "7", "10", "6 std", "6 qseqid sseqid slen evalue"] {
+            assert!(reads_by(false, true, &[outfmt]), "{outfmt}");
+        }
+        for outfmt in ["8", "9", "11", "12", "18"] {
+            assert!(!reads_by(false, true, &[outfmt]), "{outfmt}");
+        }
     }
 
     // Outfmt 5 and the XML2 and JSON documents (16 and 15) take the structured-XML path of
@@ -2016,6 +2164,7 @@ mod tests {
                 &query_seqs,
                 &subject_seqs,
                 LocalStageDProfile {
+                    max_intron_length: 0,
                     seg: Some(&seg),
                     soft_masking: false,
                     mask_lowercase: false,

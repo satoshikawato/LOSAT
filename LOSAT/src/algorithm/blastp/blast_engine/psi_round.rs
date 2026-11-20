@@ -114,7 +114,8 @@ pub(super) fn search_rounds(
             // (NCBI 2.17.0, probes `y.*`, `y2.*` of the PS5c review; line PS DECISIONS 31), and so
             // do the search strategy's request without a database and the PSSM engine's scores
             // (`PsiSearch::stop_before_search`: `SaveSearchStrategy` and `CPsiBlast` before the
-            // rounds).
+            // rounds), but not the query set-up that `CPsiBlast::Run` starts with (the query's
+            // invalid residues, `PssmQueryStop::after_round_files`).
             // The object manager's exception (`PsiSearch::annot_abort`) stops before round 1 too.
             let search_error = error.downcast_ref::<crate::cli::NativeError>().is_some()
                 && args.psi_search.as_deref().is_some_and(|psi| {
@@ -124,7 +125,7 @@ pub(super) fn search_rounds(
                                 args.strategy.is_some(),
                                 subject_source.database().is_some(),
                             )
-                            .is_none()
+                            .is_none_or(|stop| stop.after_round_files())
                 });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
                 let (asn, ascii) = input.files(&plan.request)?;
@@ -405,6 +406,12 @@ fn run_queries(
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.warning_title.clone());
+                // So are the letters of its Bioseq that its reports read (`PsiSearch::
+                // bioseq_letters`): NCBI's reports of every round read the query's Bioseq.
+                search.bioseq_letters = args
+                    .psi_search
+                    .as_deref()
+                    .and_then(|psi| psi.bioseq_letters.clone());
                 // A query that NCBI splits: round 1's query, which the round searches, and the query
                 // of its set-up (`RoundQuery::split`).
                 let (query_now, split_setup) = if split {
@@ -1134,7 +1141,10 @@ impl SubjectKeys<'_> {
     ) -> Result<Option<Vec<u8>>> {
         self.reads.letters(s_idx, || {
             let letters = match shown_subjects.letters(s_idx as usize) {
-                Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
+                // A subject's letters are never a query's Bioseq letters; they would read as these.
+                Some(ShownLetters::Ascii(letters) | ShownLetters::Bioseq(letters)) => {
+                    ncbistdaa_letters(letters)
+                }
                 Some(ShownLetters::Stored(residues)) => residues.to_vec(),
                 None => Vec::new(),
             };

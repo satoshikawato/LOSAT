@@ -399,6 +399,11 @@ def own_search() -> list[dict]:
     The application start's error without a line end (review r2 L2): `-conffile` of a file that is
     not registered (NCBI's `Critical: (106.23) Registry file "x.ini" not found, aborting.`).
 
+    Runs whose own `-outfmt` is structured (5, 8, 11, 13; BLASTN's 17), with a query whose first
+    record has no residues (review r3 M2): the CLI's run of the structured format does not write
+    the query's `Sequence contains no data` warning, which those of outfmt 0, 6 and 7 write, so
+    stream 3 adds it after the argv's standard error.
+
     TBLASTX runs whose messages go nowhere (`-logfile /dev/null`, `-logfile ""`; review r3 M1):
     stream 3 is empty, as the CLI's standard error for every format."""
     inputs = {
@@ -467,6 +472,18 @@ def own_search() -> list[dict]:
             add(f"handler.{program}.line_length.sorthsps.warned{'.outfmt' + outfmt if outfmt else ''}", program,
                 [*handler["line_length"], *handler["sorthsps"]], outfmt, failure=False, given=warned)
     add("start.blastp.conffile_missing", "blastp", ["-conffile", "x.ini"], prolog=False)
+    arch = "tests/fasta/outfmt11"
+    empty_first = {
+        "blastn": ["-query", f"{arch}/arch_tbx_emptyfirst.fna", "-subject", f"{arch}/arch_tbx_s.fna"],
+        "tblastx": ["-query", f"{arch}/arch_tbx_emptyfirst.fna", "-subject", f"{arch}/arch_tbx_s.fna"],
+        "blastp": ["-query", f"{arch}/arch_bp_emptyfirst.faa", "-subject", f"{arch}/arch_bp_s.faa"],
+        "tblastn": ["-query", f"{arch}/arch_tbn_emptyfirst.faa", "-subject", f"{arch}/arch_tbn_s.fna"],
+        "blastx": ["-query", f"{arch}/arch_bx_emptyfirst.fna", "-subject", f"{arch}/arch_bx_s.faa"],
+    }
+    for program in FORMATS:
+        for outfmt in ("5", "8", "11", "13", *(("17",) if program == "blastn" else ())):
+            add(f"query_warnings.{program}.outfmt{outfmt}", program, [], outfmt, failure=False, given=empty_first)
+            searches[-1].update({"files": True} if outfmt == "13" else {"sam": True} if outfmt == "17" else {})
     for name, logfile in (("devnull", "/dev/null"), ("empty", "")):
         add(f"logfile.tblastx.na0.{name}", "tblastx", ["-num_alignments", "0", "-logfile", logfile], failure=False)
         add(f"logfile.tblastx.line_length.warned.{name}", "tblastx", [*handler["line_length"], "-logfile", logfile],

@@ -360,14 +360,6 @@ function nativeEnv(search) {
   return env;
 }
 
-// The formatting handler's warnings (blast_args.cpp:2947-2989): the CLI writes those of
-// -num_descriptions, -line_length and -sorthits for formats above 4 only, that of -sorthsps for
-// formats other than 0, and that of the few matches for the hit list size of the format.
-const HANDLER = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches|The parameter -line_length is not applicable|The parameter -sorthits is ignored|The parameter -sorthsps is ignored)/;
-// The structured formats, whose writers do not write the queries' warnings (abi_v2.md §5,
-// `ReportFormat::writes_query_warnings`).
-const STRUCTURED = new Set([5, 8, 9, 11, 12, 13, 14, 15, 16, 17]);
-
 // The hit list size that the CLI derives for the output format `number` from the options of `argv`
 // (`report_counts`, NCBI blast_args.cpp:2894-2973): the formats of a run with the same size are one
 // search (abi_v2.md §7).
@@ -383,12 +375,12 @@ function hitListSize(argv, number) {
 }
 
 // The lines of `text` (each with its line end) that it has more times than `held` (line -> copies),
-// in order, of those that `keep` keeps; `held` then holds them (the adapter's `Diagnostics`).
-function linesAfter(held, text, keep = () => true) {
+// in order; `held` then holds them (the adapter's `Diagnostics`).
+function linesAfter(held, text) {
   const copies = new Map();
   let added = "";
   for (const line of text.split(/(?<=\n)/)) {
-    if (line === "" || !keep(line)) continue;
+    if (line === "") continue;
     const copy = (copies.get(line) || 0) + 1;
     copies.set(line, copy);
     if (copy > (held.get(line) || 0)) added += line;
@@ -414,10 +406,11 @@ function searchOrder(formats) {
 // `stderr` is stream 3 of a run that completes (§5): `own`, then the lines of the other formats'
 // standard error that it does not hold, each line as many times as one of them has it more often
 // than stream 3 holds it, the formats of the argv's own search first (the tabular ones, then those
-// up to 4); for a structured -outfmt, whose writer does not write the queries' warnings, only the
-// formatting handler's lines of the formats of its search, and the error of one that fails alone
-// (the lines of its standard error that are not warnings: LOSAT's refusal of outfmt 0 of a record
-// that is both a query and a subject and has masks, line WQA's sweep, D7, 2026-11-19).
+// up to 4). A structured -outfmt's run does not write the queries' warnings, which the other
+// formats' runs add (line WQA's sweep, D3 review r3 M2, 2026-11-19: this harness kept only the
+// formatting handler's lines of the other formats there, and so took their loss), as they add the
+// error of a format that fails alone (LOSAT's refusal of outfmt 0 of a record that is both a query
+// and a subject and has masks, line WQA's sweep, D7, 2026-11-19).
 function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
   const stderrs = new Map(), failed = new Map();
@@ -468,17 +461,12 @@ function nativeOutputs(native, search, scratch) {
   if (!failure) {
     const number = parseInt(outfmt, 10);
     const size = hitListSize(search.argv, number);
-    const structured = ownFormat === null && STRUCTURED.has(number);
     const others = FORMATS[search.program].filter((format) => format !== ownFormat);
     const same = searchOrder(others.filter((format) => hitListSize(search.argv, format) === size));
     const other = searchOrder(others.filter((format) => hitListSize(search.argv, format) !== size));
     const held = new Map();
     let text = linesAfter(held, own.toString());
-    for (const format of same) {
-      const keep = structured ? (line) => HANDLER.test(line) || (failed.get(format) && !line.startsWith("Warning: ")) : undefined;
-      text += linesAfter(held, stderrs.get(format).toString(), keep);
-    }
-    for (const format of other) text += linesAfter(held, stderrs.get(format).toString());
+    for (const format of [...same, ...other]) text += linesAfter(held, stderrs.get(format).toString());
     stderr = Buffer.from(text);
     failedStreams = others.filter((format) => failed.get(format)).sort((a, b) => a - b);
   }

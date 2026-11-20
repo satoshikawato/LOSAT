@@ -944,6 +944,11 @@ struct Searched {
     /// The formats that failed alone (`FormatRefusal::FailsAlone`): each one's stream and
     /// refusal, in the order of the formats. Their streams stay empty.
     refused: Vec<(u32, Failed)>,
+    /// The queries' warnings that the first format does not write (a structured format) and a
+    /// later format writes to the CLI's standard error (`ReportOutputs::later_warnings`): what
+    /// the later formats' standard error adds, for stream 3 where the run completes
+    /// (`search_all`).
+    later: Vec<u8>,
 }
 
 impl Searched {
@@ -986,6 +991,7 @@ fn search(
         fault: None,
     };
     let mut collected: Option<std::sync::Arc<Vec<PairwiseHit>>> = None;
+    let mut later = Vec::new();
     // Outfmt 13 and 14: the master file goes to memory and the side files to a ZIP archive on the
     // format's stream, to which the master file is added after the run (`ArchivedFiles`).
     let mut archives: Vec<Option<(Vec<u8>, Arc<ArchivedFiles>)>> = formats
@@ -1027,6 +1033,7 @@ fn search(
                 })
                 .collect(),
             diagnostics,
+            later_warnings: Some(&mut later),
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
@@ -1137,6 +1144,7 @@ fn search(
         hits: collected,
         ordinals,
         refused,
+        later,
     })
 }
 
@@ -1491,12 +1499,12 @@ fn search_all(
     let counts = window_masker_counts(&command);
     let mut command = Some(command);
     // The warnings of the argv's own search go to `diagnostics` whatever the outcome: as the first
-    // search it writes them as it goes (with a copy where a next search follows, whose lines repeat
-    // them, `Diagnostics`), else they are held until the searches end. Those of the other search
-    // are stream 3's only when the run completes: they are held until the searches end.
+    // search it writes them as it goes (with a copy, whose lines the other formats' repeat,
+    // `Diagnostics`), else they are held until the searches end. Those of the other search are
+    // stream 3's only when the run completes: they are held until the searches end.
     let streamed = own == 0;
     // Each search: what it wrote or why it failed, and the warnings that it wrote to the standard
-    // error (the first search's where it streamed them, only where a next search follows).
+    // error.
     let mut outcomes: Vec<(Result<Searched, Failed>, Vec<u8>)> = Vec::new();
     // The search whose error ends the run: the argv's own search (`own_search`), or one with a
     // fault of the adapter. No search follows it.
@@ -1512,9 +1520,8 @@ fn search_all(
             };
             give_counts(&mut command, counts.as_ref(), settings);
             let mut warnings = Vec::new();
-            let result = match (streamed && position == 0, groups.len() > 1) {
-                (true, false) => search(command, group, query, subject, &mut *diagnostics),
-                (true, true) => search(
+            let result = match streamed && position == 0 {
+                true => search(
                     command,
                     group,
                     query,
@@ -1524,7 +1531,7 @@ fn search_all(
                         copy: &mut warnings,
                     },
                 ),
-                (false, _) => search(command, group, query, subject, &mut warnings),
+                false => search(command, group, query, subject, &mut warnings),
             };
             let ends = matches!(&result, Err(failed) if position == own || failed.fault);
             outcomes.push((result, warnings));
@@ -1567,14 +1574,8 @@ fn search_all(
     if !streamed {
         let _ = diagnostics.write_all(&outcomes[own].1);
     }
-    // The lines of the argv's own search that the others repeat: its warnings where another search
-    // follows (`Kept`), else the handler's warnings of the argv's format (those of the search's other
-    // formats repeat no other line).
-    let held: &[u8] = match groups.len() > 1 {
-        true => &outcomes[own].1,
-        false => &handlers[own][0],
-    };
-    let mut texts = Diagnostics::after(held);
+    // The lines of the argv's own search, which the other formats' repeat.
+    let mut texts = Diagnostics::after(&outcomes[own].1);
     let others = (0..outcomes.len()).filter(|&position| position != own);
     for position in std::iter::once(own).chain(others) {
         let (result, warnings) = &outcomes[position];
@@ -1592,6 +1593,10 @@ fn search_all(
                 }
             }
             Ok(done) => {
+                // The queries' warnings that a structured first format does not write and the
+                // later formats' runs write (line WQA's sweep, D3 review r3, 2026-11-19: they were
+                // lost).
+                texts.warnings(&done.later, diagnostics);
                 for (stream, refused) in &done.refused {
                     let place = texts.error(refused, diagnostics);
                     crate::emit::discard(*stream, place);
@@ -1633,7 +1638,7 @@ fn search_all(
 }
 
 /// A writer to `sink` that keeps a copy of what it writes in `copy` (`search_all`: the warnings of
-/// the argv's own search as the first, which the next search's warnings repeat).
+/// the argv's own search as the first, whose lines the other formats' repeat).
 struct Kept<'w> {
     sink: &'w mut (dyn std::io::Write + Send),
     copy: &'w mut Vec<u8>,
@@ -3613,6 +3618,25 @@ mod tests {
         ),
     ];
 
+    /// Stream 3 of a run whose own -outfmt is structured: NCBI's standard error `own` of its command
+    /// line, then each line of `other` (stream 3 of the run without -outfmt: outfmt 0, 6 and 7) past
+    /// the copies of it that `own` holds. The structured formats write none of the queries' warnings
+    /// that outfmt 0, 6 and 7 write (line WQA's sweep, D3 review r3 M2, 2026-11-19).
+    fn and_the_lines_of(own: &[u8], other: &[u8]) -> String {
+        let mut held: std::collections::HashMap<&[u8], usize> = std::collections::HashMap::new();
+        for line in own.split_inclusive(|&byte| byte == b'\n') {
+            *held.entry(line).or_default() += 1;
+        }
+        let mut stream = own.to_vec();
+        for line in other.split_inclusive(|&byte| byte == b'\n') {
+            match held.get_mut(line) {
+                Some(copies) if *copies > 0 => *copies -= 1,
+                _ => stream.extend_from_slice(line),
+            }
+        }
+        text(&stream)
+    }
+
     /// A SAM document without the CL tag of its `@PG` line (`db_search_fixtures.strip_sam_cl`, the
     /// rule of the SAM rows: the CLI writes its own command line there).
     fn without_cl(document: &[u8]) -> Vec<u8> {
@@ -3627,8 +3651,9 @@ mod tests {
     }
 
     // The output of an -outfmt besides 0, 6 and 7 is stream 4, NCBI's bytes of the same command
-    // line (W11), and stream 3 NCBI's standard error of it; the formats 0, 6 and 7 and the HSP
-    // records are those of the run without -outfmt. The archive's Bioseqs are the whole records
+    // line (W11), and stream 3 NCBI's standard error of it, then the lines that the run's outfmt 0,
+    // 6 and 7 add (`and_the_lines_of`); the formats 0, 6 and 7 and the HSP records are those of the
+    // run without -outfmt. The archive's Bioseqs are the whole records
     // and the deflines as read; SAM's @PG line shows the run's command line.
     #[test]
     fn every_format_is_written_as_the_cli_writes_it() {
@@ -3650,7 +3675,12 @@ mod tests {
             let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
                 .unwrap_or_default();
             let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
-            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            let other = plain.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(
+                text(&diagnostics),
+                and_the_lines_of(&stderr, &other),
+                "{id}: stream 3"
+            );
             for stream in [0, 6, 7, STREAM_HITS] {
                 assert!(
                     plain.get(&stream) == with.get(&stream),
@@ -3726,8 +3756,9 @@ mod tests {
 
     // Outfmt 13 and 14 are a ZIP archive on stream 4: NCBI's side files, named as the CLI names them
     // for `-out results`, and NCBI's master file (`results.json` / `results.xml`), which lists them by
-    // those names; stream 3 is NCBI's standard error, and the other streams are those of the run
-    // without -outfmt (the 18 rows of the manifest with side files).
+    // those names; stream 3 is NCBI's standard error, then the lines that the run's outfmt 0, 6
+    // and 7 add (`and_the_lines_of`), and the other streams are those of the run without -outfmt
+    // (the 18 rows of the manifest with side files).
     #[test]
     fn outfmt_13_and_14_are_an_archive_of_ncbis_files() {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
@@ -3766,7 +3797,12 @@ mod tests {
             let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
                 .unwrap_or_default();
             let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
-            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            let other = plain.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(
+                text(&diagnostics),
+                and_the_lines_of(&stderr, &other),
+                "{id}: stream 3"
+            );
             for stream in [0, 6, 7, STREAM_HITS] {
                 assert!(
                     plain.get(&stream) == with.get(&stream),
@@ -3778,7 +3814,8 @@ mod tests {
 
     // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 59 rows of the manifest that a
     // run takes (not the one with a `>?` gap line, which the store refuses: maintainer decision 3),
-    // stream 4 and stream 3.
+    // stream 4 and stream 3 (NCBI's standard error, then the lines that the run's outfmt 0, 6 and 7
+    // add: `and_the_lines_of`).
     #[test]
     fn blastx_writes_ncbis_archive() {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
@@ -3802,13 +3839,19 @@ mod tests {
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
             let (query, subject) = (read(at("-query")), read(at("-subject")));
             let with = registered_streams(&words, &query, &subject);
+            let plain = registered_streams(&words[..words.len() - 2], &query, &subject);
             let ncbi = read(&format!("tests/fixtures/outfmt0/{id}.out"));
             let ours = with.get(&STREAM_CUSTOM).cloned().unwrap_or_default();
             assert!(ours == ncbi, "{id}: stream 4");
             let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
                 .unwrap_or_default();
             let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
-            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            let other = plain.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(
+                text(&diagnostics),
+                and_the_lines_of(&stderr, &other),
+                "{id}: stream 3"
+            );
         }
     }
 
@@ -5470,6 +5513,53 @@ mod tests {
                 } else {
                     assert_ne!(validated, no_hits, "{words:?}");
                 }
+            }
+        }
+    }
+
+    // A run whose own -outfmt is structured (5, 11, 13; BLASTN's 17) writes outfmt 0, 6 and 7 too,
+    // whose CLI runs write the queries' result warnings, which the structured format's run does not
+    // (blast_format.cpp:1431-1452): stream 3 is the CLI's standard error for the argv, then those
+    // warnings, which the CLI's standard error for the other formats adds (line WQA's sweep, D3
+    // review r3 M2, 2026-11-19: they were lost; native LOSAT 16bef7acd, review r3 probe
+    // `result-warn`).
+    #[test]
+    fn a_structured_outfmt_s_run_adds_the_query_warnings_of_the_other_formats() {
+        for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+            let (ranged, subject) = ranged_inputs(program);
+            let mut query = vec![FastaRecord::new("Query_1", b"qempty no residues", b"")];
+            query.push(FastaRecord::new("Query_2", b"q1", ranged[0].seq()));
+            let warning = format!(
+                "Warning: [{program}] Query_1 qempty no residues: Sequence contains no data \n"
+            );
+            let words = [program, "-query", "q", "-subject", "s", "-sorthsps", "1"];
+            let tabular =
+                streams(&[&words[..], &["-outfmt", "6"]].concat(), &query, &subject).unwrap();
+            let tabular = diagnostics_of(&tabular);
+            assert_eq!(
+                tabular.matches(&warning).count(),
+                1,
+                "{program}: {tabular:?}"
+            );
+            // The CLI's standard error for a structured format: that of outfmt 6 (the formatting
+            // handler warns alike for both) without the query's warning.
+            let argv_s = tabular.replace(&warning, "");
+            let structured: &[&str] = match program {
+                "blastn" => &["5", "11", "13", "17"],
+                _ => &["5", "11", "13"],
+            };
+            for outfmt in structured {
+                let completed = streams(
+                    &[&words[..], &["-outfmt", outfmt]].concat(),
+                    &query,
+                    &subject,
+                )
+                .unwrap();
+                assert_eq!(
+                    diagnostics_of(&completed),
+                    format!("{argv_s}{warning}"),
+                    "{program} -outfmt {outfmt}"
+                );
             }
         }
     }

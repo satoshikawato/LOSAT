@@ -1,7 +1,7 @@
 # name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 blast_formatter (ws, env_blast, the conda build), 2026-11-20, ad-RG-F3-1 (line RG item F3), every row under unshare -rn: no row reaches NCBI's servers.
 # in/bn.asn: blastn -query in/q.fa -subject in/s.fa -outfmt 11 -out in/bn.asn (NCBI BLAST+ 2.17.0, same day); in/q.fa and in/s.fa by remaining-gaps-20261112/F/f3 (impl_b.md). conf/malformed.ini is that of tests/convert2blastmask. Run without LOSAT_, NCBI_ and BLAST variables but NCBI_CONFIG_PATH (this directory) and BLAST_USAGE_REPORT=false (NCBI only).
 # Not frozen: -version and the full versions (LOSAT prints its own, NCBI's forms with LOSAT's package; tests/ncbi_toolkit_version.rs), -rid with a value (NCBI asks its servers; LOSAT refuses it, src/blast_formatter/run_tests.rs), an unreadable -archive (git keeps no file mode that hides a file from its owner; NCBI's text is that of a missing file, probe P3.124), and the rows that read the archive (they come with the formats).
-noargs
+noargs	
 h	-h
 help	-help
 help_full	-help-full

@@ -47,18 +47,19 @@ pub(crate) enum Post {
 
 impl Post {
     /// The line that a BLAST application of NCBI posts on its standard error, with its
-    /// diagnostic prefix `program` (the program's name in lower case): the one owner of each
-    /// post's text (`ReplacedChar::post`, `ncbi_exception::error_post_line`).
-    pub(crate) fn line(&self, program: &str) -> Vec<u8> {
+    /// diagnostic prefix (`SetDiagPostPrefix`: the program's name in lower case for the search
+    /// programs; none for blast_formatter): the one owner of each post's text
+    /// (`ReplacedChar::post`, `ncbi_exception::error_post_line`).
+    pub(crate) fn line(&self, prefix: Option<&str>) -> Vec<u8> {
         match self {
-            Post::BadChar(replaced) => replaced.post(Some(program)),
+            Post::BadChar(replaced) => replaced.post(prefix),
             Post::Error(text) => {
-                crate::ncbi_exception::error_post_line(None, Some(program), text.as_bytes())
+                crate::ncbi_exception::error_post_line(None, prefix, text.as_bytes())
             }
             Post::Utf8ForVisible(trace) => crate::ncbi_exception::post_line(
                 crate::ncbi_exception::Severity::Warning,
                 Some("803.10"),
-                Some(program),
+                prefix,
                 format!(
                     "CObjectIStreamAsnBinary: UTF8String data for VisibleString member {trace}, \
                      ASN.1 specification may need an update"

@@ -81,9 +81,16 @@ fn definite_lengths_end_their_values() {
     let definite = b"\x30\x10\xa0\x05\x1a\x03abc\xa1\x07\xa0\x80\x02\x01\x05\x00\x00";
     assert_eq!(definite.len(), 2 + 0x10);
     assert_eq!(outcome(definite, named::DBTAG), Ok(DBTAG.into()));
-    // The long form counts from the byte after the length's bytes.
-    let long = [&b"\x30\x81\x10"[..], &definite[2..]].concat();
+    // The long form counts from its first length byte (NCBI's build reads the position before
+    // the length's bytes: impl D's probes `def_len` and `def_len_plus2`): a length of the content
+    // alone ends the class before its last member's end.
+    let long = [&b"\x30\x81\x11"[..], &definite[2..]].concat();
     assert_eq!(outcome(&long, named::DBTAG), Ok(DBTAG.into()));
+    let content_only = [&b"\x30\x81\x10"[..], &definite[2..]].concat();
+    assert_eq!(
+        outcome(&content_only, named::DBTAG),
+        serial("EndOfContentsByte expected")
+    );
     // A member longer than its bytes: the next member starts inside it.
     let longer = b"\x30\x80\xa0\x06\x1a\x03abc\xa1\x80\xa0\x80\x02\x01\x05\x00\x00\x00\x00\x00\x00";
     assert_eq!(
@@ -243,7 +250,7 @@ fn reals_are_the_decimal_form_and_the_special_values() {
         .concat();
         let (value, posts) = read(&bytes, named::SCORE);
         assert!(posts.is_empty());
-        value.map(|value| match value {
+        value.map(|value| match &value {
             Value::Sequence(members) => match &members[0].1 {
                 Value::Choice(0, real) => match **real {
                     Value::Real(real) => real.to_bits(),
@@ -350,9 +357,10 @@ fn visible_strings_are_fixed_and_utf8_tags_posted_once() {
     let (first, posts) = read_object(&mut ber, named::DBTAG);
     assert_eq!(text_of(&first.expect("a value"), named::DBTAG), DBTAG);
     assert_eq!(posts, vec![Post::Utf8ForVisible("Dbtag.db".into())]);
+    // blast_formatter has no diagnostic prefix (impl D's probe `utf8_for_visible`).
     assert_eq!(
-        String::from_utf8(posts[0].line("blast_formatter")).expect("ASCII"),
-        "Warning: (803.10) [blast_formatter] CObjectIStreamAsnBinary: UTF8String data for \
+        String::from_utf8(posts[0].line(None)).expect("ASCII"),
+        "Warning: (803.10) CObjectIStreamAsnBinary: UTF8String data for \
          VisibleString member Dbtag.db, ASN.1 specification may need an update\n"
     );
     let (second, posts) = read_object(&mut ber, named::DBTAG);
@@ -377,6 +385,10 @@ fn visible_strings_are_fixed_and_utf8_tags_posted_once() {
     assert_eq!(
         posts,
         vec![replaced(0x01, b"\x01b\x7f"), replaced(0x7f, b"#b\x7f")]
+    );
+    assert_eq!(
+        posts[1].line(None),
+        b"Error: (803.7) Dbtag.db\nBad char [0x7F] in string at byte 9\n#b\x7f\n"
     );
 }
 

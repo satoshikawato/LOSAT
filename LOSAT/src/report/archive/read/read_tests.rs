@@ -266,6 +266,11 @@ fn ncbis_binary_archives_read_as_their_text() {
     let pairs = [
         ("blastn_multi.asn", "blastn_multi.bin"),
         ("blastn_batch.asn", "blastn_batch.bin"),
+        ("psiblast_in_pssm.asn", "psiblast_in_pssm.bin"),
+        ("psiblast_it3.asn", "psiblast_it3.bin"),
+        ("blastp_subject.asn", "blastp_subject.bin"),
+        ("error_blastp.asn", "error_blastp.bin"),
+        ("blastp_query_loc.asn", "blastp_query_loc.bin"),
     ];
     for (text_name, binary_name) in pairs {
         let text = fixture(text_name);
@@ -281,6 +286,77 @@ fn ncbis_binary_archives_read_as_their_text() {
             first_difference(&text, &out)
         );
     }
+}
+
+/// The lines that the reader of a stream posts, in NCBI's form (blast_formatter: no diagnostic
+/// prefix), and the objects it reads before the end of the data or an error.
+fn posted(bytes: &[u8]) -> (Vec<u8>, usize) {
+    let mut stream = guess_encoding(bytes).into_stream().expect("a stream");
+    let (mut lines, mut objects) = (Vec::new(), 0);
+    while !stream.end_of_data() {
+        let (value, posts) = stream.read(named::BLAST4_ARCHIVE);
+        for post in posts {
+            lines.extend(post.line(None));
+        }
+        if value.is_err() {
+            break;
+        }
+        objects += 1;
+    }
+    (lines, objects)
+}
+
+/// A binary archive (`blastp -subject`, impl D's probes of 2026-11-20 in `F3/tmp/d/probe/`)
+/// whose VisibleStrings NCBI's reader posts: a UTF8String's tag for a VisibleString once in the
+/// process (`ERR_POST_X_ONCE`, the program and the archive read twice: one line), and each byte
+/// outside 0x20..0x7E of the query's title with the position after the string's bytes in the
+/// stream (the second archive's from the start of the stream). The lines are NCBI's standard
+/// error of `blast_formatter -archive`.
+#[test]
+fn binary_posts_are_ncbis() {
+    let archive = fixture("blastp_subject.bin");
+    let replace = |bytes: &[u8], from: &[u8], to: &[u8]| -> Vec<u8> {
+        let at = bytes
+            .windows(from.len())
+            .position(|window| window == from)
+            .expect("the bytes to replace");
+        [&bytes[..at], to, &bytes[at + from.len()..]].concat()
+    };
+    let utf8 = replace(
+        &replace(&archive, b"\x1a\x06blastp", b"\x0c\x06blastp"),
+        b"\x1a\x05plain",
+        b"\x0c\x05plain",
+    );
+    let warning = b"Warning: (803.10) CObjectIStreamAsnBinary: UTF8String data for VisibleString \
+                    member Blast4-archive.request.body.queue-search.program, ASN.1 specification \
+                    may need an update\n";
+    assert_eq!(posted(&utf8), (warning.to_vec(), 1));
+    assert_eq!(posted(&[&utf8[..], &utf8].concat()), (warning.to_vec(), 2));
+    let title = b"Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.\
+                  E.title";
+    let bad = replace(
+        &archive,
+        b"\x1a\x0eq1 small query",
+        b"\x1a\x0eq1 sm\x01ll\x7fquery",
+    );
+    let lines = |at: usize| {
+        [
+            &b"Error: (803.7) "[..],
+            title,
+            format!("\nBad char [0x1] in string at byte {at}\n").as_bytes(),
+            b"q1 sm\x01ll\x7fquery\n",
+            b"Error: (803.7) ",
+            title,
+            format!("\nBad char [0x7F] in string at byte {at}\n").as_bytes(),
+            b"q1 sm#ll\x7fquery\n",
+        ]
+        .concat()
+    };
+    assert_eq!(posted(&bad), (lines(193), 1));
+    assert_eq!(
+        posted(&[&bad[..], &bad].concat()),
+        ([lines(193), lines(193 + 3914)].concat(), 2)
+    );
 }
 
 /// How the objects of an archive text end.
@@ -331,6 +407,14 @@ fn the_objects_of_a_stream_end_as_ncbis_did() {
     let binary_batch = fixture("blastn_batch.bin");
     let binary_with = |after: &[u8]| [&binary[..], after].concat();
     let binary_cut = |count: usize| binary[..binary.len() - count].to_vec();
+    let subject = fixture("blastp_subject.bin");
+    let subject_with = |after: &[u8]| [&subject[..], after].concat();
+    // The root `30 80 ... 00 00` as `30 82 HH LL ...` with the length of its content and `more`.
+    let definite = |more: usize| {
+        let content = &subject[2..subject.len() - 2];
+        let length = u16::try_from(content.len() + more).expect("a 2-byte length");
+        [&b"\x30\x82"[..], &length.to_be_bytes(), content].concat()
+    };
     let xml = fixture("blastn_multi.xml");
     let with = |before: &[u8], after: &[u8]| [before, &text[..], after].concat();
     let crlf: Vec<u8> = text
@@ -423,6 +507,29 @@ fn the_objects_of_a_stream_end_as_ncbis_did() {
             Ok((1, Eof)),
         ),
         ("binary batch", binary_batch.clone(), Ok((3, Data))),
+        // Impl D's probes on `blastp_subject.bin` (2026-11-20): one byte `00` after it, or `30 80`
+        // (the end of the data in the next root's member frame), or `30 80 00 00` (no member
+        // `request`): 1, then invalid input. The root with a definite length `82 HH LL`: NCBI
+        // counts it from the first length byte, so a length of the content alone ends the
+        // class 2 bytes early (invalid input) and one 2 longer is the archive.
+        ("binary 00 after", subject_with(b"\0"), Ok((1, Serial))),
+        (
+            "binary 30 80 after",
+            subject_with(b"\x30\x80"),
+            Ok((1, Serial)),
+        ),
+        (
+            "binary 30 80 00 00 after",
+            subject_with(b"\x30\x80\0\0"),
+            Ok((1, Serial)),
+        ),
+        ("binary definite root", definite(0), Ok((0, Serial))),
+        ("binary definite root + 2", definite(2), Ok((1, Data))),
+        (
+            "binary definite root twice",
+            [definite(0), definite(0)].concat(),
+            Ok((0, Serial)),
+        ),
         (
             "binary batch no last byte",
             binary_batch[..binary_batch.len() - 1].to_vec(),

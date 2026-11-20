@@ -406,17 +406,20 @@ impl<S: AsnSource> Ber<S> {
     //         m_CurrentDataLimit = m_Input.GetStreamPosAsInt8() + len;
     //     }
     // ```
-    // The order of the two operands of the long form is not set by C++; NCBI 2.17.0's build
-    // takes the position after the length's bytes (probe `def_len` of impl D: a root whose
-    // definite length counts its content is read as the archive; `def_len_plus2` is not).
+    // The order of the two operands of the long form is not set by C++ (unsequenced); NCBI
+    // 2.17.0's build takes the position before the length's bytes: impl D's probe (2026-11-20,
+    // `F3/tmp/d/probe/probe_d.py`) gave a root `30 82 HH LL` whose length counts only its content
+    // "Invalid input format for BLAST Archive." (rc 1, `def_len`) and formatted the one whose
+    // length counts the two length bytes too (rc 0, `def_len_plus2`).
     fn expect_indefinite_length(&mut self) -> R<()> {
         let len = self.flush_tag()?;
         self.limits.push(self.limit);
         self.limit = if len == INDEFINITE_LENGTH {
             0
         } else if len > INDEFINITE_LENGTH {
+            let at = self.pos as i64;
             let length = self.long_length(len)?;
-            (self.pos as i64).wrapping_add(length as i64)
+            at.wrapping_add(length as i64)
         } else {
             self.pos as i64 + i64::from(len)
         };

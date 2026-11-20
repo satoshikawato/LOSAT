@@ -424,7 +424,7 @@ pub(crate) fn read_in_pssm(
     let program = reader.program.to_ascii_lowercase();
     let mut posts = crate::report::diag_log::Posts::new();
     for post in &read.posts {
-        posts.post(crate::report::diag_log::ERROR, post.line(&program));
+        posts.post(crate::report::diag_log::ERROR, post.line(Some(&program)));
     }
     posts.write(diagnostics, reader.archive)?;
     let pssm = match read.result {

@@ -8,7 +8,10 @@ use std::io::Cursor;
 use super::read::{read_document, ReadError};
 use super::stream::{guess_encoding, Encoding, ObjectStream};
 use super::table::named;
+use super::write::write_document;
 use super::Value;
+use crate::report::serial::asn_ber::AsnBinaryEncoder;
+use crate::report::serial::asn_text::AsnTextEncoder;
 
 /// The objects of `text` read as `root` until `EndOfData`, and the error that ended them.
 fn objects(text: &[u8], root: u16) -> (Vec<Value>, Option<ReadError>) {
@@ -116,6 +119,37 @@ fn a_stream_keeps_one_object() {
     );
 }
 
+/// A binary stream keeps about one object too (`Ber::release` at each member and element).
+#[test]
+fn a_binary_stream_keeps_one_object() {
+    let one = read_document(
+        b"Seq-id ::= local str \"an identifier of some length\"",
+        named::SEQ_ID,
+    )
+    .0
+    .expect("a Seq-id");
+    let mut binary = Vec::new();
+    {
+        let mut enc = AsnBinaryEncoder::new(&mut binary);
+        write_document(&mut enc, named::SEQ_ID, &one);
+        assert_eq!(enc.error(), None);
+    }
+    let input = binary.repeat(40_000);
+    let mut stream = ObjectStream::binary(&input[..], b"");
+    let mut count = 0;
+    while !stream.end_of_data() {
+        assert_eq!(stream.read(named::SEQ_ID).0.as_ref(), Ok(&one));
+        count += 1;
+    }
+    assert_eq!(count, 40_000);
+    assert!(
+        stream.buffered() <= 10 * 64 * 1024,
+        "{} bytes kept of {}",
+        stream.buffered(),
+        input.len()
+    );
+}
+
 /// A delayed member longer than the blocks a stream releases keeps its text: the value is the
 /// one read from the whole text at once.
 #[test]
@@ -211,4 +245,36 @@ fn the_encoding_is_guessed_as_ncbi_guesses_it() {
             "incompatible type Seq-entry<>Blast4-archive".into()
         ))
     );
+}
+
+/// A search strategy in binary ASN.1 (NCBI's `datatool -e` of an exported strategy, which NCBI's
+/// `-import_search_strategy` read as the text: line RG-F2's probes `E.blastn.bin`, `E.blastp.bin`)
+/// is one `Blast4-request`, written back as text the strategy it was made of. NCBI's reader tries
+/// `Blast4-get-search-strategy-reply` first (remote_blast.cpp:2268-2302), an alias of
+/// `Blast4-request` that binary ASN.1 (without a header) reads as the same value. The stream stops
+/// after the object and gives the rest of the input.
+#[test]
+fn a_binary_strategy_reads_as_its_text() {
+    for name in ["strategy_blastn", "strategy_blastp"] {
+        let text = fixture(&format!("{name}.asn"));
+        let input = [&fixture(&format!("{name}.bin"))[..], b"xyz"].concat();
+        for root in [
+            named::BLAST4_GET_SEARCH_STRATEGY_REPLY,
+            named::BLAST4_REQUEST,
+        ] {
+            let guessed = guess_encoding(&input[..]);
+            assert_eq!(guessed.encoding.as_ref().ok(), Some(&Encoding::Binary));
+            let mut stream = guessed.into_stream().expect("a binary stream");
+            let (value, posts) = stream.read(root);
+            assert!(posts.is_empty());
+            let mut out = Vec::new();
+            let mut enc = AsnTextEncoder::new(&mut out);
+            write_document(&mut enc, named::BLAST4_REQUEST, &value.expect(name));
+            assert_eq!(enc.error(), None);
+            assert!(out == text, "{name}: {}", String::from_utf8_lossy(&out));
+            let (mut rest, mut input) = stream.into_rest();
+            std::io::Read::read_to_end(&mut input, &mut rest).expect("a slice reads");
+            assert_eq!(rest, b"xyz");
+        }
+    }
 }

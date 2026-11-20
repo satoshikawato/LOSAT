@@ -252,6 +252,21 @@ writes was deleted). Run from `LOSAT/`:
 The nucleotide rows also use `tests/seqdb/db/nucl_v4`, `nucl_v5` and `nucl_mv` with queries cut from
 `tests/seqdb/nucl.fna`.
 
+TBLASTN `-max_intron_length` inputs (rows `db.x3.tn.*` and `x3.tblastn.*`, line RG item X3), written by
+`make_x3_inputs.py` (run from `LOSAT/`; the generator is seeded):
+
+- `x3ex_q.faa`: the query BDT61866.1 of `tslice_q.faa` (731 residues).
+- `x3ex.fna`: `ex_plus`, six pieces of 45 residues of the query (25 % of their residues substituted, back-translated)
+  with 91, 212, 450, 1201 and 4002 random bases between them and flanks of 300, and `ex_minus`, its reverse
+  complement: which pieces NCBI links depends on the largest subject gap, which `-max_intron_length` sets.
+  Database `x3ex`:
+
+      makeblastdb -in tests/db_search/x3ex.fna -dbtype nucl -out tests/db_search/x3ex \
+          -title "x3 exon-like subject" -blastdb_version 4
+
+- `tests/fasta/outfmt0/x3_edl_q.faa`: three transposases of `tests/fasta/EDL933.fna` (ISAs1 family 272653..273789,
+  ISEc26 276198..277370, ISEc8 346224..347762), queries of the rows on a subject longer than 5,000,000 bases.
+
 Translated-search inputs (TBLASTN rows, `db.tblastn.*`), written by `make_tblastn_inputs.py` (run from `LOSAT/`;
 slices of `tests/fasta/MelaMJNV.fasta`, `LvMJNV.fasta` and `AP027133.fasta`; the protein queries are proteins of
 `PemoMJNVA.faa`, `LvMJNV.faa` and `AP027131.faa` that NCBI `tblastn -subject` finds in those genomes; mutations

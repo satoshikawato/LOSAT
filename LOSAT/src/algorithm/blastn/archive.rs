@@ -682,7 +682,7 @@ mod tests {
         };
         let lines = error_lines(
             &native(
-                "BLAST query/options error: bad  option\nPlease refer to the BLAST+ user manual.\n",
+                "BLAST query/options error: bad  option\nPlease refer to the LOSAT user manual.\n",
             ),
             false,
         )
@@ -691,7 +691,7 @@ mod tests {
             lines,
             vec![
                 (ERROR, b"BLAST query/options error: bad option".to_vec()),
-                (ERROR, b"Please refer to the BLAST+ user manual.".to_vec()),
+                (ERROR, b"Please refer to the LOSAT user manual.".to_vec()),
             ]
         );
         assert!(error_lines(&native("Command line argument error: x\n"), false).is_none());

@@ -238,8 +238,10 @@ fn values_that_ncbi_cannot_convert_stop_where_ncbi_reads_them() {
                     string_to_int_exception("abc", 861, 0),
                     "{what}"
                 );
+                // NCBI's archive in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+                let archive = losat::wording::losat_output_bytes(ABC_ERROR_ARCHIVE.as_bytes());
                 let expected: &[u8] = match (outfmt, stop) {
-                    ("11", _) => ABC_ERROR_ARCHIVE.as_bytes(),
+                    ("11", _) => &archive,
                     ("0", Stop::Prolog) => prolog(&plain.stdout),
                     _ => b"",
                 };

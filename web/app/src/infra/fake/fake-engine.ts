@@ -77,7 +77,7 @@ export class FakeEngine implements EngineGateway {
       }
       const [flag, value] = word.split(/=(.*)/s, 2);
       const option = parameters.find((p) => p.flag === flag);
-      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help for CLI v2 syntax\n` };
+      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help to list the options\n` };
       if (option.takesValue && value === undefined) i++;
     }
     return { ok: true };

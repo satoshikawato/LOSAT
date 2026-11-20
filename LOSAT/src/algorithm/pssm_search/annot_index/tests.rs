@@ -27,9 +27,10 @@ fn posts(annots: &[&str]) -> String {
     String::from_utf8(outcome.posts.text()).unwrap()
 }
 
-/// `CATCH_ALL`'s report of an exception at `file`:`line` (one line of the chain).
+/// `CATCH_ALL`'s report of an exception at `file`:`line` (one line of the chain): NCBI's text in
+/// LOSAT's words (`crate::wording::losat_text`).
 fn report(file: &str, line: u32, kind: &str, text: &str) -> String {
-    format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/{file}\", line {line}: Error: ({kind}) {text}\n\n")
+    crate::wording::losat_text(&format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/{file}\", line {line}: Error: ({kind}) {text}\n\n")).into_owned()
 }
 
 const TABLE: &str = "src/objmgr/seq_table_info.cpp";
@@ -121,13 +122,14 @@ fn seq_table_column_messages() {
     );
     assert_eq!(
         posts(&[&table(1, "{ header { field-name \"Seq-table location\" }, data int { 1 } }")]),
-        "Error: (CInvalidChoiceSelection::eFail) [psiblast] CSeqTable_multi_data::GetLoc(): Invalid choice selection: NCBI-SeqTable::SeqTable-multi-data.int\n\
-         Error: [psiblast] Bad 'Seq-table location' column (CInvalidChoiceSelection::eFail) CSeqTable_multi_data::GetLoc(): Invalid choice selection: NCBI-SeqTable::SeqTable-multi-data.int\n"
+        // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+        crate::wording::losat_text("Error: (CInvalidChoiceSelection::eFail) [psiblast] CSeqTable_multi_data::GetLoc(): Invalid choice selection: NCBI-SeqTable::SeqTable-multi-data.int\n\
+         Error: [psiblast] Bad 'Seq-table location' column (CInvalidChoiceSelection::eFail) CSeqTable_multi_data::GetLoc(): Invalid choice selection: NCBI-SeqTable::SeqTable-multi-data.int\n")
     );
     assert_eq!(
         posts(&[&table(1, "{ header { field-name \"Sorted, max length\" }, data string { \"a\" } }")]),
-        "Error: (CSeqTableException::eIncompatibleValueType) [psiblast] CSeqTable_multi_data::TryGetInt4(): value cannot be converted to requested type\n\
-         Error: [psiblast] Bad 'Sorted, max length' column (CSeqTableException::eIncompatibleValueType) CSeqTable_multi_data::TryGetInt4(): value cannot be converted to requested type\n"
+        crate::wording::losat_text("Error: (CSeqTableException::eIncompatibleValueType) [psiblast] CSeqTable_multi_data::TryGetInt4(): value cannot be converted to requested type\n\
+         Error: [psiblast] Bad 'Sorted, max length' column (CSeqTableException::eIncompatibleValueType) CSeqTable_multi_data::TryGetInt4(): value cannot be converted to requested type\n")
     );
     // A table that is not a feature table checks only its location (t23).
     assert_eq!(

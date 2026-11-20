@@ -222,7 +222,8 @@ fn unconvertible_lmdb_variables_end_as_makeblastdb_ends() {
         assert_eq!(output.status.code(), Some(case.status), "{}", case.name);
         assert_eq!(
             String::from_utf8_lossy(&output.stderr),
-            case.stderr.replace("{ROOT}", ROOT),
+            // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            losat::wording::losat_text(&case.stderr.replace("{ROOT}", ROOT)),
             "{}",
             case.name
         );
@@ -259,7 +260,8 @@ fn a_variable_s_bytes_are_quoted_as_makeblastdb_quotes_them() {
         assert_eq!(output.status.code(), Some(255), "{variable}");
         assert_eq!(
             String::from_utf8_lossy(&output.stderr),
-            stderr.replace("{ROOT}", ROOT),
+            // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            losat::wording::losat_text(&stderr.replace("{ROOT}", ROOT)),
             "{variable}"
         );
     }

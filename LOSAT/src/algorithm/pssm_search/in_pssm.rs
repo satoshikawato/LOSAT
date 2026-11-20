@@ -1893,6 +1893,14 @@ mod tests {
     // (NCBI BLAST+ 2.17.0: the fixture rows `db.ps.inpssm.d3.om.r4.*`).
     #[test]
     fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
+        // NCBI's report of an exception (the end of its place, its class and its message) in
+        // LOSAT's words (`crate::wording::losat_text`): the message.
+        let ncbi = |report: &str| {
+            let text = format!("Error: NCBI C++ Exception:\n    T0 \"/src/{report}");
+            crate::wording::losat_text(&text)
+                .trim_start_matches("Error: ")
+                .to_string()
+        };
         let stop = |name: &str, database: bool| {
             let text = gunzip(&format!("pssm/d3om_r4_{name}.asn.gz"));
             let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&text)
@@ -1926,7 +1934,7 @@ mod tests {
         let (posts, error) = stop("set_getseq", true).unwrap();
         assert!(posts.contains("(1207.6)"), "{posts}");
         assert!(
-            error.contains("Seq_entry_.cpp\", line 99: Error: (CInvalidChoiceSelection::eFail) CSeq_entry::GetSeq(): Invalid choice selection: NCBI-Seqset::Seq-entry.set"),
+            error.contains(&ncbi("Seq_entry_.cpp\", line 99: Error: (CInvalidChoiceSelection::eFail) CSeq_entry::GetSeq(): Invalid choice selection: NCBI-Seqset::Seq-entry.set")),
             "{error}"
         );
         // Seq-data that the search does not read: the object manager's stop comes first.
@@ -1937,7 +1945,7 @@ mod tests {
         assert!(error.contains("Duplicate partial column"), "{error}");
         let (_, error) = stop("dupid_a19", true).unwrap();
         assert!(
-            error.contains("tse_info.cpp\", line 901: Error: (CObjMgrException::eAddDataError) ncbi::objects::CTSE_Info::x_SetBioseqIds() - duplicate Bioseq id lcl|Query_1 present in\n  seq1: lcl|Query_1 | lcl|Query_1\n  seq2: lcl|Query_1 | lcl|Query_1\n"),
+            error.contains(&ncbi("tse_info.cpp\", line 901: Error: (CObjMgrException::eAddDataError) ncbi::objects::CTSE_Info::x_SetBioseqIds() - duplicate Bioseq id lcl|Query_1 present in\n  seq1: lcl|Query_1 | lcl|Query_1\n  seq2: lcl|Query_1 | lcl|Query_1\n")),
             "{error}"
         );
         // With `-subject` a subject's Seq-id of the handle may have made its info: a local id's

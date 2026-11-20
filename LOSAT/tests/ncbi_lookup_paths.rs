@@ -403,17 +403,21 @@ fn registry_files_are_looked_for_where_ncbi_looks() {
 #[cfg(unix)]
 const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
 
-/// NCBI's post of one read of a `.ncbirc` with the line `garbage` at `line`.
+/// NCBI's post of one read of a `.ncbirc` with the line `garbage` at `line`, in LOSAT's words
+/// (NCBI's text through `losat::wording`, AGENTS.md rule 8).
 #[cfg(unix)]
 fn critical(line: usize) -> String {
-    format!(
+    temp_support::expected_losat_text(format!(
         "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = {line})\n\n"
-    )
+    ))
 }
 
-/// NCBI's report of a `<program>.ini` of the line `garbage`, which ends the program.
+/// NCBI's report of a `<program>.ini` of the line `garbage`, which ends the program, in LOSAT's
+/// words (NCBI's text through `losat::wording`, AGENTS.md rule 8).
 #[cfg(unix)]
-const INI_REPORT: &str = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
+fn ini_report() -> String {
+    temp_support::expected_losat_text("Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n".to_string())
+}
 
 /// The name of the system-wide registry file on Unix (Windows names it `ncbi.ini`).
 #[cfg(unix)]
@@ -489,7 +493,7 @@ fn a_malformed_registry_file_is_reported_as_ncbi_reports_it() {
     assert_eq!(ini_off.stdout, reference.stdout);
     // A malformed blastn.ini, also for `-h`; without the usage report's read, its report twice.
     fs::write(&ini, "garbage\n").unwrap();
-    let report = format!("{}{INI_REPORT}", critical(3));
+    let report = format!("{}{}", critical(3), ini_report());
     for words in [&args[..], &["blastn", "-h"]] {
         let failed = run_in(losat, words, &dir, &[], b"");
         assert_eq!(failed.status.code(), Some(2), "{failed:?}");
@@ -498,7 +502,7 @@ fn a_malformed_registry_file_is_reported_as_ncbi_reports_it() {
     }
     let failed = run_in(losat, &args, &dir, &[("BLAST_USAGE_REPORT", "false")], b"");
     assert_eq!(failed.status.code(), Some(2));
-    assert_eq!(text(&failed.stderr), INI_REPORT.repeat(2));
+    assert_eq!(text(&failed.stderr), ini_report().repeat(2));
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -558,7 +562,8 @@ fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
     // A malformed blastdbcmd.ini.
     let ini = dir.join("blastdbcmd.ini");
     fs::write(&ini, "[x\n").unwrap();
-    let section = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+    // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+    let section = temp_support::expected_losat_text("Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n".to_string());
     let failed = run_in(losat, &with_log, &dir, &[], b"");
     assert_eq!(failed.status.code(), Some(2), "{failed:?}");
     assert!(failed.stdout.is_empty());
@@ -657,7 +662,8 @@ fn a_malformed_ini_with_a_logfile_is_replayed_where_ncbi_replays_it() {
         let _ = fs::remove_file(&log);
         content
     };
-    let section = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+    // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+    let section = temp_support::expected_losat_text("Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n".to_string());
     let u = critical(1);
     fs::write(dir.join(NCBIRC), "garbage\n").unwrap();
     for program in [

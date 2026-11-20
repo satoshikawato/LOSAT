@@ -100,9 +100,10 @@ o_empty_maskinfo	-ustat ../winmask/counts/dm2L_u9.binary -in in/empty.fa -outfmt
 o_empty_seqloc	-ustat ../winmask/counts/dm2L_u9.binary -in in/empty.fa -outfmt seqloc_asn1_text
 o_stdin	-ustat ../winmask/counts/dm2L_u9.binary < in/multi.fa
 o_stdin_dash	-ustat ../winmask/counts/dm2L_u9.binary -in - < in/multi.fa
-# Records: letters, lengths, records without letters, CRLF, gaps.
+# Records: letters, lengths, records without letters, CRLF, gaps. ncbi/<name>.merged is NCBI's 2>&1 stream of a run of its own for the rows of make_fixtures.py's MERGED (the reader's warnings among the output's bytes; r_letters_slb, r_gap_mi and the .merged files added 2026-11-21 by ad-M5-1).
 r_letters	-ustat ../winmask/counts/dm2L_u9.binary -in in/letters.fa
 r_letters_fasta	-ustat ../winmask/counts/dm2L_u9.binary -in in/letters.fa -outfmt fasta
+r_letters_slb	-ustat ../winmask/counts/dm2L_u9.binary -in in/letters.fa -outfmt seqloc_asn1_bin
 r_short	-ustat ../winmask/counts/dm2L_u9.binary -in in/short.fa
 r_short_fasta	-ustat ../winmask/counts/dm2L_u9.binary -in in/short.fa -outfmt fasta
 r_hdronly	-ustat ../winmask/counts/dm2L_u9.binary -in in/hdronly.fa
@@ -113,6 +114,7 @@ r_lastempty_mi	-ustat ../winmask/counts/dm2L_u9.binary -in in/lastempty.fa -outf
 r_crlf	-ustat ../winmask/counts/dm2L_u9.binary -in in/crlf.fa
 r_gap	-ustat ../winmask/counts/dm2L_u9.binary -in in/gap.fa
 r_gap_fasta_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/gap.fa -outfmt fasta -parse_seqids
+r_gap_mi	-ustat ../winmask/counts/dm2L_u9.binary -in in/gap.fa -dust T -outfmt maskinfo_asn1_text
 # The masker's settings.
 w_9	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -window 9
 w_10	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -window 10
@@ -166,11 +168,13 @@ d_true_word	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60
 d_nz_ob	-ustat ../winmask/counts/mg1655_u9.obinary -in ../fasta/NZ_CP006932.fasta -dust yes
 d_thres_low	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -dust T -t_thres 40
 d_short	-ustat ../winmask/counts/dm2L_u9.binary -in in/short.fa -dust T
-# -ids and -exclude_ids (text match on the title's first word).
+# -ids and -exclude_ids (text match on the title's first word). The lists' lines are split as NCBI's Linux build splits them: a \r stays in the id (i_ids_crlf, i_ids_cr, i_excl_crlf; added 2026-11-21 by ad-M5-1).
 i_ids_a	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_a.txt
 i_ids_b	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_b.txt
 i_ids_tab	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_tab.txt
 i_ids_crlf	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_crlf.txt
+i_ids_cr	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_cr.txt
+i_excl_crlf	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_ids in/ids_crlf.txt
 i_ids_none	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_none.txt
 i_ids_missing	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/nonexistent.txt
 i_excl_a	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_ids in/ids_a.txt

@@ -136,8 +136,8 @@ fn masking_run(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:375-376,405-445
 /// `-text_match false` with `-infmt blastdb` matches the lists as Seq-ids (`CIdSet_SeqId`),
-/// whose messages for an id NCBI cannot parse name NCBI's build path: LOSAT refuses it. An id
-/// of no words is NCBI's crash (`ids::EmptyId`): refused.
+/// which LOSAT does not do yet: refused. An id of no words is NCBI's crash (`ids::EmptyId`):
+/// refused.
 fn id_lists(args: &Args, infmt: &str, text_match: bool) -> Result<IdLists, Failure> {
     let ids = args.value("ids").unwrap_or_default();
     let exclude_ids = args.value("exclude_ids").unwrap_or_default();
@@ -163,7 +163,7 @@ fn id_lists(args: &Args, infmt: &str, text_match: bool) -> Result<IdLists, Failu
                 )));
             }
             return Err(Failure::Refused(unsupported(
-                "-text_match false (ids matched as Seq-ids, whose messages name NCBI's build)",
+                "-text_match false (ids matched as Seq-ids)",
             )));
         }
         fill_id_list(name).map(Some).map_err(|EmptyId { id }| {

@@ -63,7 +63,8 @@ None that change the output of a normal run. When the reader of the output close
 
 - `-mk_counts` and `-convert`: LOSAT does not make or convert counts files yet.
 - Counts files on which NCBI's result is undefined, such as an `ascii` file with units of more than 16 letters.
-- `-text_match F` with `-ids` or `-exclude_ids`, and an ids file with an empty id.
+- `-text_match F` with `-infmt blastdb` and `-ids` or `-exclude_ids`: LOSAT does not match ids as Seq-ids yet.
+- An ids file with an empty id (a line that starts with a space or a tab, `>`, `|` or `>|`).
 
 See [What LOSAT refuses](../refusals.md#windowmasker).
 

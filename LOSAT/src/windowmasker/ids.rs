@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 
+use crate::ncbi_app::files::{input_lines, LineEnds};
 use crate::seqid::ParsedSeqId;
 
 /// `CWinMaskUtil::CIdSet_TextMatch`: the ids of a list, by their number of `|`-words
@@ -108,18 +109,16 @@ impl TextMatchIds {
 /// line; a file that does not open gives none.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:471-484
-/// `NcbiGetlineEOL` ends a line at `\n`, `\r` or `\r\n` (a `\r` alone ends one too), and the
-/// last line needs no end. A line that starts with a space or a tab gives an empty id; one
+/// The lines are those of `NcbiGetlineEOL` on the host (`ncbi_app::files::input_lines`: on Linux
+/// a `\r` stays in the line, so a CRLF list matches nothing, as NCBI's Linux build), and the
+/// empty ones are skipped. A line that starts with a space or a tab gives an empty id; one
 /// whose first space comes at 0 after `>` (`> x`) too.
 pub(super) fn fill_id_list(name: &str) -> Result<TextMatchIds, EmptyId> {
     let mut ids = TextMatchIds::default();
     let Ok(bytes) = std::fs::read(name) else {
         return Ok(ids);
     };
-    for line in getline_eol(&bytes) {
-        if line.is_empty() {
-            continue;
-        }
+    for line in input_lines(&bytes, LineEnds::HOST) {
         let stop = line
             .iter()
             .position(|&byte| byte == b' ' || byte == b'\t')
@@ -133,33 +132,6 @@ pub(super) fn fill_id_list(name: &str) -> Result<TextMatchIds, EmptyId> {
         ids.insert(id)?;
     }
     Ok(ids)
-}
-
-/// The lines of `NcbiGetlineEOL`: ended by `\n`, `\r\n` or a `\r` alone.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:191-224
-/// (`s_NcbiGetline` stops at either delimiter and, after a `\r`, takes a `\n` that follows as
-/// part of the same end.)
-fn getline_eol(bytes: &[u8]) -> Vec<&[u8]> {
-    let mut lines = Vec::new();
-    let mut rest = bytes;
-    while !rest.is_empty() {
-        match rest.iter().position(|&byte| byte == b'\n' || byte == b'\r') {
-            Some(end) => {
-                lines.push(&rest[..end]);
-                let mut next = end + 1;
-                if rest[end] == b'\r' && rest.get(next) == Some(&b'\n') {
-                    next += 1;
-                }
-                rest = &rest[next..];
-            }
-            None => {
-                lines.push(rest);
-                rest = &[];
-            }
-        }
-    }
-    lines
 }
 
 /// The `-ids` and `-exclude_ids` lists of the run (`CWinMaskConfig::Ids`, `ExcludeIds`).
@@ -302,14 +274,6 @@ mod tests {
         let two = list(&["lcl|rec2"]);
         assert!(two.find(b"lcl|rec2 local"));
         assert!(!two.find(b"rec2"));
-    }
-
-    #[test]
-    fn the_lines_end_at_any_line_end() {
-        assert_eq!(
-            getline_eol(b"a\r\nb\rc\n\nd"),
-            vec![&b"a"[..], b"b", b"c", b"", b"d"]
-        );
     }
 
     #[test]

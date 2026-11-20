@@ -57,6 +57,9 @@ enum Post {
     /// The loads of a batch's prefetch (`Posts::loads`): lines whose text is made where they are
     /// written.
     Loads(Vec<crate::report::query_warnings::SubjectRead>),
+    /// Lines of the query's result warnings that the call's first format does not write and a
+    /// format after it does (`Posts::later`): they show nothing on the diagnostics.
+    Later(Vec<u8>),
 }
 
 /// Where NCBI writes the search strategy request of the batch whose first query (the run's) is
@@ -118,6 +121,53 @@ impl Posts {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452
+    // ```c++
+    //     if (m_FormatType == CFormattingArgs::eAsnText
+    //       || m_FormatType == CFormattingArgs::eAsnBinary
+    //       || m_FormatType == CFormattingArgs::eXml
+    //     ...
+    //       || m_FormatType == CFormattingArgs::eSAM)
+    //     {
+    //         x_PrintStructuredReport(results, queries);
+    //         return;
+    //     }
+    //     ...
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
+    /// Adds `lines`, the query's result warnings, where the call's first format is a structured
+    /// one, which returns before them, and the caller takes those of the formats after it
+    /// (`ReportOutputs::later_warnings`): the command line's run of such a format posts them when
+    /// the query's report starts, so its writer writes them to the format's receiver there
+    /// (`write_later`, `QueryWarnings::with_later`). Nothing of them shows on the diagnostics
+    /// (`write`, `text`, `has_text`), which are the first format's.
+    pub fn later(&mut self, lines: &[u8]) {
+        if !lines.is_empty() {
+            self.0.push(Post::Later(lines.to_vec()));
+        }
+    }
+
+    /// `posts`, the posts before each query's report, with the later lines of each query
+    /// (`later`, with NCBI's lines above it; `lines` by query, none for a query beyond it).
+    pub fn with_later(mut posts: Vec<Posts>, lines: &[Vec<u8>]) -> Vec<Posts> {
+        for (posts, lines) in posts.iter_mut().zip(lines) {
+            posts.later(lines);
+        }
+        posts
+    }
+
+    /// Writes the lines of `later` (with NCBI's lines above it) to `receiver`, a later format's
+    /// (`ReportOutputs::later_warnings`).
+    pub fn write_later(&self, receiver: &mut Vec<u8>) {
+        for post in &self.0 {
+            if let Post::Later(lines) = post {
+                receiver.extend_from_slice(lines);
+            }
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
     // ```c++
     //                 BlastFormatter_PreFetchSequenceData(*results, scope,
@@ -163,7 +213,9 @@ impl Posts {
         for post in &other.0 {
             match post {
                 Post::Lines(lines) => self.lines(lines),
-                Post::Whole { .. } | Post::Request(_) | Post::Loads(_) => self.0.push(post.clone()),
+                Post::Whole { .. } | Post::Request(_) | Post::Loads(_) | Post::Later(_) => {
+                    self.0.push(post.clone())
+                }
             }
         }
     }
@@ -192,7 +244,9 @@ impl Posts {
                     posts.lines(&text);
                 }
                 Post::Lines(lines) => posts.lines(lines),
-                Post::Whole { .. } | Post::Request(_) => posts.0.push(post.clone()),
+                Post::Whole { .. } | Post::Request(_) | Post::Later(_) => {
+                    posts.0.push(post.clone())
+                }
             }
         }
         posts
@@ -203,12 +257,12 @@ impl Posts {
         self.0.is_empty()
     }
 
-    /// Whether a post shows text on the diagnostics (a request mark alone shows none; loads, whose
-    /// texts are made where they are written, count as text unless none of them can make one:
-    /// `placed` first where it decides).
+    /// Whether a post shows text on the diagnostics (a request mark alone shows none, nor do a
+    /// later format's lines, `later`; loads, whose texts are made where they are written, count
+    /// as text unless none of them can make one: `placed` first where it decides).
     pub fn has_text(&self) -> bool {
         self.0.iter().any(|post| match post {
-            Post::Request(_) => false,
+            Post::Request(_) | Post::Later(_) => false,
             Post::Loads(reads) => reads
                 .iter()
                 .any(|read| !read.text.is_empty() || read.load.is_some()),
@@ -225,7 +279,7 @@ impl Posts {
                     text.extend_from_slice(bytes)
                 }
                 Post::Loads(reads) => text.extend(reads.iter().flat_map(|read| read.placed())),
-                Post::Request(_) => {}
+                Post::Request(_) | Post::Later(_) => {}
             }
         }
         text
@@ -234,7 +288,8 @@ impl Posts {
     /// Writes the posts to `diagnostics`, the stream of the run's diagnostics: the lines as they
     /// are, and with the BLAST archive (`archive`, whose handle saves what that stream writes)
     /// each whole post saved as one message (`ArchiveHandle::write_post`); a request mark marks its
-    /// search strategy requests reached (`request`); the loads' texts are made here (`placed`).
+    /// search strategy requests reached (`request`); the loads' texts are made here (`placed`). A
+    /// later format's lines (`later`) are not the diagnostics': nothing of them is written.
     pub fn write(
         &self,
         diagnostics: &mut dyn std::io::Write,
@@ -243,6 +298,7 @@ impl Posts {
         for post in &self.0 {
             match (post, archive) {
                 (Post::Request(mark), _) => mark.export.release_through(mark.first)?,
+                (Post::Later(_), _) => {}
                 (Post::Loads(reads), _) => {
                     for read in reads {
                         diagnostics.write_all(&read.placed())?;
@@ -361,5 +417,56 @@ mod tests {
             ]
         );
         assert!(log.is_empty());
+    }
+
+    // The later formats' lines of a query (`Posts::later`) are not the diagnostics': they are
+    // written to a later format's receiver alone, before the query's report
+    // (`QueryWarnings::with_later`), and kept by the copies of the posts.
+    #[test]
+    fn later_lines_go_to_a_later_format_s_receiver_alone() {
+        use crate::report::query_warnings::QueryWarnings;
+        let mut first = Posts::of_lines(b"Warning: [blastn] reader\n".to_vec());
+        first.later(b"Warning: [blastn] Query_1 q: Sequence contains no data \n");
+        let mut second = Posts::new();
+        second.later(b"");
+        assert!(second.is_empty());
+        second.later(b"Warning: [blastn] Query_2 r: Sequence contains no data \n");
+        assert!(!second.has_text() && second.text().is_empty());
+        let posts = Posts::with_later(vec![first, second, Posts::new()], &[Vec::new()]);
+        let copies: Vec<Posts> = posts.iter().map(Posts::placed).collect();
+        assert_eq!(copies, posts);
+        // The first format: the diagnostics get the reader's line, no receiver anything.
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut warnings = QueryWarnings::of_posts(&posts, None, &mut diagnostics);
+        for query in 0..3 {
+            warnings.before_query(query, &mut report).unwrap();
+        }
+        drop(warnings);
+        assert_eq!(diagnostics, b"Warning: [blastn] reader\n");
+        // A later format whose report stops after the first query: the diagnostics get nothing,
+        // its receiver the first query's line.
+        let (mut diagnostics, mut later) = (Vec::new(), Vec::new());
+        let mut warnings = QueryWarnings::of_posts(&[], None, &mut diagnostics)
+            .with_later(&posts, Some(&mut later));
+        warnings.before_query(0, &mut report).unwrap();
+        drop(warnings);
+        assert!(diagnostics.is_empty() && report.is_empty());
+        assert_eq!(
+            later,
+            b"Warning: [blastn] Query_1 q: Sequence contains no data \n"
+        );
+        // One that writes every query's report: both lines, in the order of the queries.
+        let mut later = Vec::new();
+        let mut warnings = QueryWarnings::of_posts(&[], None, &mut diagnostics)
+            .with_later(&posts, Some(&mut later));
+        for query in 0..3 {
+            warnings.before_query(query, &mut report).unwrap();
+        }
+        drop(warnings);
+        assert_eq!(
+            later,
+            b"Warning: [blastn] Query_1 q: Sequence contains no data \n\
+              Warning: [blastn] Query_2 r: Sequence contains no data \n"
+        );
     }
 }

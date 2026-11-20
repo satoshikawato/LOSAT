@@ -123,11 +123,13 @@ ruzstd = "0.9"
 rustix = { version = "1.1.6", default-features = false, features = ["std", "param", "mm", "fs", "stdio"] }
 
 # Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
-# `IsIStreamEmpty` (`input_files::has_stream_position`), and the read-only file mappings of the
+# `IsIStreamEmpty` (`input_files::has_stream_position`), the read-only file mappings of the
 # RPS-BLAST profile files (`utils::mapped_file`: `CreateFileMappingW`, whose signature names
-# `SECURITY_ATTRIBUTES`, and `MapViewOfFile`); only the features those need.
+# `SECURITY_ATTRIBUTES`, and `MapViewOfFile`), and the system time zone and character types that
+# the C runtime's `localtime` reads (`writedb::local_offset`: `GetTimeZoneInformation`,
+# `GetStringTypeW`); only the features those need.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Memory", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Time"] }
 
 [features]
 default = ["parallel"]

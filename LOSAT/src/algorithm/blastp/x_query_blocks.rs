@@ -67,7 +67,8 @@
 //!   are made per block instead, in the call of the block that holds the query, before that
 //!   block's first byte and after the reports of the blocks before (`run_call`): outfmt 0's
 //!   refusal of the masks of a record that is both a query and a subject under `-parse_deflines`
-//!   (`believed::refuse_shared_masks`), and outfmt 1 to 4's refusal of such a record's section
+//!   (`believed::refuse_shared_masks`; where outfmt 0 can fail alone, such a record takes the
+//!   search of all queries, `x_query_block_plan`), and outfmt 1 to 4's refusal of such a record's section
 //!   that NCBI BLAST+ aborts on (`pairwise::blastp_section_aborts`; what NCBI writes before its
 //!   abort depends on its buffers). The refusals of a database sequence that NCBI shows as a
 //!   query (`ListedTitles::refuse_generated_query_ids`, `refuse_display_ids_of_queries`) sit at

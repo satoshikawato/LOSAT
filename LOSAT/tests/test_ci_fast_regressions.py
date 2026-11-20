@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,6 +27,7 @@ import xinclude_fixtures as xinclude  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
 sys.path.insert(0, str(fast.FIXTURE_DIR))
+import check_losat  # noqa: E402  (the -subject fixtures' checker)
 import run_oracle  # noqa: E402  (the outfmt 0 manifest's reader and writer)
 
 FROZEN, KNOWN, OTHER = "f" * 64, "a" * 64, "0" * 64
@@ -497,133 +499,6 @@ class XincludeFixtureTests(unittest.TestCase):
             xinclude.extension("16")
         self.assertEqual(xinclude.side_name("id", 3, "13"), "id.out_3.json")
 
-    def test_the_libm_rule_accepts_only_the_last_of_15_digits_of_a_real(self):
-        # PD-LOSAT-PLATFORM-LIBM (macOS, WASI): the cases of `the_libm_rule_accepts_only_a_last_digit_of_a_real`
-        # (LOSAT/tests/outfmt11_blastx.rs), in a Seq-align's score and in psiblast's ASN.1 PSSM.
-        rule = xinclude.libm_last_digit_differences
-
-        def archive(m: str, e: str = "-80", tail: str = "") -> bytes:
-            return f"evalue real {{ {m}, 10, {e} }},\nscore 7{tail}".encode()
-
-        want = archive("693693758698357")
-        self.assertEqual(rule(want, want), 0)
-        for m in ("693693758698358", "693693758698356"):
-            self.assertEqual(rule(archive(m), want), 1, m)
-        for got in (archive("693693758698359"), archive("693693758698355"),  # 2 apart
-                    archive("693693758698358", "-79"),  # another exponent
-                    archive("69369375869836"),  # another digit count
-                    archive("693693758698357", tail=" "),  # any other byte
-                    b"evalue real { 693693758698358, 10, -80 },\nscore 8",
-                    b"evalue real { 693693758698358, 10, -80 },\nscore",
-                    b"evalue 693693758698358,\nscore 7",
-                    b"evalue real { 693693758698358, 2, -80 },\nscore 7"):  # not a REAL of base 10
-            self.assertIsNone(rule(got, want), got)
-
-        # Each value is judged on its own; a second, different one fails the whole file.
-        def pssm(a: str, b: str, zero: str = "0") -> bytes:
-            return (f"lambda {{ {a}, 10, -15 }},\ninformationContent {{\n  {{ {zero}, 10, 0 }},\n"
-                    f"  {{ -{b}, 10, -3 }}\n}}\n").encode()
-
-        want = pssm("347923230575626", "100000000000001")
-        self.assertEqual(rule(pssm("347923230575625", "100000000000002"), want), 2)
-        self.assertEqual(rule(pssm("347923230575627", "100000000000001"), want), 1)
-        self.assertIsNone(rule(pssm("347923230575625", "100000000000003"), want))
-        # A shorter mantissa (NCBI drops the trailing zeros) 1 away is not a last digit of 15.
-        self.assertIsNone(rule(pssm("347923230575626", "100000000000001", "1"), want))
-        self.assertIsNone(rule(b"{ 6, 10, -1 }", b"{ 5, 10, -1 }"))
-        # A missing or added value is a difference of the bytes around the values.
-        self.assertIsNone(rule(want + b"{ 347923230575626, 10, -15 }", want))
-
-    def test_pssm_files_follow_the_libm_rule_only_when_the_caller_asks(self):
-        # Without a reference every byte counts (the native gates); with one (the WASI commands), a frozen
-        # file is the expectation, and a file over 64 KB is compared with the reference's bytes, which must
-        # have the frozen SHA-256.
-        pad = b"\n" + b"x" * xinclude.FREEZE_LIMIT
-        small = b"informationContent {\n  { 347923230575626, 10, -15 }\n}\n"
-        big = small + pad
-        files = [("r.asn", small), ("r.asn.1", big)]
-        row = {"row_id": "r", "files": xinclude.PSSM_ASN, "side_sha256": xinclude.pssm_cell(files, "r", xinclude.PSSM_ASN)}
-        first_difference = lambda want, got: "differs at a line"  # noqa: E731
-
-        def run(*data: bytes) -> xinclude.PssmResult:
-            return xinclude.PssmResult(None, [(name, value) for (name, _), value in zip(files, data)])
-
-        last = small.replace(b"626", b"625")
-        with tempfile.TemporaryDirectory() as tmp:
-            frozen = Path(tmp)
-            xinclude.freeze_pssm(xinclude.PssmResult(None, files), frozen, "r", xinclude.PSSM_ASN)
-            self.assertEqual(sorted(path.name for path in frozen.iterdir()), ["r.asn"])
-            reference = dict(files).get
-            self.assertEqual(xinclude.pssm_problems(run(small, big), row, frozen, first_difference), [])
-            # exact: both files differ
-            problems = xinclude.pssm_problems(run(last, last + pad), row, frozen, first_difference)
-            self.assertEqual(problems, ["r.asn differs at a line", problems[1]])
-            self.assertIn("r.asn.1 differs (sha256", problems[1])
-            # the rule: both are the same, and each is listed
-            accepted: list[str] = []
-            self.assertEqual(xinclude.pssm_problems(run(last, last + pad), row, frozen, first_difference,
-                                                    reference, accepted), [])
-            self.assertEqual(accepted, ["r.asn: 1 values", "r.asn.1: 1 values"])
-            # 2 apart, or another byte, still differ under the rule
-            two = small.replace(b"626", b"624")
-            for got in ((two, big), (small, two + pad), (small, last + pad + b"x")):
-                problems = xinclude.pssm_problems(run(*got), row, frozen, first_difference, reference, [])
-                self.assertEqual(len(problems), 1, got[1][:60])
-            # a reference whose file is not the frozen one gives no expectation
-            problems = xinclude.pssm_problems(run(small, last + pad), row, frozen, first_difference,
-                                              {"r.asn.1": last + pad}.get, [])
-            self.assertEqual(len(problems), 1)
-            self.assertIn("reference run's file has sha256", problems[0])
-            problems = xinclude.pssm_problems(run(small, last + pad), row, frozen, first_difference, {}.get, [])
-            self.assertIn("reference run's file has sha256 none", problems[0])
-
-    @unittest.skipUnless(os.name == "posix", "the stand-in LOSAT commands are scripts with a #! line")
-    def test_db_check_applies_the_libm_rule_to_pssm_files_only(self):
-        # `db_search_fixtures.py check --libm-last-digit NATIVE` (what check_wasm_threading.py runs for the
-        # WASI commands): a psiblast row whose ASN.1 PSSM (over 64 KB, not frozen) differs in the last
-        # digit of a REAL is `libm-last-digit`; without the option it differs; the report stays exact.
-        value = b"informationContent {\n  { 347923230575626, 10, -15 }\n}\n" + b"x" * xinclude.FREEZE_LIMIT
-        report = b"lambda real { 347923230575626, 10, -15 }\n"
-        with tempfile.TemporaryDirectory() as tmp:
-            directory, frozen = Path(tmp), Path(tmp) / "frozen"
-            frozen.mkdir()
-
-            def command(name: str, asn: bytes, stdout: bytes = report) -> Path:
-                script = directory / name
-                script.write_text(f"#!{sys.executable}\nimport sys\n"
-                                  "path = sys.argv[sys.argv.index('-out_pssm') + 1]\n"
-                                  f"open(path, 'wb').write({asn!r})\nsys.stdout.buffer.write({stdout!r})\n")
-                script.chmod(0o755)
-                return script
-
-            (frozen / "r.out").write_bytes(report)
-            row = {"row_id": "r", "program": "psiblast", "kind": "ncbi", "db": "d", "query": "q", "extra_args": "",
-                   "outfmt": "11", "rc": "0", "stdout_sha256": xinclude.sha256(report),
-                   "stdout_bytes": str(len(report)), "stderr_sha256": "", "covers": "", "files": xinclude.PSSM_ASN,
-                   "side_sha256": xinclude.pssm_cell([("r.asn", value)], "r", xinclude.PSSM_ASN)}
-            native = command("native", value)
-            last = value.replace(b"626", b"625", 1)
-            env = dict(os.environ)
-            with unittest.mock.patch.object(db_fixtures, "FROZEN", frozen):
-                def check(losat: Path, libm: Path | None) -> tuple[str, str]:
-                    return db_fixtures.check_row(row, losat, 1, env, libm_native=libm)
-
-                self.assertEqual(check(native, None), ("same", ""))
-                self.assertEqual(check(native, native), ("same", ""))
-                wasi = command("wasi", last)
-                status, detail = check(wasi, None)
-                self.assertEqual(status, "differs")
-                self.assertIn("r.asn differs (sha256", detail)
-                self.assertEqual(check(wasi, native), ("libm-last-digit", "r.asn: 1 values"))
-                # 2 apart; a reference that does not give the frozen bytes
-                self.assertEqual(check(command("two", value.replace(b"626", b"624", 1)), native)[0], "differs")
-                self.assertEqual(check(wasi, command("other", last))[0], "differs")
-                # the report is compared byte for byte, also with the option
-                moved = command("moved", last, report.replace(b"626", b"625"))
-                status, detail = check(moved, native)
-                self.assertEqual(status, "differs")
-                self.assertIn("stdout line 1", detail)
-
 
 class SelectionTests(unittest.TestCase):
     def test_paths_select_programs(self):
@@ -645,6 +520,64 @@ class SelectionTests(unittest.TestCase):
         self.assertIn("tblastx", blastn)
         for program in fast.PROGRAMS:
             self.assertIn(program, fast.program_dependents()[program])
+
+
+class OutputFormatSelectionTests(unittest.TestCase):
+    """`--outfmts` of the two fixture checkers, and the rows that check_wasm_threading.py runs with it: blastx's
+    BLAST XML, XML2 and JSON rows through each WASI command (`blastx_prescan_checkers`)."""
+
+    CELLS = ["5", "1", "16", "13", "6 qseqid sseqid", "15", "14", "0"]
+
+    def test_a_row_is_kept_by_the_first_word_of_its_format_whole(self):
+        rows = [{"row_id": f"r{index}", "program": "blastx", "outfmt": cell} for index, cell in enumerate(self.CELLS)]
+
+        def kept(outfmts: str, program: str = "blastx") -> list[str]:
+            args = argparse.Namespace(only="", program=program, outfmts=outfmts)
+            return [row["outfmt"] for row in rows if db_fixtures.selected(row, args)]
+
+        self.assertEqual(kept("5,13,14,15,16"), ["5", "16", "13", "15", "14"])
+        self.assertEqual(kept("1"), ["1"])
+        self.assertEqual(kept("6"), ["6 qseqid sseqid"])
+        self.assertEqual(kept(""), self.CELLS)
+        self.assertEqual(kept("5", "blastp"), [])
+        # `freeze` has no --outfmts: every row.
+        self.assertEqual(sum(db_fixtures.selected(row, argparse.Namespace(only="", program="")) for row in rows), 8)
+        # check_losat.py: the same rule, an empty cell being outfmt 0.
+        rows = [{"fixture_id": f"x{index}", "program": "blastx", "outfmt": cell}
+                for index, cell in enumerate(["", *self.CELLS])]
+        rows.append({"fixture_id": "y", "program": "blastp", "outfmt": "5"})
+
+        def subject(outfmts: str, programs: str = "blastx", only: str = "") -> list[str]:
+            return [row["fixture_id"] for row in check_losat.selected_rows(rows, programs, only, outfmts)]
+
+        self.assertEqual(subject("0"), ["x0", "x8"])
+        self.assertEqual(subject("5,16"), ["x1", "x3"])
+        self.assertEqual(subject("5", "blastx,blastp"), ["x1", "y"])
+        self.assertEqual(subject("", "blastx", "x1"), ["x1"])
+        self.assertEqual(len(subject("")), 9)
+
+    def test_the_wasi_section_runs_every_blastx_xml_and_json_row_of_both_sets(self):
+        import check_wasm_threading as wasm
+
+        formats = wasm.BLASTX_PRESCAN_FORMATS.split(",")
+        self.assertEqual(formats, ["5", "13", "14", "15", "16"])
+        subject = check_losat.selected_rows(run_oracle.read_manifest()[2], "blastx", "", wasm.BLASTX_PRESCAN_FORMATS)
+        args = argparse.Namespace(only="", program="blastx", outfmts=wasm.BLASTX_PRESCAN_FORMATS)
+        db = [row for row in db_fixtures.read_manifest()[1] if db_fixtures.selected(row, args)]
+        # Every format, in the -subject and the -db rows; every blastx row of these formats and no other.
+        for rows, every, number in [
+                (subject, [row for row in run_oracle.read_manifest()[2] if row["program"] == "blastx"],
+                 lambda row: run_oracle.outfmt(row).split()[0]),
+                (db, [row for row in db_fixtures.read_manifest()[1] if row["program"] == "blastx"],
+                 db_fixtures.format_number)]:
+            self.assertEqual(sorted({number(row) for row in rows}, key=int), formats)
+            self.assertEqual(rows, [row for row in every if number(row) in formats])
+        # The section's command lines are the checkers' own: with a prefix that no row has, each selects nothing
+        # and passes (no LOSAT runs).
+        for name, checker, _ in wasm.blastx_prescan_checkers(Path("no-such-losat")):
+            run = subprocess.run([sys.executable, *checker, "--only", "no-such-row"], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, (name, run.stderr))
+            self.assertRegex(run.stdout.splitlines()[-1], r"^# (fixtures=0 differing=\[\]|rows=0 differing=0 )", name)
 
 
 class StartupTraceNoticeTests(unittest.TestCase):
@@ -794,6 +727,89 @@ class NcbiUsageReportOffTests(unittest.TestCase):
                 self.assertEqual(fixtures.run_case(str(bin_dir / program), [], "x", "", "").stdout, b"true")
             self.assertEqual((fixtures_dir / f"{case[0]}.out").read_bytes(), b"false")
             self.assertIn("of false (", (fixtures_dir / "manifest.tsv").read_text())
+
+
+
+class WasmDbTotalRowsTests(unittest.TestCase):
+    """The -db rows that check_wasm_threading.py runs through each WASI command for a database total of 2^32
+    letters or more (`DB_TOTAL_ROWS`): NCBI's rows of one database whose alias file declares such a `LENGTH`
+    (below 2^63: from there NCBI's `Int8` is negative, and the statistics read the length of OID 0)."""
+
+    def test_the_rows_are_every_ncbi_row_of_one_database_of_2_to_the_32_letters_or_more(self):
+        import check_wasm_threading as watcher
+
+        def alias_length(row: dict[str, str]) -> int:
+            names = row["db"].split()
+            if len(names) != 1 or ":" in names[0]:
+                return 0
+            for suffix in (".nal", ".pal"):
+                alias = db_fixtures.ENGINE / (names[0] + suffix)
+                if alias.is_file():
+                    for line in alias.read_text().splitlines():
+                        key, _, value = line.partition(" ")
+                        if key == "LENGTH":
+                            return int(value)
+            return 0
+
+        rows = db_fixtures.read_manifest()[1]
+        expected = [row["row_id"] for row in rows if row["kind"] == "ncbi" and 2**32 <= alias_length(row) < 2**63]
+        self.assertEqual(sorted(watcher.DB_TOTAL_ROWS), sorted(expected))
+        self.assertEqual(len(set(watcher.DB_TOTAL_ROWS)), 8)
+        # The watcher selects each row by `--only` (a prefix of the row id): it names that row alone.
+        for row_id in watcher.DB_TOTAL_ROWS:
+            self.assertEqual([row["row_id"] for row in rows if row["row_id"].startswith(row_id)], [row_id])
+
+
+
+class WasmLocalTimeTests(unittest.TestCase):
+    """The local times that check_wasm_threading.py puts aside in the outputs of makeblastdb, blastdbcmd -info and
+    a search report of its local-time-and-path block (`local_times`), and its test that each is the local time of
+    its run (`is_local_time_of`)."""
+
+    def test_each_form_is_read_and_put_aside(self):
+        import calendar
+        import check_wasm_threading as watcher
+
+        log = (b"\n\nBuilding a new DB, current time: 11/18/2026 21:27:29\nNew DB name:   /w/db\n"
+               b"Adding sequences from FASTA; added 3 sequences in 0.00400209 seconds.\n")
+        self.assertEqual(watcher.local_times(log), (
+            b"\n\nBuilding a new DB, current time: <time>\nNew DB name:   /w/db\n"
+            b"Adding sequences from FASTA; added 3 sequences in <seconds> seconds.\n",
+            [(calendar.timegm((2026, 11, 18, 21, 27, 29)), 1)]))
+        # makeblastdb 2.17.0's form of a short build time.
+        self.assertEqual(watcher.local_times(b"added 1 sequences in 5.5e-05 seconds.\n")[0],
+                         b"added 1 sequences in <seconds> seconds.\n")
+        info = b"Database: t\n\t3 sequences; 2,700 total bases\n\nDate: Nov 8, 2026  9:07 PM\tLongest sequence: 900 bases\n"
+        self.assertEqual(watcher.local_times(info), (
+            b"Database: t\n\t3 sequences; 2,700 total bases\n\nDate: <time>\tLongest sequence: 900 bases\n",
+            [(calendar.timegm((2026, 11, 8, 21, 7, 0)), 60)]))
+        report = b"  Database: t\n    Posted date:  Jan 1, 2027  12:05 AM\n  Number of letters in database: 2,700\n"
+        self.assertEqual(watcher.local_times(report), (
+            b"  Database: t\n    Posted date:  <time>\n  Number of letters in database: 2,700\n",
+            [(calendar.timegm((2027, 1, 1, 0, 5, 0)), 60)]))
+        self.assertEqual(watcher.local_times(b"Date: Dec 31, 2026  12:59 PM\t")[1],
+                         [(calendar.timegm((2026, 12, 31, 12, 59, 0)), 60)])
+        # Text that only looks like a time stays.
+        other = b"Query= Date: Nov 8, 2026  9:07 PM\nbuilt 11/18/2026 21:27:29\n"
+        self.assertEqual(watcher.local_times(other), (other, []))
+
+    def test_a_time_is_the_local_time_of_its_run_in_the_zone(self):
+        import check_wasm_threading as watcher
+
+        started, ended = 1_795_000_000.4, 1_795_000_002.9
+        jst = 32400
+        # The log, to the second: any second of the run, one second of slack at each end.
+        for printed in [1_795_000_000 + jst, 1_795_000_002 + jst, 1_794_999_999 + jst, 1_795_000_003 + jst]:
+            self.assertTrue(watcher.is_local_time_of(printed, 1, jst, started, ended), printed)
+        for printed in [1_794_999_998 + jst, 1_795_000_004 + jst, 1_795_000_001]:
+            self.assertFalse(watcher.is_local_time_of(printed, 1, jst, started, ended), printed)
+        # The date, to the minute: the minute of the run's start or end.
+        minute = (1_795_000_000 + jst) // 60 * 60
+        self.assertTrue(watcher.is_local_time_of(minute, 60, jst, started, ended))
+        self.assertFalse(watcher.is_local_time_of(minute - 60, 60, jst, started, ended))
+        self.assertFalse(watcher.is_local_time_of(minute - jst, 60, jst, started, ended))
+        # UTC is the zone of offset 0.
+        self.assertTrue(watcher.is_local_time_of(1_795_000_001, 1, 0, started, ended))
 
 
 if __name__ == "__main__":

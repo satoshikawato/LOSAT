@@ -124,10 +124,10 @@ pub(super) fn x_loop_free_on() -> bool {
 /// subject (a unit on the pool always starts so): a new diagonal table's entries all lie beyond
 /// the two-hit window, as a kept table's entries do after NCBI's offset step
 /// (blast_extend.c:166-171), so no reported value changes. The presence bytes of `x_scan_byte`
-/// (32 KiB a thread) stay: the chunks of a split query batch are searched in flows of their own
-/// with the same table, and building them again in each flow cost more than they hold (81 KB of
-/// subjects at 32 threads: 1.2 % more instructions and 1,600 more waits). `LOSAT_X_TBNLOOPFREE=0`
-/// keeps them all.
+/// (32 KiB a table, which every thread reads) stay: the chunks of a split query batch are searched
+/// in flows of their own with the same table, and building them again in each flow cost more than
+/// they hold (81 KB of subjects at 32 threads: 1.2 % more instructions and 1,600 more waits).
+/// `LOSAT_X_TBNLOOPFREE=0` keeps them all.
 pub(super) fn x_loop_free() {
     if !x_loop_free_on() {
         return;

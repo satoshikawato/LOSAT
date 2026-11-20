@@ -443,7 +443,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 | BLASTN のバッチ | `QueryBatchSizes::of_database`：全体の文字数（リストがあっても全体）で `CBatchSizeMixer` を始める | `run_in_pool` と同じ値 |
 | archive | `ReportOutputs::finish_archive`：失敗と、どの archive にも載らなかったメッセージの error archive を CLI と同じく書く | `PrintErrorArchive` |
 
-BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`blastx_record` が `RecordSource` を持ち越す）。LOSAT Web の records は id を持たないので、ブラウザの拒否は残る。
+BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`blastx_record` が `RecordSource` を持ち越す）。LOSAT Web の records は id を持たないので、ブラウザの拒否は残る。2026-11-19（線 WQA の D7）：この拒否は外した。CLI は id の無い record も `-parse_deflines` で走らせ（それは option 無しで読んだ records だけ）、LOSAT Web は `losat_web2_register_inputs` で id を持った records を読む。5 program とも `-parse_deflines` の records は `api::input::read_search_inputs` のもの。
 
 ### 13.2 検証
 

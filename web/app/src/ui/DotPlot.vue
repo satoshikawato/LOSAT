@@ -36,6 +36,7 @@ import {
   type View,
 } from '../domain/plot-geometry';
 import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel, type AxisTicks } from '../domain/plot-scale';
+import { withUnit } from '../domain/units';
 import { formatCount, formatCounted, framesLabel, framesPhrase, framesText } from './format';
 import './plots.css';
 
@@ -101,7 +102,7 @@ const size = computed(() => plotSize(extent.value, stageWidth.value - MARGIN.lef
 const box = computed<Box>(() => ({ left: MARGIN.left, top: MARGIN.top, width: size.value.width, height: size.value.height }));
 
 /** What a protein axis's title adds against a nucleotide axis while the axes are to scale (S13b decision 26). */
-const scaleNote = (weight: number): string => (weight !== 1 && size.value.toScale ? `; drawn at ${weight} nt per aa` : '');
+const scaleNote = (weight: number): string => (weight !== 1 && size.value.toScale ? `; drawn at ${withUnit(weight, 'nt')} per aa` : '');
 /** A context that measures the query's axis title (in its font) before the canvas is sized. */
 const measuring = document.createElement('canvas').getContext('2d');
 if (measuring !== null) measuring.font = TITLE_FONT;
@@ -161,7 +162,7 @@ const selectedText = computed(() => {
   if (hsp === undefined) return '';
   const { qstart, qend, sstart, send } = hsp.fields;
   const frames = framesPhrase(hsp);
-  return `Selected: HSP ${hsp.id.rank + 1}, query ${qstart}–${qend} ${units.value.query}, subject ${sstart}–${send} ${units.value.subject}${frames ? `, ${frames}` : ''}.`;
+  return `Selected: HSP ${hsp.id.rank + 1}, query ${withUnit(`${qstart}–${qend}`, units.value.query)}, subject ${withUnit(`${sstart}–${send}`, units.value.subject)}${frames ? `, ${frames}` : ''}.`;
 });
 /**
  * n and p on the plot select an HSP: with the popup closed, which tells its HSP itself, the line
@@ -778,7 +779,7 @@ function pickSubject(event: Event): void {
         <span>Subject</span>
         <select data-testid="dotplot-subject" @change="pickSubject">
           <option v-for="s in state.subjects" :key="s.sIdx" :value="s.sIdx" :selected="s.sIdx === state.sIdx">
-            {{ s.first.sseqid }} · {{ formatCount(s.length) }} {{ units.subject }} · {{ formatCounted(s.hspCount, 'HSP') }}
+            {{ s.first.sseqid }} · {{ withUnit(formatCount(s.length), units.subject) }} · {{ formatCounted(s.hspCount, 'HSP') }}
           </option>
         </select>
       </label>
@@ -790,8 +791,7 @@ function pickSubject(event: Event): void {
     <figcaption class="plot-caption">
       <span class="plot-title" data-testid="dotplot-title">Plot of {{ queryId }} vs {{ subjectId }}</span>
       <span class="muted small"
-        >Query {{ queryId }} ({{ formatCount(queryLength) }} {{ units.query }}) against subject {{ subjectId }} ({{ formatCount(subjectLength) }}
-        {{ units.subject }}).</span
+        >Query {{ queryId }} ({{ withUnit(formatCount(queryLength), units.query) }}) against subject {{ subjectId }} ({{ withUnit(formatCount(subjectLength), units.subject) }}).</span
       >
     </figcaption>
     <div ref="stage" class="plot-stage">
@@ -843,9 +843,9 @@ function pickSubject(event: Event): void {
               <dt>Identity (%)</dt>
               <dd data-field="pident">{{ selected.fields.pident }}</dd>
               <dt>Query</dt>
-              <dd data-field="query">{{ selected.fields.qstart }}–{{ selected.fields.qend }} {{ units.query }}</dd>
+              <dd data-field="query">{{ withUnit(`${selected.fields.qstart}–${selected.fields.qend}`, units.query) }}</dd>
               <dt>Subject</dt>
-              <dd data-field="subject">{{ selected.fields.sstart }}–{{ selected.fields.send }} {{ units.subject }}</dd>
+              <dd data-field="subject">{{ withUnit(`${selected.fields.sstart}–${selected.fields.send}`, units.subject) }}</dd>
               <template v-if="framesLabel(selected)">
                 <dt>{{ framesLabel(selected) }}</dt>
                 <dd data-field="frames">{{ framesText(selected, ' / ') }}</dd>

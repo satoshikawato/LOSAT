@@ -1,17 +1,17 @@
 // A worker of worker-end.spec.ts, as the Engine worker of a threaded runtime: a shared memory of
-// its own, of the given maximum, with the application's keeper (memory-keeper-worker.ts) on the
-// given channel, and an instance of the test's module on it. Once the keeper is ready it says
+// its own, of the given maximum, with the application's keeper (memory-keeper-worker.ts) linked to
+// the page (link.ts), and an instance of the test's module on it. Once the keeper is ready it says
 // so, then waits on the memory without a timeout (the module's export `park`) until the page
 // ends it.
 import type { KeeperCommand } from '../../../../packages/losat/src/infra/engine-worker/protocol';
 
 const scope = self as unknown as {
-  onmessage: ((event: MessageEvent<{ module: WebAssembly.Module; maximumPages: number; keeperChannel: string }>) => void) | null;
-  postMessage(message: string): void;
+  onmessage: ((event: MessageEvent<{ module: WebAssembly.Module; maximumPages: number }>) => void) | null;
+  postMessage(message: string | { readonly type: 'link'; readonly port: MessagePort }, transfer?: Transferable[]): void;
 };
 
 scope.onmessage = (event) => {
-  const { module, maximumPages, keeperChannel } = event.data;
+  const { module, maximumPages } = event.data;
   let memory: WebAssembly.Memory;
   try {
     memory = new WebAssembly.Memory({ initial: 1, maximum: maximumPages, shared: true });
@@ -28,6 +28,9 @@ scope.onmessage = (event) => {
     scope.postMessage('waiting');
     (instance.exports['park'] as () => void)();
   };
-  const keep: KeeperCommand = { type: 'keep', memory, maximumPages, channel: keeperChannel };
-  keeper.postMessage(keep);
+  // As the Engine worker links the keeper to the page (engine-worker.ts).
+  const link = new MessageChannel();
+  scope.postMessage({ type: 'link', port: link.port2 }, [link.port2]);
+  const keep: KeeperCommand = { type: 'keep', memory, maximumPages, port: link.port1 };
+  keeper.postMessage(keep, [link.port1]);
 };

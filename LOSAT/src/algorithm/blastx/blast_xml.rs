@@ -290,6 +290,7 @@ fn xml_rows(
     srow: &mut Vec<u8>,
 ) -> Result<(i32, i32)> {
     let raw = &hsp.hsp;
+    let (q_end, s_end) = hsp.seqalign_ends();
     qrow.clear();
     srow.clear();
     let (mut qi, mut si) = (usize::try_from(raw.q_start)?, usize::try_from(raw.s_start)?);
@@ -321,10 +322,10 @@ fn xml_rows(
         }
     }
     ensure!(
-        qi == raw.q_end as usize && si == raw.s_end as usize,
+        qi == q_end as usize && si == s_end as usize,
         "BLASTX edit script does not reach final endpoints"
     );
-    let (qstart, qend) = query_endpoints(query.sequence.len(), raw.frame, raw.q_start, raw.q_end);
+    let (qstart, qend) = query_endpoints(query.sequence.len(), raw.frame, raw.q_start, q_end);
     Ok((qstart.min(qend), qstart.max(qend)))
 }
 
@@ -941,10 +942,79 @@ pub(super) struct QueryScan {
 /// batch yet) the read adds each batch to the scopes of the queries (`QueryScopes::add_batch_ids`),
 /// so that LOSAT's refusal of two queries of one scope with one id comes before the first byte; the
 /// search then reads them from `QueryScan::query_scopes`. `checks_titles`: as `scan_queries`.
+///
+/// `file` is the query file the search reads (`-query`, a regular file, named `query` in NCBI's
+/// error when its position cannot be read or set): the read takes it and gives it back with the
+/// scan, at the position it had, so the search's reading starts where it would have started. It
+/// reads that open file itself, never a second handle on it, which the WASI targets cannot make.
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
+// ```c++
+// 	char c;
+// 	CNcbiStreampos orig_p = in.tellg();
+// 	// Piped input
+// 	if(orig_p < 0)
+// 		return false;
+//
+// 	IOS_BASE::iostate orig_state = in.rdstate();
+// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
+//
+// 	if(! (in >> c))
+// 		return true;
+//
+// 	in.seekg(orig_p);
+// 	in.flags(orig_flags);
+// 	in.clear();
+// 	in.setstate(orig_state);
+//
+// 	return false;
+// ```
+// NCBI reads ahead of the search on the argument's one stream (`m_Ios`, ncbiargs.cpp:727-735) and
+// seeks it back to `orig_p`. This read has no NCBI counterpart (NCBI reads the query file once; this
+// read is LOSAT's, for its refusals before the first byte), and it reads the same way: on the one
+// open file, put back where it started.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prescan_queries(
-    file: std::fs::File,
+    file: crate::blastinput::input_files::InputFile,
+    query: &std::path::Path,
     settings: &super::input::QueryStreamSettings,
+    options: &ResolvedOptions,
+    lowercase: bool,
+    batch_size: usize,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
+    holds_back: bool,
+    checks_titles: bool,
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
+) -> Result<(QueryScan, crate::blastinput::input_files::InputFile)> {
+    use std::io::{Seek, SeekFrom};
+    let inaccessible = || crate::cli::inaccessible("query", query);
+    let mut file = file;
+    let start = file.stream_position().map_err(|_| inaccessible())?;
+    let scan = if batch_size == 0 {
+        QueryScan::default()
+    } else {
+        let mut stream = settings.stream_before_search(file);
+        let scan = scan_query_stream(
+            &mut stream,
+            options,
+            lowercase,
+            batch_size,
+            range,
+            holds_back,
+            checks_titles,
+            query_scopes,
+        )?;
+        file = stream.into_input();
+        scan
+    };
+    file.seek(SeekFrom::Start(start))
+        .map_err(|_| inaccessible())?;
+    Ok((scan, file))
+}
+
+/// The read of `prescan_queries` on its stream of the query file.
+#[allow(clippy::too_many_arguments)]
+fn scan_query_stream<R: std::io::Read>(
+    stream: &mut super::input::FastaStream<R>,
     options: &ResolvedOptions,
     lowercase: bool,
     batch_size: usize,
@@ -953,15 +1023,11 @@ pub(super) fn prescan_queries(
     checks_titles: bool,
     mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
 ) -> Result<QueryScan> {
-    if batch_size == 0 {
-        return Ok(QueryScan::default());
-    }
-    let mut stream = settings.stream_before_search(file);
     let mut delivered = 0usize;
     let mut refusal = None;
     let mut scan = scan_queries(options, holds_back, checks_titles, &mut |deliver| {
         super::input::read_fasta_stream_batches(
-            &mut stream,
+            stream,
             false,
             lowercase,
             batch_size,
@@ -1440,7 +1506,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 // and the rows that `-subject`'s mapper leaves,
                                 // `SubjectLoc::of_list`). NCBI catches it in
                                 // `s_BlastXMLAddIteration` (`CaughtException`).
-                                if rows_empty(&hsp.hsp) {
+                                if rows_empty(hsp) {
                                     return Err(CaughtException(
                                         match loc.of_list(list, options.gapped) {
                                             SubjectLoc::Interval => std_seg_lengths_not_accurate(),
@@ -1465,7 +1531,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                     query_from,
                                     query_to,
                                     hit_from: hsp.hsp.s_start + 1 + subject_offset,
-                                    hit_to: hsp.hsp.s_end + subject_offset,
+                                    hit_to: hsp.seqalign_ends().1 + subject_offset,
                                     query_frame: translation_frame(
                                         plus,
                                         query_from,
@@ -1740,6 +1806,99 @@ mod scan_tests {
         })
         .unwrap();
         assert_eq!(found.stops_after, None);
+    }
+
+    /// The (title, letters) of every record that the search's stream of `file` reads.
+    fn search_reads(
+        settings: &super::super::input::QueryStreamSettings,
+        file: crate::blastinput::input_files::InputFile,
+        batch_size: usize,
+    ) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let mut read = Vec::new();
+        super::super::input::read_fasta_stream_batches(
+            &mut settings.stream(file),
+            false,
+            false,
+            batch_size,
+            false,
+            None,
+            &mut |batch| {
+                read.extend(
+                    batch
+                        .iter()
+                        .map(|record| (record.title.clone(), record.sequence.clone())),
+                );
+                Ok(())
+            },
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        read
+    }
+
+    // The read before the search takes the open query file, reads it as the search does and gives
+    // the same open file back at the position it had (no second handle, which the WASI targets
+    // cannot make): the search then reads every record from there, as from a file nothing read.
+    #[test]
+    fn the_read_before_the_search_gives_the_open_file_back_where_it_was() {
+        use std::io::{Seek, SeekFrom};
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-blastx-prescan-{}",
+            crate::utils::test_dir::process_id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("query.fna");
+        let mut text = Vec::new();
+        for (number, letters) in [(1, 300), (2, 450), (3, 120), (4, 300)] {
+            let query = record("", letters);
+            text.extend_from_slice(format!(">q{number} query {number}\n").as_bytes());
+            for line in query.sequence.chunks(60) {
+                text.extend_from_slice(line);
+                text.push(b'\n');
+            }
+        }
+        std::fs::write(&path, &text).unwrap();
+        let second = text.windows(4).position(|w| w == b">q2 ").unwrap() as u64;
+        let settings = super::super::input::QueryStreamSettings {
+            program: super::super::args::ProgramName::BLASTX,
+            parse_deflines: false,
+            id_scope: None,
+            strand: crate::report::archive::bioseq::SeqLocStrand::Both,
+            data_loaders: false,
+        };
+        let options = super::super::stage_c_tests::options();
+        let open = |start: u64| {
+            let mut file = crate::blastinput::input_files::InputFile::from(
+                std::fs::File::open(&path).unwrap(),
+            );
+            file.seek(SeekFrom::Start(start)).unwrap();
+            file
+        };
+        // A batch of every query, a batch per query (the reader's refills), and no batch.
+        for batch_size in [100_000, 100, 0] {
+            for start in [0, second] {
+                let unread = search_reads(&settings, open(start), batch_size.max(1));
+                assert_eq!(unread.len(), if start == 0 { 4 } else { 3 });
+                let file = open(start);
+                #[cfg(unix)]
+                let descriptor = std::os::fd::AsRawFd::as_raw_fd(&*file);
+                let (scan, mut file) = prescan_queries(
+                    file, &path, &settings, &options, false, batch_size, None, false, true, None,
+                )
+                .unwrap();
+                assert_eq!(scan.stops_after, None);
+                // The same open file, at the position it had.
+                #[cfg(unix)]
+                assert_eq!(std::os::fd::AsRawFd::as_raw_fd(&*file), descriptor);
+                assert_eq!(file.stream_position().unwrap(), start, "{batch_size}");
+                assert_eq!(
+                    search_reads(&settings, file, batch_size.max(1)),
+                    unread,
+                    "{batch_size} {start}"
+                );
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 

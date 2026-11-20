@@ -7,6 +7,7 @@ use crate::stats::sum_statistics::{
     gap_decay_divisor, ncbi_large_gap_sum_e, normalize_score, small_gap_sum_e,
 };
 use crate::stats::KarlinParams;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -713,7 +714,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // Keep per-context logK available for the exact NCBI xsum expression below.
     let log_k_by_ctx: Vec<f64> = query_contexts
         .iter()
-        .map(|ctx| ctx.karlin_params.k.ln())
+        .map(|ctx| ctx.karlin_params.k.glibc_ln())
         .collect();
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
@@ -1661,7 +1662,7 @@ fn link_hsp_group_ncbi(
             "  lambda={}, k={}, logK={:.4}",
             params.lambda,
             params.k,
-            params.k.ln()
+            params.k.glibc_ln()
         );
     }
 
@@ -3820,7 +3821,10 @@ mod tests {
                 karlin_params: params,
             })
             .collect();
-        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
+        let log_k: Vec<f64> = contexts
+            .iter()
+            .map(|c| c.karlin_params.k.glibc_ln())
+            .collect();
         (params, contexts, log_k)
     }
 
@@ -4292,7 +4296,10 @@ mod tests {
         for context in contexts.iter_mut() {
             context.karlin_params = params;
         }
-        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
+        let log_k: Vec<f64> = contexts
+            .iter()
+            .map(|c| c.karlin_params.k.glibc_ln())
+            .collect();
         let link_ncbi = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs| {
             let mut helpers = Vec::new();
             let mut links = Vec::new();

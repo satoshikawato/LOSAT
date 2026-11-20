@@ -5,6 +5,7 @@
 
 use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutputs};
 use crate::common::GapEditOp;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
@@ -473,7 +474,7 @@ fn calculate_blastn_context_statistics(
     eff_searchsp: i64,
     round_down_evalue_score: bool,
 ) -> (f64, f64) {
-    let log_k = params.k.ln();
+    let log_k = params.k.glibc_ln();
     let bit_score = (params.lambda * (raw_score as f64) - log_k) / NCBIMATH_LN2;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1864-1870
     // ```c
@@ -492,7 +493,7 @@ fn calculate_blastn_context_statistics(
     let e_value = if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
         -1.0
     } else {
-        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).exp()
+        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).glibc_exp()
     };
     (bit_score, e_value)
 }
@@ -6478,7 +6479,8 @@ struct BlastnReportInputs<'a> {
     /// `-culling_limit` (0: no culling), read when the hit lists are finished.
     culling_limit: i32,
     db_num_seqs: i32,
-    db_len_total: usize,
+    /// NCBI's `Int8` (`SubjectMetadata::db_len_total`).
+    db_len_total: i64,
     /// The `Database:` lines of a database search's outfmt 0 report.
     database: Option<&'a PairwiseDatabase>,
     /// The tabular subject ids of a database search's reported sequences, by rank
@@ -6561,18 +6563,20 @@ struct BlastnReportInputs<'a> {
 
 impl BlastnReportInputs<'_> {
     /// The number of sequences the reports print: the database's own (with a taxid list, the
-    /// whole database's: `SeqDb::printed_num_seqs`), or the subject set's.
-    fn shown_num_seqs(&self) -> usize {
-        self.database.map_or(self.db_num_seqs as usize, |database| {
-            database.num_sequences as usize
-        })
+    /// whole database's: `SeqDb::printed_num_seqs`), or the subject set's; NCBI's `Int8`
+    /// (`PairwiseDatabase::num_sequences`).
+    fn shown_num_seqs(&self) -> i64 {
+        self.database
+            .map_or(i64::from(self.db_num_seqs), |database| {
+                database.num_sequences
+            })
     }
 
-    /// The total length the reports print (as `shown_num_seqs`).
-    fn shown_total_letters(&self) -> usize {
-        self.database.map_or(self.db_len_total, |database| {
-            usize::try_from(database.total_letters).unwrap_or(usize::MAX)
-        })
+    /// The total length the reports print (as `shown_num_seqs`), NCBI's `Int8`
+    /// (`PairwiseDatabase::total_letters`).
+    fn shown_total_letters(&self) -> i64 {
+        self.database
+            .map_or(self.db_len_total, |database| database.total_letters)
     }
 }
 
@@ -10084,7 +10088,8 @@ struct ShownSubjects {
     name: String,
     /// The statistics' number of sequences, NCBI's `Int4` (`SubjectMetadata::db_num_seqs`).
     num_seqs: i32,
-    total_letters: usize,
+    /// The statistics' total length, NCBI's `Int8` (`SubjectMetadata::db_len_total`).
+    total_letters: i64,
     database: Option<PairwiseDatabase>,
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`BlastnArgs::tabular_taxdb`; not found where it was not asked).
@@ -10435,7 +10440,7 @@ fn run_in_pool(
         let total_length = shown
             .database
             .as_ref()
-            .map_or(source.metadata().db_len_total as i64, |database| {
+            .map_or(source.metadata().db_len_total, |database| {
                 database.total_letters
             });
         if total_length > 0 {
@@ -11940,7 +11945,7 @@ fn write_format_prolog(
             megablast,
             &shown.name,
             // Printed for a subject set only (a database prints `database`).
-            shown.num_seqs as usize,
+            i64::from(shown.num_seqs),
             shown.total_letters,
             shown.database.as_ref(),
         )?;
@@ -12108,14 +12113,21 @@ fn write_reports_untimed(
     mut written: x_rpt_stream::Written<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
-    // Outfmt 0 only: the query-anchored sections (outfmt 1 to 4) draw these masks as NCBI does
-    // (`query_anchored::fill_loc_list`).
-    if args.parse_deflines
-        && output_formats.contains(&BlastnOutputFormat::Pairwise(
-            crate::report::pairwise::PairwiseView::Pairwise,
-        ))
-    {
-        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+    // Outfmt 0 only, each such output's refusal (`refuse_shared_masks_in`): the query-anchored
+    // sections (outfmt 1 to 4) draw these masks as NCBI does (`query_anchored::fill_loc_list`).
+    if args.parse_deflines {
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
+            outputs
+                .formats
+                .iter_mut()
+                .zip(output_formats)
+                .filter(|(_, output_format)| {
+                    **output_format
+                        == BlastnOutputFormat::Pairwise(
+                            crate::report::pairwise::PairwiseView::Pairwise,
+                        )
+                })
+                .map(|(format, _)| &mut format.refusal),
             query_records,
             |query| {
                 results
@@ -12365,7 +12377,7 @@ fn write_reports_untimed(
         eff_db_length: if args.db_length() > 0 {
             args.db_length()
         } else {
-            subjects.shown.total_letters as i64
+            subjects.shown.total_letters
         },
         archive: args.archive.as_ref(),
         batch_spans: results.batches,
@@ -14736,9 +14748,10 @@ mod tests {
         let (bit_score, evalue) =
             calculate_blastn_context_statistics(raw_score, &params, eff_searchsp, false);
 
-        let expected_bit_score = (params.lambda * raw_score as f64 - params.k.ln()) / NCBIMATH_LN2;
-        let expected_evalue =
-            (eff_searchsp as f64) * (-(params.lambda) * raw_score as f64 + params.k.ln()).exp();
+        let expected_bit_score =
+            (params.lambda * raw_score as f64 - params.k.glibc_ln()) / NCBIMATH_LN2;
+        let expected_evalue = (eff_searchsp as f64)
+            * (-(params.lambda) * raw_score as f64 + params.k.glibc_ln()).glibc_exp();
 
         assert_eq!(bit_score, expected_bit_score);
         assert_eq!(evalue, expected_evalue);
@@ -14773,10 +14786,11 @@ mod tests {
         let (bit_score, evalue) =
             calculate_blastn_context_statistics(raw_score, &params, eff_searchsp, true);
 
-        let expected_bit_score = (params.lambda * raw_score as f64 - params.k.ln()) / NCBIMATH_LN2;
+        let expected_bit_score =
+            (params.lambda * raw_score as f64 - params.k.glibc_ln()) / NCBIMATH_LN2;
         let expected_evalue_score = raw_score & !1;
         let expected_evalue = (eff_searchsp as f64)
-            * (-(params.lambda) * expected_evalue_score as f64 + params.k.ln()).exp();
+            * (-(params.lambda) * expected_evalue_score as f64 + params.k.glibc_ln()).glibc_exp();
 
         assert_eq!(bit_score, expected_bit_score);
         assert_eq!(evalue, expected_evalue);

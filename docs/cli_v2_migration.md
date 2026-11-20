@@ -103,8 +103,9 @@ Machine-readable final fields: [`acceptance.json`](../artifacts/cli-v2-20260911/
 
 ## Configuration boundary
 
-Both `-query` and `-subject` require file paths. Stdin (`-`) and `-db` are not
-implemented. Values are consumed as values, including negative numbers and
+At v0.1.0, `-query` and `-subject` required file paths, and stdin (`-`) and `-db` were not
+implemented. Since v0.2.0 every search program reads its query from the standard input (`-query -`)
+and searches BLAST databases (`-db`); README.md lists what each program takes. Values are consumed as values, including negative numbers and
 paths beginning with a dash. `-help`/`--help` display canonical names; top-level
 `--version` remains available.
 

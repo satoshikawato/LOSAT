@@ -2,6 +2,7 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::{bail, Context, Result};
 #[cfg(all(
     feature = "parallel",
@@ -1132,7 +1133,6 @@ fn blastp_should_parallelize_stage(
     effective_threads: usize,
     _subject_records: usize,
     worker_jobs: usize,
-    _total_subject_residues: usize,
 ) -> bool {
     // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1409-1475
     // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) { ... }
@@ -1166,10 +1166,6 @@ fn blastp_should_parallelize_subject_prep(
         effective_threads,
         subject_records.len(),
         subject_records.len(),
-        subject_records
-            .iter()
-            .map(|record| record.seq().len())
-            .sum::<usize>(),
     )
 }
 
@@ -1787,7 +1783,8 @@ fn x_build_compact_preliminary_hsp_list<'h>(
             .map(|hit| XPrelimHsp {
                 hsp: *hit,
                 e_value: search_space
-                    * (-karlin_params.lambda * hit.raw_score as f64 + karlin_params.k.ln()).exp(),
+                    * (-karlin_params.lambda * hit.raw_score as f64 + karlin_params.k.glibc_ln())
+                        .glibc_exp(),
             })
             .collect(),
     };
@@ -1853,7 +1850,7 @@ pub(super) fn blastp_link_context(
 ) -> crate::core::link_hsps::LinkContext {
     crate::core::link_hsps::LinkContext {
         lambda: karlin_params.lambda,
-        log_k: karlin_params.k.ln(),
+        log_k: karlin_params.k.glibc_ln(),
         query_length: query_length as i32,
         length_adjustment: search_space.length_adjustment as i32,
         eff_searchsp: search_space.effective_space as i64,
@@ -6717,19 +6714,16 @@ impl<'a> BlastpSubjectSource<'a> {
     }
 
     /// The number of sequences and of letters that the `Database:` lines of the reports
-    /// show: the real totals, also with `-dbsize`.
-    fn shown_totals(self) -> (usize, usize) {
+    /// show: the real totals, also with `-dbsize`, as NCBI's `Int8` (`PairwiseDatabase`).
+    fn shown_totals(self) -> (i64, i64) {
         match self {
             Self::Fasta(records) => (
-                records.len(),
-                records.iter().map(|record| record.seq().len()).sum(),
+                records.len() as i64,
+                records.iter().map(|record| record.seq().len() as i64).sum(),
             ),
             Self::Database(database) => {
                 let shown = database.pairwise_database();
-                (
-                    usize::try_from(shown.num_sequences).unwrap_or(usize::MAX),
-                    usize::try_from(shown.total_letters).unwrap_or(usize::MAX),
-                )
+                (shown.num_sequences, shown.total_letters)
             }
         }
     }
@@ -8183,7 +8177,9 @@ fn x_bp_encode_block_subjects(
 // outfmt 5's names too, `x_query_blocks::x_block_xml_subjects_allowed` and
 // `x_block_xml_run_allowed`; each check where any output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
-// (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
+// (`blastp_database_search_space`, with `-db` or `-dbsize`), no query that is also a subject under
+// `-parse_deflines` where outfmt 0 can fail alone (its refusal of such a record's masks is outfmt
+// 0's alone, `believed::refuse_shared_masks_in`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
 // search would have written the reports of the blocks before. Both lookup tables
 // (`AaLookupTable`, and `CompressedAaLookupTable` of blastp-fast) take it.
@@ -8232,6 +8228,26 @@ fn x_query_block_plan(
             || (outputs.observer.is_some() && outputs.hits.is_none())
             || (outputs.formats.len() > 1
                 && !outputs.formats.iter().all(|format| format.sink.is_writer())))
+    {
+        return None;
+    }
+    // A query that is also a subject under `-parse_deflines`, in a call whose outfmt 0 can fail
+    // alone (LOSAT Web's outfmt 0 when the argv asks for another format): outfmt 0's refusal of
+    // such a record's masks is that format's alone (`believed::refuse_shared_masks_in`), which the
+    // blocks' outputs, whose refusals fail the call, cannot make (line WQA's sweep, D7, 2026-11-19).
+    if args.parse_deflines
+        && outputs.formats.iter().any(|format| {
+            matches!(
+                format.refusal,
+                crate::api::local_blast::FormatRefusal::FailsAlone
+            ) && matches!(
+                OutputFormat::parse(format.outfmt),
+                Ok((OutputFormat::Pairwise, _))
+            )
+        })
+        && queries
+            .iter()
+            .any(|record| record.believed().is_some_and(|ids| ids.shared.is_some()))
     {
         return None;
     }
@@ -8297,7 +8313,7 @@ fn x_query_block_plan(
         .collect::<Option<Vec<_>>>()?;
     // Outfmt 1 to 4 refuse a section that NCBI BLAST+ aborts on, and a database sequence that NCBI
     // shows as a query, in the call that reports the query, before any byte of it (`run_call`, as
-    // outfmt 0 refuses the masks of a shared record, `believed::refuse_shared_masks`): in a block
+    // outfmt 0 refuses the masks of a shared record, `believed::refuse_shared_masks_in`): in a block
     // search, after the bytes of the blocks before (NCBI's own bytes before its abort depend on
     // its buffers, so no prefix is NCBI's); the blocks are taken as for outfmt 0. (The second
     // has parsed Seq-ids, which the block search never takes, `database::x_titles_allow_blocks`:
@@ -9045,10 +9061,9 @@ fn write_reports_without_queries(
                     gapped_karlin: lookup_protein_params(&args.scoring),
                     gumbel: if !args.old_fsc {
                         Some(
-                            lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
-                                .context(
-                                    "missing NCBI gumbel parameters for supported blastp scoring",
-                                )?,
+                            lookup_protein_gumbel_params(&args.scoring, total_db_len).context(
+                                "missing NCBI gumbel parameters for supported blastp scoring",
+                            )?,
                         )
                     } else {
                         None
@@ -10827,7 +10842,7 @@ fn run_call(
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
     if contexts.iter().any(|ctx| ctx.is_valid)
         && crate::stats::setup::setup_subject_length(
-            total_db_len as i64,
+            total_db_len,
             num_subjects,
             (!args.old_fsc).then_some((cutoff_subject_length, false)),
         )
@@ -11082,11 +11097,6 @@ fn run_call(
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
             ))]
             blastp_num_threads,
-            #[cfg(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))]
-            total_db_len,
         },
         &process_subject,
         &process_own_subject,
@@ -11389,11 +11399,6 @@ fn run_call(
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         blastp_num_threads,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        total_db_len,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -11811,7 +11816,6 @@ fn run_call(
         reports,
         ranges,
         query_records,
-        query_frames,
         query_valid: &query_valid,
         query_batch_skipped: &query_batch_skipped,
         query_batches: &query_batches,
@@ -11842,7 +11846,40 @@ fn run_call(
         &mut query_warning_lines,
         &mut psiblast_pssms,
     )?;
-    report_prep::refuse_unreportable(&prep, &rows_of)?;
+    let unreportable = report_prep::refuse_unreportable(&prep, &rows_of);
+    // Outfmt 0's refusal of a query that is also a subject and has masks, each outfmt 0 output's
+    // (`believed::refuse_shared_masks_in`; the query-anchored sections draw these masks as NCBI
+    // does, `query_anchored::fill_loc_list`). It was the first of `refuse_unreportable`'s refusals
+    // and its error still comes first; it is made after them because they read `prep`, which
+    // holds the outputs (line WQA's sweep, D7, 2026-11-19).
+    if args.parse_deflines
+        && format_plans.iter().any(|outfmt| {
+            matches!(
+                outfmt,
+                BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
+            )
+        })
+    {
+        let masks = query_record_masks(query_frames, &ranges.query_input.placements);
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
+            outputs
+                .formats
+                .iter_mut()
+                .zip(format_plans.iter())
+                .filter(|(_, outfmt)| {
+                    matches!(
+                        outfmt,
+                        BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
+                    )
+                })
+                .map(|(format, _)| &mut format.refusal),
+            query_records,
+            |query| masks.get(query).is_some_and(|m| !m.is_empty()),
+            args.lcase_masking,
+            args.app.name(),
+        )?;
+    }
+    unreportable?;
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks (`x_subject_meta`).
@@ -12603,6 +12640,68 @@ mod tests {
             psiblast_pssm: None,
             formatting: Default::default(),
             rps: None,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-923
+    // ```c
+    //    Int8 total_length = -1;
+    //    Int4 num_seqs = -1;
+    //
+    //    if (seq_src) {
+    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
+    //       if (total_length <= 0)
+    //           total_length = BlastSeqSrcGetTotLen(seq_src);
+    //
+    //       /* Set the database length for new FSC */
+    //       if (sbp->gbp) {
+    //           Int8 dbl = total_length;
+    //           /* Override the database length or set one (e.g., blast2seq). */
+    //           if (eff_len_options->db_length) {
+    //               dbl = eff_len_options->db_length;
+    //           }
+    //           sbp->gbp->db_length =
+    //               (Blast_SubjectIsTranslated(program_number))?
+    //               dbl/3 : dbl;
+    //       }
+    // ```
+    // The call's extent holds a database total of 2^32 letters or more (an alias file's `LENGTH`
+    // over `tests/db_search/taxfilter/tfp`, rows db.cnt.l4295.bp.* and db.cnt.avg2p32.bp_c0) as
+    // NCBI's `Int8` on every target: the effective lengths and the Gumbel block read all of it.
+    #[test]
+    fn db_extent_holds_a_total_of_2_to_the_32_letters_or_more() {
+        let resolved = make_blastp_args().resolve().expect("resolved blastp args");
+        for (name, total) in [
+            ("l4295", 4_294_967_296_000_000_000),
+            ("l4294", 4_294_967_295_999_999_999),
+            ("avg2p32", 98_784_247_808),
+        ] {
+            assert!(total > i64::from(u32::MAX), "{name}");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/dbcounts")
+                .join(name);
+            let database = database::BlastpDatabase::open(
+                path.to_str().unwrap(),
+                &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
+                "BLASTP",
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            let extent = call_setup::db_extent(&resolved, Some(&database), &[])
+                .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            assert_eq!(
+                (
+                    extent.total_db_len,
+                    extent.eff_db_length,
+                    extent.num_subjects
+                ),
+                (total, total, 23),
+                "{name}"
+            );
+            assert_eq!(
+                extent.gapped_gumbel.map(|gumbel| gumbel.db_length),
+                Some(total),
+                "{name}"
+            );
         }
     }
 

@@ -397,12 +397,54 @@ jobs:
             echo "::warning title=semver checks::cargo semver-checks exited with $status: see the job summary (a report until the first publication)"
           fi
 
+  # CodeQL of the workflows of a pull request that changes .github/ (Owner 2026-11-19 「C」): 31 of the
+  # 35 alerts open on main on 2026-11-19 were in workflows (actions/cache-poisoning,
+  # actions/missing-workflow-permissions), raised a week after they merged. codeql.yml scans the
+  # pull request's merge commit for language actions only (about a minute) and fails on an open
+  # alert; `rust` requires it, so such a pull request does not merge. Other pull requests skip it.
+  workflow-changes:
+    name: workflow changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      changed: ${{ steps.files.outputs.changed }}
+    steps:
+      - name: Does the pull request change .github/?
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/files" --paginate --jq '.[].filename')
+          if grep -q '^\.github/' <<< "$files"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  workflow-codeql:
+    needs: workflow-changes
+    if: needs.workflow-changes.outputs.changed == 'true'
+    uses: ./.github/workflows/codeql.yml
+    with:
+      own_commit: true
+      languages: '["actions"]'
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
   # The check to require in the rulesets: it always runs and fails if a job it needs failed or was
-  # cancelled (`semver checks (report)` is not one of them).
+  # cancelled (`semver checks (report)` is not one of them; the two workflow jobs are skipped on a
+  # pull request that does not change .github/ and on pushes).
   rust:
     name: rust
     if: always()
-    needs: [rust-lint, rust-tests, rust-tests-run, public-api]
+    needs: [rust-lint, rust-tests, rust-tests-run, public-api, workflow-changes, workflow-codeql]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -299,25 +299,16 @@ fn display_counts_of_the_pairwise_report() {
     );
 }
 
-/// The side files of outfmt 13 and 14 without a file name are refused, as are the ids of the
-/// deflines of records that kept none, before anything is written.
+/// The side files of outfmt 13 and 14 without a file name are refused before anything is written.
 #[test]
 fn refusals_come_before_any_output() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
-    for (formats, extra) in [
-        (&["14"][..], &[][..]),
-        (&["6"][..], &["-parse_deflines"][..]),
-    ] {
-        let queries = queries(&Inputs::path(&inputs.query));
-        let subjects = subjects(&Inputs::path(&inputs.subject));
-        let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, formats, extra);
-        let error = result.expect_err("refused");
-        assert!(
-            error.to_string().contains("not supported in"),
-            "{formats:?} {extra:?}: {error}"
-        );
-        assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
-    }
+    let queries = queries(&Inputs::path(&inputs.query));
+    let subjects = subjects(&Inputs::path(&inputs.subject));
+    let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, &["14"], &[]);
+    let error = result.expect_err("refused");
+    assert!(error.to_string().contains("not supported in"), "{error}");
+    assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
 }
 
 /// `check_options` (LOSAT Web's `validate`) fails where a run of the same formats fails before it
@@ -335,7 +326,6 @@ fn check_options_fails_as_a_run_does() {
         (&["11"][..], &[][..]),
         // NCBI's formatting handler: a custom delimiter that a field uses (W10).
         (&["6 delim=; qseqid staxids", "0"][..], &[][..]),
-        (&["6"][..], &["-parse_deflines"][..]),
         // NCBI's error of a matrix BLASTX does not take (IDENTITY, `std_matrix_only`).
         (&FORMATS[..], &["-matrix", "IDENTITY"][..]),
         (&FORMATS[..], &["-evalue", "0"][..]),
@@ -370,7 +360,30 @@ fn check_options_fails_as_a_run_does() {
         failed += usize::from(run.is_err());
     }
     // Every case but the three searches and the valid ranges fails.
-    assert_eq!(failed, 12);
+    assert_eq!(failed, 11);
+    // `-parse_deflines` passes the check: the records come later, read with the ids of their
+    // deflines (LOSAT Web's `register_inputs`; line WQA's sweep, D7, 2026-11-19).
+    let args = blastx_args(&inputs.query, &inputs.subject, &["-parse_deflines"]);
+    crate::algorithm::blastx::check_options(&args, &["6"]).unwrap();
+}
+
+// Two empty inputs end the command line's run with NCBI's error, with `-parse_deflines` as without
+// it (native CLI, `blastx -query empty -subject empty [-parse_deflines] -outfmt 6`: exit 3, `BLAST
+// engine error: Empty CBlastQueryVector`); `run_local` refused them with a message of LOSAT Web
+// under the option until line WQA's sweep, D7, 2026-11-19.
+#[test]
+fn two_empty_inputs_end_with_ncbis_error_with_parse_deflines_too() {
+    let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
+    for extra in [&[][..], &["-parse_deflines"][..]] {
+        let (result, outputs, diagnostics) = try_run(&inputs, &[], &[], &["6"], extra);
+        // NCBI's message as the command line writes it to its standard error.
+        let error = format!("{:#}", result.expect_err("no records"));
+        assert_eq!(
+            error, "BLAST engine error: Empty CBlastQueryVector\n",
+            "{extra:?}"
+        );
+        assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
+    }
 }
 
 /// Values that the command line's parser refuses and a caller of `run_local` can set itself get

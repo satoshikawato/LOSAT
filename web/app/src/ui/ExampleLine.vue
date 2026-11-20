@@ -44,6 +44,12 @@ const help = computed(
 function sentence(set: ExampleSet): string {
   const progress = load.value?.id === set.id ? load.value.progress : undefined;
   switch (progress?.state) {
+    // LOSAT is asked again before any request, or its decoders inflate the set: the offer "Downloads 8.0 MB from …", or
+    // "Downloading 43 bytes of 43 bytes…", beside the loader read as a download from the set's site (the fifth review
+    // of line WQA's D1 and D2, L1, 2026-11-19; its sixth review, 2026-11-20).
+    case 'asking':
+    case 'inflating':
+      return 'Waiting for LOSAT…';
     case 'reading':
       return 'Opening the saved copy…';
     case 'downloading':

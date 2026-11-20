@@ -21,7 +21,7 @@
 //! with the branch. Exact blastp builds no compressed table, and the switch does not act.
 //!
 //! The loops after the list (blastp-fast's fused loop with the branch-free two-hit test and the
-//! staged copy, `src/algorithm/blastp/x_seed_fused_clut.rs`; always taken, natively, on a table
+//! staged copy, `src/algorithm/blastp/x_seed_fused_clut.rs`; always taken on a table
 //! with the branch-free list) are part of the default run here, and the report must not change
 //! with the loop with the branch. The subjects include records shorter than a word, which take
 //! the branch-free test's loop without the staged copy.
@@ -29,7 +29,7 @@
 //! With `LOSAT_X_STATS` (and the `xstats` feature, as in `cargo test --all-features`) the
 //! `[X_STATS] BPFLAT lean= fseed= bf= branch=` line counts the subjects each loop on the flat table
 //! scanned, so the default arm is shown to run `x_scan_flat_lean` (the proteins) and
-//! `x_scan_flat_fseed_loop` (the records shorter than a word, natively), and the `=0` arm the loop with
+//! `x_scan_flat_fseed_loop` (the records shorter than a word), and the `=0` arm the loop with
 //! the branch alone; the reference table prints no such line; a build without the feature prints
 //! none. `LOSAT_X_STATS` changes neither the report nor the other messages. A build without the
 //! `parallel` feature runs the one-thread cases only.
@@ -306,7 +306,7 @@ fn blastp_fast_reports_do_not_depend_on_the_branch_free_list() {
                     // Each subject is scanned once per search (150 proteins and the three short
                     // records). Default: the proteins take the list two offsets per step, the
                     // records of 1, 3 and 4 residues the loop for subjects shorter than a word
-                    // (natively; wasm32 runs `bf` on every subject), none the loop with the branch.
+                    // (wasm32 too since 2026-11-18), none the loop with the branch.
                     assert_eq!(on_n[0], Some(150), "{msg}");
                     assert_eq!(on_n[1], Some(3), "{msg}");
                     assert_eq!(on_n[2], Some(0), "{msg}");

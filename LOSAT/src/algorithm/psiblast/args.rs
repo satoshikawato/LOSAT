@@ -345,7 +345,7 @@ pub struct PsiblastArgs {
     pub subject_loc: Option<String>,
     // NCBI's argument is a string (blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
-    #[arg(long, default_value = "0", value_name = "SPEC")]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 6, 7, 10 and 20", "6, 7, 10 and 20", "; with -in_pssm: 0, 6 and 7"))]
     pub outfmt: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1147-1152
     // ```c++

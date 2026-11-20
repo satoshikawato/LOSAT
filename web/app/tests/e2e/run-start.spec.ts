@@ -16,7 +16,7 @@ import { expect, type Download, type Locator, type Page } from '@playwright/test
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, openParameters, openSearch, paste, pickRun, program, storedOutputs, submit, waitStatus } from './support/search';
+import { chooseRun, openFiles, openParameters, openSearch, paste, pickRun, program, storedOutputs, submit, waitStatus } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 
@@ -57,7 +57,7 @@ async function downloaded(page: Page, click: () => Promise<void>): Promise<{ rea
 }
 
 /** A new directory of the test's output for a native run, with the inputs as query.fa and subject.fa. */
-function nativeDirectory(query: string, subject: string): string {
+function nativeDirectory(query: string, subject: string | Uint8Array): string {
   mkdirSync(test.info().outputPath(), { recursive: true });
   const directory = mkdtempSync(join(test.info().outputPath(), 'native-'));
   writeFileSync(join(directory, 'query.fa'), query);
@@ -66,14 +66,19 @@ function nativeDirectory(query: string, subject: string): string {
 }
 
 /**
- * The file of `-logfile run.log` that the native CLI writes for the search `words` (program first) on
- * the inputs, with the run's one thread: undefined without LOSAT_WEB_NATIVE.
+ * The file of `-logfile run.log` and the standard error that the native CLI writes for the search `words` (program
+ * first) on the inputs, with the run's one thread: undefined without LOSAT_WEB_NATIVE.
  */
-function nativeLogFile(words: readonly string[], query: string, subject: string): Buffer | undefined {
+function nativeLogRun(words: readonly string[], query: string, subject: string | Uint8Array): { file: Buffer; stderr: Buffer } | undefined {
   if (NATIVE === undefined) return undefined;
   const directory = nativeDirectory(query, subject);
-  spawnSync(NATIVE, [words[0]!, '-query', 'query.fa', '-subject', 'subject.fa', ...words.slice(1), '-logfile', 'run.log', '-num_threads', '1'], { cwd: directory });
-  return readFileSync(join(directory, 'run.log'));
+  const run = spawnSync(NATIVE, [words[0]!, '-query', 'query.fa', '-subject', 'subject.fa', ...words.slice(1), '-logfile', 'run.log', '-num_threads', '1'], { cwd: directory });
+  return { file: readFileSync(join(directory, 'run.log')), stderr: run.stderr };
+}
+
+/** The file of `-logfile run.log` of `nativeLogRun`. */
+function nativeLogFile(words: readonly string[], query: string, subject: string | Uint8Array): Buffer | undefined {
+  return nativeLogRun(words, query, subject)?.file;
 }
 
 // The file of -logfile of a completed run: TBLASTX writes the warning of -max_target_seqs 1 into it,
@@ -152,6 +157,177 @@ test('a failed TBLASTX run keeps the file of its -logfile, with NCBI\'s error, u
   expect(saved.bytes.toString('utf8')).toBe(shown);
   const native = nativeLogFile(['tblastx'], QUERY, EMPTY_SUBJECT);
   if (native !== undefined) expect(saved.bytes.equals(native), 'tblastx -logfile run.log, failed').toBe(true);
+});
+
+// Each output that a run could not write points to where its error is, as the engine says (ABI v2 §5, stream 9: the
+// place where it wrote the error; line WQA's sweep, D7, 2026-11-20), and the notice, the Outputs and Run details say
+// so. TBLASTX with -logfile run.log: -num_alignments 0, whose hit list of 0 fails the tabular formats, writes BLAST+'s
+// error where the run's messages go, the file of -logfile (which then holds what the tabular formats' search wrote: the
+// CLI's run of the argv's outfmt 0 writes none of it); a subject title that NCBI cannot decode stops them with LOSAT's
+// own refusal, which goes to the Warnings, as the CLI writes it to its standard error whatever -logfile is (the file
+// stays empty, as the CLI's). With -logfile /dev/null BLAST+'s error is written nowhere, and LOSAT's still to the
+// Warnings.
+test("TBLASTX with -logfile: the outputs that could not be written point to where the run wrote their error", async ({ page }, testInfo) => {
+  if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the CLI's file: ${NO_NATIVE_REASON}` });
+  const notice = (kind: string) => page.locator(`[data-testid="results-notice"][data-kind="${kind}"]`);
+  const bad = Buffer.concat([Buffer.from('>Subject_9 bad x'), Buffer.from([0x81]), Buffer.from(`y title\n${dna(7, 300)}\n`)]);
+  const refusal = 'subject record 1 (Subject_9) has a title whose non-UTF-8 bytes';
+  const inFile = "in the file of the run's -logfile, run.log, under Outputs";
+  const nowhere = "not kept, as the run's -logfile writes its messages nowhere";
+  const warnings = 'under Warnings in Run details';
+  const cases = [
+    {
+      subject: SUBJECT,
+      alignments: '0',
+      extra: '-logfile run.log',
+      kind: 'no-tabular-hits',
+      text: `-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error, ${inFile}), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.`,
+      place: inFile,
+      file: 'No hits are being saved',
+      diagnostics: undefined,
+      details: `The run's warnings are ${inFile}.`,
+    },
+    {
+      subject: bad,
+      alignments: undefined,
+      extra: '-logfile run.log',
+      kind: 'no-tabular-output',
+      text: `outfmt 6 and 7 could not be written, so this run has no HSP records. Their error is ${warnings}.`,
+      place: warnings,
+      file: '',
+      diagnostics: refusal,
+      details: undefined,
+    },
+    {
+      subject: SUBJECT,
+      alignments: '0',
+      extra: '-logfile /dev/null',
+      kind: 'no-tabular-hits',
+      text: `-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error, ${nowhere}), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.`,
+      place: nowhere,
+      file: undefined,
+      diagnostics: undefined,
+      details: `The run's warnings are ${nowhere}.`,
+    },
+    {
+      subject: bad,
+      alignments: undefined,
+      extra: '-logfile /dev/null',
+      kind: 'no-tabular-output',
+      text: `outfmt 6 and 7 could not be written, so this run has no HSP records. Their error is ${warnings}.`,
+      place: warnings,
+      file: undefined,
+      diagnostics: refusal,
+      details: `The run's other warnings are ${nowhere}.`,
+    },
+  ] as const;
+  for (const [index, { subject, alignments, extra, kind, text, place, file, diagnostics, details }] of cases.entries()) {
+    // Each case on a page of its own: its run is run 1.
+    if (index > 0) await openSearch(page);
+    const run = 1;
+    await program(page, 'tblastx');
+    await paste(page, 'query', QUERY);
+    if (typeof subject === 'string') await paste(page, 'subject', subject);
+    else await openFiles(page, 'subject', [{ name: 'subject.fa', text: subject }]);
+    await openParameters(page);
+    // -num_alignments is a field of the form.
+    if (alignments !== undefined) await page.getByTestId('param-num_alignments').fill(alignments);
+    await page.getByTestId('param-extra').fill(extra);
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, run, 'completed');
+    await chooseRun(page, run);
+    await expect(notice(kind)).toHaveText(text);
+    await page.getByTestId('results-view-outputs').click();
+    await page.getByTestId('format-6').click();
+    await expect(page.getByTestId('outputs-not-written')).toHaveText(`outfmt 6 could not be written: its error is ${place}.`);
+    await page.getByTestId('format-0').click();
+    await expect(page.getByTestId('outputs-not-written')).toHaveCount(0);
+    if (file === undefined) {
+      await expect(page.getByTestId('format-run-files')).toHaveCount(0);
+    } else {
+      await page.getByTestId('format-run-files').click();
+      const shown = page.getByTestId('run-file-0');
+      if (file === '') {
+        await expect(shown.getByTestId('run-file-empty')).toHaveText('The file is empty.');
+        // The CLI's file of the same argv (outfmt 0, which writes the alignments) is empty too, and the CLI's run of
+        // outfmt 6 writes LOSAT's refusal to its standard error, none to the file.
+        const native = nativeLogFile(['tblastx'], QUERY, subject);
+        if (native !== undefined) expect(native.length, 'tblastx -logfile run.log, an undecodable subject title').toBe(0);
+        const six = nativeLogRun(['tblastx', '-outfmt', '6'], QUERY, subject);
+        if (six !== undefined) {
+          expect(six.stderr.toString('utf8'), 'tblastx -outfmt 6 -logfile run.log: standard error').toContain(refusal);
+          expect(six.file.length, 'tblastx -outfmt 6 -logfile run.log: the file').toBe(0);
+        }
+      } else {
+        await expect(shown.getByTestId('run-file-text')).toContainText(file);
+      }
+    }
+    // Run details: the Warnings (stream 3) and where the run's other messages are.
+    await page.getByTestId('results-view-details').click();
+    if (diagnostics === undefined) await expect(page.getByTestId('run-diagnostics')).toHaveCount(0);
+    else await expect(page.getByTestId('run-diagnostics')).toContainText(diagnostics);
+    if (details === undefined) await expect(page.getByTestId('run-diagnostics-place')).toHaveCount(0);
+    else await expect(page.getByTestId('run-diagnostics-place')).toHaveText(details);
+    await expect(page.getByTestId('run-diagnostics-none')).toHaveCount(0);
+  }
+});
+
+// Run details says where the run's warnings are, as the engine says (ABI v2 §5, stream 10; line WQA's sweep, D7,
+// 2026-11-20): TBLASTX writes the messages of its run into the file of -logfile (the warning of -max_target_seqs 1
+// here, as the CLI's file holds it), or nowhere with -logfile /dev/null; with -logfile -, and in BLASTN whatever the
+// -logfile, they are its Warnings. "The engine wrote no warnings" is said where the warnings go and none came: a
+// TBLASTX search without warnings leaves the file of -logfile empty, as the CLI's.
+test("Run details says where the run's warnings are: the file of -logfile, nowhere, or its Warnings", async ({ page, browserName }) => {
+  const cases = [
+    { id: 'tblastx', extra: '-logfile run.log', warned: true, place: "The run's warnings are in the file of the run's -logfile, run.log, under Outputs.", file: 'Examining 5' },
+    { id: 'tblastx', extra: '-logfile /dev/null', warned: true, place: "The run's warnings are not kept, as the run's -logfile writes its messages nowhere.", file: undefined },
+    { id: 'tblastx', extra: '-logfile -', warned: true, place: undefined, file: undefined },
+    { id: 'blastn', extra: '-logfile run.log', warned: true, place: undefined, file: '' },
+    { id: 'tblastx', extra: '-logfile run.log', warned: false, place: undefined, file: '' },
+  ] as const;
+  for (const [index, { id, extra, warned, place, file }] of cases.entries()) {
+    // Each case on a page of its own: its run is run 1.
+    if (index > 0) await openSearch(page);
+    const run = 1;
+    await program(page, id);
+    await paste(page, 'query', QUERY);
+    await paste(page, 'subject', SUBJECT);
+    await openParameters(page);
+    // "Max target sequences" is a field of the form.
+    if (warned) {
+      await page.getByTestId('param-max_target_seqs').selectOption('other');
+      await page.getByTestId('param-max_target_seqs-other').fill('1');
+    }
+    await page.getByTestId('param-extra').fill(extra);
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, run, 'completed');
+    await chooseRun(page, run);
+    await page.getByTestId('results-view-details').click();
+    const warning = `Warning: [${id}] Examining 5 or more matches is recommended`;
+    if (!warned) {
+      await expect(page.getByTestId('run-diagnostics-none')).toHaveText('The engine wrote no warnings.');
+      await expect(page.getByTestId('run-diagnostics')).toHaveCount(0);
+      await expect(page.getByTestId('run-diagnostics-place')).toHaveCount(0);
+    } else if (place === undefined) {
+      await expect(page.getByTestId('run-diagnostics')).toContainText(warning);
+      await expect(page.getByTestId('run-diagnostics-place')).toHaveCount(0);
+    } else {
+      await expect(page.getByTestId('run-diagnostics-place')).toHaveText(place);
+      await expect(page.getByTestId('run-diagnostics')).toHaveCount(0);
+    }
+    if (warned) await expect(page.getByTestId('run-diagnostics-none')).toHaveCount(0);
+    await shoot(page.getByTestId('run-details'), `07-run-details-${id}-${extra.replace(/[^a-z]+/g, '-')}${warned ? '' : '-no-warning'}`, browserName);
+    await page.getByTestId('results-view-outputs').click();
+    if (file === undefined) await expect(page.getByTestId('format-run-files')).toHaveCount(0);
+    else {
+      await page.getByTestId('format-run-files').click();
+      const shown = page.getByTestId('run-file-0');
+      if (file === '') await expect(shown.getByTestId('run-file-empty')).toHaveText('The file is empty.');
+      else await expect(shown.getByTestId('run-file-text')).toContainText(warning);
+    }
+  }
 });
 
 // -conffile: the engine's start names the file, the form asks for it, and without it the engine's error

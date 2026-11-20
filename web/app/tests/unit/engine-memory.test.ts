@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { Worker as NodeWorker } from 'node:worker_threads';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { instantiateSerial } from 'losat';
 import { OUTPUT_FORMATS } from 'losat/domain';
 import { findReactors } from '../../build/reactors';
@@ -209,19 +209,46 @@ describe('endWaits', () => {
   });
 });
 
+// Line WQA's sweep, D8 (2026-11-20): the keeper opened a BroadcastChannel, which Firefox refuses with SecurityError where
+// the site's data is blocked; it listens on its link now (link.ts). The browser here refuses BroadcastChannel.
 describe('MemoryKeeper', () => {
-  it('grows the memory to its maximum when asked on its channel, and answers there', async () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** The keeper's link: the keeper's end, and the main thread's, which answers the hello as the Gateway does (answerLink). */
+  function keeperLink(): { readonly port: MessagePort; readonly gateway: MessagePort; readonly received: unknown[] } {
+    vi.stubGlobal(
+      'BroadcastChannel',
+      class {
+        constructor() {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        }
+      },
+    );
+    const channel = new MessageChannel();
+    const received: unknown[] = [];
+    channel.port2.onmessage = (event: MessageEvent<{ type?: string }>) => {
+      if (event.data?.type === 'hello') channel.port2.postMessage({ type: 'hello' });
+      else received.push(event.data);
+    };
+    return { port: channel.port1, gateway: channel.port2, received };
+  }
+
+  async function grown(received: unknown[]): Promise<void> {
+    for (let i = 0; i < 1000 && received.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(received).toEqual<KeeperGrown[]>([{ type: 'grown' }]);
+  }
+
+  it('is ready once its link carried messages both ways, then grows the memory to its maximum when asked there, and answers there', async () => {
     const keeper = new MemoryKeeper();
     const memory = new WebAssembly.Memory({ initial: 1, maximum: 6, shared: true });
-    const name = `test-keeper-${Math.random()}`;
-    expect(keeper.receive({ type: 'keep', memory, maximumPages: 6, channel: name })).toEqual({ type: 'ready' });
-    const gateway = new BroadcastChannel(name);
+    const { port, gateway, received } = keeperLink();
     try {
-      const answer = new Promise<KeeperGrown>((resolve) => {
-        gateway.onmessage = (event: MessageEvent<KeeperGrown>) => resolve(event.data);
-      });
+      // The answer to its hello came back: the link carries messages also while the Engine worker runs synchronously.
+      expect(await keeper.receive({ type: 'keep', memory, maximumPages: 6, port })).toEqual({ type: 'ready' });
       gateway.postMessage({ type: 'grow' });
-      expect(await answer).toEqual({ type: 'grown' });
+      await grown(received);
       expect(memory.buffer.byteLength).toBe(6 * PAGE);
       // and ended the waits of the memory's threads (endWaits).
       expect(Atomics.load(new Int32Array(memory.buffer), WAITS_ENDING_ADDRESS / 4)).toBe(1);
@@ -231,6 +258,21 @@ describe('MemoryKeeper', () => {
     }
   });
 
+  it('is not ready while no answer to its hello came', async () => {
+    const keeper = new MemoryKeeper();
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 6, shared: true });
+    const channel = new MessageChannel();
+    let ready = false;
+    void keeper.receive({ type: 'keep', memory, maximumPages: 6, port: channel.port1 }).then(() => (ready = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ready).toBe(false);
+    channel.port2.postMessage({ type: 'hello' });
+    for (let i = 0; i < 1000 && !ready; i++) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(ready).toBe(true);
+    channel.port2.close();
+    keeper.close();
+  });
+
   it('answers also when the grow throws: the Gateway ends the runtime only on the answer', async () => {
     const keeper = new MemoryKeeper();
     const broken = {
@@ -238,15 +280,11 @@ describe('MemoryKeeper', () => {
         throw new Error('not readable');
       },
     } as unknown as WebAssembly.Memory;
-    const name = `test-keeper-${Math.random()}`;
-    keeper.receive({ type: 'keep', memory: broken, maximumPages: 6, channel: name });
-    const gateway = new BroadcastChannel(name);
+    const { port, gateway, received } = keeperLink();
     try {
-      const answer = new Promise<KeeperGrown>((resolve) => {
-        gateway.onmessage = (event: MessageEvent<KeeperGrown>) => resolve(event.data);
-      });
+      await keeper.receive({ type: 'keep', memory: broken, maximumPages: 6, port });
       gateway.postMessage({ type: 'grow' });
-      expect(await answer).toEqual({ type: 'grown' });
+      await grown(received);
     } finally {
       gateway.close();
       keeper.close();

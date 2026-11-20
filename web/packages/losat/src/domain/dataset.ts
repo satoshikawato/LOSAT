@@ -37,6 +37,17 @@ export interface RecordKey {
 }
 
 /**
+ * The IDs that the outputs of a run show for the records of its query and its subject, in the
+ * order of the records, where the engine read them from the deflines (`-parse_deflines`: ABI v2 §9
+ * *inputs*, `shown_id`): `AB000001.1` of `>gb|AB000001.1| ...`, the first two columns of outfmt 6
+ * and 7. A run without them shows each record's ID (`RecordKey.id`).
+ */
+export interface ShownIds {
+  readonly query: readonly string[];
+  readonly subject: readonly string[];
+}
+
+/**
  * Compares the record table of a run input with the records that the engine read from the
  * same bytes (plan §5.4). Returns a description of the first difference, or undefined if
  * they agree.

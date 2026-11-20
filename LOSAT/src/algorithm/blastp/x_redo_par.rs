@@ -1348,6 +1348,7 @@ fn x_result_difference(
 mod tests {
     use super::*;
     use crate::algorithm::blastp::encoding::EncodedProtein;
+    use crate::utils::glibc_fma_libm::GlibcLibm;
 
     const ECUTOFF: f64 = 0.002;
 
@@ -2526,7 +2527,7 @@ mod tests {
             compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
             alphsize: crate::utils::matrix::BLASTAA_SIZE as i32,
             composition_test_index: 0,
-            log_k: fixture.gapped_params.k.ln(),
+            log_k: fixture.gapped_params.k.glibc_ln(),
             score_divisor: SCALE,
             smith_waterman: false,
             near_identical_cutoff: 1.74 * std::f64::consts::LN_2 / scaled_lambda,

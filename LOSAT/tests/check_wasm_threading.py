@@ -313,13 +313,10 @@ def main():
     # check_losat.py: stdout, stderr, the PSSM files) and of the -db fixtures (db_search_manifest/
     # psiblast*.tsv, every row; db_search_fixtures.py check). Its PSSM queries (-in_pssm) open no query
     # input, as NCBI reads none, and its ASN.1 PSSM files are staged under a name without a process
-    # id, which WASI does not have (LOSAT/src/utils/process_id.rs). The -db rows run with
-    # PD-LOSAT-PLATFORM-LIBM's rule on the PSSM files (Owner 2026-11-18, WASI=b): in 14 of them the
-    # ASN.1 PSSM's informationContent comes from log() and differs in the last of its 15 digits by 1,
-    # the bytes NCBI BLAST+ 2.17.0 writes with glibc's FMA variant of log() off (Wasm has no FMA); the
-    # frozen bytes had it on. `--libm-last-digit` names the native command, whose run of such a row
-    # gives the frozen bytes of a PSSM file over 64 KB (not frozen; compared by its SHA-256). Every
-    # other byte, standard output, standard error and the exit status stay exact.
+    # id, which WASI does not have (LOSAT/src/utils/process_id.rs). The -db rows are compared byte for
+    # byte, all of them: since the port of glibc's FMA exp/log/pow (LOSAT/src/utils/glibc_fma_libm.rs)
+    # WASI writes the frozen bytes in the 14 rows that PD-LOSAT-PLATFORM-LIBM 1.1 named, where the
+    # ASN.1 PSSM's informationContent had differed in the last of its 15 digits by 1.
     # NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
     # ```c++
     # 	char c;
@@ -353,7 +350,7 @@ def main():
                 ("psiblast-fixtures", "outfmt0", [ROOT / "docs/evidence/losat_web_e2a/check_losat.py", "--losat", wrapper,
                                                   "--programs", "psiblast", "--threads", "1"], "\tDIFF\t"),
                 ("psiblast-fixtures", "db", [TESTS / "db_search_fixtures.py", "check", "--losat", wrapper, "--program",
-                                             "psiblast", "--threads", "1", "--libm-last-digit", args.native.resolve()],
+                                             "psiblast", "--threads", "1"],
                  "\tdiffers\t"),
                 *(("blastx-xml-fixtures", *checker) for checker in blastx_prescan_checkers(wrapper))]:
             label = f"{section}/{kind}/{name}"

@@ -6,6 +6,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/unified_pvalues.c
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::{bail, Result};
 use std::sync::OnceLock;
 
@@ -1422,7 +1423,7 @@ fn freq_ratio_to_score_square(
             if *value == 0.0 {
                 *value = COMPO_SCORE_MIN as f64;
             } else {
-                *value = value.ln() / lambda;
+                *value = value.glibc_ln() / lambda;
             }
         }
     }
@@ -1479,9 +1480,9 @@ fn calc_lambda_full_precision_from_scores(
         // `fold` takes f before f is evaluated again, so the Newton test
         // below compares this iteration's f with the previous iteration's f.
         let fold = f;
-        let lambda = -x.ln();
+        let lambda = -x.glibc_ln();
         let was_newton = is_newton;
-        let x_pow_max_score = (-max_score * lambda).exp();
+        let x_pow_max_score = (-max_score * lambda).glibc_exp();
         f = -x_pow_max_score;
         let mut slope = max_score * f / x;
 
@@ -1495,7 +1496,7 @@ fn calc_lambda_full_precision_from_scores(
                 }
                 let ff = if max_score != score[i][j] {
                     let diff_score = max_score - score[i][j];
-                    let ff = row_prob[i] * col_p * (-lambda * diff_score).exp();
+                    let ff = row_prob[i] * col_p * (-lambda * diff_score).glibc_exp();
                     slope += diff_score * ff / x;
                     ff
                 } else {
@@ -1553,7 +1554,7 @@ fn calc_lambda_full_precision_from_scores(
     }
 
     if k < K_LAMBDA_ITERATION_LIMIT {
-        (-x.ln(), k)
+        (-x.glibc_ln(), k)
     } else {
         (-1.0, k)
     }
@@ -1576,10 +1577,10 @@ pub fn blast_get_relative_entropy(
         let temp = (a[i] + b[i]) / 2.0;
         if temp > 0.0 {
             if a[i] > 0.0 {
-                value += a[i] * (a[i] / temp).ln() / 2.0;
+                value += a[i] * (a[i] / temp).glibc_ln() / 2.0;
             }
             if b[i] > 0.0 {
-                value += b[i] * (b[i] / temp).ln() / 2.0;
+                value += b[i] * (b[i] / temp).glibc_ln() / 2.0;
             }
         }
     }
@@ -2493,7 +2494,7 @@ fn evaluate_re_functions(
     values[0] = 0.0;
     values[1] = 0.0;
     for k in 0..alphsize * alphsize {
-        let mut temp = (x[k] / q[k]).ln();
+        let mut temp = (x[k] / q[k]).glibc_ln();
         values[0] += x[k] * temp;
         grads[0][k] = temp + 1.0;
         if constrain_rel_entropy {
@@ -2518,7 +2519,7 @@ fn compute_scores_from_probs(
     for i in 0..alphsize {
         for j in 0..alphsize {
             let k = i * alphsize + j;
-            scores[k] = (target_freqs[k] / (row_freqs[i] * col_freqs[j])).ln();
+            scores[k] = (target_freqs[k] / (row_freqs[i] * col_freqs[j])).glibc_ln();
         }
     }
 }
@@ -2856,7 +2857,7 @@ pub fn blast_composition_pvalue(lambda: f64) -> f64 {
 pub fn blast_overall_p_value(p_comp: f64, p_alignment: f64) -> f64 {
     let product = p_comp * p_alignment;
     if product > 0.0 {
-        product * (1.0 - product.ln())
+        product * (1.0 - product.glibc_ln())
     } else {
         product
     }
@@ -3292,12 +3293,25 @@ fn high_pair_either_seq(
 //     /* convert from radians to degrees */
 //     angle = angle * HALF_CIRCLE_DEGREES / PI;
 // ```
-// No clamp and no zero guard: a cosine rounded below -1 or above 1, or a zero distance, gives
-// NaN, and `angle > ANGLE_DEGREE_THRESHOLD` is then false (the relative-entropy rule), as in NCBI.
-fn matrix_adjust_rule_angle(d_m_mat: f64, d_q_mat: f64, d_m_q: f64) -> f64 {
-    let angle =
-        ((d_m_mat * d_m_mat + d_q_mat * d_q_mat - d_m_q * d_m_q) / 2.0 / d_m_mat / d_q_mat).acos();
-    angle * HALF_CIRCLE_DEGREES / PI
+// `angle > ANGLE_DEGREE_THRESHOLD` (compo_mode_condition.c:221) for this angle, decided from the
+// cosine without a libm: glibc's `acos(cosine) * HALF_CIRCLE_DEGREES / PI` (on x86-64 with FMA,
+// where NCBI wrote the tests' bytes) is above 70 exactly when the cosine is in
+// [-1, ANGLE_COSINE_LIMIT). `acos` decreases; at the limit the expression is 70.0 and one double
+// below it 70.00000000000001. Every double within 2^24 steps of the limit and 10^7 random cosines
+// in [-1, 1] give the same decision with glibc 2.35 and 2.39 (with and without their FMA
+// variants) and with musl (WASI), which also all put the limit at this double; another platform's
+// `acos` could move it by a step (`utils::glibc_fma_libm`).
+// No clamp and no zero guard: a cosine rounded below -1 or above 1, or a zero distance (NaN), is
+// outside the range, where NCBI's `acos` gives NaN and `angle > ANGLE_DEGREE_THRESHOLD` is false
+// (the relative-entropy rule).
+const ANGLE_COSINE_LIMIT: f64 = f64::from_bits(0x3fd5_e3a8_7442_b4c9); // 0.34202014306613343
+                                                                       // The limit is for these constants.
+const _: () =
+    assert!(HALF_CIRCLE_DEGREES == 180.0 && PI == 3.1415926543 && ANGLE_DEGREE_THRESHOLD == 70.0);
+
+fn matrix_adjust_rule_angle_above_threshold(d_m_mat: f64, d_q_mat: f64, d_m_q: f64) -> bool {
+    let cosine = (d_m_mat * d_m_mat + d_q_mat * d_q_mat - d_m_q * d_m_q) / 2.0 / d_m_mat / d_q_mat;
+    (-1.0..ANGLE_COSINE_LIMIT).contains(&cosine)
 }
 
 fn blast_choose_matrix_adjust_rule(
@@ -3343,7 +3357,8 @@ fn blast_choose_matrix_adjust_rule(
             let d_q_mat = blast_get_relative_entropy(prob_array1, p_matrix);
             let d_m_q = blast_get_relative_entropy(prob_array2, prob_array1);
 
-            let angle = matrix_adjust_rule_angle(d_m_mat, d_q_mat, d_m_q);
+            let angle_above_threshold =
+                matrix_adjust_rule_angle_above_threshold(d_m_mat, d_q_mat, d_m_q);
 
             let len_large = (length1.max(length2)) as f64;
             let len_small = (length1.min(length2)) as f64;
@@ -3363,7 +3378,7 @@ fn blast_choose_matrix_adjust_rule(
                 Ok(EMatrixAdjustRule::UserSpecifiedRelEntropy)
             } else if d_m_q > QUERY_MATCH_DISTANCE_THRESHOLD
                 && len_large / len_small > LENGTH_RATIO_THRESHOLD
-                && angle > ANGLE_DEGREE_THRESHOLD
+                && angle_above_threshold
             {
                 Ok(EMatrixAdjustRule::CompoScaleOldMatrix)
             } else {
@@ -3705,14 +3720,51 @@ mod tests {
 
     #[test]
     fn matrix_adjust_rule_angle_follows_the_ncbi_expression() {
-        // compo_mode_condition.c:200-204. NCBI's PI (3.1415926543) is above pi, so its degrees
-        // are a little smaller: a right angle is not 90 and a straight one is not 180.
-        assert_eq!(matrix_adjust_rule_angle(0.3, 0.4, 0.5), 89.99999997965406);
-        assert_eq!(matrix_adjust_rule_angle(0.3, 0.2, 0.5), 179.99999995930813);
+        // compo_mode_condition.c:200-204. A right angle (cosine 0) and a straight one (cosine -1)
+        // are above 70 degrees.
+        assert!(matrix_adjust_rule_angle_above_threshold(0.3, 0.4, 0.5));
+        assert!(matrix_adjust_rule_angle_above_threshold(0.3, 0.2, 0.5));
         // A cosine below -1 (a collapsed triangle) and a zero distance give NaN, not 180 or 0.
-        assert!(matrix_adjust_rule_angle(0.3, 0.2, 0.5000000001).is_nan());
-        assert!(matrix_adjust_rule_angle(0.3, 0.0, 0.3).is_nan());
-        assert!(matrix_adjust_rule_angle(0.0, 0.0, 0.0).is_nan());
+        assert!(!matrix_adjust_rule_angle_above_threshold(
+            0.3,
+            0.2,
+            0.5000000001
+        ));
+        assert!(!matrix_adjust_rule_angle_above_threshold(0.3, 0.0, 0.3));
+        assert!(!matrix_adjust_rule_angle_above_threshold(0.0, 0.0, 0.0));
+        // Around the limit: 70.0 degrees at it, 70.00000000000001 one double below.
+        let below = f64::from_bits(ANGLE_COSINE_LIMIT.to_bits() - 1);
+        assert!((-1.0..ANGLE_COSINE_LIMIT).contains(&below));
+        assert!(!(-1.0..ANGLE_COSINE_LIMIT).contains(&ANGLE_COSINE_LIMIT));
+    }
+
+    #[cfg(all(target_os = "linux", target_env = "gnu", target_arch = "x86_64"))]
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "checks the limit against glibc's own acos, NCBI's"
+    )]
+    fn matrix_adjust_rule_limit_is_glibcs() {
+        // NCBI's expression with glibc's acos against the limit, for every double within 2^16
+        // steps of it and for cosines across [-1.25, 1.25].
+        let ncbi = |cosine: f64| cosine.acos() * HALF_CIRCLE_DEGREES / PI > ANGLE_DEGREE_THRESHOLD;
+        let limit = ANGLE_COSINE_LIMIT.to_bits();
+        for bits in limit - (1 << 16)..limit + (1 << 16) {
+            let cosine = f64::from_bits(bits);
+            assert_eq!(
+                ncbi(cosine),
+                (-1.0..ANGLE_COSINE_LIMIT).contains(&cosine),
+                "{cosine}"
+            );
+        }
+        for i in -125_000..=125_000 {
+            let cosine = f64::from(i) * 1e-5;
+            assert_eq!(
+                ncbi(cosine),
+                (-1.0..ANGLE_COSINE_LIMIT).contains(&cosine),
+                "{cosine}"
+            );
+        }
     }
 
     // The query and match distances of the rule, and the cosine of its angle.
@@ -3730,17 +3782,16 @@ mod tests {
     fn matrix_adjust_rule_takes_ncbi_degrees_at_the_threshold() {
         // A query shifted from BLOSUM62's background (letter 11 up, letter 2 down) against the
         // distant, four times longer match of the test above. At the first shift the angle is
-        // 70.0000000079 degrees with the true pi but 69.9999999921 with NCBI's PI, so NCBI takes
-        // the relative-entropy rule; past NCBI's crossing it takes the scaling rule.
+        // 70.0000000079 degrees with the true pi (the cosine is below cos 70 degrees,
+        // 0.3420201433256688) but 69.9999999921 with NCBI's PI (not below the limit), so NCBI
+        // takes the relative-entropy rule; past NCBI's crossing it takes the scaling rule.
         let mut subject = [0.8 / 19.0; COMPO_NUM_TRUE_AA];
         subject[11] = 0.2;
         let at = |shift: f64| {
             let mut query = BLOSUM62_BG;
             query[11] += shift;
             query[2] -= shift;
-            let degrees = matrix_adjust_rule_cosine(&query, &subject)
-                .acos()
-                .to_degrees();
+            let cosine = matrix_adjust_rule_cosine(&query, &subject);
             let rule = blast_choose_matrix_adjust_rule(
                 100,
                 400,
@@ -3750,10 +3801,13 @@ mod tests {
                 BlastCompoAdjustMode::CompositionMatrixAdjust,
             )
             .unwrap();
-            (degrees, rule)
+            (cosine, rule)
         };
-        let (degrees, rule) = at(0.03708335181724542);
-        assert!(degrees > ANGLE_DEGREE_THRESHOLD, "{degrees}");
+        let (cosine, rule) = at(0.03708335181724542);
+        assert!(
+            (ANGLE_COSINE_LIMIT..0.3420201433256688).contains(&cosine),
+            "{cosine}"
+        );
         assert_eq!(rule, EMatrixAdjustRule::UserSpecifiedRelEntropy);
         let (_, rule) = at(0.03708335187554269);
         assert_eq!(rule, EMatrixAdjustRule::CompoScaleOldMatrix);
@@ -3799,7 +3853,7 @@ mod tests {
     fn test_blast_overall_p_value_matches_fisher_style_formula() {
         let combined = blast_overall_p_value(0.2, 0.3);
         let product = 0.06f64;
-        assert!((combined - (product * (1.0 - product.ln()))).abs() < 1.0e-12);
+        assert!((combined - (product * (1.0 - product.glibc_ln()))).abs() < 1.0e-12);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
@@ -4016,9 +4070,9 @@ mod tests {
         let mut k = 0;
         while k < K_LAMBDA_ITERATION_LIMIT {
             let fold = f;
-            let lambda = -x.ln();
+            let lambda = -x.glibc_ln();
             let was_newton = is_newton;
-            let x_pow_max_score = (-max_score * lambda).exp();
+            let x_pow_max_score = (-max_score * lambda).glibc_exp();
             f = -x_pow_max_score;
             let mut slope = max_score * f / x;
             for i in 0..alphsize {
@@ -4028,7 +4082,7 @@ mod tests {
                     }
                     let ff = if max_score != score[i][j] {
                         let diff_score = max_score - score[i][j];
-                        let ff = row_prob[i] * col_prob[j] * (-lambda * diff_score).exp();
+                        let ff = row_prob[i] * col_prob[j] * (-lambda * diff_score).glibc_exp();
                         slope += diff_score * ff / x;
                         ff
                     } else {
@@ -4074,7 +4128,7 @@ mod tests {
             k += 1;
         }
         let lambda = if k < K_LAMBDA_ITERATION_LIMIT {
-            -x.ln()
+            -x.glibc_ln()
         } else {
             -1.0
         };
@@ -4122,7 +4176,7 @@ mod tests {
             let mut phi = -1.0;
             for i in 0..2 {
                 for j in 0..2 {
-                    phi += rows[i] * cols[j] * (lambda * matrix[i][j]).exp();
+                    phi += rows[i] * cols[j] * (lambda * matrix[i][j]).glibc_exp();
                 }
             }
             assert!(phi.abs() <= 1.0e-12, "case {name}: phi {phi}");

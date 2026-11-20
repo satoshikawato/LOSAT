@@ -6,37 +6,44 @@
 // -num_threads and validate that argv (ABI v2 §7), register the query and, unless the
 // instance holds it, the subject, compare the records that the engine read with the
 // record tables (plan §5.4; a difference stops the run before any output), run, and send
-// the output streams to the Data worker's port, with the engine's discards of an output that
-// failed alone (stream 9). A BLASTN search with -window_masker_db also
-// gives the engine the counts file, which the instance holds for later BLASTN searches. A search
-// with -conffile gives the engine the registry file for that search only, and the files that a
-// run makes besides its outputs (stream 8: the file of -logfile) come back with its result, or with
-// its error when it fails (line RG E1w-3b); they never go to the Data worker. The warnings of a run
-// (stream 3) go to the Data worker; a run that the engine failed ends its output with `fail`, so that
-// the Data worker keeps those of a failed run (line WQA's sweep, D3, 2026-11-19).
+// the output streams to the Data worker's port, with the engine's signal of each output that
+// failed (stream 9: the Data worker drops what it received of that output). A BLASTN search
+// with -window_masker_db also gives the engine the counts file, which the instance holds for
+// later BLASTN searches. A search with -conffile gives the engine the registry file for that
+// search only, and the files that a run makes besides its outputs (stream 8: the file of
+// -logfile) come back with its result, or with its error when it fails (line RG E1w-3b); they
+// never go to the Data worker. Where the run's messages go (stream 10: the diagnostics, the file of
+// -logfile, or nowhere) comes back with its result too (line WQA's sweep, D7, 2026-11-20). The
+// warnings of a run (stream 3) go to the Data worker; a run that the engine failed ends its output
+// with `fail`, so that the Data worker keeps those of a failed run (line WQA's sweep, D3,
+// 2026-11-19).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
-import { readStoredZip, type RunFile } from '../../domain/run-files.js';
+import { readStoredZip, type MessagePlace, type RunFile } from '../../domain/run-files.js';
 import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase } from '../../ports/engine.js';
-import { isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
+import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
 import {
-  discardedStream,
+  discardSignal,
   DISCARD_STREAM,
   EngineCallError,
   FILE_REGISTRY,
   FILE_WINDOW_MASKER_COUNTS,
   loadFile,
+  MESSAGES_STREAM,
+  messagesSignal,
   ROLE_QUERY,
   ROLE_SUBJECT,
   RUN_FILES_STREAM,
   type FileInfo,
+  type RegisteredInputs,
 } from '../reactor/abi.js';
 import type { ReactorArtifact } from '../reactor/artifact.js';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance.js';
 import { createSharedMemory } from '../reactor/shared-memory.js';
 import { RunOutputWriter } from '../run-output/writer.js';
 import type { InstanceUse } from './instance-use.js';
+import type { MainLinks } from './link.js';
 import type { RuntimePath, WorkerCounts, WorkerRun, WorkerRunResult } from './protocol.js';
 import { ThreadHost } from './thread-host.js';
 import { warmUp } from './warm-up.js';
@@ -45,9 +52,8 @@ export interface RuntimeOptions {
   readonly serial: () => Promise<WebAssembly.Module>;
   readonly threads: () => Promise<{ readonly module: WebAssembly.Module; readonly artifact: ReactorArtifact }>;
   readonly builds: { readonly serial: string; readonly threads: string };
-  readonly faultChannel: string;
-  /** The channel of the keeper of the threaded instance's shared memory (memory-keeper.ts). */
-  readonly keeperChannel: string;
+  /** The links of the thread workers and the keeper of the threaded instance's shared memory to the main thread (link.ts). */
+  readonly main: MainLinks;
   /**
    * Whether the threaded instance is in use, shared with the Gateway (instance-use.ts): the
    * calls into it and the threads of its search pool count, and the Gateway ends this worker
@@ -176,15 +182,22 @@ export class EngineRuntime {
     const threads = loaded.path === 'threaded' ? request.threads : 1;
     const argv = [...request.argv, '-num_threads', String(threads)];
     const abi = loaded.instance.abi;
-    // What the engine holds for this search alone: the registry file of -conffile and the query. Each
-    // is released once, before `end` or when the search fails, unless the instance stopped.
+    // What the engine holds for this search alone: the registry file of -conffile, the query, and the
+    // subject of inputs read together for this argv (`registerInputs`). Each is released once, before
+    // `end` or when the search fails, unless the instance stopped.
     let registry = registryHandle;
     let query: number | undefined;
+    let ownSubject: number | undefined;
     const release = () => {
       if (abi.stoppedBy !== undefined) return;
       if (query !== undefined) {
         const handle = query;
         query = undefined;
+        abi.release(handle);
+      }
+      if (ownSubject !== undefined) {
+        const handle = ownSubject;
+        ownSubject = undefined;
         abi.release(handle);
       }
       if (registry !== undefined) {
@@ -196,28 +209,43 @@ export class EngineRuntime {
     try {
       const invalid = abi.validate(argv);
       if (invalid !== undefined) throw new EngineCallError(invalid);
+      const started = abi.start(argv);
+      if (!started.ok) throw new EngineCallError(started.message);
 
-      const registered = abi.register(request.program, ROLE_QUERY, request.query.bytes);
+      // -parse_deflines (line WQA's sweep, D7, 2026-11-19): the CLI reads the subjects and then the
+      // query of this argv in one scope of IDs, so the engine reads both inputs together for it, and
+      // the two handles are this search's alone. The retained subject, read without the IDs, is
+      // released first: the instance does not hold two copies of the subject.
+      let together: RegisteredInputs | undefined;
+      if (started.start.registerInputs) {
+        this.releaseRetained(loaded);
+        together = abi.registerInputs(argv, request.query.bytes, request.subject.bytes);
+        ownSubject = together.subject.handle;
+      }
+      const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, request.query.bytes);
       query = registered.handle;
       const queryMismatch = recordMismatch(request.query.records, registered.records);
       if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
-      const subjectRetained = loaded.retained?.key === request.subject.key;
-      const subject = this.subject(loaded, request);
+      const subjectRetained = together === undefined && loaded.retained?.key === request.subject.key;
+      const subject = together?.subject ?? this.subject(loaded, request);
       const subjectMismatch = recordMismatch(request.subject.records, subject.records);
       if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
+      const shownIds = together?.shownIds;
 
       const writer = new RunOutputWriter(request.output);
       const linearBytesBefore = abi.memoryBytes();
       // The engine's standard error of this search only, for a stop message.
       loaded.instance.wasi.clear();
       phase('running');
-      // The run's files (stream 8) stay here, apart from the outputs.
+      // The run's files (stream 8) stay here, apart from the outputs, and so does where its messages go (stream 10).
       const archive: Uint8Array[] = [];
+      let messages: MessagePlace | undefined;
       try {
         abi.run(argv, registered.handle, subject.handle, (stream, bytes) => {
           this.options.beforeOutput?.();
           if (stream === RUN_FILES_STREAM) archive.push(bytes.slice());
-          else if (stream === DISCARD_STREAM) writer.discard(discardedOutput(bytes));
+          else if (stream === MESSAGES_STREAM) messages = messagesPlace(bytes);
+          else if (stream === DISCARD_STREAM) writer.discard(...discardedOutput(bytes));
           else if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
         });
       } catch (error) {
@@ -230,6 +258,7 @@ export class EngineRuntime {
         throw failedWithFiles(error, archive);
       }
       const runFiles = readRunFiles(archive);
+      if (messages === undefined) throw new Error(`the engine did not say where the messages of the run go (stream ${MESSAGES_STREAM})`);
       const linearBytesAfter = abi.memoryBytes();
       loaded.runs++;
       loaded.ran.add(request.argv.join('\0'));
@@ -246,6 +275,8 @@ export class EngineRuntime {
         ...(fallbackReason === undefined ? {} : { fallbackReason }),
         memory: { linearBytesBefore, linearBytesAfter, instanceRuns: loaded.runs },
         subjectRetained,
+        messages,
+        ...(shownIds === undefined ? {} : { shownIds }),
         ...(windowMasker === undefined ? {} : { windowMasker }),
         ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
         ...(runFiles.length === 0 ? {} : { runFiles }),
@@ -371,19 +402,24 @@ export class EngineRuntime {
   private subject(loaded: Loaded, request: WorkerRun): Retained {
     const abi = loaded.instance.abi;
     if (loaded.retained?.key === request.subject.key) return loaded.retained;
-    if (loaded.retained !== undefined) {
-      abi.release(loaded.retained.handle);
-      loaded.retained = undefined;
-    }
+    this.releaseRetained(loaded);
     const registered = abi.register(request.program, ROLE_SUBJECT, request.subject.bytes);
     loaded.retained = { key: request.subject.key, handle: registered.handle, records: registered.records };
     return loaded.retained;
   }
 
+  /** Releases the subject that the instance retains, if it retains one. */
+  private releaseRetained(loaded: Loaded): void {
+    if (loaded.retained === undefined) return;
+    const handle = loaded.retained.handle;
+    loaded.retained = undefined;
+    loaded.instance.abi.release(handle);
+  }
+
   private async load(path: RuntimePath): Promise<Loaded> {
     const current = this.loaded;
     if (current?.path === path && current.instance.abi.stoppedBy === undefined) return current;
-    // A second keeper on the Gateway's channel could answer for the other memory.
+    // The Gateway asks the keeper whose link came last (gateway.ts): the keeper of the other memory ends first.
     if (!this.dispose()) throw new Error(ENDING);
     if (path === 'serial') {
       const instance = await instantiateSerial(await this.options.serial());
@@ -398,8 +434,7 @@ export class EngineRuntime {
     // The maximum that the module declares, or a smaller one where the browser cannot
     // reserve it; never a larger one (plan TD-7).
     const { memory, maximumPages } = createSharedMemory(artifact.memory);
-    const { faultChannel, keeperChannel } = this.options;
-    const threads = new ThreadHost({ module, memory, maximumPages, faultChannel, keeperChannel, use });
+    const threads = new ThreadHost({ module, memory, maximumPages, main: this.options.main, use });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn);
       this.loaded = { path, instance, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
@@ -432,14 +467,34 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * The output that the engine's signal of stream 9 discards (ABI v2 §5): an output stream of the run
- * that failed alone after some of its chunks were sent. Another number breaks the ABI.
+ * The output that the engine's signal of stream 9 names (ABI v2 §5), an output stream of the run
+ * that failed, and where its error is: stream 3 (the diagnostics), stream 8 (the run's files: the
+ * file of -logfile) or nowhere. Another number breaks the ABI.
  */
-function discardedOutput(bytes: Uint8Array): RunOutput {
-  const stream = discardedStream(bytes);
+function discardedOutput(bytes: Uint8Array): [RunOutput, MessagePlace] {
+  const { stream, errorStream } = discardSignal(bytes);
   if (!isRunOutput(stream)) throw new Error(`the engine discarded stream ${stream}, which is not an output of a run`);
-  return stream;
+  const error = errorStream === undefined ? 'nowhere' : PLACES.get(errorStream);
+  if (error === undefined) throw new Error(`the engine put the error of output stream ${stream} on stream ${errorStream}, which holds no error`);
+  return [stream, error];
 }
+
+/**
+ * Where the run's messages go, as the engine's signal of stream 10 says (ABI v2 §5): stream 3 (the diagnostics), stream 8
+ * (the run's files: the file of -logfile) or nowhere. Another number breaks the ABI (line WQA's sweep, D7, 2026-11-20).
+ */
+function messagesPlace(bytes: Uint8Array): MessagePlace {
+  const stream = messagesSignal(bytes);
+  const place = stream === undefined ? 'nowhere' : PLACES.get(stream);
+  if (place === undefined) throw new Error(`the engine put the messages of the run on stream ${stream}, which holds no messages`);
+  return place;
+}
+
+/** The place of messages that a signal of stream 9 or 10 gives as a stream (ABI v2 §5). */
+const PLACES: ReadonlyMap<number, MessagePlace> = new Map([
+  [DIAGNOSTICS_STREAM, 'diagnostics'],
+  [RUN_FILES_STREAM, 'logfile'],
+]);
 
 /** The files of a run's archive (stream 8, in chunks); none when the run sent none. */
 function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {

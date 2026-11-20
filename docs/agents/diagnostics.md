@@ -20,7 +20,7 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   `*_algebraic` operations, FMA intrinsics (`_mm*_fmadd_*` and the other `_mm*_fm*` /
   `_mm*_fnm*`, `vfmaq_*`, `vfmsq_*`), or the Wasm `relaxed-simd` feature (its `relaxed_madd`
   fuses or not depending on the engine). The Wasm builds enable `+simd128` only.
-- **One fused multiply-add**, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
+- **Fused multiply-adds in two places.** First, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
   rounding error of a product in the double-double emulation of `expl` in the long-double line
   `result *= expl(-z * z) / z` of NCBI's `boost_erf.c`. The other call is its test
   `x_dekker_product_error_matches_fused_multiply_add`. `mul_add` rounds once (IEEE 754
@@ -40,15 +40,30 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   PGO and other inlining changes may move the site into a caller outside `stats::spouge`; the
   check then fails and names the function.
 
+  Second, `Fused::fma` in `utils/glibc_fma_libm.rs` (since 2026-11-20, #1344): every fused
+  operation of glibc 2.35's x86-64 FMA `exp`, `log` and `pow`, the functions NCBI BLAST+ called
+  for the reference output. Its test `the_emulated_fma_rounds_once` holds the other two calls.
+  On baseline x86-64 each entry point is chosen on its first call (the copy compiled with
+  `fma` when the CPU has FMA, else the emulation) and then called through a pointer, as glibc's
+  ifunc does: rustc drops `#[inline(never)]` on a `#[target_feature]` function, and a caller whose
+  features imply `fma` (`optimize_avx512`) inlined the copy. On aarch64 the entry points are never
+  inlined. So the FMA instructions stay in `losat::utils::glibc_fma_libm::` functions; on
+  baseline x86-64 the cold `exp_specialcase` calls the `fma` of compiler-builtins. In the
+  baseline x86-64 release binary of #1344 (2026-11-20): 88 FMA instructions in the `fused`
+  copies of `x86_fma::{exp,ln,log10,pow}` (15, 23, 23, 27) and one `fma` reference in
+  `exp_specialcase`.
+
   A new `mul_add` needs the same argument (the fused result is the value NCBI computes) and an
   entry in the checker's `MUL_ADD_SITES` (and, in another module, `MUL_ADD_FUNCTION_PREFIXES`).
-- **The C library's math functions.** `ln`, `exp`, `powf` and the other transcendental functions
-  call the platform's libm (glibc on Linux, Apple's libm on macOS, the UCRT on Windows, wasi-libc
-  in Wasm), as NCBI's C code does, so on one machine both get the same values. No build option
-  changes which function is called: glibc picks its variant (for example `__log_fma` on an
-  FMA-capable CPU) when it is loaded, from the CPU, not from LOSAT's target CPU. Do not
-  replace these calls by another implementation (LOSAT does not depend on the `libm` crate, and
-  `LOSAT/tests/check_fp_contract.py` rejects a call into it, `libm::<fn>`).
+- **The C library's math functions.** `exp`, `ln`, `log10` and `pow` (`powf`) come from
+  `utils/glibc_fma_libm.rs` on every target (since 2026-11-20, #1344): glibc 2.35's x86-64 FMA
+  versions, bit for bit, with `f64::mul_add` where the CPU has FMA and an exact emulation of the
+  FMA elsewhere (WebAssembly, x86-64 CPUs without FMA). NCBI's reference bytes were written with
+  glibc's FMA variants (`__log_fma` and the others, picked from the CPU when glibc is loaded);
+  the other libms (glibc without FMA, Apple's, the UCRT, wasi-libc) differ from them by 1 ULP on
+  some arguments. `LOSAT/clippy.toml` refuses the transcendental methods of `f64` and `f32`
+  outside the module; a new one is ported into it from glibc. Do not call the `libm` crate
+  (`LOSAT/tests/check_fp_contract.py` rejects `libm::<fn>`).
 - **Release builds.** `cargo build --release`: fat LTO, one codegen unit, `panic = "abort"`
   (`LOSAT/Cargo.toml`) and the x86-64 loop alignment of `LOSAT/.cargo/config.toml`, for the
   baseline CPU of the target; the AVX2 kernels are chosen at run time
@@ -6187,9 +6202,9 @@ Scheduling (each value computed by one thread with the original function; order 
   (presence bits in half or more of the backbone cells, `x_scan_bf_for`), are scanned with tblastn's
   scan on presence bytes (`LOSAT_X_TBNSCANBYTE`, `tblastx/x_scan_byte.rs` `x_scan_one_range_byte`,
   exactness argument in its header): the table indexes of a block of 256 words made 16 at a time from
-  the letters, candidates listed from a presence vector of one byte per index (32 KB, built once per
-  group table), and each candidate copied once, NCBI's room test kept where the block could fill the
-  offset array. NCBI's range walk (`s_BlastAaScanSubject`, `blast_aascan.c:48-131`) is kept around
+  the letters, candidates listed from a presence vector of one byte per index (32 KB per group table,
+  made once the query batch's tables are built and freed with the table), and each candidate copied
+  once, NCBI's room test kept where the block could fill the offset array. NCBI's range walk (`s_BlastAaScanSubject`, `blast_aascan.c:48-131`) is kept around
   it, so every call returns NCBI's pairs and scan range (test
   `x_scan_subject_bf_and_compact_equal_ncbi_scan_on_random_subjects`, byte arm, against
   `s_blast_aa_scan_subject`). The offset arrays get `X_SCAN_BYTE_SLACK` (20) entries more while the
@@ -6201,7 +6216,15 @@ Scheduling (each value computed by one thread with the original function; order 
   3 rounds alternating, two runs, against dev ec6bd8123): x0.958-0.967, x0.965-0.967, ssDNA.prok.8
   x0.966-0.972, Easyfig's tblastx example x0.984-0.986, Galaxy's small tblastx test x0.999-1.010 (its
   tables are sparse; the same instructions). Branch misses x0.88-0.95. Heap peak (massif) the same
-  within 10 bytes: the presence bytes live with their group table, not at the peak. Probe: line DT
+  within 10 bytes: the presence bytes live with their group table, not at the peak. Until
+  fix/tbx-presence-scratch (2026-11-19) the bytes were made where each table was built; on Sakai x
+  MG1655 `-subject` at 16 threads (84 slice tables) they sat between the tables in the building
+  thread's heap, and glibc kept the 560 MiB of freed tables there after the seed release: max
+  RssAnon 2,225 MiB against 1,984 MiB with `=0` (line MEM, v4-MEM REPORT §28). Made in
+  `XPairPar::prepare` once every table of the batch is built (`x_pair_par.rs` `XGroup::x_make_presence`;
+  a lazy cell read in the scan changed the units' scan loop, +1.6 % instructions on ViPTreeGen's
+  Begomovirus.40 at one thread), they leave the
+  build's allocations as with `=0`: 1,983 MiB (median of 6 runs, 1,975-1,995; `=0` 1,986). Probe: line DT
   (tool-speed-20261115, DECISIONS 8); prefetching the candidates' cells or chain heads before the copy
   gave nothing more (x0.991-1.023).
 - `LOSAT_X_TBXCTXTABLE=1` TBLASTX (speed; in the strict set from the pull request that added it, 2026-11-17, on by

@@ -1,7 +1,9 @@
 // Display helpers of the UI. They format application values only, never BLAST values.
+import { withUnit } from '../domain/units';
+
 const UNITS = ['bytes', 'kB', 'MB', 'GB', 'TB'] as const;
 
-/** A byte count in SI units, for example "1.5 MB". */
+/** A byte count in SI units, for example "1.5 MB" (the number and the unit joined by a no-break space: line WQA's sweep, D9, 2026-11-19). */
 export function formatBytes(bytes: number): string {
   let value = bytes;
   let unit = 0;
@@ -10,7 +12,7 @@ export function formatBytes(bytes: number): string {
     unit++;
   }
   const digits = unit === 0 ? 0 : 1;
-  return `${value.toFixed(digits)} ${UNITS[unit]}`;
+  return withUnit(value.toFixed(digits), UNITS[unit]!);
 }
 
 /** A count with thousands separators, for example "12,345". */
@@ -29,7 +31,7 @@ export function formatDuration(ms: number): string {
 
 /** A short time span with its unit, for example "420 ms" or "2.6 s" (a step of a run, which `formatDuration` rounds down to the second). */
 export function formatMillis(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+  return ms < 1000 ? withUnit(Math.round(ms), 'ms') : withUnit((ms / 1000).toFixed(1), 's');
 }
 
 /**

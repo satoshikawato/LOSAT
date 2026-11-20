@@ -99,7 +99,7 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 
 ## The output differs from NCBI BLAST+
 
-First check [Differences from NCBI BLAST+](differences.md). A few differences are on purpose, for example a local `tblastx` or `tblastn` subject translated with `-db_gencode`, the last digit of some full-precision values on macOS and WASI, and the `CL:` tag of SAM output. If your case is not covered there, it is a bug: please report it.
+First check [Differences from NCBI BLAST+](differences.md). A few differences are on purpose, for example a local `tblastx` or `tblastn` subject translated with `-db_gencode`, the last digit of some full-precision values on macOS, and the `CL:` tag of SAM output. If your case is not covered there, it is a bug: please report it.
 
 ## Where to report a problem
 

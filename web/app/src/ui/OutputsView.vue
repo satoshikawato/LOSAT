@@ -3,14 +3,19 @@
 // command of each format and their export (plan §5.8; the view filters never apply here): the
 // formats of every run, and the output of the run's own -outfmt (W10, W11). A binary output
 // (outfmt 9, and the ZIP archive of the files of 13 and 14) is exported, not shown. An output that cannot be read, or an export that is not
-// saved, says why (application/outputs.ts). After the formats, the files that the run made besides
+// saved, says why (application/outputs.ts), and so does an output that the run could not write, which is empty, with
+// where its error is (`ResultSetRef.failed`; line WQA's sweep, D7, 2026-11-19 and 2026-11-20). After the formats, the files that the run made besides
 // its outputs (the file of -logfile; line RG E1w-3b) are a tab of their own (RunFiles).
 import { computed, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader } from '../application/outputs';
-import { toShellCommand } from '../domain/argv';
+import { failedOutput } from '../application/results';
+import { commandWords } from '../domain/argv';
 import { isBinaryOutput, outfmtOf, runOutputs } from '../domain/output-format';
+import CommandText from './CommandText.vue';
+import { placeParts } from './message-place-text';
+import PlaceWords from './PlaceWords.vue';
 import OutputText from './OutputText.vue';
 import RunFiles from './RunFiles.vue';
 import TabList from './TabList.vue';
@@ -27,6 +32,11 @@ const runFiles = computed(() => props.run.record.runFiles ?? []);
 /** The output shown: the one chosen, or outfmt 6 for a run that does not write it. */
 const format = computed(() => (outputs.value.includes(chosen.value) ? chosen.value : 6));
 const binary = computed(() => isBinaryOutput(props.run.snapshot.argv, format.value));
+/** Where the error of the output shown is, in words, when the run could not write it, as the engine said (it is empty); undefined where it was written. */
+const notWritten = computed(() => {
+  const error = failedOutput(props.run, format.value);
+  return error === undefined ? undefined : placeParts(error, props.run);
+});
 /** The run's files are shown, in place of an output. */
 const filesShown = computed(() => filesChosen.value && runFiles.value.length > 0);
 /** The formats, then the run's files: tabs of one panel, the output or the files shown (WA2-AX-12). */
@@ -75,7 +85,11 @@ watch([() => props.run, format], ([run, fmt]) => void reader.show(run, fmt, !isB
     </div>
     <div v-else :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${format}`" class="outputs-panel">
       <p class="command">
-        Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>
+        <!-- The command as Run details shows it: a line does not break after an option's leading hyphen (line WQA's sweep, D7, 2026-11-20). -->
+        Command: <code data-testid="result-command"><CommandText :words="commandWords(run.snapshot.argv, format)" /></code>
+      </p>
+      <p v-if="notWritten !== undefined" class="results-message" data-testid="outputs-not-written">
+        outfmt {{ outfmtOf(run.snapshot.argv, format) }} could not be written: its error is <PlaceWords :parts="notWritten" />.
       </p>
       <OutputText
         v-if="!output.failed && !binary"

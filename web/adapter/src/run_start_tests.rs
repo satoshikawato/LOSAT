@@ -4,6 +4,7 @@
 //! `conf_missing` of line RG `E/SURVEY_E1.md`).
 
 use super::*;
+use crate::emit::{PLACE_NOWHERE, STREAM_MESSAGES};
 use std::collections::BTreeMap;
 
 /// The inputs of each program (`LOSAT/tests/fasta/outfmt11`, as the command line's tests).
@@ -33,17 +34,22 @@ fn run_of(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
         .iter()
         .find(|(program, _, _)| *program == words[0])
         .unwrap();
+    run_on(words, &input(query), &input(subject))
+}
+
+/// `run_of` on the FASTA records `query` and `subject`.
+fn run_on(
+    words: &[&str],
+    query: &[u8],
+    subject: &[u8],
+) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let program = Program::parse(words[0]).unwrap();
-    let (query, _) = crate::store::register(words[0], 0, &input(query)).unwrap();
-    let (subject, _) = crate::store::register(words[0], 1, &input(subject)).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, query).unwrap();
+    let (subject, _) = crate::store::register(words[0], 1, subject).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
-    let result = crate::store::with_inputs(
-        program,
-        query,
-        subject,
-        writes_archive(words),
-        |queries, subjects| run(words, queries, subjects),
-    );
+    let result = crate::store::with_inputs(program, query, subject, words, |queries, subjects| {
+        run(words, queries, subjects)
+    });
     crate::store::release(query).unwrap();
     crate::store::release(subject).unwrap();
     let mut streams = BTreeMap::new();
@@ -89,6 +95,48 @@ fn run_files(streams: &BTreeMap<u32, Vec<u8>>) -> Option<Vec<(String, String)>> 
     })
 }
 
+/// The place of the run's messages that its signal of stream 10 gives (`emit::messages`), or `None`
+/// where the run sent none (a start that ended the run). One signal per run (line WQA's sweep, D7,
+/// 2026-11-20).
+fn messages_place(streams: &BTreeMap<u32, Vec<u8>>) -> Option<u32> {
+    streams.get(&STREAM_MESSAGES).map(|bytes| {
+        assert_eq!(bytes.len(), 4, "one signal of stream 10");
+        u32::from_le_bytes(bytes[..].try_into().unwrap())
+    })
+}
+
+/// Where `text` is in the run's `streams`: on stream 3, in the file of `-logfile` (stream 8), or
+/// nowhere (`PLACE_NOWHERE`); never in both.
+fn place_of(streams: &BTreeMap<u32, Vec<u8>>, text: &str) -> u32 {
+    let on_3 = stream_text(streams, STREAM_DIAGNOSTICS).contains(text);
+    let in_file =
+        run_files(streams).is_some_and(|files| files.iter().any(|(_, bytes)| bytes.contains(text)));
+    match (on_3, in_file) {
+        (true, false) => STREAM_DIAGNOSTICS,
+        (false, true) => STREAM_RUN_FILES,
+        (false, false) => PLACE_NOWHERE,
+        (true, true) => panic!("{text:?} is on stream 3 and in the file of -logfile"),
+    }
+}
+
+/// The signals of stream 9: each failed stream and the place of its error (`emit::discard`).
+fn signals(streams: &BTreeMap<u32, Vec<u8>>) -> Vec<(u32, u32)> {
+    let bytes = streams
+        .get(&crate::emit::STREAM_DISCARD)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(bytes.len() % 8, 0);
+    bytes
+        .chunks(8)
+        .map(|signal| {
+            (
+                u32::from_le_bytes(signal[..4].try_into().unwrap()),
+                u32::from_le_bytes(signal[4..].try_into().unwrap()),
+            )
+        })
+        .collect()
+}
+
 /// Registers the registry file `name` (kind 2) with `bytes`, for one test: names are unique per
 /// test, since the registrations are the process's and the tests run at once.
 struct Registered(u32);
@@ -128,6 +176,13 @@ fn the_logfile_is_a_file_of_the_run() {
             "{program}"
         );
         assert_eq!(run_files(&plain), None, "{program}");
+        // The host is told where the run's messages go: stream 3 without -logfile, the file of
+        // -logfile (stream 8) in TBLASTX with one (line WQA's sweep, D7, 2026-11-20).
+        assert_eq!(
+            messages_place(&plain),
+            Some(STREAM_DIAGNOSTICS),
+            "{program}"
+        );
         let mut words = plain_words.clone();
         words.extend(["-logfile", "run.log"]);
         validate(&words).unwrap();
@@ -149,6 +204,11 @@ fn the_logfile_is_a_file_of_the_run() {
             (stderr, Some(vec![("run.log".to_string(), file)])),
             "{program}"
         );
+        let place = match to_log {
+            true => STREAM_RUN_FILES,
+            false => STREAM_DIAGNOSTICS,
+        };
+        assert_eq!(messages_place(&logged), Some(place), "{program}");
         // `-logfile=NAME` is the same word.
         let mut joined = plain_words.clone();
         joined.push("-logfile=run.log");
@@ -167,6 +227,12 @@ fn the_logfile_is_a_file_of_the_run() {
                 (expected.to_string(), None),
                 "{program} {value:?}"
             );
+            let place = if quiet {
+                PLACE_NOWHERE
+            } else {
+                STREAM_DIAGNOSTICS
+            };
+            assert_eq!(messages_place(&streams), Some(place), "{program} {value:?}");
             assert_eq!(streams.get(&6), plain.get(&6), "{program} {value:?}");
         }
         let mut words = plain_words.clone();
@@ -176,6 +242,7 @@ fn the_logfile_is_a_file_of_the_run() {
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), refusal, "{program}");
         assert_eq!(run_files(&streams), None, "{program}");
+        assert_eq!(messages_place(&streams), None, "{program}");
     }
 }
 
@@ -250,9 +317,15 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
         validate(&words).unwrap();
         let (result, streams) = run_of(&words);
         result.unwrap();
+        // No output; the host is told where the run's messages go (stream 10).
         assert_eq!(
             streams.keys().copied().collect::<Vec<u32>>(),
-            Vec::<u32>::new(),
+            [STREAM_MESSAGES],
+            "{program}"
+        );
+        assert_eq!(
+            messages_place(&streams),
+            Some(STREAM_DIAGNOSTICS),
             "{program}"
         );
         let (result, streams) = run_of(&argv(program, &["-dryrun", "-logfile", "run.log"]));
@@ -262,6 +335,11 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
             Some(vec![("run.log".to_string(), String::new())]),
             "{program}"
         );
+        let place = match program {
+            "tblastx" => STREAM_RUN_FILES,
+            _ => STREAM_DIAGNOSTICS,
+        };
+        assert_eq!(messages_place(&streams), Some(place), "{program}");
         assert!(validate(&argv(program, &["-dryrun", "-evalue", "x"])).is_err());
     }
 }
@@ -271,7 +349,7 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
 fn the_start_json_tells_the_files_and_the_dry_run() {
     assert_eq!(
         start_json(&["blastn", "-outfmt", "6"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false}"#
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false}"#
     );
     assert_eq!(
         start_json(&[
@@ -284,12 +362,12 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "-dryrun"
         ])
         .unwrap(),
-        r#"{"conffile":"c.ini","log_file":"x.log","dry_run":true}"#
+        r#"{"conffile":"c.ini","log_file":"x.log","dry_run":true,"register_inputs":false}"#
     );
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false}"#
+        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false}"#
     );
     let version = start_json(&["blastn", "-version"]).unwrap_err();
     assert_eq!(version, parse(&["blastn", "-version"]).unwrap_err());
@@ -303,9 +381,8 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
 // NCBI BLAST+ 2.17.0 (probes `log_warn`, `log_engine_err` of line RG `E/SURVEY_E1.md`): TBLASTX
 // writes the messages of its run, and the error that ends it, to the `-logfile` file. In LOSAT Web
 // the file of a run that failed comes on stream 8 too. The file holds what the CLI's file holds for
-// the argv: in a run of two searches (here the tabular formats' hit list size of 0, which fails them
-// alone) the CLI's file of outfmt 0 is empty, and what the other search adds goes to stream 3, as
-// without `-logfile` (native LOSAT 16bef7acd, review r2 probe `result6-base.txt`; line WQA's sweep,
+// the argv: in a run of two searches what the other search adds goes to stream 3, as without
+// `-logfile` (`the_error_of_an_output_that_fails_alone_is_where_its_signal_says`; line WQA's sweep,
 // D3 review r2, 2026-11-19: the file had the other search's warning and error). The command line's
 // file of the failed run (ws, the gate's build of this branch, NCBI's text): `BLAST query/options
 // error: expect value ...`.
@@ -323,25 +400,122 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
             "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n".to_string()
         )])
     );
+}
+
+// Line WQA's sweep, D7 (2026-11-20): each output that a run could not write is signalled with the
+// place where its error is (stream 9), which is where the sink wrote it (`CallerSink::error`), for
+// each `-logfile`. The tabular formats' hit list size of 0 fails them alone with NCBI's message.
+// The run of the argv's `-outfmt 0` (here) writes the run's messages where the CLI's run of the
+// argv writes them: in TBLASTX the file of `-logfile run.log`, which then holds what the CLI's file
+// holds, nothing (the CLI's `tblastx -num_alignments 0 -logfile run.log`); what the tabular formats
+// add, their error among it, goes to stream 3, as without `-logfile` (line WQA's sweep, D3 review
+// r2, 2026-11-19), and nowhere for `""` and `/dev/null`, where the CLI's `tblastx -outfmt 6
+// -num_alignments 0` writes it nowhere (LOSAT's command line and NCBI BLAST+ 2.17.0; D3 review r3);
+// BLASTN's go to the standard error. A subject title that NCBI cannot decode fails them alone with
+// LOSAT's own refusal, which the CLI's `tblastx -outfmt 6` writes to the standard error whatever
+// `-logfile` is (`cli::main_entry`, its file empty).
+#[test]
+fn the_error_of_an_output_that_fails_alone_is_where_its_signal_says() {
+    const CODING: &str = "ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
+    let query = format!(">q\n{CODING}\n").into_bytes();
+    let bad = [
+        &b">Subject_9 bad x\x81y title\n"[..],
+        CODING.as_bytes(),
+        b"\n",
+    ]
+    .concat();
+    let saved = "No hits are being saved";
+    let refusal = "subject record 1 (Subject_9) has a title";
     for program in ["tblastx", "blastn"] {
-        let plain_words = argv(program, &["-num_alignments", "0"]);
-        let (result, plain) = run_of(&plain_words);
+        let (result, plain) = run_of(&argv(program, &["-num_alignments", "0"]));
         result.unwrap();
         let stderr = stream_text(&plain, STREAM_DIAGNOSTICS);
-        assert!(
-            stderr.contains("No hits are being saved"),
-            "{program}: {stderr}"
-        );
-        let mut words = plain_words.clone();
-        words.extend(["-logfile", "run.log"]);
-        let (result, logged) = run_of(&words);
-        result.unwrap();
-        assert_eq!(logged.get(&0), plain.get(&0), "{program}");
-        assert_eq!(
-            (stream_text(&logged, STREAM_DIAGNOSTICS), run_files(&logged)),
-            (stderr, Some(vec![("run.log".to_string(), String::new())])),
-            "{program}"
-        );
+        assert!(stderr.contains(saved), "{program}: {stderr}");
+        for logfile in [
+            None,
+            Some("-"),
+            Some("run.log"),
+            Some(""),
+            Some("/dev/null"),
+        ] {
+            let extra: Vec<&str> = logfile.map_or(Vec::new(), |name| vec!["-logfile", name]);
+            let label = format!("{program} {logfile:?}");
+            // NCBI's message.
+            let words = argv(program, &[&["-num_alignments", "0"][..], &extra].concat());
+            let (result, streams) = run_of(&words);
+            result.unwrap();
+            assert_eq!(streams.get(&0), plain.get(&0), "{label}");
+            assert_eq!(
+                run_files(&streams).is_some(),
+                logfile == Some("run.log"),
+                "{label}"
+            );
+            let messages = match (program, logfile) {
+                ("tblastx", Some("run.log")) => STREAM_RUN_FILES,
+                ("tblastx", Some("" | "/dev/null")) => PLACE_NOWHERE,
+                _ => STREAM_DIAGNOSTICS,
+            };
+            assert_eq!(messages_place(&streams), Some(messages), "{label}");
+            // The error is where what the tabular formats add goes: stream 3, as without -logfile,
+            // also where the run's messages go to the file, which holds the CLI's file of the argv
+            // (empty), and nowhere where they go nowhere (line WQA's sweep, D3 review r2 and r3).
+            let place = place_of(&streams, saved);
+            assert_eq!(signals(&streams), [(6, place), (7, place)], "{label}");
+            let nowhere = messages == PLACE_NOWHERE;
+            assert_eq!(
+                place,
+                if nowhere {
+                    PLACE_NOWHERE
+                } else {
+                    STREAM_DIAGNOSTICS
+                },
+                "{label}"
+            );
+            assert_eq!(
+                stream_text(&streams, STREAM_DIAGNOSTICS),
+                if nowhere {
+                    String::new()
+                } else {
+                    stderr.clone()
+                },
+                "{label}"
+            );
+            if logfile == Some("run.log") {
+                assert_eq!(
+                    run_files(&streams),
+                    Some(vec![("run.log".to_string(), String::new())]),
+                    "{label}"
+                );
+            }
+            // LOSAT's own refusal.
+            let words = [program, "-query", "q", "-subject", "s"];
+            let words = [&words[..], &extra].concat();
+            let (result, streams) = run_on(&words, &query, &bad);
+            result.unwrap();
+            assert_eq!(place_of(&streams, refusal), STREAM_DIAGNOSTICS, "{label}");
+            assert_eq!(
+                signals(&streams),
+                [(6, STREAM_DIAGNOSTICS), (7, STREAM_DIAGNOSTICS)],
+                "{label}"
+            );
+            let on_3 = stream_text(&streams, STREAM_DIAGNOSTICS);
+            assert_eq!(on_3.matches(refusal).count(), 1, "{label}");
+            // Where the run's messages go elsewhere, stream 3 holds the refusal alone.
+            if messages_place(&streams) != Some(STREAM_DIAGNOSTICS) {
+                assert!(
+                    on_3.starts_with("Error: subject record 1 (Subject_9)")
+                        && on_3.matches('\n').count() == 1,
+                    "{label}: {on_3}"
+                );
+            }
+            if logfile == Some("run.log") {
+                assert_eq!(
+                    run_files(&streams),
+                    Some(vec![("run.log".to_string(), String::new())]),
+                    "{label}"
+                );
+            }
+        }
     }
 }
 
@@ -354,7 +528,11 @@ fn a_dry_run_does_not_read_the_outfmt() {
         validate(&words).unwrap();
         let (result, streams) = run_of(&words);
         result.unwrap();
-        assert!(streams.is_empty(), "{outfmt}");
+        assert_eq!(
+            streams.keys().copied().collect::<Vec<u32>>(),
+            [STREAM_MESSAGES],
+            "{outfmt}"
+        );
         let words = argv("tblastx", &["-outfmt", outfmt]);
         assert!(validate(&words).is_err(), "{outfmt}");
     }

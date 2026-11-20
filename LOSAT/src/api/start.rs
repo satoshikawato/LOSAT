@@ -17,7 +17,7 @@ use super::error::Error;
 use super::input::Inputs;
 use super::search::Search;
 use crate::blastinput::ncbi_environment::{
-    log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart, DiagTarget,
+    log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart, DiagTarget, TextPlace,
 };
 use crate::report::run_files::RunFiles;
 
@@ -253,6 +253,14 @@ impl RunLog {
         }
     }
 
+    /// Where the messages of a sink with `to_log` end up (`RunSink::write`): the target's place
+    /// (`DiagTarget::place`), or the caller's diagnostics without a target.
+    pub(super) fn place(&self) -> TextPlace {
+        self.0
+            .as_ref()
+            .map_or(TextPlace::StandardError, DiagTarget::place)
+    }
+
     /// Writes `messages`, gathered from a search, where the run's messages go, and gives back what
     /// goes to the call's diagnostics: all of it without a target or for `cerr`, nothing for the
     /// file of `-logfile` or no output.
@@ -303,6 +311,15 @@ impl RunSink<'_> {
     pub(super) fn failed(&mut self, error: &anyhow::Error) -> Error {
         self.log.failed(error)
     }
+
+    /// Where the messages written to this sink end up (`RunSink::write`): where the run's messages
+    /// go (`RunLog::place`) with `to_log`, else the caller's diagnostics.
+    fn place(&self) -> TextPlace {
+        match self.to_log {
+            true => self.log.place(),
+            false => TextPlace::StandardError,
+        }
+    }
 }
 
 impl Write for RunSink<'_> {
@@ -318,6 +335,72 @@ impl Write for RunSink<'_> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.diagnostics.flush()
+    }
+}
+
+/// Whose error a caller's run writes (`CallerSink::error`), which decides where the command line
+/// writes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorSource {
+    /// NCBI's message (a `NativeError`'s), which NCBI writes where the run's messages go
+    /// (`CallerSink::add`).
+    Ncbi,
+    /// LOSAT's own refusal (`Error: ` and the error, as `main` writes it), which NCBI has no
+    /// message for.
+    Losat,
+}
+
+/// The writer of the messages that a caller's run writes for `cerr` (`CallerStart::sink`): they go
+/// where the run's messages go (`RunLog::sink`: the file of `-logfile` in TBLASTX, else the caller's
+/// diagnostics), as they come. It also writes what the caller's run adds to the command line's
+/// messages for its arguments (`CallerSink::add`), among them the error of an output that the run
+/// could not write (`CallerSink::error`), and says where each went.
+pub struct CallerSink<'a>(RunSink<'a>);
+
+impl CallerSink<'_> {
+    /// Writes `text`, what the caller's run adds to the command line's messages for its arguments
+    /// (LOSAT Web writes outfmt 0, 6 and 7 besides the argv's `-outfmt`, and gives what the command
+    /// line writes for those formats), and gives back where that is: the caller's diagnostics, the
+    /// standard error, also where the run's messages go to the file of `-logfile`, which keeps what
+    /// the command line's file holds for the arguments (line WQA's sweep, D3 review r2,
+    /// 2026-11-19: the file had the other formats' lines); nowhere where the run's messages go
+    /// nowhere (`-logfile ""` and `-logfile /dev/null` in TBLASTX, `DiagTarget::Discard`), as the
+    /// command line's run of any format writes them nowhere there (D3 review r3, 2026-11-19).
+    pub fn add(&mut self, text: &[u8]) -> TextPlace {
+        match self.0.place() {
+            TextPlace::Nowhere => TextPlace::Nowhere,
+            TextPlace::StandardError | TextPlace::LogFile => {
+                let _ = self.0.diagnostics.write_all(text);
+                TextPlace::StandardError
+            }
+        }
+    }
+
+    /// Writes `text`, the error of an output that the run could not write (one that the command
+    /// line's run of the arguments does not write: that run's own error ends the caller's run), and
+    /// gives back where that is: NCBI's message (`ErrorSource::Ncbi`) where the run's other added
+    /// messages go (`CallerSink::add`), LOSAT's own refusal (`ErrorSource::Losat`) to the caller's
+    /// diagnostics, the standard error, which the command line writes it to whatever `-logfile` is
+    /// (`cli::main_entry`). The place is the writer's own, so it stays where the text is (line
+    /// WQA's sweep, D7, 2026-11-20).
+    pub fn error(&mut self, text: &[u8], source: ErrorSource) -> TextPlace {
+        match source {
+            ErrorSource::Ncbi => self.add(text),
+            ErrorSource::Losat => {
+                let _ = self.0.diagnostics.write_all(text);
+                TextPlace::StandardError
+            }
+        }
+    }
+}
+
+impl Write for CallerSink<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
     }
 }
 
@@ -398,32 +481,23 @@ impl CallerStart {
 
     /// The writer of the messages that the run writes for `cerr`: they go where the run's
     /// messages go (`RunLog::sink`: the file of `-logfile` in TBLASTX, else `diagnostics`), as
-    /// they come.
-    pub fn sink<'a>(
-        &'a mut self,
-        diagnostics: &'a mut (dyn Write + Send),
-    ) -> impl Write + Send + 'a {
-        self.log.sink(diagnostics, true)
+    /// they come (`CallerSink`).
+    pub fn sink<'a>(&'a mut self, diagnostics: &'a mut (dyn Write + Send)) -> CallerSink<'a> {
+        CallerSink(self.log.sink(diagnostics, true))
+    }
+
+    /// Where the messages written to `sink` end up (`RunLog::place`): the file of `-logfile`, or
+    /// nowhere, where the run's messages go to its target (TBLASTX's, `run_messages_follow_log`),
+    /// else the caller's diagnostics. LOSAT Web tells its host where the run's messages go (line
+    /// WQA's sweep, D7, 2026-11-20).
+    pub fn messages_place(&self) -> TextPlace {
+        self.log.place()
     }
 
     /// Writes `text`, the message of a `NativeError` that ended the run, to the `-logfile` file
     /// when the run's messages go there, where the command line writes it (`RunLog::post`).
     pub fn post(&mut self, text: &[u8]) {
         self.log.post_text(text);
-    }
-
-    /// Writes `text`, the messages that the caller's run adds to the command line's for its
-    /// arguments (LOSAT Web writes outfmt 0, 6 and 7 besides the argv's `-outfmt`, and gives what
-    /// the command line writes for those formats), to `diagnostics`, unless the run's messages go
-    /// nowhere (`-logfile ""` and `-logfile /dev/null` in TBLASTX, `DiagTarget::Discard`): the
-    /// command line's run of any format writes them nowhere there. The file of `-logfile` keeps
-    /// what the command line's file holds for the arguments (line WQA's sweep, D3 review r3,
-    /// 2026-11-19: they showed where the command line writes none).
-    pub fn add(&self, text: &[u8], diagnostics: &mut dyn Write) -> std::io::Result<()> {
-        match &self.log.0 {
-            Some(DiagTarget::Discard) => Ok(()),
-            _ => diagnostics.write_all(text),
-        }
     }
 
     /// Hands the file of `-logfile` to the run's files (`RunFiles::deliver_log`) at the end of the

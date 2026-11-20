@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RunOutputWriter, sha256Hex } from 'losat';
-import { CUSTOM_OUTPUT, type RegistryFile, type RunFile } from 'losat/domain';
+import { CUSTOM_OUTPUT, type MessagePlace, type RegistryFile, type RunFile, type ShownIds } from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
   runOutputFailedOf,
+  UnavailableError,
   withRunFiles,
   withRunOutputFailed,
   type EngineGateway,
@@ -33,7 +34,11 @@ const request: SearchRequest = {
   requestedThreads: 'auto',
 };
 
-function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataService) => DataGateway = (d) => d) {
+function setup(
+  engine: EngineGateway = new FakeEngine(),
+  wrap: (data: DataService) => DataGateway = (d) => d,
+  dataWorkerEnded?: Promise<Error>,
+) {
   const store = new MemoryBlockStore();
   let token = 0;
   const data = new DataService({
@@ -57,6 +62,7 @@ function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataServic
     now: () => 1000,
     newRunId: () => `run-${++id}`,
     digest: sha256Hex,
+    ...(dataWorkerEnded === undefined ? {} : { dataWorkerEnded }),
   });
   return { coordinator, data, store, saved };
 }
@@ -85,12 +91,16 @@ class ManualEngine implements EngineGateway {
   /** The registry files that `validate` was given, in order. */
   readonly registries: Array<RegistryFile | undefined> = [];
   /** What the engine's start reads of every argv, or its message. */
-  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } };
   private readonly pending = new Map<
     string,
     { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void; output: MessagePort }
   >();
   lateFinish?: () => void;
+  /** The IDs that the outputs of the next runs show (a run of -parse_deflines). */
+  shownIds?: ShownIds;
+  /** Where the runs' messages go, as the engine says (`RuntimeInfo.messages`). */
+  messages: MessagePlace = 'diagnostics';
 
   async describe() {
     return { program: 'blastn' as const, formats: [6] as const, parameters: [] };
@@ -113,7 +123,14 @@ class ManualEngine implements EngineGateway {
           writer.write(6, new TextEncoder().encode(`${req.runId}\n`));
           writer.write(DIAGNOSTICS_STREAM, new TextEncoder().encode(`Warning: ${req.runId}\n`));
           writer.end();
-          resolve({ path: 'fake', threads: 1, engineBuild: 'manual', ...(runFiles === undefined ? {} : { runFiles }) });
+          resolve({
+            path: 'fake',
+            threads: 1,
+            engineBuild: 'manual',
+            messages: this.messages,
+            ...(runFiles === undefined ? {} : { runFiles }),
+            ...(this.shownIds === undefined ? {} : { shownIds: this.shownIds }),
+          });
         },
         reject,
         output,
@@ -122,7 +139,11 @@ class ManualEngine implements EngineGateway {
       this.lateFinish = () => onPhase('finalizing');
     });
   }
-  cancel(): void {}
+  /** The runs that were cancelled, in order. */
+  readonly cancelled: string[] = [];
+  cancel(runId: string): void {
+    this.cancelled.push(runId);
+  }
   /** Ends a run, with the files that it made besides its outputs. */
   finish(runId: string, runFiles?: readonly RunFile[]) {
     this.pending.get(runId)?.resolve(runFiles);
@@ -148,7 +169,7 @@ class ManualEngine implements EngineGateway {
   }
 }
 
-const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, ...start } });
+const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, ...start } });
 const logFile = (text: string): RunFile => ({ name: 'run.log', bytes: new TextEncoder().encode(text) });
 
 describe('Coordinator', () => {
@@ -167,6 +188,124 @@ describe('Coordinator', () => {
     expect(engine.started).toEqual([first, second]);
     expect(new TextDecoder().decode(await data.readOutput(first, 6))).toBe(`${first}\n`);
     expect(await data.readDiagnostics(first)).toBe(`Warning: ${first}\n`);
+  });
+
+  // Line WQA's sweep, D2 (2026-11-19): a Data worker that did not answer the commit kept the run "Organizing results"
+  // for good, with no Cancel, and the queue behind it waited.
+  it('a cancel ends a run whose results are not committed, the next run starts, and results that come later are deleted', async () => {
+    const engine = new ManualEngine();
+    let commit: (value: unknown) => void = () => undefined;
+    let made: Promise<unknown> = Promise.resolve();
+    const deleted: string[] = [];
+    const { coordinator } = setup(engine, (data) =>
+      Object.assign(Object.create(data) as DataService, {
+        // The first run's commit is made, and its answer comes only when the test lets it.
+        commitRun: (runId: string) => {
+          const commitment = data.commitRun(runId);
+          if (viewOf(coordinator, runId)!.snapshot.number !== 1) return commitment;
+          made = commitment;
+          return new Promise((resolve) => (commit = resolve)).then(() => commitment);
+        },
+        deleteRun: async (runId: string) => {
+          deleted.push(runId);
+          await data.deleteRun(runId);
+        },
+      }),
+    );
+    const first = (await coordinator.enqueue(request)).runId!;
+    const second = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, first, 'running');
+    engine.finish(first);
+    await waitFor(coordinator, first, 'finalizing');
+    // The Data worker committed the results; its answer does not come.
+    await made;
+    coordinator.cancel(first);
+    await waitFor(coordinator, first, 'cancelled');
+    await waitFor(coordinator, second, 'running');
+    expect(deleted).toEqual([]);
+    commit(undefined);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(deleted).toEqual([first]);
+    expect(statusOf(coordinator, first)).toBe('cancelled');
+  });
+
+  // Line WQA's sweep, D1 and D2: a part of LOSAT that could not be loaded or stopped is said as the page says it.
+  it('a run whose Data worker stopped fails with what stopped and the remedy', async () => {
+    const engine = new ManualEngine();
+    const { coordinator } = setup(engine, (data) =>
+      Object.assign(Object.create(data) as DataService, {
+        commitRun: () => Promise.reject(new UnavailableError('The part of LOSAT that keeps the results stopped')),
+      }),
+    );
+    const runId = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, runId, 'running');
+    engine.finish(runId);
+    await waitFor(coordinator, runId, 'failed');
+    expect(viewOf(coordinator, runId)!.record.error).toBe('The part of LOSAT that keeps the results stopped. Reload the page.');
+  });
+
+  // Line WQA's sweep, D2, its review, L2 (2026-11-19): when the Data worker ended during a search, the page said so at
+  // once, but the run went on "Searching" and failed only when the search ended, at the commit of its results.
+  it('a run whose Data worker ended during its search fails at once, and its search ends', async () => {
+    const engine = new ManualEngine();
+    let end: (error: Error) => void = () => undefined;
+    const ended = new Promise<Error>((resolve) => (end = resolve));
+    const { coordinator } = setup(engine, undefined, ended);
+    const first = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, first, 'running');
+    end(new UnavailableError('The part of LOSAT that keeps the results stopped'));
+    await waitFor(coordinator, first, 'failed');
+    expect(viewOf(coordinator, first)!.record.error).toBe('The part of LOSAT that keeps the results stopped. Reload the page.');
+    expect(engine.cancelled).toEqual([first]);
+  });
+
+  it('a run whose Data worker ended while its outputs were staged starts no search', async () => {
+    const engine = new ManualEngine();
+    let end: (error: Error) => void = () => undefined;
+    const ended = new Promise<Error>((resolve) => (end = resolve));
+    let stage: () => void = () => undefined;
+    const staged = new Promise<void>((resolve) => (stage = resolve));
+    const { coordinator } = setup(
+      engine,
+      (inner) => {
+        const gateway = Object.create(inner) as DataGateway;
+        // The outputs are staged, and the answer comes after the Data worker ended.
+        gateway.openRun = async (runId, outputs) => {
+          const port = await inner.openRun(runId, outputs);
+          await staged;
+          return port;
+        };
+        return gateway;
+      },
+      ended,
+    );
+    const first = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, first, 'preparing');
+    end(new UnavailableError('The part of LOSAT that keeps the results stopped'));
+    await ended;
+    stage();
+    await waitFor(coordinator, first, 'failed');
+    expect(viewOf(coordinator, first)!.record.error).toBe('The part of LOSAT that keeps the results stopped. Reload the page.');
+    expect(engine.started).toEqual([]);
+  });
+
+  it('refuses a request with the remedy, not as a fault of the options or the input, when a part of LOSAT is unavailable', async () => {
+    const engine = new ManualEngine();
+    const unavailable = new UnavailableError('LOSAT could not download its engine file /engine/serial.wasm (network error)');
+    engine.start = () => Promise.reject(unavailable);
+    const { coordinator } = setup(engine);
+    expect(await coordinator.enqueue(request)).toEqual({
+      ok: false,
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (network error). Reload the page.',
+    });
+    const reading = new ManualEngine();
+    const { coordinator: other } = setup(reading, (data) =>
+      Object.assign(Object.create(data) as DataService, { indexSource: () => Promise.reject(unavailable) }),
+    );
+    expect(await other.enqueue(request)).toEqual({
+      ok: false,
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (network error). Reload the page.',
+    });
   });
 
   it('freezes the snapshot so later edits cannot change a queued job', async () => {
@@ -480,6 +619,37 @@ describe('Coordinator', () => {
 
   // ABI v2 stream 8 (line RG E1w-3b): the file of -logfile comes with the engine's answer, also when
   // the run fails, and the run keeps it; a cancelled run keeps none.
+  // line WQA's sweep, D7, 2026-11-19: the results name the records of a -parse_deflines run as its outputs do.
+  it('keeps the IDs that the outputs of a run show, where the engine read them from the deflines', async () => {
+    const engine = new ManualEngine();
+    const { coordinator } = setup(engine);
+    const plain = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, plain, 'running');
+    engine.finish(plain);
+    await waitFor(coordinator, plain, 'completed');
+    expect('shownIds' in viewOf(coordinator, plain)!.record).toBe(false);
+    engine.shownIds = { query: ['AB000001.1'], subject: ['NP_000006.1'] };
+    const parsed = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, parsed, 'running');
+    engine.finish(parsed);
+    await waitFor(coordinator, parsed, 'completed');
+    expect(viewOf(coordinator, parsed)!.record.shownIds).toEqual({ query: ['AB000001.1'], subject: ['NP_000006.1'] });
+  });
+
+  // line WQA's sweep, D7, 2026-11-20: where the run's messages went is the engine's word, kept with the completed run.
+  it("keeps where the run's messages went, as the engine said", async () => {
+    const engine = new ManualEngine();
+    const { coordinator } = setup(engine);
+    for (const messages of ['diagnostics', 'logfile', 'nowhere'] as const) {
+      engine.messages = messages;
+      const runId = (await coordinator.enqueue(request)).runId!;
+      await waitFor(coordinator, runId, 'running');
+      engine.finish(runId);
+      await waitFor(coordinator, runId, 'completed');
+      expect(viewOf(coordinator, runId)!.record.messages).toBe(messages);
+    }
+  });
+
   it('keeps the files that a run made besides its outputs, of a completed and of a failed run, and none of a cancelled one', async () => {
     const engine = new ManualEngine();
     const { coordinator, saved } = setup(engine);

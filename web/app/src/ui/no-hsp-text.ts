@@ -6,6 +6,7 @@ export const NO_HSP_TEXT: Readonly<Record<NoHspReason, string>> = {
   'dry-run': 'This run was a dry run (-dryrun): LOSAT read the arguments and the settings and ran no search.',
   'empty-query': 'The query has no sequences.',
   'no-tabular-hits': '-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty.',
+  'no-tabular-output': 'outfmt 6 and 7 could not be written, so this run has no HSP records.',
   'no-queries': 'No queries match the query filters.',
   'no-hits': 'No significant similarity found for this query.',
   'filtered-out': 'No HSPs of this query match the view filters.',

@@ -94,11 +94,11 @@ Cases that LOSAT refuses with an error are on [What LOSAT refuses](refusals.md),
 
 ## Platforms
 
-### Last digit of a full-precision value on macOS and WASI
+### Last digit of a full-precision value on macOS
 
 - **What you see.** The last (15th) digit of a value printed with all its digits can differ by 1 from the Linux and Windows value.
-- **When.** macOS: the E value in `-outfmt 11` and `-outfmt 8` (tabular output is not affected). WASI (`wasm32-wasip1` and `wasm32-wasip1-threads`): the values of the ASN.1 PSSM of `psiblast -out_pssm` written with `-out_ascii_pssm`. Values rounded to 6 digits (XML, JSON) or printed with 2 or 3 digits (tabular) are not affected in practice.
-- **Why.** The platform's maths library differs by 1 ULP. NCBI BLAST+ on macOS is expected to show the same (not tested). On WASI, NCBI BLAST+ 2.17.0 writes the same digit on an x86-64 CPU without FMA.
+- **When.** macOS: the E value in `-outfmt 11` and `-outfmt 8` (tabular output is not affected). Values rounded to 6 digits (XML, JSON) or printed with 2 or 3 digits (tabular) are not affected in practice.
+- **Why.** The platform's maths library differs by 1 ULP. NCBI BLAST+ on macOS is expected to show the same (not tested).
 - **Record.** [The decision record on the last digit of full-precision values](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
 
 ### NCBI's own builds differ across platforms

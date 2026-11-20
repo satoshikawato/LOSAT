@@ -66,7 +66,7 @@ jobs:
         # macOS x64.
         runner: >-
           ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]'
-          || '["ubuntu-24.04", "ubuntu-24.04-arm", "windows-2025", "macos-15", "macos-15-intel"]') }}
+          || '["ubuntu-24.04", "ubuntu-24.04-arm"]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     defaults:
@@ -108,9 +108,13 @@ jobs:
         run: |
           set -euo pipefail
           # The maturin of python.yml's tests, pinned in one place.
-          "$PYTHON" -m pip install --disable-pip-version-check --quiet "$(grep '^maturin==' tests/requirements.txt)"
-          "$PYTHON" -m maturin build --release --locked --compatibility pypi --auditwheel check \
+          # PROBE (not for merge): link against glibc 2.17 with zig as the linker.
+          m=$(grep '^maturin==' tests/requirements.txt)
+          "$PYTHON" -m pip install --disable-pip-version-check --quiet "maturin[zig]==${m#maturin==}"
+          "$PYTHON" -m pip list 2>/dev/null | grep -i -E 'maturin|ziglang'
+          "$PYTHON" -m maturin build --release --locked --zig --compatibility manylinux2014 --auditwheel check \
             --interpreter "$PYTHON" --out dist
+          ls -l dist
 
       - name: Install it in fresh environments and search
         working-directory: python

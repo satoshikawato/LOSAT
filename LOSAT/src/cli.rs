@@ -1505,7 +1505,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "strand",
     "subject_besthit",
 ];
 

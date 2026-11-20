@@ -409,6 +409,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpsblast` option. |
+| `-outfmt 5` with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI's XML takes the query for the entry (the query's title in `Hit_def`). `-outfmt 11` writes NCBI's bytes. |
 | A query above 5,000,000 letters | Refused. |
 | A database that lists one volume twice (`-db "x x"`) | Refused. The database layer refuses it for every program; NCBI's `rpsblast` searches the volume once. |
 | A profile database whose volumes differ in matrix or gap costs | Refused. |
@@ -441,6 +442,7 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number 
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpstblastn` option. |
+| `-outfmt 5` with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI stops with an exception after half a document. `-outfmt 11` writes NCBI's bytes. |
 | `-query_gencode 32` | Refused (exit status 2). |
 | `rpstblastn` in the library API and the Web engine | Refused. |
 | The database refusals of `rpsblast` above, and its alias-file keys | Refused. |

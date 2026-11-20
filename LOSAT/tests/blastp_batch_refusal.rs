@@ -17,7 +17,9 @@
 //! after qa's report (NCBI BLAST+ 2.17.0 n1: exit status 3, rows `db.x4.chunk.neg.*`). Where the wrapped
 //! ranges leave gaps between chunks that all hold a query (`x4/chunk_second.faa` with `CHUNK_SIZE=-1
 //! OVERLAP_CHUNK_SIZE=-200`: the 398 letters make chunks [0, 100) and [300, 398)), NCBI searches on
-//! without the hits in the gap, and LOSAT refuses before the first byte (PD-LOSAT-NCBI-DEFECTS D13).
+//! without the hits in the gap; the maintainer kept that setting refused (PD-LOSAT-NCBI-DEFECTS
+//! version 1.1), and LOSAT refuses where that batch's search would start, after batch 1's report
+//! (review 3 of X4; row `db.x4.chunk.neg.gap.6`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 //! ```c++
@@ -184,29 +186,44 @@ fn a_negative_pair_that_leaves_chunks_without_a_query_in_batch_2_is_refused_afte
 }
 
 #[test]
-fn a_negative_pair_that_leaves_gaps_between_its_chunks_is_refused_before_the_first_byte() {
+fn a_negative_pair_that_leaves_gaps_between_its_chunks_in_batch_2_is_refused_after_batch_1() {
     let env = [
         ("BATCH_SIZE", "1"),
         ("CHUNK_SIZE", "-1"),
         ("OVERLAP_CHUNK_SIZE", "-200"),
     ];
+    // Batch 1 (qsok2, 92 letters: one chunk with this pair) alone, without the variables.
+    let alone = search("tests/fasta/x4/chunk_first.faa", "6", 1, &[]);
+    let alone7 = search("tests/fasta/x4/chunk_first.faa", "7", 1, &[]);
+    assert_eq!(alone.code, Some(0), "{}", alone.stderr);
+    assert!(!alone.stdout.is_empty());
+    let epilog = alone7
+        .stdout
+        .rfind("# BLAST processed")
+        .expect("outfmt 7's last line");
+    let message =
+        "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch";
     for threads in [1, 4] {
-        for outfmt in ["6", "7"] {
-            let run = search("tests/fasta/x4/chunk_second.faa", outfmt, threads, &env);
-            assert_eq!(
-                run.code,
-                Some(1),
-                "n{threads} outfmt {outfmt}: {}",
-                run.stderr
-            );
-            assert_eq!(run.stdout, "", "n{threads} outfmt {outfmt}");
-            assert!(
-                run.stderr.contains(
-                    "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch"
-                ),
-                "n{threads} outfmt {outfmt}: {}",
-                run.stderr
-            );
-        }
+        let run = search("tests/fasta/x4/chunk_second.faa", "6", threads, &env);
+        assert_eq!(run.code, Some(1), "n{threads}: {}", run.stderr);
+        assert!(run.stderr.contains(message), "n{threads}: {}", run.stderr);
+        assert_eq!(run.stdout, alone.stdout, "n{threads}");
+        let commented = search("tests/fasta/x4/chunk_second.faa", "7", threads, &env);
+        assert_eq!(commented.code, Some(1), "n{threads}: {}", commented.stderr);
+        assert!(
+            commented.stderr.contains(message),
+            "n{threads}: {}",
+            commented.stderr
+        );
+        assert_eq!(commented.stdout, alone7.stdout[..epilog], "n{threads}");
+        // In one batch (the default batch size) the refusal comes before the first byte.
+        let one_batch = search(
+            "tests/fasta/x4/chunk_second.faa",
+            "6",
+            threads,
+            &[("CHUNK_SIZE", "-1"), ("OVERLAP_CHUNK_SIZE", "-200")],
+        );
+        assert_eq!(one_batch.code, Some(1), "n{threads}: {}", one_batch.stderr);
+        assert_eq!(one_batch.stdout, "", "n{threads}");
     }
 }

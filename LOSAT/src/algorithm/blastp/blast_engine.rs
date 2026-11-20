@@ -8493,7 +8493,7 @@ fn x_block_input(
 // the cause, after the rows of the blocks before:
 // - the diagonal table of all queries (`check_diag_table_window` in `call_setup::scan_shape`, with
 //   the concatenated length of all queries; a block's is shorter);
-// - the split of a long query batch (the `ensure!`s of `search_split_query_batches`);
+// - the split of a long query batch (the refusals of `search_split_query_batches`);
 // - with the compressed lookup table, a table of one of NCBI's query batches (or of a query
 //   chunk of a split batch) that fills NCBI's overflow banks: `x_word_blocks`, which the block
 //   search tests on its pool before the first block (and leaves the search to the reference path
@@ -9877,11 +9877,13 @@ fn search_split_query_batches(
             continue;
         };
         // NCBI stops in the search of the batch (its exception) after it has printed the reports of
-        // the batches before (`blastp_app.cpp:257-276`, quoted in `search`): so do the two refusals
+        // the batches before (`blastp_app.cpp:257-276`, quoted in `search`): so do the refusals
         // below, as the batch's failure (`database::HeaderReadError`, the batch's first query;
-        // TBLASTN's and TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). In psiblast's
-        // later rounds, the only ones it splits, NCBI has printed the rounds of the query before as
-        // well: those refusals come before the run's first byte.
+        // TBLASTN's and TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). psiblast searches
+        // one query at a time and NCBI's stops in the query's round 1 (it splits that round too),
+        // after the rounds of the queries before: every round of a query makes the same chunks,
+        // so a later round never reaches these refusals, and the refusal of the query's search is
+        // the plain error.
         let batch_refusal = |refusal: anyhow::Error| -> anyhow::Error {
             if args.psi_search.is_some() {
                 refusal
@@ -9929,12 +9931,15 @@ fn search_split_query_batches(
         // `split_protein_batch`): where the first range covers the batch, the chunks after it
         // hold no query and NCBI stops above. Otherwise the ranges leave gaps between chunks that
         // each hold a query and would not be split again, which NCBI searches on with the hits in
-        // the gaps lost: that is refused before the run's first byte (PD-LOSAT-NCBI-DEFECTS D13).
-        anyhow::ensure!(
-            !sizes.negative_chunk_size(),
-            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
-            args.app.name()
-        );
+        // the gaps lost: the maintainer kept that setting refused (PD-LOSAT-NCBI-DEFECTS version
+        // 1.1), and the refusal comes where the batch's search would start, after the reports of
+        // the batches before (the form of 1.40 for a refusal in the middle of a run).
+        if sizes.negative_chunk_size() {
+            return Err(batch_refusal(anyhow::anyhow!(
+                "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
+                args.app.name()
+            )));
+        }
         let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
         // The options' search spaces of the batch's contexts (one per query), which every chunk
         // reads by its own context index (`SplitQuery_SetEffectiveSearchSpace`, quoted at

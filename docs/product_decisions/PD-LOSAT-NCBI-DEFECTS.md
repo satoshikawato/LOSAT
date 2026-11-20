@@ -188,8 +188,9 @@
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.51, line RG item X-short-tbx; the
   same day, X4 fix round 3: also the explicit rejection of a failed batch whose first query holds
   a redone match, on which NCBI crashes, rule 3; X4 fix round 4: a negative `CHUNK_SIZE` that
-  leaves a chunk without a query also after the reports of the batches before, the rejection
-  before the first byte kept for the negative pair whose chunks leave gaps)
+  leaves a chunk without a query also after the reports of the batches before; 2026-11-20, review
+  3 of X4: so does the rejection that version 1.1 kept of the negative pair whose chunks leave
+  gaps)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -349,8 +350,9 @@ Explicit rejections (rule 3):
   negative `CHUNK_SIZE` that splits a batch. Unlike BLASTN's exception 1, the maintainer
   kept the rejection for these programs. BLASTP's rejections of a chunk split again or of a
   chunk without a query come after the reports of the query batches before, where NCBI's
-  exception stops the search of the batch (version 1.52, the form of 1.40; psiblast's later
-  rounds, the only ones it splits, keep the rejection before the first byte). A chunk without a
+  exception stops the search of the batch (version 1.52, the form of 1.40; psiblast, which
+  searches one query at a time, stops in the query's round 1 after the rounds of the queries
+  before, as NCBI does: review 3 of X4 found that NCBI splits that round too). A chunk without a
   query is refused first: NCBI's `CQuerySplitter::Split` makes every chunk's query factory before
   it sets a chunk up and stops at such a chunk's missing query vector
   (`split_query_cxx.cpp:234,876-879`, `CCoreException`), before any chunk is split again (as with
@@ -359,10 +361,14 @@ Explicit rejections (rule 3):
   batch's length (`split_query_cxx.cpp:145-171`): chunk 0 covers the batch and the chunks after
   it hold no query, so NCBI stops at the split after the batches before (version 1.52, X4 fix
   round 4; review 2 of X4 found NCBI's exit status 3 with the reports of the batches before,
-  rows `db.x4.chunk.neg.*`). Only a negative pair whose wrapped ranges leave gaps between chunks
-  that all hold a query and are not split again, which NCBI searches on with the hits in the
-  gaps lost, keeps the rejection before the first byte (row `db.x4.chunk.neg.gap.6`; rows
-  `db.x4.chunk.empty.*` and `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
+  rows `db.x4.chunk.neg.*`). A negative pair whose wrapped ranges leave gaps between chunks
+  that all hold a query and are not split again is not a failure of NCBI's: NCBI searches on
+  with the hits in the gaps lost (exit status 0), and the maintainer kept that setting rejected
+  (version 1.1, rule 2). BLASTP's rejection comes where the batch's search would start, after
+  the reports of the query batches before (version 1.52, review 3 of X4: the form of 1.40 for a
+  rejection in the middle of a run; row `db.x4.chunk.neg.gap.6`, whose bytes are NCBI's report
+  of the batch before, row `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and
+  `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
   exhaust its overflow bank, and `-max_target_seqs` values that make the preliminary hit

@@ -173,18 +173,16 @@ class DbSearchFixtureTests(unittest.TestCase):
         for r in rows:
             if r["kind"] != "ncbi":
                 self.assertFalse(db_fixtures.under_valgrind(r), r["row_id"])
-                # A rejection row of a crash whose frozen stdout is its anchor's (`ncbi-anchor:`, NCBI's run of a
-                # near input that fails at the same step): the same bytes and cells as the anchor's.
-                anchor = db_fixtures.anchor_row_id(r)
-                if anchor:
-                    source = by_id[anchor]
-                    self.assertEqual((r["kind"], source["kind"], source["outfmt"]),
-                                     ("losat-rejection", "ncbi", r["outfmt"]), r["row_id"])
+                # A rejection row whose stdout is a near input's NCBI run (`ncbi-near:`, the bytes LOSAT writes
+                # before it refuses): the stdout cells of that `ncbi` row of its own run, and no file of its own.
+                near = db_fixtures.near_row_id(r)
+                if near:
+                    source = by_id[near]
+                    self.assertEqual((r["kind"], source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
+                                     ("losat-rejection", "ncbi", None, r["outfmt"]), r["row_id"])
                     self.assertEqual([source[k] for k in ("stdout_sha256", "stdout_bytes")],
                                      [r[k] for k in ("stdout_sha256", "stdout_bytes")], r["row_id"])
-                    self.assertEqual((db_fixtures.FROZEN / f"{r['row_id']}.out").read_bytes(),
-                                     (db_fixtures.FROZEN / f"{db_fixtures.frozen_id(source)}.out").read_bytes(),
-                                     r["row_id"])
+                    self.assertFalse((db_fixtures.FROZEN / f"{r['row_id']}.out").exists(), r["row_id"])
                 continue
             # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
             near = db_fixtures.near_row_id(r)
@@ -260,7 +258,7 @@ class DbSearchFixtureTests(unittest.TestCase):
                       and db_fixtures.rps_cell(r["db"]) is None)
         rps = first(lambda r: r["kind"] == "ncbi" and db_fixtures.rps_cell(r["db"]) is not None)
         rejection = first(lambda r: r["kind"] == "losat-rejection" and r["stdout_bytes"]
-                          and not xinclude.wants_pssm(r) and not db_fixtures.anchor_row_id(r))
+                          and not xinclude.wants_pssm(r) and not db_fixtures.near_row_id(r))
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir, frozen = Path(tmp) / "bin", Path(tmp) / "frozen"
             bin_dir.mkdir()
@@ -281,31 +279,32 @@ class DbSearchFixtureTests(unittest.TestCase):
             self.assertEqual(len(written), 1)
 
     @unittest.skipUnless(os.name == "posix", "the stand-in NCBI program is a shell script")
-    def test_freeze_copies_the_anchor_of_a_rejection_row(self):
-        # A rejection row of a crash with `ncbi-anchor:` takes its anchor's frozen stdout and cells; NCBI runs only
-        # for the anchor (the stand-in counts its runs), which may come after the rejection row in the manifest.
+    def test_freeze_gives_a_rejection_row_the_stdout_cells_of_its_near_row(self):
+        # A rejection row with `ncbi-near:` takes the stdout cells of its near row and keeps its own rc; NCBI runs
+        # only for the near row (the stand-in counts its runs), which may come after the rejection row in the
+        # manifest, and no frozen file is written for the rejection row.
         rows = db_fixtures.read_manifest()[1]
-        rejection = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.anchor_row_id(r)))
-        anchor = dict(next(r for r in rows if r["row_id"] == db_fixtures.anchor_row_id(rejection)))
+        rejection = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_row_id(r)))
+        near = dict(next(r for r in rows if r["row_id"] == db_fixtures.near_row_id(rejection)))
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir, frozen, runs = Path(tmp) / "bin", Path(tmp) / "frozen", Path(tmp) / "runs"
             bin_dir.mkdir()
-            script = bin_dir / anchor["program"]
-            script.write_text(f'#!/bin/sh\necho run >> "{runs}"\nprintf "the anchor\\n"\nexit 3\n')
+            script = bin_dir / near["program"]
+            script.write_text(f'#!/bin/sh\necho run >> "{runs}"\nprintf "the near run\\n"\nexit 3\n')
             script.chmod(0o755)
             written = []
-            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [rejection, anchor])), \
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [rejection, near])), \
                     unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: written.append(a)), \
                     unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
                     contextlib.redirect_stdout(io.StringIO()):
                 args = argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="", valgrind="")
                 self.assertEqual(db_fixtures.freeze(args), 0)
             self.assertEqual(runs.read_text(), "run\n")
-            self.assertEqual((frozen / f"{rejection['row_id']}.out").read_bytes(), b"the anchor\n")
-            self.assertEqual((frozen / f"{anchor['row_id']}.out").read_bytes(), b"the anchor\n")
+            self.assertFalse((frozen / f"{rejection['row_id']}.out").exists())
+            self.assertEqual((frozen / f"{near['row_id']}.out").read_bytes(), b"the near run\n")
             self.assertEqual([rejection[k] for k in ("stdout_sha256", "stdout_bytes", "rc")],
-                             [anchor["stdout_sha256"], "11", "1"])
-            self.assertEqual(anchor["rc"], "3")
+                             [near["stdout_sha256"], "13", "1"])
+            self.assertEqual(near["rc"], "3")
             self.assertEqual(len(written), 1)
 
 

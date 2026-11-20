@@ -55,11 +55,14 @@ LOSAT/tests/db_search (README.md there says how they were built).
   <row_id>.out by `freeze` (which runs NCBI for such a row and keeps only its stdout) and checked
   against `stdout_sha256`. Its `rc` and stderr are LOSAT's. Where NCBI crashes on such a row, the frozen
   stdout is the part of the report that LOSAT writes before it refuses; `freeze` keeps it when NCBI's
-  stdout stops earlier or later but agrees up to that point (`frozen_stdout`). Such a row whose `covers`
-  cell has `ncbi-anchor: ROW_ID` (up to a space or a ` | `) takes that stdout from the `ncbi` row ROW_ID of
-  the same outfmt, NCBI's run of a near input that fails at the same step without the crash (its anchor):
-  `freeze` does not run NCBI for it and copies ROW_ID's frozen stdout and its hash and size cells to the
-  row, after ROW_ID is frozen (`anchor_row_id`), and the unit tests check that both rows hold the same bytes.
+  stdout stops earlier or later but agrees up to that point (`frozen_stdout`). A rejection row whose
+  `covers` cell has `ncbi-near: ROW_ID` takes its stdout from the `ncbi` row ROW_ID of the same outfmt,
+  NCBI's run of a near input that writes the bytes LOSAT writes before it refuses: an input that fails at
+  the same step where NCBI crashes on the row's own (line RG item X4: the failed batch of a
+  Smith-Waterman redo), or the query batches before the batch that LOSAT refuses and NCBI searches on
+  (X4: the negative CHUNK_SIZE pair whose chunks leave gaps). `freeze` runs nothing for such a row and
+  copies ROW_ID's stdout columns, `check` reads ROW_ID's frozen stdout (`frozen_id`), and the row keeps
+  its own rc and stderr (LOSAT's).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -440,14 +443,6 @@ def near_row_id(row: dict[str, str]) -> str | None:
     return rest.split(" | ")[0].split()[0] if marker else None
 
 
-def anchor_row_id(row: dict[str, str]) -> str | None:
-    """The `ncbi` row whose frozen stdout is the frozen stdout of the `losat-rejection` row `row`
-    (`ncbi-anchor: ROW_ID` in its covers cell: NCBI's run of a near input that fails at the step where NCBI
-    crashes on the row's own input), or None."""
-    _, marker, rest = row["covers"].partition("ncbi-anchor: ")
-    return rest.split(" | ")[0].split()[0] if marker else None
-
-
 def under_valgrind(row: dict[str, str]) -> bool:
     """Whether the frozen bytes of `row` are NCBI's run under valgrind (a ` | ncbi-valgrind` part of its covers
     cell): rows where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3)."""
@@ -507,9 +502,7 @@ def freeze(args: argparse.Namespace) -> int:
         if not selected(row, args):
             continue
         command = [str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"]
-        if row["kind"] == "losat-rejection" and row["stdout_bytes"] and anchor_row_id(row):
-            continue  # its anchor's stdout, below
-        if row["kind"] == "losat-rejection" and row["stdout_bytes"]:
+        if row["kind"] == "losat-rejection" and row["stdout_bytes"] and not near_row_id(row):
             # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too.
             if xinclude.wants_pssm(row):
                 run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
@@ -576,25 +569,16 @@ def freeze(args: argparse.Namespace) -> int:
     by_id = {row["row_id"]: row for row in rows}
     for row in rows:
         near = near_row_id(row)
-        if not selected(row, args) or row["kind"] != "ncbi" or not near:
+        if not selected(row, args) or row["kind"] not in ("ncbi", "losat-rejection") or not near:
             continue
         source = by_id.get(near)
         if source is None or source["kind"] != "ncbi" or near_row_id(source) or source["outfmt"] != row["outfmt"]:
             raise SystemExit(f"{row['row_id']}: ncbi-near {near} is not an ncbi row of its own run with the same outfmt")
-        row.update({key: source[key] for key in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")})
+        # A rejection row keeps its own rc and stderr (LOSAT's) and takes the near run's stdout.
+        keys = ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256") if row["kind"] == "ncbi" \
+            else ("stdout_sha256", "stdout_bytes")
+        row.update({key: source[key] for key in keys})
         print(f"{row['row_id']}\tncbi-near={near}\trc={row['rc']}\tstdout={row['stdout_bytes']}")
-    # The rejection rows of a crash whose stdout is their anchor's (`anchor_row_id`), after the anchor is frozen.
-    for row in rows:
-        anchor = anchor_row_id(row)
-        if not selected(row, args) or row["kind"] != "losat-rejection" or not row["stdout_bytes"] or not anchor:
-            continue
-        source = by_id.get(anchor)
-        if source is None or source["kind"] != "ncbi" or source["outfmt"] != row["outfmt"]:
-            raise SystemExit(f"{row['row_id']}: ncbi-anchor {anchor} is not an ncbi row with the same outfmt")
-        out = (FROZEN / f"{frozen_id(source)}.out").read_bytes()
-        (FROZEN / f"{row['row_id']}.out").write_bytes(out)
-        row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
-        print(f"{row['row_id']}\tncbi-anchor={anchor}\tstdout={len(out)} (rejection row: its anchor's stdout)")
     write_manifest(comments, rows)
     return 0
 
@@ -680,7 +664,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
         # library skips.
         if row["stdout_bytes"]:
-            out_path = FROZEN / f"{row['row_id']}.out"
+            out_path = FROZEN / f"{frozen_id(row)}.out"
             out = out_path.read_bytes() if out_path.exists() else b""
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")

@@ -263,7 +263,7 @@ impl DbMaskOption {
                 message: format!(
                     "BLAST options error: Masking algorithm ID {id} is not supported in {} '{db_name}' BLAST database\n",
                     if nucleotide { "nucleotide" } else { "protein" }
-                ),
+                ).into(),
             }
             .into());
         }
@@ -389,7 +389,7 @@ impl DbMaskOption {
             match error {
                 SeqDbError::Range(text) => NativeError {
                     exit: 2,
-                    message: format!("BLAST Database error: {text}\n"),
+                    message: format!("BLAST Database error: {text}\n").into(),
                 }
                 .into(),
                 error => crate::algorithm::common::database::database_error_of(error, program),

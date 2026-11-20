@@ -153,6 +153,25 @@ pub struct TblastxArgs {
     pub query_gencode: u8,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]
     pub db_gencode: u8,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:74-75
+    // ```c++
+    //     arg.Reset(new CLargestIntronSizeArgs);
+    //     m_Args.push_back(arg);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:937-944
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgMaxIntronLength, "length",
+    //                     "Length of the largest intron allowed in a translated "
+    //                     "nucleotide sequence when linking multiple distinct "
+    //                     "alignments",
+    //                     CArgDescriptions::eInteger,
+    //                     NStr::IntToString(kDfltArgMaxIntronLength));
+    //     arg_desc.SetConstraint(kArgMaxIntronLength,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
+    // ```
+    // A value other than 0 is NCBI's options error (`check_ncbi_options`); 0 changes nothing.
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]")]
+    pub max_intron_length: Option<i32>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927
     // ```c
     //     m_NumDescriptions = m_DfltNumDescriptions;
@@ -246,6 +265,19 @@ pub struct TblastxArgs {
     // by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244
+    // ```c++
+    //     if (!m_SuppressSumStats) {
+    //         arg_desc.AddOptionalKey(kArgSumStats, "bool_value",
+    //                      	 	"Use sum statistics",
+    //                      	 	CArgDescriptions::eBoolean);
+    //     }
+    // ```
+    // (`CGenericSearchArgs( !kQueryIsProtein, false, false, true)`, tblastx_args.cpp:68, does not
+    // suppress it.) Option, not a value with a default: whether it was given is what a BLAST
+    // archive (outfmt 11) records (`SumStatistics`); the search reads `sum_stats()`.
+    #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics [default: true]")]
+    pub sum_stats: Option<bool>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
     // arg_desc.AddFlag(kArgUseLCaseMasking,
     //     "Use lower case filtering in query and subject sequence(s)?", true);
@@ -537,6 +569,27 @@ impl TblastxArgs {
     /// other handler of tblastx sets `mask_at_hash`.
     pub fn soft_masking(&self) -> bool {
         self.soft_masking.unwrap_or(false)
+    }
+
+    /// Whether the search links its HSPs with sum statistics (`do_sum_stats`): `-sum_stats`, else
+    /// TBLASTX's default, true.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:321-323
+    /// ```c++
+    ///     if (args.Exist(kArgSumStats) && args[kArgSumStats]) {
+    ///         opt.SetSumStatisticsMode(args[kArgSumStats].AsBoolean());
+    ///     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/tblastx_options.cpp:76-81
+    /// ```c++
+    /// CTBlastxOptionsHandle::SetHitSavingOptionsDefaults()
+    /// {
+    ///     CBlastProteinOptionsHandle::SetHitSavingOptionsDefaults();
+    ///     m_Opts->SetSumStatisticsMode();
+    /// }
+    /// ```
+    pub fn sum_stats(&self) -> bool {
+        self.sum_stats.unwrap_or(true)
     }
 
     /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a

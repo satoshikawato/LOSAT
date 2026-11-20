@@ -11,17 +11,23 @@ the published sources found quoted text of Microsoft's C runtime, libstdc++ and 
 LGPL code, some of it labelled "NCBI reference"), and of LMDB, Boost, lmdb++, SQLite and the
 Rust crates bzip2 and ruzstd; those quotes were removed and their citations kept.
 
-Two checks, over every `.rs` file of the repository:
-- QUOTE: a fenced block (```` ``` ````) in a line comment is a quote of the source that the
+Two checks, over the comments of the repository's source files (`COMMENT_STYLES`: line
+comments of Rust, C, C++, JavaScript and TypeScript; `#` comments of TOML, YAML, shell and
+Python, and Python's docstrings; every line of Markdown and text files):
+- QUOTE: a fenced block (```` ``` ````) in a comment is a quote of the source that the
   comment lines right above it cite: the last of them that starts with a citation label
-  (`<label>: <path>...`, `NCBI reference ...`, `<project> <version> reference ...`), else
-  each of them that names a source; without one, the last citation above it in the file
-  (a quote inside a function cited above the function). It fails when that citation is of
-  another project: it names a source of `FOREIGN_SOURCES` or a path of `NON_NCBI_PATHS`, or
-  its label is not one of `NCBI_LABEL_RE`.
-- LABEL: a comment line labelled as NCBI's (`NCBI reference ...`) fails when its label or
-  path names another project's source (the code is not NCBI's).
-A fenced block with no citation above it in its file is not a quote and is not checked.
+  (`<label>: <path>...`, `NCBI reference ...`, `NCBI <path>`, `<project> <version>
+  reference ...`), else each of them that names a source; without one, the last citation
+  above it in the file (a quote inside a function cited above the function). It fails when
+  that citation is of another project: it names a source of `FOREIGN_SOURCES` or a path of
+  `NON_NCBI_PATHS`, or its label is not one of `NCBI_LABEL_RE`. A comment line that is a
+  line of C or C++ (`CODE_LINE_RE`) under such a labelled citation, in the same comment, is
+  a quote without a fence and fails the same way.
+- LABEL: a comment line labelled as NCBI's (`NCBI reference ...`, `NCBI <path>`) fails when
+  its label or path names another project's source (the code is not NCBI's).
+A fenced block with no citation above it in its file is not a quote and is not checked. In
+Markdown and text files only the paragraph right above a fence is read for its citation (their
+fences are mostly commands and examples).
 
 The tables below are the one place that says which sources are NCBI's. There is no
 allowlist of exceptions: cite the file and lines instead of quoting them.
@@ -46,12 +52,12 @@ NCBI_LABEL_RE = re.compile(r"^(?:NCBI(?!['\u2019]s)\b|Reference\b)")
 NCBI_CITATION_RE = re.compile(r"^(?:NCBI reference|NCBI unit test|Reference)\b")
 
 # Files in NCBI's tree that are other projects' code: they carry no NCBI PUBLIC DOMAIN NOTICE.
-# A path is matched when it contains the entry (after `c++/`).
+# A path is matched when it contains the entry (after `c++/`; `boost_erf.c` by its name alone).
 NON_NCBI_PATHS: tuple[tuple[str, str], ...] = (
     ("LMDB", "src/util/lmdb/"),
     ("LMDB", "include/util/lmdb/"),
     ("lmdb++", "include/util/lmdbxx/"),
-    ("Boost", "src/algo/blast/core/boost_erf.c"),
+    ("Boost", "boost_erf.c"),
     ("BitMagic", "include/util/bitset/"),
     ("bzip2", "src/util/compress/bzip2/"),
     ("bzip2", "include/util/compress/bzip2/"),
@@ -93,12 +99,38 @@ FOREIGN_SOURCES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 COMMENT_RE = re.compile(r"^\s*//[/!]?(?P<text>.*)$")
+HASH_COMMENT_RE = re.compile(r"^\s*#(?![!\[])(?P<text>.*)$")
+# A Python docstring's opening line: the quotes start the line.
+DOCSTRING_RE = re.compile(r"^\s*[rRuU]?(?P<quotes>\"\"\"|\'\'\')(?P<text>.*)$")
+# The comment syntax of each kind of source file, by its extension.
+COMMENT_STYLES: dict[str, str] = {
+    ".rs": "slash",
+    ".c": "slash",
+    ".h": "slash",
+    ".cc": "slash",
+    ".cpp": "slash",
+    ".hpp": "slash",
+    ".js": "slash",
+    ".mjs": "slash",
+    ".cjs": "slash",
+    ".ts": "slash",
+    ".tsx": "slash",
+    ".toml": "hash",
+    ".yml": "hash",
+    ".yaml": "hash",
+    ".sh": "hash",
+    ".py": "python",
+    ".md": "text",
+    ".txt": "text",
+}
 FENCE_RE = re.compile(r"^\s*```")
 # A cited source: a path with a source extension, a libstdc++ header path, or `<path>:<line>`.
+# (Each path is matched from the start of its token only: a long token, such as a line of a
+# sequence in a text file, is then read once, not once from each of its letters.)
 CITE_RE = re.compile(
-    r"[\w.+-]*(?:/[\w.+-]+)*\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc|asn|def|prt)\b"
+    r"(?<![\w.+/-])[\w.+-]*(?:/[\w.+-]+)*\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc|asn|def|prt)\b"
     r"|\b(?:bits|ext|std)/\w+"
-    r"|[\w.+-]+(?:/[\w.+-]+)+:\d"
+    r"|(?<![\w.+/-])[\w.+-]+(?:/[\w.+-]+)+:\d"
 )
 # A labelled citation: the line starts with `<label>: <path>:<line>` or `<label>: <path> (`.
 LABELLED_RE = re.compile(
@@ -106,7 +138,19 @@ LABELLED_RE = re.compile(
 )
 # A line that starts with `<project> [<version>] reference`.
 LABEL_START_RE = re.compile(r"^[A-Za-z][\w.+ -]{0,40}\breference\b")
-SKIPPED_DIRS = frozenset({".git", ".worktrees", "target", "node_modules"})
+# A line labelled as NCBI's by a path: `NCBI c++/src/...:<lines>`, `NCBI 2.17.0 boost_erf.c:...`.
+NCBI_PATH_LABEL_RE = re.compile(
+    r"^NCBI(?:\s+[^\s:]+){0,4}?\s+(?P<path>[\w.+/-]+\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc))\b"
+)
+# A comment line that is a line of C or C++: a statement, a brace, a definition, a `#define`.
+CODE_LINE_RE = re.compile(
+    r"(?:=|\breturn\b|\w\()[^.`]*;\s*$|^\s*\}\s*$|\)\s*\{\s*$|^\s*#\s*define\b"
+    r"|^\s*(?:static\s+)?(?:const\s+)?(?:unsigned\s+|signed\s+)?"
+    r"(?:int|double|float|char|void|size_t|long|bool|Int4|Int8|Uint4|Uint8)\s+\**\w+\s*[(=;]"
+)
+SKIPPED_DIRS = frozenset(
+    {".git", ".worktrees", "target", "node_modules", ".venv", "venv", "__pycache__"}
+)
 
 
 @dataclass(frozen=True)
@@ -118,13 +162,45 @@ class Finding:
     text: str
 
 
-def rust_files(root: Path) -> Iterable[Path]:
-    """Every `.rs` file under `root`, skipping build output, worktrees and package caches."""
+def source_files(root: Path) -> Iterable[Path]:
+    """Every source file under `root` whose comments are read (`COMMENT_STYLES`), skipping build
+    output, worktrees, environments and package caches."""
     for directory, subdirs, files in os.walk(root):
         subdirs[:] = sorted(d for d in subdirs if d not in SKIPPED_DIRS)
         for name in sorted(files):
-            if name.endswith(".rs"):
+            if Path(name).suffix in COMMENT_STYLES:
                 yield Path(directory) / name
+
+
+def comment_texts(style: str, lines: Sequence[str]) -> list[str | None]:
+    """The text of each line that is a comment (`style` of `COMMENT_STYLES`), None for the others.
+
+    A Python docstring is a comment from its opening line to its closing one; every line of a
+    Markdown or text file is text."""
+    texts: list[str | None] = []
+    docstring: str | None = None
+    for line in lines:
+        if docstring is not None:
+            if docstring in line:
+                docstring = None
+            texts.append(line.strip())
+            continue
+        if style == "text":
+            texts.append(line.strip())
+            continue
+        if style == "slash":
+            comment = COMMENT_RE.match(line)
+        else:
+            comment = HASH_COMMENT_RE.match(line)
+            if comment is None and style == "python":
+                opening = DOCSTRING_RE.match(line)
+                if opening is not None:
+                    if opening.group("quotes") not in opening.group("text"):
+                        docstring = opening.group("quotes")
+                    texts.append(opening.group("text").strip())
+                    continue
+        texts.append(None if comment is None else comment.group("text").strip())
+    return texts
 
 
 def named_source(text: str) -> str | None:
@@ -138,11 +214,19 @@ def named_source(text: str) -> str | None:
     return None
 
 
+def ncbi_path_label(text: str) -> str | None:
+    """The other project of a line labelled as NCBI's by a path (`NCBI <path>`), or None."""
+    labelled = NCBI_PATH_LABEL_RE.match(text)
+    return None if labelled is None else named_source(labelled.group("path"))
+
+
 def foreign_source(text: str) -> str | None:
     """The other project whose source a citation line cites, or None for NCBI's or LOSAT's.
 
     A labelled citation (`<label>: <path>...`) is judged by its label and path; any other
     citation line by everything it names."""
+    if NCBI_PATH_LABEL_RE.match(text):
+        return ncbi_path_label(text)
     labelled = LABELLED_RE.match(text)
     if labelled is None:
         return named_source(text)
@@ -171,65 +255,82 @@ def is_label_line(text: str) -> bool:
     return (
         LABELLED_RE.match(text) is not None
         or NCBI_CITATION_RE.match(text) is not None
+        or NCBI_PATH_LABEL_RE.match(text) is not None
         or LABEL_START_RE.match(text) is not None
     )
 
 
-def check_text(rel: str, lines: Sequence[str]) -> list[Finding]:
-    """The findings of one file, whose lines are `lines`."""
+def cited_source(cited: Sequence[tuple[int, str]]) -> tuple[str, str] | None:
+    """The other project of the first of `cited` that cites one, with where it is cited."""
+    for cited_at, cited_text in cited:
+        source = foreign_source(cited_text)
+        if source is not None:
+            return source, f"cited at :{cited_at}: {cited_text}"
+    return None
+
+
+def check_text(rel: str, lines: Sequence[str], style: str = "slash") -> list[Finding]:
+    """The findings of one file, whose lines are `lines` (comments of `style`)."""
     findings: list[Finding] = []
     last_citation: tuple[int, str] | None = None
-    # The comment lines above the current line, back to a code line, an empty comment line or
-    # a fence: the citation of a fence that opens next is among them.
-    run: list[tuple[int, str]] = []
+    # The citations among the comment lines above the current line, back to a code line, an
+    # empty comment line or a fence (the run): the last labelled one decides; without one, every
+    # citation line of the run.
+    run_label: tuple[int, str] | None = None
+    run_citations: list[tuple[int, str]] = []
     in_fence = False
-    for number, line in enumerate(lines, start=1):
-        comment = COMMENT_RE.match(line)
-        if comment is None:
+    for number, text in enumerate(comment_texts(style, lines), start=1):
+        if text is None:
             in_fence = False  # a fence ends with its comment run
-            run = []
+            run_label, run_citations = None, []
             continue
-        text = comment.group("text").strip()
+        cited = [run_label] if run_label is not None else list(run_citations)
         if FENCE_RE.match(text):
             if not in_fence:
-                # The last labelled citation above the fence decides; without one, every
-                # citation line of the run, else the last citation above in the file.
-                labels = [(n, t) for n, t in run if is_label_line(t)]
-                cited = labels[-1:] or [(n, t) for n, t in run if is_citation(t)]
-                if not cited and last_citation is not None:
+                # Without a citation in the run, the last citation above in the file (in source
+                # files: a quote inside a function cited above the function).
+                if not cited and last_citation is not None and style != "text":
                     cited = [last_citation]
-                for cited_at, cited_text in cited:
-                    source = foreign_source(cited_text)
-                    if source is not None:
-                        where = f"cited at :{cited_at}: {cited_text}"
-                        findings.append(Finding(rel, number, "QUOTE", source, where))
-                        break
+                found = cited_source(cited)
+                if found is not None:
+                    findings.append(Finding(rel, number, "QUOTE", found[0], found[1]))
             in_fence = not in_fence
-            run = []
+            run_label, run_citations = None, []
             continue
         if in_fence:
             continue
         if not text:
-            run = []
+            run_label, run_citations = None, []
             continue
-        run.append((number, text))
+        citation = is_citation(text)
+        if run_label is not None and not citation and CODE_LINE_RE.search(text):
+            found = cited_source([run_label])
+            if found is not None:
+                findings.append(Finding(rel, number, "QUOTE", found[0], found[1]))
+        if is_label_line(text):
+            run_label = (number, text)
+        elif citation:
+            run_citations.append((number, text))
         labelled = LABELLED_RE.match(text)
-        if NCBI_CITATION_RE.match(text) or (
-            labelled is not None and NCBI_LABEL_RE.match(labelled.group("label"))
+        if (
+            NCBI_CITATION_RE.match(text)
+            or NCBI_PATH_LABEL_RE.match(text)
+            or (labelled is not None and NCBI_LABEL_RE.match(labelled.group("label")))
         ):
             source = foreign_source(text)
             if source is not None:
                 findings.append(Finding(rel, number, "LABEL", source, text))
-        if is_citation(text):
+        if citation:
             last_citation = (number, text)
     return findings
 
 
 def find(root: Path) -> list[Finding]:
     findings: list[Finding] = []
-    for path in rust_files(root):
+    for path in source_files(root):
         text = path.read_text(encoding="utf-8", errors="replace")
-        findings.extend(check_text(path.relative_to(root).as_posix(), text.splitlines()))
+        style = COMMENT_STYLES[path.suffix]
+        findings.extend(check_text(path.relative_to(root).as_posix(), text.splitlines(), style))
     return findings
 
 

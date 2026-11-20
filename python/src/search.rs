@@ -156,11 +156,6 @@ fn rounds_rows(rounds: &[api::QueryRounds]) -> Vec<RoundsRow> {
         .collect()
 }
 
-/// The text of what the command line writes to its standard error.
-fn diagnostics_text(diagnostics: &[u8]) -> String {
-    String::from_utf8_lossy(diagnostics).into_owned()
-}
-
 /// A list of byte ranges of a report, as Python slices of its bytes.
 fn slices<'py>(
     py: Python<'py>,
@@ -218,41 +213,46 @@ pub fn run<'py>(
         HspTable::new(table),
         stats_rows(&outcome.query_stats),
         rounds_rows(&outcome.rounds),
-        diagnostics_text(&outcome.diagnostics),
+        PyBytes::new(py, &outcome.diagnostics),
     )
         .into_pyobject(py)
 }
 
 /// The report of `outfmt` written to the file `path`, as the command line's `-out` writes it, with
-/// the side files of outfmt 13 and 14 next to it; returns what the command line writes to its
-/// standard error.
+/// the side files of outfmt 13 and 14 next to it; returns the bytes that the command line writes
+/// to its standard error.
 #[pyfunction]
-pub fn run_to_file(
-    py: Python<'_>,
+pub fn run_to_file<'py>(
+    py: Python<'py>,
     program: &str,
     argv: Vec<String>,
     query: NamedQuery,
     subject: NamedSubject,
     outfmt: &str,
     path: PathBuf,
-) -> PyResult<String> {
-    py.detach(|| {
-        let loaded = Loaded::read(program, &argv, query, subject)?;
-        let mut diagnostics = Vec::new();
-        api::run_to_file(
-            &loaded.search,
-            loaded.inputs(),
-            outfmt,
-            &path,
-            &mut diagnostics,
-        )?;
-        Ok(diagnostics_text(&diagnostics))
-    })
-    .map_err(exception)
+) -> PyResult<Bound<'py, PyBytes>> {
+    let diagnostics = py
+        .detach(|| {
+            let loaded = Loaded::read(program, &argv, query, subject)?;
+            let mut diagnostics = Vec::new();
+            api::run_to_file(
+                &loaded.search,
+                loaded.inputs(),
+                outfmt,
+                &path,
+                &mut diagnostics,
+            )?;
+            Ok(diagnostics)
+        })
+        .map_err(exception)?;
+    Ok(PyBytes::new(py, &diagnostics))
 }
 
 /// A tool of the library API (`api::run_makeblastdb` and the others).
 type Tool = fn(&[&str], &mut dyn Read, &mut dyn Write, &mut dyn Write) -> Result<(), api::Error>;
+
+/// The bytes that a tool writes to standard output and to standard error.
+type ToolBytes<'py> = (Bound<'py, PyBytes>, Bound<'py, PyBytes>);
 
 /// `tool` with the command line's words and `input` as its standard input, without the GIL:
 /// what it writes to standard output and to standard error.
@@ -261,7 +261,7 @@ fn run_tool<'py>(
     argv: Vec<String>,
     input: PyBackedBytes,
     tool: Tool,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     let (output, diagnostics) = py
         .detach(|| {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
@@ -270,7 +270,7 @@ fn run_tool<'py>(
             Ok((output, diagnostics))
         })
         .map_err(exception)?;
-    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+    Ok((PyBytes::new(py, &output), PyBytes::new(py, &diagnostics)))
 }
 
 /// `makeblastdb` with the command line's words: `input` is its standard input. Returns what it
@@ -280,7 +280,7 @@ pub fn makeblastdb<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_makeblastdb)
 }
 
@@ -291,7 +291,7 @@ pub fn blastdbcmd<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_blastdbcmd)
 }
 
@@ -302,7 +302,7 @@ pub fn dustmasker<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_dustmasker)
 }
 
@@ -313,7 +313,7 @@ pub fn segmasker<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_segmasker)
 }
 
@@ -324,7 +324,7 @@ pub fn convert2blastmask<'py>(
     py: Python<'py>,
     argv: Vec<String>,
     input: PyBackedBytes,
-) -> PyResult<(Bound<'py, PyBytes>, String)> {
+) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_convert2blastmask)
 }
 
@@ -353,7 +353,7 @@ fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTup
         HspTable::new(table),
         stats_rows(&stats),
         rounds_rows(&rounds),
-        diagnostics_text(&diagnostics),
+        PyBytes::new(py, &diagnostics),
     )
         .into_pyobject(py)
 }
@@ -378,7 +378,7 @@ type BatchRow = (
     RecordBatch,
     Vec<Option<StatsRow>>,
     Vec<RoundsRow>,
-    String,
+    Vec<u8>,
 );
 
 /// The search of one query batch at a time. Each `next` searches a batch with the GIL released;
@@ -437,6 +437,7 @@ impl Batches {
             .map_err(exception)?;
         batch
             .map(|(start, end, table, stats, rounds, diagnostics)| {
+                let diagnostics = PyBytes::new(py, &diagnostics);
                 (start, end, HspTable::new(table), stats, rounds, diagnostics).into_pyobject(py)
             })
             .transpose()
@@ -450,6 +451,6 @@ fn batch_row(batch: api::Batch) -> BatchRow {
         of_records(&batch.hsps),
         stats_rows(&batch.query_stats),
         rounds_rows(&batch.rounds),
-        diagnostics_text(&batch.diagnostics),
+        batch.diagnostics,
     )
 }

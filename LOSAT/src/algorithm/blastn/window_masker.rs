@@ -144,7 +144,7 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
                 message: format!(
                     "BLAST query/options error: Only optimized binary windowmasker stat files are supported\n{}\n",
                     crate::wording::USER_MANUAL_FOOTER
-                ),
+                ).into(),
             });
         }
     }
@@ -439,7 +439,13 @@ pub(crate) fn batch_error(
         message.push(' ');
     }
     message.push('\n');
-    Some((warnings, NativeError { exit: 3, message }))
+    Some((
+        warnings,
+        NativeError {
+            exit: 3,
+            message: message.into(),
+        },
+    ))
 }
 
 /// LOSAT's rejection of the errors that NCBI does not report as `batch_error` does: an ascii
@@ -514,7 +520,7 @@ mod tests {
         assert_eq!(
             missing.message,
             // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
-            crate::wording::losat_text(&format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n\n"))
+            crate::wording::losat_text(&format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n\n")).as_bytes()
         );
         // A directory opens and reads nothing on Unix and on WASI: the unknown format. Windows
         // cannot open a directory as a file, so the open fails first there: the "could not open"
@@ -524,17 +530,16 @@ mod tests {
             assert_eq!(directory.exit, 1);
             assert_eq!(
                 directory.message,
-                "BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the LOSAT user manual.\n"
+                b"BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the LOSAT user manual.\n"
             );
         } else {
             assert_eq!(directory.exit, 255);
             assert!(
-                directory.message.ends_with(&format!(
-                    "could not open {}\n\n",
-                    env!("CARGO_MANIFEST_DIR")
-                )),
+                directory.message.ends_with(
+                    format!("could not open {}\n\n", env!("CARGO_MANIFEST_DIR")).as_bytes()
+                ),
                 "{}",
-                directory.message
+                String::from_utf8_lossy(&directory.message)
             );
         }
         let binary = open(&counts_path("dm2L_u9.binary"), &FileCounts).unwrap();
@@ -607,7 +612,7 @@ mod tests {
         // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
         assert_eq!(
             error.message,
-            crate::wording::losat_text(&format!("BLAST engine error: {one}{one}\n"))
+            crate::wording::losat_text(&format!("BLAST engine error: {one}{one}\n")).as_bytes()
         );
         // "AAAAAAAAA" is a unit beyond `Uint4` (base 16).
         let ascii = open_taxid(10, root, &FileCounts).unwrap();
@@ -655,7 +660,7 @@ mod tests {
         // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
         assert_eq!(
             error.message,
-            crate::wording::losat_text(&format!("BLAST engine error: {unit}{unit}\n"))
+            crate::wording::losat_text(&format!("BLAST engine error: {unit}{unit}\n")).as_bytes()
         );
         let short = WinMaskError::Format {
             site: FormatSite::HashTable,
@@ -678,7 +683,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             bad_index.message,
-            "BLAST engine error: Warning: bad index at key 8764 : 14779 \n"
+            b"BLAST engine error: Warning: bad index at key 8764 : 14779 \n"
         );
         assert!(
             batch_error(&WinMaskError::EmptyCacheBitArray { unit: 2 }, 1, none, none).is_none()

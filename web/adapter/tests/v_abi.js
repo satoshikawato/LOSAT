@@ -536,6 +536,10 @@ function checkHits(streams, program, label, queryIds, shownIds) {
   const rows = out6.toString().split("\n").filter(Boolean);
   assert.equal(records.length, rows.length, `${label}: one record per outfmt 6 row`);
   const ranks = new Map();
+  // BLASTN's matrix-only scoring (`-task rmblastn`, reward 0 and penalty 0) opens its report with
+  // RMBLASTN and shows the raw score alone (` Score = 27204`; blast_format.cpp:168-177,
+  // showalign.cpp:3586-3591,3605); the other searches show `<bits> bits (<raw>),`.
+  const rawScoreOnly = out0.subarray(0, 9).toString() === "RMBLASTN ";
   records.forEach((record, index) => {
     assert.equal(record.index, index, `${label}: index`);
     const rank = ranks.get(record.q_idx) || 0;
@@ -572,7 +576,8 @@ function checkHits(streams, program, label, queryIds, shownIds) {
       return;
     }
     assert.ok(section.startsWith(" Score ="), `${label}: out0 of HSP ${index}`);
-    assert.ok(section.includes(`bits (${record.raw_score}),`), `${label}: raw score in out0 of HSP ${index}`);
+    const score = rawScoreOnly ? section.startsWith(` Score = ${record.raw_score}\n`) : section.includes(`bits (${record.raw_score}),`);
+    assert.ok(score, `${label}: raw score in out0 of HSP ${index}`);
     const heading = out0.subarray(record.out0_subject[0], record.out0_subject[1]).toString();
     // A local id that is not shown leaves "> " before the title; under -parse_deflines the
     // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19).

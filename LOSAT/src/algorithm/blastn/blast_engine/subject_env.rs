@@ -26,6 +26,7 @@ use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::coordination::TaskConfig;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 use crate::algorithm::blastn::scoring::{check_gapped_x_dropoffs, gap_x_dropoffs};
+use crate::core::blast_util::ncbi_int4_from_double;
 use crate::utils::threading::SearchPool;
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressFinish, ProgressStyle};
@@ -268,11 +269,31 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     //       params->gap_x_dropoff_final = (Int4)
     //           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
     // ```
-    let (x_drop_gapped, x_drop_final) =
-        gap_x_dropoffs(context_karlin, config.x_drop_gapped, config.x_drop_final);
+    //
+    // Under matrix-only scoring the options' values are raw scores, and the final X-drop is not
+    // raised to the preliminary one.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:472-482
+    // ```c
+    //    if ( program_number == eBlastTypeBlastn && sbp->matrix_only_scoring )
+    //    {
+    //       ...
+    //       params->gap_x_dropoff = options->gap_x_dropoff;
+    //       params->gap_x_dropoff_final = options->gap_x_dropoff_final;
+    //    }
+    // ```
+    // The assignment converts the double option as a C cast (`ncbi_int4_from_double`).
+    let (x_drop_gapped, x_drop_final) = if config.matrix_only {
+        (
+            ncbi_int4_from_double(config.x_drop_gapped),
+            ncbi_int4_from_double(config.x_drop_final),
+        )
+    } else {
+        gap_x_dropoffs(context_karlin, config.x_drop_gapped, config.x_drop_final)
+    };
     if !UNGAPPED {
         check_gapped_x_dropoffs(
             config.use_dp,
+            config.matrix_only,
             (config.x_drop_gapped, config.x_drop_final),
             (x_drop_gapped, x_drop_final),
             (config.reward, config.penalty),
@@ -331,10 +352,16 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     let percent_identity = args.percent_identity_value();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1130 (BlastScoreBlkNuclMatrixCreate)
-    let score_matrix = build_blastna_matrix(reward, penalty);
+    // The matrix and the score table below score with `sbp->reward`/`sbp->penalty`, the engine
+    // pair (1/-3 under matrix-only scoring, `coordination::engine_scoring_pair`); the option pair
+    // (`reward`, `penalty`) stays for the traceback's re-evaluation (blast_hits.c:627,637).
+    let score_matrix = build_blastna_matrix(config.score_reward, config.score_penalty);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:236-259
     // ```c
+    // Int4 reward = sbp->reward;
+    // Int4 penalty = sbp->penalty;
+    // ...
     // for (i = 0; i < 256; i++) {
     //    Int4 score = 0;
     //    if (i & 3) score += penalty; else score += reward;
@@ -344,7 +371,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     //    table[i] = score;
     // }
     // ```
-    let nucl_score_table = build_nucl_score_table(reward, penalty);
+    let nucl_score_table = build_nucl_score_table(config.score_reward, config.score_penalty);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:218-221
     // ```c
@@ -364,17 +391,32 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // (`batch_setup::batch_cutoffs`). `-xdrop_ungap` replaces the task's bits (`configure_task`).
     // The conversion is the protein programs' (`core::x_drop::ungapped_x_dropoff`, scale factor
     // 1): 0 bits and every value whose ceiling is 0 give 0, a value past `Int4` gives `INT_MIN`.
+    //
+    // Under matrix-only scoring the option's value is the raw X-drop (and `batch_cutoffs` keeps
+    // a 0 as 0).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:208-217
+    // ```c
+    //       if ( program_number == eBlastTypeBlastn && sbp->matrix_only_scoring )
+    //       {
+    //         ...
+    //         p->cutoffs[context].x_dropoff_init = word_options->x_dropoff;
+    //       }else {
+    // ```
     let x_drop_ungapped_bits = config.x_drop_ungapped;
-    let x_dropoff_init: Vec<i32> = search_karlin
-        .iter()
-        .map(|blocks| {
-            crate::core::x_drop::ungapped_x_dropoff(
-                x_drop_ungapped_bits,
-                blocks.ungapped.lambda,
-                1.0,
-            )
-        })
-        .collect();
+    let x_dropoff_init: Vec<i32> = if config.matrix_only {
+        vec![ncbi_int4_from_double(x_drop_ungapped_bits); search_karlin.len()]
+    } else {
+        search_karlin
+            .iter()
+            .map(|blocks| {
+                crate::core::x_drop::ungapped_x_dropoff(
+                    x_drop_ungapped_bits,
+                    blocks.ungapped.lambda,
+                    1.0,
+                )
+            })
+            .collect()
+    };
     Ok(SubjectSearchEnv {
         progress_bar,
         hitlist_size,

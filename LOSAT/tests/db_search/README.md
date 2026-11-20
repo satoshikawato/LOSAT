@@ -17,6 +17,26 @@ FASTA files:
   reads the stored O (26), which is not the X the query holds for its own O, so `q_o` against `s_o` is not
   "near identical", the subject is SEG-filtered and scores 266 bits; against `s_x` it scores 307 (and
   `-subject` gives 307 for both).
+- `oseed.faa` / `oseed_q.faa` (rows `db.oseed.*`, line NP item DBO): `oseed_o`, 20 V, `AOA`, 10 V, `AOA`, 20 V, and
+  `oseed_x`, the same with X; the queries `q_o`, `q_x` and `q_ox` are the same with I for V and O, X, or O then X in the
+  two words. A query word `AXA` (the query's O is read as X) scores 7 against itself with BLOSUM62, under the threshold
+  11, so NCBI's lookup table holds it under its own letters only: it finds the stored `AXA` of `oseed_x` and not the
+  stored `AOA` of `oseed_o`, which it would meet only as a neighbour (O scores as X). At `-threshold 7` (`db.oseed.t7.6`)
+  it is a neighbour of `AOA` and both subjects are found; with words of 6 (`db.oseed.w6.6`) the compressed alphabet
+  has no letter for O or X. `oseed_bx_q.fna` is `q_x` as DNA (ATT for I, GCT for A, NNN for X), the BLASTX query of
+  `db.oseed.bx.6`.
+- `oreal.faa` / `oreal_q.faa` (row `db.oreal.psi.6`, line NP item DBO): four proteins of `LOSAT/tests/fasta/AP027132.faa`
+  (records `a_BDV02837.1`, `a_BDV02907.1`, `a_BDV02938.1`, `a_BDV02956.1`) with 2 % of their letters replaced by O, X or U, and a protein of
+  `AP027131.faa` (`BDV02481.1_x`) with 3 % replaced by X (a fixed pseudo-random generator; the set was cut down from 1,116
+  such proteins while NCBI's result stayed apart from that of a search that reads a stored O as X). In PSIBLAST's
+  iterations 2 and 3 the PSSM scores a stored O with its own score for O (`BLAST_SCORE_MIN` at a position that has
+  aligned sequences, the matrix's score of X at one that has none), not with its score for X.
+- `opssm.faa` (row `db.opssm.inpssm.6`, line NP item DBO): `opssm_o`, 40 random letters, 12 O and 40 random letters (a
+  fixed pseudo-random generator), and `opssm_x`, the same with X. The row's `-in_pssm` query
+  `LOSAT/tests/fixtures/pssm/dbo_qx_o9.asn.gz` is NCBI's `-out_pssm` of `psiblast -query` `q_x` of `oseed_q.faa`
+  `-db oseed -num_iterations 2 -comp_based_stats 0`, with the score for O set to 9 at every position (the other scores
+  and the frequency ratios as NCBI wrote them): NCBI finds the 12 stored O at every query offset, which a search that
+  reads them as X (score -1) does not.
 - `o_stored_bx_q.fna`: `s_x` back-translated with its twelve X as `NNN` codons, the BLASTX query of `db.o_stored.bx.8`
   (BLASTX reads the stored O of `s_o` as stored, 154 identities; `-subject o_stored.faa` reads it as X, 166, row
   `pyl.blastx.ostored.8` of `outfmt0_manifest.tsv`).
@@ -171,6 +191,12 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "PajaWSV proteins" -blastdb_version 4
     makeblastdb -in tests/db_search/o_stored.faa -dbtype prot -out tests/db_search/o_stored \
         -title "stored O against the query's X" -blastdb_version 4
+    makeblastdb -in tests/db_search/oseed.faa -dbtype prot -out tests/db_search/oseed \
+        -title "stored O and X in words under the threshold" -blastdb_version 4
+    makeblastdb -in tests/db_search/oreal.faa -dbtype prot -out tests/db_search/oreal \
+        -title "four proteins with stored O, X and U" -blastdb_version 4
+    makeblastdb -in tests/db_search/opssm.faa -dbtype prot -out tests/db_search/opssm \
+        -title "12 stored O, and X, between random letters" -blastdb_version 4
     makeblastdb -in tests/db_search/vol2.faa -dbtype prot -out tests/db_search/vol2_nophr \
         -title "two volumes, the second without its header file" -blastdb_version 4 -max_file_sz 128B
     rm tests/db_search/vol2_nophr.01.phr
@@ -251,6 +277,21 @@ writes was deleted). Run from `LOSAT/`:
 
 The nucleotide rows also use `tests/seqdb/db/nucl_v4`, `nucl_v5` and `nucl_mv` with queries cut from
 `tests/seqdb/nucl.fna`.
+
+TBLASTN `-max_intron_length` inputs (rows `db.x3.tn.*` and `x3.tblastn.*`, line RG item X3), written by
+`make_x3_inputs.py` (run from `LOSAT/`; the generator is seeded):
+
+- `x3ex_q.faa`: the query BDT61866.1 of `tslice_q.faa` (731 residues).
+- `x3ex.fna`: `ex_plus`, six pieces of 45 residues of the query (25 % of their residues substituted, back-translated)
+  with 91, 212, 450, 1201 and 4002 random bases between them and flanks of 300, and `ex_minus`, its reverse
+  complement: which pieces NCBI links depends on the largest subject gap, which `-max_intron_length` sets.
+  Database `x3ex`:
+
+      makeblastdb -in tests/db_search/x3ex.fna -dbtype nucl -out tests/db_search/x3ex \
+          -title "x3 exon-like subject" -blastdb_version 4
+
+- `tests/fasta/outfmt0/x3_edl_q.faa`: three transposases of `tests/fasta/EDL933.fna` (ISAs1 family 272653..273789,
+  ISEc26 276198..277370, ISEc8 346224..347762), queries of the rows on a subject longer than 5,000,000 bases.
 
 Translated-search inputs (TBLASTN rows, `db.tblastn.*`), written by `make_tblastn_inputs.py` (run from `LOSAT/`;
 slices of `tests/fasta/MelaMJNV.fasta`, `LvMJNV.fasta` and `AP027133.fasta`; the protein queries are proteins of
@@ -1240,7 +1281,7 @@ rows `db.minraw.*` (DI-6b: `-min_raw_gapped_score`; the queries
     losat makeblastdb -dbtype nucl -in tests/fasta/MejoMJNV.fasta -title MejoMJNV -out tests/db_search/mejo -blastdb_version 4
     rm tests/db_search/mejo.njs
 
-The rows `db.blastn.ungapped_rej.*` (outfmt 8, 11, 17 with `-ungapped`) are refusals until O4a-2.
+The row `db.blastn.ungapped_rej.17` (outfmt 17 with `-ungapped`) is a refusal until O4a-2; the rows `db.blastn.ungapped.{mb,bn}.{8,9,11,12}` (O4b) are NCBI's Dense-diag Seq-aligns of the same search.
 
 ## Several databases in -db (DI-8f)
 
@@ -2093,3 +2134,22 @@ chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n
 deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
 `(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
 (with the pdb one alone it prints `Unknown` and `no longer exists in database`).
+
+## Where some inputs come from (provenance)
+
+- `tm_psi_rhx.faa`, `tm_psi_rhy.faa` (commit eb27ebee4, 2026-11-04): the FASTA of the databases above; origin of the letters
+  not recorded.
+- `ids/plook_q*.faa`, `ids/plook_q*.fna`, `ids/plook_z_q0.faa`, `ids/nlook_q*.faa`, `ids/nlook_q*.fna`: written by
+  `ids/make_look_fasta.py` (random proteins, seed 20261103; commit d191a9d3a, 2026-11-02).
+- `ids/pord_q*.faa`, `ids/pord_q*.fna`, `ids/pord_x_q0.faa`, `ids/nord_q*.faa`, `ids/nord_q*.fna`: written by
+  `ids/make_ord_fasta.py` (random proteins, seed 20261102; commit 99074fc9f, 2026-11-02).
+- `ids/prdn_u0y.fna`: input of `ids/make_ids.py --pssmread-only` for the database `prdn_u0y`; origin of the letters not
+  recorded (commit a18dd4682, 2026-11-11).
+- `multidb/ld*.fa`, `multidb/l5b.fa`, `multidb/l6*.fa`, `multidb/nutl.fa`, `multidb/putl.fa`, `multidb/pfz*.fa`: written by
+  `make_multidb.py` (its docstring tells, per mode, which records they hold and which come from `ids/ids_q.faa`, from
+  `multidb/nnp.fa` or from seeded random letters); commits 2104f0950, dfa9763cd and db2e5a338 (2026-11-16), 6b1b2a43d,
+  bfa554af4 and dc934f255 (2026-11-17), 1a529b829 (2026-11-18).
+- `xpost/s60*.faa`: written by `make_xpost_inputs.py` (commit be806c7d4, 2026-11-16).
+- `xpost/m2b_*_qm.*`: made by agent4's `m2/probe_m2b.py`, and `xpost/db/{nST,pA,pB,pR3}/*.fa` by the probes of K4h review 2,
+  as `make_xpost_inputs.py`'s docstring says (commit 135255760, 2026-11-16); neither script is in this repository, and the
+  origin of the letters is not recorded.

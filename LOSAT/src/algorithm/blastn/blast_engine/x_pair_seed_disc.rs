@@ -554,6 +554,7 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let word_length = two_stage.word_length();
+    let exact_ungapped = x.exact_ungapped;
     // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its early return (na_ungapped.c:531).
     let x_tow = LEAN && word_length == lut_word_length;
     let s_len = x.s_len;
@@ -859,7 +860,7 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         } else {
             None
         };
-        let ungapped = if word_length < 11 {
+        let ungapped = if exact_ungapped {
             extend_hit_ungapped_exact_ncbi(
                 x.encoded_query_concat_blastna,
                 search_seq_packed,
@@ -1335,6 +1336,7 @@ fn fold_two_hit_array<const LEAN: bool>(
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let word_length = two_stage.word_length();
+    let exact_ungapped = x.exact_ungapped;
     // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its early return (na_ungapped.c:531).
     let x_tow = LEAN && word_length == lut_word_length;
     let s_len = x.s_len;
@@ -1633,7 +1635,7 @@ fn fold_two_hit_array<const LEAN: bool>(
         } else {
             None
         };
-        let ungapped = if word_length < 11 {
+        let ungapped = if exact_ungapped {
             extend_hit_ungapped_exact_ncbi(
                 x.encoded_query_concat_blastna,
                 search_seq_packed,
@@ -2237,6 +2239,7 @@ mod tests {
             reduced_cutoff_scores: &[24, 24],
             score_matrix: &c.score_matrix,
             nucl_score_table: &c.nucl_score_table,
+            exact_ungapped: lookup.word_length() < 11,
             diag_offset,
             diag_hash_window: diag_hash_insert_window(window_size, 0, lookup.word_length()),
             use_array_indexing: false,

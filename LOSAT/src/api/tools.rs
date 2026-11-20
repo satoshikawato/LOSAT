@@ -73,23 +73,20 @@ impl Write for Recorded<'_> {
     }
 }
 
-/// The result of a tool that ended with `status` after writing `diagnostics`.
+/// The result of a tool that ended with `status` after writing `diagnostics`: their bytes, as the
+/// command line writes them to its standard error (`Error::written`).
 fn outcome(status: i32, diagnostics: Vec<u8>) -> Result<(), Error> {
     if status == 0 {
         return Ok(());
     }
-    Err(Error::Search(
-        String::from_utf8_lossy(&diagnostics)
-            .trim_end_matches('\n')
-            .to_string(),
-    ))
+    Err(Error::written(diagnostics))
 }
 
 /// LOSAT's refusal `reason` in a tool's run, written to its diagnostics as the command line's
 /// `main` writes it (`Error: ` and the reason; exit status 1 there), and the error of what the
 /// run wrote (`outcome`), as the tools of `ncbi_app` refuse.
-fn refused(mut recorded: Recorded<'_>, reason: &str) -> Error {
-    let _ = writeln!(recorded, "Error: {reason}");
+fn refused(mut recorded: Recorded<'_>, reason: &[u8]) -> Error {
+    let _ = recorded.write_all(&[b"Error: ", reason, b"\n"].concat());
     match outcome(1, recorded.bytes) {
         Err(error) => error,
         Ok(()) => unreachable!("a status of 1 is a failure"),
@@ -239,11 +236,11 @@ pub fn run_makeblastdb(
     {
         Ok(None) => {}
         Ok(Some(status)) => return outcome(status, recorded.bytes),
-        Err(reason) => return Err(refused(recorded, &reason)),
+        Err(reason) => return Err(refused(recorded, reason.as_bytes())),
     }
     drop(opened.target);
     let cli: Cli = crate::cli::try_parse_with_own_start(words())
-        .map_err(|error| Error::Argv(crate::cli::render_message(&error)))?;
+        .map_err(|error| Error::Argv(crate::cli::render_message(&error).into()))?;
     let Commands::Makedb(args) = cli.command else {
         unreachable!("the first word names makeblastdb");
     };
@@ -251,7 +248,7 @@ pub fn run_makeblastdb(
     // LOSAT rejects the settings that change the output (`cli/main_entry.rs`).
     let settings = match opened.start.settings() {
         Ok(settings) => settings,
-        Err(reason) => return Err(refused(recorded, &reason)),
+        Err(reason) => return Err(refused(recorded, reason.as_bytes())),
     };
     // `-dryrun` ends here, as on the command line (`cli::main_entry`).
     if matches!(preparse(argv), Preparsed::Words { dryrun: true, .. }) {
@@ -267,7 +264,7 @@ pub fn run_makeblastdb(
     )
     .and_then(|()| makeblastdb::check_environment(&|name: &str| std::env::var_os(name)));
     if let Err(reason) = checked {
-        return Err(refused(recorded, &reason));
+        return Err(refused(recorded, reason.as_bytes()));
     }
     let now = LocalTime::now();
     let status = makeblastdb::run_with(

@@ -1,3 +1,35 @@
+// Derived from LMDB 0.9.24 (mdb.c, lmdb.h) as bundled in NCBI BLAST+ 2.17.0,
+// c++/src/util/lmdb/, which carries this notice:
+//
+// Copyright 2011-2019 Howard Chu, Symas Corp.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted only as authorized by the OpenLDAP
+// Public License.
+//
+// A copy of this license is available in the file LICENSE in the
+// top-level directory of the distribution or, alternatively, at
+// <http://www.OpenLDAP.org/license.html>.
+//
+// This code is derived from btree.c written by Martin Hedenfalk.
+//
+// Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
+//
+// Permission to use, copy, modify, and distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//
+// (In LOSAT, the OpenLDAP Public License 2.8 is in THIRD_PARTY_NOTICES, section 2 (LMDB).)
+
 //! The properties of the platform that reach the bytes makeblastdb writes.
 //!
 //! makeblastdb writes the same files on every platform except where NCBI's source asks the
@@ -63,20 +95,7 @@ pub(crate) enum NcbiOs {
 // #define DEFAULT_TAXID_MAP_SIZE 300000000
 // #endif
 // ```
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:3979-4003 (mdb_env_map)
-// ```c
-// #ifdef _WIN32
-// 	...
-// 	} else {
-// 		msize = env->me_mapsize;
-// 		...
-// 		/* Windows won't create mappings for zero length files.
-// 		 * and won't map more than the file size.
-// 		 * Just set the maxsize right now.
-// 		 */
-// 		if (!(flags & MDB_WRITEMAP) && (SetFilePointer(env->me_fd, sizelo, &sizehi, 0) != (DWORD)sizelo
-// 			|| !SetEndOfFile(env->me_fd)
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3979-4003 (mdb_env_map)
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:347-351
 // ```c++
 // int CWriteDB_IndexFile::x_Overhead(const string & T,
@@ -168,12 +187,7 @@ impl LmdbPlatform {
     };
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:321,395,3969
-// ```c
-// #define GET_PAGESIZE(x) {SYSTEM_INFO si; GetSystemInfo(&si); (x) = si.dwPageSize;}
-// #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
-// 	GET_PAGESIZE(e->me_os_psize);
-// ```
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:321,395,3969
 /// LMDB's `GET_PAGESIZE` on the host: `GetSystemInfo` on Windows, `sysconf(_SC_PAGE_SIZE)`
 /// elsewhere. On Linux the C library's `sysconf` returns the kernel's `AT_PAGESZ`, which is
 /// the kernel's page size; LOSAT asks the kernel for that size directly

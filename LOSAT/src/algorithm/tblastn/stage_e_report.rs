@@ -1612,7 +1612,7 @@ fn write_pairwise(
     }
     let report = BlastpPairwiseReport {
         version: crate::NCBI_BLAST_VERSION.into(),
-        database_name: shown.name(),
+        database_name: shown.name().into(),
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
         // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
@@ -2163,6 +2163,7 @@ mod tests {
                 &query_seqs,
                 &subject_seqs,
                 LocalStageDProfile {
+                    max_intron_length: 0,
                     seg: Some(&seg),
                     soft_masking: false,
                     mask_lowercase: false,

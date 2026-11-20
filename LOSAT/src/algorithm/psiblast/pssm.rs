@@ -36,6 +36,9 @@ pub struct PsiblastPssmOptions {
     pub pseudocount: i32,
     /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
     pub in_pssm: Option<std::path::PathBuf>,
+    /// `-in_msa`: the query as an alignment, made into a PSSM with the options
+    /// (`algorithm::psiblast::in_msa`).
+    pub in_msa: Option<super::in_msa::MsaInput>,
     /// The run's `-save_each_pssm` numbers (`PsiblastArgs::pssm_versions`).
     pub versions: PssmVersions,
     /// The queries that the call's checks of its PSSM files cover (`PsiblastArgs::pssm_check`).
@@ -277,10 +280,10 @@ impl std::error::Error for PssmStop {}
 //             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
 //             exit_code = BLAST_INPUT_ERROR;                                  \
 // ```
-fn blast_options_error(message: &str) -> anyhow::Error {
+pub(crate) fn blast_options_error(message: &str) -> anyhow::Error {
     crate::cli::NativeError {
         exit: 1,
-        message: format!("BLAST options error: {message}\n"),
+        message: format!("BLAST options error: {message}\n").into(),
     }
     .into()
 }
@@ -690,6 +693,59 @@ fn pssm_with_parameters(
     scoring: PssmScoring<'_>,
     pseudocount: i32,
 ) -> PssmWithParameters {
+    let entry = SeqEntry::Seq(Box::new(PssmQuery {
+        ids: vec![query.id.clone()],
+        descr: Some(vec![Seqdesc::Title(query.title.to_vec())]),
+        inst: SeqInst::new(
+            ("raw", 2),
+            ("aa", 3),
+            Some(letters.len() as u32),
+            Some(SeqData::Ncbistdaa(letters.to_vec())),
+        ),
+        annot: None,
+    }));
+    PssmWithParameters {
+        pssm: pssm_object(pssm, letters.len(), Some(entry)),
+        params: Some(PssmParameters {
+            pseudocount: Some(pseudocount),
+            rpsdbparams: Some(FormatRpsDbParameters {
+                matrix_name: scoring.matrix_name.to_ascii_uppercase().into_bytes(),
+                gap_open: Some(scoring.gap_open),
+                gap_extend: Some(scoring.gap_extend),
+            }),
+            ..PssmParameters::default()
+        }),
+    }
+}
+
+/// The `PssmWithParameters` that `CPssmEngine::Run` returns for an alignment (`-in_msa`): the
+/// engine's `x_PSIMatrix2Asn1` with the options' diagnostics and the query Bioseq (`entry`, none
+/// when the alignment holds no Bioseq of the query's letters), whose parameters are the
+/// pseudocount of the default PSI-BLAST options (0) and the matrix's name in capitals; the gap
+/// costs are `PsiBlastAddAncillaryPssmData`'s, which this path does not call.
+pub(crate) fn msa_pssm_with_parameters(
+    pssm: &PsiPssm,
+    columns: usize,
+    entry: Option<SeqEntry>,
+    matrix_name: &str,
+) -> PssmWithParameters {
+    PssmWithParameters {
+        pssm: pssm_object(pssm, columns, entry),
+        params: Some(PssmParameters {
+            pseudocount: Some(0),
+            rpsdbparams: Some(FormatRpsDbParameters {
+                matrix_name: matrix_name.to_ascii_uppercase().into_bytes(),
+                gap_open: None,
+                gap_extend: None,
+            }),
+            ..PssmParameters::default()
+        }),
+    }
+}
+
+/// `x_PSIMatrix2Asn1`'s `CPssm`: the scores, the Karlin-Altschul values and the diagnostics of
+/// `pssm`, with the query `entry`.
+fn pssm_object(pssm: &PsiPssm, columns: usize, entry: Option<SeqEntry>) -> Pssm {
     let by_column =
         |rows: &[[f64; BLASTAA_SIZE]]| -> Vec<f64> { rows.iter().flatten().copied().collect() };
     let diagnostics = &pssm.diagnostics;
@@ -714,46 +770,25 @@ fn pssm_with_parameters(
             .map(|counts| counts.iter().map(|&count| count as i32).collect()),
         num_indept_obsr: None,
     };
-    PssmWithParameters {
-        pssm: Pssm {
-            is_protein: Some(true),
-            identifier: None,
-            num_rows: BLASTAA_SIZE as i32,
-            num_columns: letters.len() as i32,
-            row_labels: None,
-            by_row: Some(false),
-            query: Some(SeqEntry::Seq(Box::new(PssmQuery {
-                ids: vec![query.id.clone()],
-                descr: Some(vec![Seqdesc::Title(query.title.to_vec())]),
-                inst: SeqInst::new(
-                    ("raw", 2),
-                    ("aa", 3),
-                    Some(letters.len() as u32),
-                    Some(SeqData::Ncbistdaa(letters.to_vec())),
-                ),
-                annot: None,
-            }))),
-            intermediate_data: Some(intermediate_data),
-            final_data: Some(PssmFinalData {
-                scores: pssm.scores.iter().flatten().copied().collect(),
-                lambda: pssm.gapped.lambda,
-                kappa: pssm.gapped.k,
-                h: pssm.gapped.h,
-                scaling_factor: None,
-                lambda_ungapped: Some(pssm.ungapped.lambda),
-                kappa_ungapped: Some(pssm.ungapped.k),
-                h_ungapped: Some(pssm.ungapped.h),
-                word_score_threshold: None,
-            }),
-        },
-        params: Some(PssmParameters {
-            pseudocount: Some(pseudocount),
-            rpsdbparams: Some(FormatRpsDbParameters {
-                matrix_name: scoring.matrix_name.to_ascii_uppercase().into_bytes(),
-                gap_open: Some(scoring.gap_open),
-                gap_extend: Some(scoring.gap_extend),
-            }),
-            ..PssmParameters::default()
+    Pssm {
+        is_protein: Some(true),
+        identifier: None,
+        num_rows: BLASTAA_SIZE as i32,
+        num_columns: columns as i32,
+        row_labels: None,
+        by_row: Some(false),
+        query: entry,
+        intermediate_data: Some(intermediate_data),
+        final_data: Some(PssmFinalData {
+            scores: pssm.scores.iter().flatten().copied().collect(),
+            lambda: pssm.gapped.lambda,
+            kappa: pssm.gapped.k,
+            h: pssm.gapped.h,
+            scaling_factor: None,
+            lambda_ungapped: Some(pssm.ungapped.lambda),
+            kappa_ungapped: Some(pssm.ungapped.k),
+            h_ungapped: Some(pssm.ungapped.h),
+            word_score_threshold: None,
         }),
     }
 }
@@ -793,7 +828,7 @@ fn pssm_with_parameters(
 //         retval = "Found flanking gap at end of alignment";
 //         break;
 // ```
-fn error_code_to_string(error: PsiError) -> &'static str {
+pub(crate) fn error_code_to_string(error: PsiError) -> &'static str {
     match error {
         PsiError::BadSeqWeights => "Error computing sequence weights",
         PsiError::PositiveAvgScore => "PSSM has positive average score",
@@ -805,6 +840,15 @@ fn error_code_to_string(error: PsiError) -> &'static str {
         PsiError::ColumnOfGaps => "Found column with only GAP residues",
         PsiError::StartingGap => "Found flanking gap at start of alignment",
         PsiError::EndingGap => "Found flanking gap at end of alignment",
+        // `x_ErrorCodeToString(PSIERR_UNKNOWN)`, PSIERR_UNKNOWN being -255 (blast_psi_priv.h:392).
+        PsiError::Unknown => "Unknown error code returned from PSSM engine: -255",
+        PsiError::NoMatrixFrequencyData => {
+            "No matrix frequency ratios were found for requested matrix"
+        }
+        // NCBI crashes here; `-in_msa` refuses the run before any text is written.
+        PsiError::NoUngappedKarlinBlock => {
+            "The ungapped Karlin-Altschul block of the query is not available"
+        }
     }
 }
 

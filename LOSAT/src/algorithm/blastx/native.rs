@@ -3315,6 +3315,8 @@ mod archive_error_tests {
             window_size: 40,
             gapped_karlin: Default::default(),
             gumbel: None,
+            gapped: true,
+            show_linked_set_size: false,
             num_descriptions: 500,
             num_alignments: 250,
         };

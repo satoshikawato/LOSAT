@@ -442,6 +442,7 @@ pub(super) fn render(
             shown,
             hitlists,
             parameters,
+            ungapped_karlin,
             query_validity,
             query_batch_skipped,
             scoring,
@@ -687,7 +688,8 @@ pub(super) fn render(
     // ```
     // The statistics of each query for the observer, the values of the XML reports.
     if let Some(observer) = observer.as_deref_mut() {
-        let stats = super::blast_xml::query_stats(parameters, query_validity, scoring);
+        let stats =
+            super::blast_xml::query_stats(parameters, query_validity, scoring, ungapped_karlin);
         for (q_idx, stats) in stats.into_iter().enumerate() {
             observer.query_stats(q_idx, stats);
         }
@@ -703,10 +705,12 @@ pub(super) fn render(
         ungapped_karlin,
         query_validity,
         query_batch_skipped,
-        gapped: lookup_protein_params(&ProteinScoringSpec {
-            matrix: scoring.matrix,
-            gap_open: scoring.gap_open,
-            gap_extend: scoring.gap_extend,
+        gapped: scoring.gapped.then(|| {
+            lookup_protein_params(&ProteinScoringSpec {
+                matrix: scoring.matrix,
+                gap_open: scoring.gap_open,
+                gap_extend: scoring.gap_extend,
+            })
         }),
         seg,
         mask_lowercase,
@@ -898,6 +902,7 @@ pub(super) fn render(
                     warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),
+                    scoring.gapped,
                 )?,
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
                 // ```c++
@@ -1605,9 +1610,14 @@ fn write_pairwise(
             (pairwise.num_sequences, pairwise.total_letters)
         }
     };
-    // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
-    let gumbel = subject_set.gumbel_block(&spec, total_nt);
-    if gumbel.is_none() && !subject_set.old_fsc {
+    // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`). An ungapped
+    // search has neither a Gumbel nor a gapped block (its gap costs need not be in the matrix's
+    // table, `args.rs`): the footers print the ungapped block only.
+    let gumbel = scoring
+        .gapped
+        .then(|| subject_set.gumbel_block(&spec, total_nt))
+        .flatten();
+    if scoring.gapped && gumbel.is_none() && !subject_set.old_fsc {
         anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
     }
     let report = BlastpPairwiseReport {
@@ -1630,10 +1640,19 @@ fn write_pairwise(
         // `kbp_gap`: a PSSM query's `kbp_gap_psi` (the PSSM's gapped values; the Gumbel values
         // stay the matrix's).
         gapped_karlin: match pssm {
+            _ if !scoring.gapped => Default::default(),
             Some(psi) => psi.gapped_karlin(&lookup_protein_params(&spec)),
             None => lookup_protein_params(&spec),
         },
         gumbel,
+        gapped: scoring.gapped,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:165-167
+        // ```c++
+        //     if (use_sum_statistics && m_IsUngappedSearch) {
+        //         m_ShowLinkedSetSize = true;
+        // ```
+        // (the link parameters are made with sum statistics, `local_subject_parameters`).
+        show_linked_set_size: !scoring.gapped && parameters.link.is_some(),
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2913-2927
         // ```c
         //     m_NumDescriptions = m_DfltNumDescriptions;

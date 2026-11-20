@@ -9212,6 +9212,8 @@ fn write_reports_without_queries(
                     } else {
                         None
                     },
+                    gapped: true,
+                    show_linked_set_size: false,
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };

@@ -148,29 +148,49 @@ pub(super) struct PreparedXml {
 //             m_LengthAdjustment = ctx->length_adjustment;
 //             break;
 // ```
-/// The `Statistics` of every query, with the gapped Karlin block of the scoring; the unsearched
-/// values for a query without a valid context.
+/// The `Statistics` of every query, with the gapped Karlin block of the scoring (an ungapped
+/// search: the query's own ungapped block, `ungapped_karlin`); the unsearched values for a query
+/// without a valid context.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:241-248
+/// ```c++
+///     const Blast_KarlinBlk *kbp =
+///                    m_AncillaryData[query_index]->GetGappedKarlinBlk();
+///     if (kbp)
+///         return kbp->Lambda;
+///
+///     kbp = m_AncillaryData[query_index]->GetUngappedKarlinBlk();
+///     if (kbp)
+///         return kbp->Lambda;
+/// ```
+/// An ungapped search makes no gapped block, so its statistics are the ungapped block's.
 pub(super) fn query_stats(
     parameters: &LocalSubjectParameters,
     query_validity: &[bool],
     scoring: LocalStageDScoring,
+    ungapped_karlin: &[crate::stats::tables::KarlinParams],
 ) -> Vec<XmlStats> {
-    let gapped = lookup_protein_params(&ProteinScoringSpec {
-        matrix: scoring.matrix,
-        gap_open: scoring.gap_open,
-        gap_extend: scoring.gap_extend,
+    let gapped = scoring.gapped.then(|| {
+        lookup_protein_params(&ProteinScoringSpec {
+            matrix: scoring.matrix,
+            gap_open: scoring.gap_open,
+            gap_extend: scoring.gap_extend,
+        })
     });
     query_validity
         .iter()
         .enumerate()
         .map(|(q_idx, &valid)| match parameters.lengths.get(q_idx) {
-            Some(length) if valid => XmlStats {
-                hsp_len: length.length_adjustment as i32,
-                eff_space: length.eff_searchsp,
-                kappa: gapped.k,
-                lambda: gapped.lambda,
-                entropy: gapped.h,
-            },
+            Some(length) if valid => {
+                let karlin = gapped.unwrap_or(ungapped_karlin[q_idx]);
+                XmlStats {
+                    hsp_len: length.length_adjustment as i32,
+                    eff_space: length.eff_searchsp,
+                    kappa: karlin.k,
+                    lambda: karlin.lambda,
+                    entropy: karlin.h,
+                }
+            }
             _ => XmlStats::NONE,
         })
         .collect()
@@ -185,6 +205,7 @@ pub(super) fn prepare(
     shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     parameters: &LocalSubjectParameters,
+    ungapped_karlin: &[crate::stats::tables::KarlinParams],
     query_validity: &[bool],
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
@@ -204,7 +225,7 @@ pub(super) fn prepare(
     // A matrix name that the formatting table does not know stops a run with queries before its
     // reports (`stage_e_report::xml_matrix_failure`, `render`): here only a run without a query.
     let positives = FormattingMatrix::new(matrix_name);
-    let stats = query_stats(parameters, query_validity, scoring);
+    let stats = query_stats(parameters, query_validity, scoring, ungapped_karlin);
     let has_hits = |hitlist: &KappaResultHitList| {
         hitlist
             .lists()

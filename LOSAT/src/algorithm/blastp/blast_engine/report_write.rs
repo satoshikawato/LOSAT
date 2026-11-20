@@ -817,6 +817,8 @@ pub(super) fn write_pairwise(
         window_size: args.window_size as i32,
         gapped_karlin: psi_report_karlin.map_or(gapped_params, |karlin| karlin.gapped),
         gumbel: gapped_gumbel,
+        gapped: true,
+        show_linked_set_size: false,
         // NCBI blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
         // or the -num_descriptions / -num_alignments / -max_target_seqs values
         // (`ReportCounts`).

@@ -82,7 +82,9 @@ fn the_counts_modes_refuse_what_ncbi_gives_no_one_result_for() {
             "-sformat",
             "binary"
         ]),
-        (1, String::new(), format!("pass 1\n{nan}"))
+        // The binary format's extra word of the standard output, written when its writer is
+        // made, as NCBI's is.
+        (1, "\0\0\0\0".to_string(), format!("pass 1\n{nan}"))
     );
     assert_eq!(
         run_words(&["-mk_counts", "-infmt", "seqids", "-in", "ids.txt"]),

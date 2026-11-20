@@ -792,6 +792,27 @@ pub(crate) fn sw_heap_past(context: usize, queries: usize) -> anyhow::Error {
     .into()
 }
 
+/// LOSAT's refusal of `-use_sw_tback` with `-ungapped` (which only `-comp_based_stats 0` lets
+/// reach a search): NCBI's traceback runs the Smith-Waterman redo for an ungapped search too, and
+/// its set-up reads the gapped Karlin blocks of every context, which an ungapped search does not
+/// make, and crashes (SIGSEGV) at every query batch NCBI searches, with hits or without, with
+/// `-subject` and with `-db` (line RG X4b's survey, a debugger's trace; probes `u.*` of item X4b-2
+/// on ws, 2026-11-21). PD-LOSAT-NCBI-DEFECTS 1.57, rule 3. The caller refuses at the traceback of
+/// the first query batch that is searched, after the reports of the batches before it (batches
+/// without a valid context, which NCBI does not search).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3092-3095
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
+#[cold]
+#[inline(never)]
+pub(crate) fn sw_ungapped_refusal() -> anyhow::Error {
+    ErrorAfterBatchReports(anyhow::anyhow!(
+        "-use_sw_tback with -ungapped, on which NCBI BLAST+ 2.17.0's blastx crashes at every query batch it searches, is not supported by LOSAT's BLASTX"
+    ))
+    .into()
+}
+
 /// The heap test of a redo that makes none: the X-drop redo, and the Smith-Waterman redo in
 /// cutoff-score mode (sum statistics), whose significance reads no heap.
 pub(crate) fn no_heap_test(_context: usize, _evalue: f64, _score: i32) -> Result<bool> {

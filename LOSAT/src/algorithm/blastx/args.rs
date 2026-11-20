@@ -345,10 +345,10 @@ pub struct BlastxArgs {
     // ```
     #[arg(long)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     // NCBI's flag, off by default: the Smith-Waterman redo of each match (`kappa::sw_redo_context`,
     // item X4b-2), with every `-comp_based_stats`. RPSTBLASTN's own (`rpstblastn::args`) never
     // sets it here.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     #[arg(long)]
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955

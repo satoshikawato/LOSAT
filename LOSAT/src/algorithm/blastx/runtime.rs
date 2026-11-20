@@ -1565,6 +1565,11 @@ impl PreliminarySink for Runtime<'_> {
         use super::x_timing::End as XEnd;
         let x_t = super::x_timing::lap();
         let mut x_t_finish = None;
+        // `-use_sw_tback` with `-ungapped`: NCBI's traceback crashes at the redo's set-up of every
+        // batch it searches (`kappa::sw_ungapped_refusal`).
+        if self.options.use_sw_tback && !self.options.gapped {
+            return Err(super::kappa::sw_ungapped_refusal());
+        }
         let mut stream = self.stream.take().expect("batch stream");
 
         let mut full = params.to_vec();

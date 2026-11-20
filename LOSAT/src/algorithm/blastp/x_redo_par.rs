@@ -339,6 +339,9 @@ struct XCounts {
     /// The Smith-Waterman redo: the heap tests that a job deferred and its replay answered TRUE,
     /// each finished by a continuation in the next window (`XCarry`).
     continued: usize,
+    /// The seconds of the continued matches' jobs, which their continuations repeat up to the
+    /// heap test (`XCarry::first_round_s`).
+    rerun_s: f64,
 }
 
 /// The matches of one query's preliminary hit list: its lists with HSPs. A compact list
@@ -472,6 +475,9 @@ impl XWindow {
 struct XCarry {
     /// The match and its test's E-value and score.
     continued: (XMatch, (f64, i32)),
+    /// With `LOSAT_TIMING=1`: the seconds of the match's job, which its continuation repeats up
+    /// to the test.
+    first_round_s: f64,
     /// The window's matches after it, and their results (`None`: ended before their window).
     matches: Vec<XMatch>,
     results: XWindowResults,
@@ -484,6 +490,9 @@ struct XCarry {
 struct XComputed {
     result: Result<BlastpPostprocessResult>,
     deferred: Option<(f64, i32)>,
+    /// With `LOSAT_TIMING=1` and `deferred`: the seconds of the job's redo of the match, which
+    /// stopped at the test (what a continuation of the match does again); else 0.
+    first_round_s: f64,
 }
 
 impl From<Result<BlastpPostprocessResult>> for XComputed {
@@ -491,6 +500,7 @@ impl From<Result<BlastpPostprocessResult>> for XComputed {
         Self {
             result,
             deferred: None,
+            first_round_s: 0.0,
         }
     }
 }
@@ -908,11 +918,13 @@ fn x_redo_match_sw<P>(
             return XComputed {
                 result: Err(error),
                 deferred: None,
+                first_round_s: 0.0,
             }
         }
     };
     let subject_raw = subject.residues();
     let mut deferred = None;
+    let started = search.timing.then(Instant::now);
     let result = postprocess_preliminary_hits_smith_waterman(
         &scratch.hits,
         query_workspace,
@@ -945,7 +957,15 @@ fn x_redo_match_sw<P>(
             }
         },
     );
-    XComputed { result, deferred }
+    let first_round_s = match (started, deferred) {
+        (Some(started), Some(_)) => started.elapsed().as_secs_f64(),
+        _ => 0.0,
+    };
+    XComputed {
+        result,
+        deferred,
+        first_round_s,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3493-3511
@@ -1024,6 +1044,7 @@ where
                         (!ended).then(|| XComputed {
                             result: Err(anyhow::anyhow!("{error:#}")),
                             deferred: None,
+                            first_round_s: 0.0,
                         })
                     })
                     .collect();
@@ -1363,7 +1384,12 @@ fn x_replay<const SW: bool>(
         }
         // A match without a result had the test true at its window's start; the test is
         // monotone over the replay (`x_end_above`, header), so it is true here.
-        let Some(XComputed { result, deferred }) = computed else {
+        let Some(XComputed {
+            result,
+            deferred,
+            first_round_s,
+        }) = computed
+        else {
             unreachable!(
                 "query {} match {}: ended before its window, not ended at its replay",
                 matched.q_idx, matched.position
@@ -1379,6 +1405,7 @@ fn x_replay<const SW: bool>(
             if heaps[matched.q_idx].would_insert(test.0, test.1, local_match.oid) {
                 *carry = Some(XCarry {
                     continued: (matched, test),
+                    first_round_s,
                     matches: matches[index + 1..].to_vec(),
                     results: results.collect(),
                 });
@@ -1538,7 +1565,10 @@ fn x_redo_windows<const SW: bool>(
             counts.wasted += replayed.wasted;
             if SW {
                 *counts.turned.get_or_insert(0) += replayed.turned;
-                counts.continued += usize::from(carry.is_some());
+                if let Some(carry) = &carry {
+                    counts.continued += 1;
+                    counts.rerun_s += carry.first_round_s;
+                }
             }
             if let Some(replay_start) = replay_start {
                 counts.replay_s += replay_start.elapsed().as_secs_f64();
@@ -1683,8 +1713,8 @@ fn x_print_timing(counts: &XCounts) {
         counts
             .turned
             .map_or(String::new(), |turned| format!(
-                " turned={turned} continued={}",
-                counts.continued
+                " turned={turned} continued={} rerun_s={:.6}",
+                counts.continued, counts.rerun_s
             ))
     );
 }
@@ -3376,7 +3406,11 @@ mod tests {
                 SwKind::NotAsked => unreachable!(),
             }
         };
-        XComputed { result, deferred }
+        XComputed {
+            result,
+            deferred,
+            first_round_s: 0.0,
+        }
     }
 
     /// The windows of the Smith-Waterman redo on synthetic matches (`cases[q][position]`), each
@@ -4058,6 +4092,7 @@ mod tests {
                                 .expect("asked");
                             let carry = XCarry {
                                 continued: (matched, asked),
+                                first_round_s: 0.0,
                                 matches: window.matches[index + 1..].to_vec(),
                                 results: window.ended[index + 1..]
                                     .iter()

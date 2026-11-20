@@ -1961,7 +1961,8 @@ Rebuilding less:
   `wasted`: those computed and dropped; with `-use_sw_tback` the line ends with ` turned=<t>
   continued=<c>`: the matches whose heap test a job could not answer (its redo stopped at the test) and
   the replay answered FALSE (the job's result stands) or TRUE (a continuation in the next window
-  finishes the match)). Diagnostics only, the output bytes do not change: the counters
+  finishes the match), and ` rerun_s=<s>`, the seconds of the continued matches' jobs, which their
+  continuations repeat up to the test). Diagnostics only, the output bytes do not change: the counters
   and traces of the redo count the `wasted` matches as well (`[TIMING] x_bpredofit: lists= hsps=`, the
   kappa range counters, `LOSAT_DEBUG_BLASTP_TRACE_HSP` lines), and `[X_STATS] NEWTONLANES` counts the
   prefetches of the jobs (four matches each, the one-thread loop prefetches 16 ahead). With

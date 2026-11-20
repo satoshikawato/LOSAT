@@ -2006,7 +2006,7 @@ mod tests {
             let error = get_query_batch_size(Some(OsStr::new(text))).unwrap_err();
             assert_eq!(error.site().line, line, "{text:?}");
             assert!(
-                error.what().ends_with(&format!("(m_Pos = {pos})\n")),
+                error.what().ends_with(&format!("(position {pos})\n")),
                 "{text:?}: {}",
                 error.what()
             );

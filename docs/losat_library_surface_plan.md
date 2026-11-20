@@ -396,10 +396,12 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 
 | 不足 | 足したもの | 根拠 |
 |---|---|---|
-| 行に id が無い。表が `qaccver` を持てない | `HspRecord::query_id`、`subject_id`（`Arc<str>`、record ごとに 1 回作る） | engine の `shown_id`、`subject_tabular_id`。列との一致は `check_columns` と `-parse_deflines` のテスト |
+| 行に id が無い。表が `qaccver` を持てない | `HspRecord::query_id`、`subject_id`（`api::Id`：報告の byte。record ごとに 1 回作る） | engine の `shown_id`、`subject_tabular_id`。列との一致は `check_columns` と `-parse_deflines` のテスト |
 | `pident` は binding が計算できない | `HspRecord::percent_identity()`。式は `report/outfmt6.rs` の 1 か所 | `x_PrintPercentIdentical`（`tabular.hpp:437-442`） |
 | ファイルは bytes にしてからで、`.gz` は呼び出し側が開けない | `read_input_file(role, path)`。CLI の開き方と文言 | `open_file_input`、`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` の例外 8 |
 | エンジンの版が取れない（gbdraw の runtime 記録） | `api::VERSION` | `CBlastVersion`（`version.hpp`） |
+
+→ 2026-11-20（branch `fix/lib-hsp-id-bytes`、最初の公開の前）：`query_id`、`subject_id` の型を `Arc<str>` から `api::Id` に変えた。`Arc<str>` は `String::from_utf8_lossy` で作るので、題の最初の語の UTF-8 でない byte（Latin-1 の file など）が U+FFFD になり、報告の byte と違っていた（2026-11-16 の報告）。`Id` は表形式の報告が `qaccver`、`saccver` に書く byte をそのまま持つ（`as_bytes`。NCBI の id は `std::string` で、byte のまま書かれる）。text は `to_str`（UTF-8 のときだけ）と `to_string_lossy`（maximal ill-formed subpart ごとに U+FFFD 1 個）。`Display` は持たない（U+FFFD の text は id ではないので、名前で頼む。std の `Path`・`OsStr`・`CStr` と同じ。後から足すのは壊さないが、消すのは壊す）。等しさ・順序・hash は byte のもので手で書き、`Borrow<[u8]>` を持つ（id を key にした map を `&[u8]` で引ける。`Borrow<str>` は `str` と `[u8]` の hash が違うので持たない）。比較は `str`・`&str`・`String`・`[u8]`・`&[u8]`・`[u8; N]`・`&[u8; N]`・`Vec<u8>` と byte で（`str`・`&str`・`[u8]` とは逆向きも）。clone は byte を写さない。名前は `AccVer` から `Id` に変えた（review 2026-11-20：値は accession.version とは限らない（`Query_1`、`BL_ORD_ID:5`、題の最初の語）、後の `sseqid`・`sacc`・`sallseqid` も同じ型で持てる）。NCBI が subject の `saccver` を書けない（lookup が失敗する）とき、`subject_id` は query と同じ規則の id（database の配列では題の最初の語）。database の `saccver`（`ReportedSubject::id`）も同じ型にした。pylosat の列と `Hsp` の id は text のまま（U+FFFD、README・manual・stub・getter の docstring に書いた）。
 
 足さなかったもの：
 

@@ -1201,7 +1201,7 @@ mod tests {
         assert_eq!(counts(&["-outfmt", "6", "-num_alignments", "2"]), (2, 2, 2));
         assert_eq!(
             error(&["-num_descriptions", "0", "-num_alignments", "0"]),
-            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+            "BLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
         );
     }
 
@@ -1581,7 +1581,7 @@ mod tests {
         for size in ["5", "6", "7", "8"] {
             assert_eq!(
                 error(&["-word_size", size]),
-                "BLAST query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the BLAST+ user manual.\n",
+                "BLAST query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the LOSAT user manual.\n",
                 "{size}"
             );
         }

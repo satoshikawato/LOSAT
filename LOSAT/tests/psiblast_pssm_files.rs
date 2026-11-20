@@ -233,13 +233,13 @@ fn in_pssm_dash_reads_the_standard_input() {
     assert_eq!(cut.status.code(), Some(1));
     assert_eq!(
         cut.stderr,
-        b"BLAST query/options error: Unrecognized format for PSSM in - (must be PssmWithParameters)\nPlease refer to the BLAST+ user manual.\n"
+        b"BLAST query/options error: Unrecognized format for PSSM in - (must be PssmWithParameters)\nPlease refer to the LOSAT user manual.\n"
     );
     let empty = run("-", std::process::Stdio::null());
     assert_eq!(empty.status.code(), Some(1));
     assert_eq!(
         empty.stderr,
-        b"BLAST query/options error: Unsupported format for PSSM\nPlease refer to the BLAST+ user manual.\n"
+        b"BLAST query/options error: Unsupported format for PSSM\nPlease refer to the LOSAT user manual.\n"
     );
 }
 

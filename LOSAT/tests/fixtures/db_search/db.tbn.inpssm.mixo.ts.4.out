@@ -1,0 +1,91 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nucleotide slices of two shrimp viruses
+           5 sequences; 33,385 total letters
+
+
+
+Query= BDT61857.1 innexin [Penaeus monodon majanivirus A]
+
+Length=378
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block       415     2e-134
+v_slice LvMJNV 21001-39000 with ambiguity codes                       23.8    0.23  
+m_minus MelaMJNV 59001-62000 with ambiguity codes                     19.6    4.5   
+
+
+
+Query_1  1      MASLGLLSTLRGILQGKRNADIENLI---SKLHYRVTTTTVFCFCLLVTTNTLVGDPISC  57
+0        933    MASLGLLSTLRGILQGKRNADIENIM---SKLHYRVTTTVLFSFCLIVTTNTLVGDPI    1097
+0        1243                                                             SC  1248
+0        696                                         SSTLFGMCIK*KKNTLI        746
+0        7733                                    FRNNIKTIFSYCII               7692
+2        1477                                                  ITTTTVVYSKTRC  1439
+2        2071                                                  ITTTTVVYSKTRC  2033
+2        1282                                                  ITTTTVVYSKTRC  1244
+2        14698                       IENIL---SK--YIVPLRDVFHMC                 14754
+1        1029   VAST*CTSXFMGIIHNSNKTIIENIMYSCSQLYYTFYSFNF*SYNYSILTFYL-GDRIKX  1205
+
+Query_1  58     VYDSGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAI-----------------------  94
+0        1249   IVDRTNPKLSDKVINTYCWIHTTFTIPNRIYKERGKLSFTFIFLCIYKTFDVFYFAVVYI  1428
+0        7546                   HCYLFSSFTCP                                   7514
+2        1438   VIDRTN                                                        1421
+2        2032   VID*TN                                                        2015
+2        1243   VID*TN                                                        1226
+1        1206   I                                                             1208
+
+Query_1  95     ----------SSPGIGthnlsdpvtyhayyqwvpfmlfiqgllfyaphyiwktweggrmq  144
+0        1640                                           GLMFYAPHYFWKTLEGGRLQ  1699
+0        1429   IFVLFLILDTHFPGISNYNRVDTITYHAYYQWVPFMLFLQVIISL**HY             1575
+0        1227                                             MYYYYHYYW           1201
+2        6971                                                        LRGTCIK  6951
+2        10324                   YNLISRL*YHHYHYYQLFFSYL                       10389
+
+Query_1  145    sitadlsvpilnkedqokrvnqladylqnslwnnntyalkylfcqclslvncivnmVLMN  204
+0        1700   XIVTDFSTPIFNSEERRKRIKQLADYLQNSLWXNNTYVIKYLICEFLYLLNCIINIVLID  1879
+0        6693                                     NNKDINNVTCDCNFVINCRLSL      6758
+2        6950   KLDYQYNIPIYVLKFI*ITIQQITDLLGSLFWFNSICLINFSF                   6822
+
+Query_1  205    KFLNGKFLTYGADVFSYSEAVDQESRTDPMIEVFPRVTKCSMSMFGSSGTLQKHDFLCVL  264
+0        1880   KFLNGMFITYGTDVLSYNEVTDHENKIHPMIALFPRMXKCSMNMYGSSGSIERHDFLCVL  2059
+0        1329                                      RNSKCSMN-----PTISIDNLIT*L  1270
+
+Query_1  265    AVNVINE--KIYLAMWLWFILLISLSILVFFFHLAVFAVPVIRRLYLVYLLGSGDKARIV  322
+0        2060   AVNVVNE--KIXLIMWFWLFFLISMSILVCIFYLIVFIFPIMRRLYLLILLGSNKKVNVV  2233
+0        1269   GISAINDTAEIYIYMYYYY                                           1213
+
+Query_1  323    ARTFNQMGDVFLLYLLKKNVECQSLNLLLTEL  354
+0        2234   IQTFNQMGDIFILSLLXKNIDSQYLELLVTEL  2329
+
+
+Lambda      K        H        a         alpha
+   0.324    0.138    0.425    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3517992
+
+
+  Database: nucleotide slices of two shrimp viruses
+    Posted date:  Oct 15, 2026  10:35 PM
+  Number of letters in database: 33,385
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

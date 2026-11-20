@@ -64,7 +64,8 @@
 //!   that `-outfmt` alone, with the inputs' names where the command line shows its file names.
 //!   [`Report`] tells where each HSP lies in its bytes. The HSP records ([`HspRecord`]) are the
 //!   engine's values: each number that names a `-outfmt` column is the column's value for the
-//!   HSP's row, not rounded. Text to show is read from a report, never formatted here.
+//!   HSP's row, not rounded, and each id the column's bytes ([`Id`]). Text to show is read
+//!   from a report, never formatted here.
 //! - An E-value is a value of the whole search, not of the pair: the same pair has another
 //!   E-value among other subjects. [`QueryStats`] holds what fixed it, and `-dbsize` or
 //!   `-searchsp` fix it across searches.
@@ -145,8 +146,8 @@
 //!   [`Role`], [`FastaRecord`], [`Inputs`], [`InputRecords`], [`QueryEnd`], [`QueryError`]
 //! - The options: [`validate`], [`Search`], [`API_OWNED`]
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
-//! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`QueryStats`],
-//!   [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
+//! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`Id`],
+//!   [`QueryStats`], [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
 //!   [`run_convert2blastmask`]
 //! - The failures: [`Error`]
@@ -155,6 +156,7 @@
 mod batches;
 mod describe;
 mod error;
+mod id;
 pub(crate) mod input;
 mod parts;
 // The shared local search entry of the command line and the web ABIs: each program's `run_local`
@@ -171,6 +173,7 @@ pub use crate::record::FastaRecord;
 pub use batches::{run_batches, Batch, Batches};
 pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
+pub use id::Id;
 pub use input::{
     read_fasta, read_input_file, read_input_records, read_inputs, InputRecords, Inputs, QueryEnd,
     QueryError, Role,

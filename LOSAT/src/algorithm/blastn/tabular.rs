@@ -54,6 +54,7 @@ use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularHsp, TabularKind,
     TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
+use crate::utils::lower_bound::lower_bound_by;
 
 const PROGRAM: &str = "BLASTN";
 
@@ -540,26 +541,27 @@ impl SeqRange {
 struct RangeCollection(Vec<SeqRange>);
 
 impl RangeCollection {
-    /// `std::lower_bound` from `start` with `PRangeLessPos` (`R.GetToOpen() <= Pos`): the first
-    /// range with `to_open > pos` while the ranges are sorted. libstdc++'s halving, step for
-    /// step, since a range that a query gap made (`to_open` 0, `uniq_seq_coverage`) leaves the
-    /// collection unsorted, where the probes decide the result.
+    /// `lower_bound(begin, end, pos, p)` of `x_CombineWith` and `x_Subtract` (quoted below) from
+    /// position `start`: the first position of `start..len` whose range is not less than `pos` by
+    /// `p` (less: `to_open <= pos`), or `len` when there is none.
     ///
-    /// libstdc++ reference (bits/stl_algobase.h, `std::__lower_bound`):
+    /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:44-51
+    /// ```c++
+    /// template<class Range, class Position>
+    /// struct PRangeLessPos
+    /// {
+    ///     using is_transparent = void;
+    ///     bool operator()(const Range &R, Position Pos)     { return R.GetToOpen() <= Pos;  }
+    ///     //bool operator()(Position Pos, const Range &R)     { return Pos < R.GetToOpen();  }
+    ///     bool operator()(const Range &R1, const Range &R2) { return R1.GetToOpen() < R2.GetToOpen();  }
+    /// };
+    /// ```
+    /// The ranges are not always in the order of `to_open`: a query gap at the first or last subject
+    /// letter of a part gives a query range whose `TSeqPos` arithmetic wrapped (`uniq_seq_coverage`).
+    /// The position found then depends on which ranges are compared, so they are compared in the
+    /// order NCBI's `lower_bound` compares them (`utils::lower_bound`).
     fn lower_bound(&self, start: usize, pos: u32) -> usize {
-        let mut first = start;
-        let mut len = self.0.len() - start;
-        while len > 0 {
-            let half = len >> 1;
-            let middle = first + half;
-            if self.0[middle].to_open <= pos {
-                first = middle + 1;
-                len = len - half - 1;
-            } else {
-                len = half;
-            }
-        }
-        first
+        lower_bound_by(start, self.0.len(), |i| self.0[i].to_open <= pos)
     }
 
     /// `x_CombineWith(const TRange&)`.
@@ -843,35 +845,32 @@ mod tests {
         assert_eq!(pairs(&zero), [(0, 9)]);
     }
 
-    // A query gap at a part's last subject letter makes the range [from, to_open 0), which is
-    // empty and leaves the collection unsorted: the probes of `std::lower_bound` then decide
-    // where later ranges go (`uniq_seq_coverage`).
+    // Ranges out of the order of `to_open` (a range whose `to_open` wrapped to 0 after larger
+    // ones): the positions that `std::lower_bound` returned for them (`observe_lower_bound one`,
+    // `LOSAT/tests/unit/lower_bound_observed/README.md`). The first five are not the first range
+    // not less than the value (at 1, 1, 1, 0 and 2). The last two also tell the observed search
+    // from other searches that give the first five: `slice::partition_point`, for one, returns 3
+    // for 15.
     #[test]
-    fn lower_bound_probes_as_libstdcxx() {
-        let unsorted = RangeCollection(vec![
-            SeqRange::new(0, 9),
-            SeqRange {
-                from: 1546,
-                to_open: 0,
-            },
-            SeqRange::new(20, 29),
-            SeqRange::new(40, 49),
-        ]);
-        // The probes: [20, 30) is below 35, then [40, 50) is not.
-        assert_eq!(unsorted.lower_bound(0, 35), 3);
-        // A linear scan would answer 0 ([0, 10) is not below 5); the halving probes [20, 30),
-        // which is not below 5, then [1546, 0), which is, and answers 2.
-        assert_eq!(unsorted.lower_bound(0, 5), 2);
-        let mut collection = unsorted.clone();
-        collection.combine_with(SeqRange::new(12, 14));
-        assert_eq!(
-            collection
-                .0
-                .iter()
-                .map(|r| (r.from, r.to_open))
-                .collect::<Vec<_>>(),
-            [(0, 10), (1546, 0), (12, 15), (20, 30), (40, 50)]
-        );
+    fn lower_bound_of_unordered_ranges_is_the_observed_one() {
+        let ranges = |to_opens: &[u32]| {
+            RangeCollection(
+                to_opens
+                    .iter()
+                    .map(|&to_open| SeqRange {
+                        from: to_open,
+                        to_open,
+                    })
+                    .collect(),
+            )
+        };
+        assert_eq!(ranges(&[40, 50, 0, 60]).lower_bound(0, 45), 3);
+        assert_eq!(ranges(&[10, 30, 0, 40, 50]).lower_bound(0, 25), 3);
+        assert_eq!(ranges(&[10, 30, 0, 40, 50]).lower_bound(1, 25), 3);
+        assert_eq!(ranges(&[100, 0, 0, 0, 0, 0, 0, 0]).lower_bound(0, 50), 8);
+        assert_eq!(ranges(&[50, 0, 120, 4, 90, 200]).lower_bound(1, 100), 5);
+        assert_eq!(ranges(&[0, 0, 10, 20, 0]).lower_bound(0, 5), 2);
+        assert_eq!(ranges(&[0, 0, 10, 20, 0]).lower_bound(0, 15), 5);
     }
 
     #[test]

@@ -103,6 +103,24 @@ pub struct BatchResults {
     //               for(unsigned int i =1; i < num_subjects; i++)
     // ```
     pub search_skipped: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181 (quoted
+    // at `report::archive::OptionsHandle::pass`)
+    /// The `EffectiveSearchSpace` option that the batch's search leaves in the options handle
+    /// where it is not context 0's search space (`archive::batch_searched_space`): RPSTBLASTN's
+    /// last search unit's (`rps_search::volumes::RpsUnits::request_space`). `None`: the search
+    /// space of context 0.
+    pub request_space: Option<i64>,
+    /// RPSTBLASTN: the HSPs of each query's profiles that the alias files' OID range leaves out
+    /// past the formatter's cut, which left the query's merged lists
+    /// (`rps_search::volumes::report_ordinal_ids`): outfmt 7's count and the prefetch's limit
+    /// still count them (`BatchResults::unlisted_hsps`). Empty where none left.
+    pub unlisted: Vec<usize>,
+    /// RPSTBLASTN over several volumes: the number of each query's merged lists that the
+    /// formatter's cut to the hit list size keeps, which counts following lists whose Seq-align
+    /// ids match as one subject (`database::ReportedSubjects::for_batch`,
+    /// `common::database::joined_cut`). Empty where the reports take
+    /// `ResolvedOptions::shown_lists` (`BatchResults::cut_lists`).
+    pub shown: Vec<usize>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:102-104
     // ```c++
     //     if (sbp->kbp_gap) {
@@ -114,6 +132,35 @@ pub struct BatchResults {
     /// `kbp_gap[0]` (series PR, item PS12b, `rps_search::engine::batch_gapped_k`); `None` in
     /// BLASTX's results.
     pub gapped_k: Option<Vec<f64>>,
+}
+
+impl BatchResults {
+    /// The HSPs of the query `query` of the batch whose profiles left its merged lists past the
+    /// formatter's cut (`unlisted`), 0 for every other search.
+    pub fn unlisted_hsps(&self, query: usize) -> usize {
+        self.unlisted.get(query).copied().unwrap_or(0)
+    }
+
+    /// The lists of the query `query` that the reports NCBI's formatter cuts write
+    /// (`ResolvedOptions::shown_lists` says which): its first `shown` lists, else its first
+    /// `options.shown_lists()`.
+    pub(crate) fn shown_lists(
+        &self,
+        query: usize,
+        options: &super::args::ResolvedOptions,
+    ) -> &[HspList] {
+        self.cut_lists(query, options.shown_lists())
+    }
+
+    /// The lists of the query `query` that the formatter's cut keeps (`shown`, else the first
+    /// `cut`, `ResolvedOptions::shown_lists`): the one reading of that cut, which
+    /// `shown_lists` and `database::ReportedSubjects::for_batch` take.
+    pub(crate) fn cut_lists(&self, query: usize, cut: usize) -> &[HspList] {
+        let lists = &self.queries[query];
+        &lists[..lists
+            .len()
+            .min(self.shown.get(query).copied().unwrap_or(cut))]
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1539-1554
@@ -1294,6 +1341,9 @@ impl PreliminarySink for Runtime<'_> {
             prepared: batch.x_for_results(),
             parameters: params.to_vec(),
             search_skipped: true,
+            request_space: None,
+            unlisted: Vec::new(),
+            shown: Vec::new(),
             gapped_k: None,
         });
         Ok(())
@@ -2245,6 +2295,9 @@ impl PreliminarySink for Runtime<'_> {
             prepared: batch.x_for_results(),
             parameters: full,
             search_skipped: false,
+            request_space: None,
+            unlisted: Vec::new(),
+            shown: Vec::new(),
             gapped_k: None,
         });
         super::x_timing::end(XEnd::Finish, x_t_finish);

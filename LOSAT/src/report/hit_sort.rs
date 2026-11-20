@@ -3,18 +3,12 @@
 //! BLASTP, BLASTX, TBLASTN and TBLASTX, and the values that the description table's columns of
 //! `-sorthits` read.
 //!
-//! NCBI sorts `std::list`s, whose `sort` is stable (the C++ standard: elements that compare equal
-//! keep their order). Each sort here is Rust's stable `sort_by` with a total order that gives the
-//! order of NCBI's comparator, plus the explicit steps for the comparators that are not strict
-//! weak orders or that reorder the compared hits' HSPs (`sort_query_hits`). The steps were taken
-//! from the outputs of `std::list::sort` built with g++ 13 for comparators of the same shapes, on
-//! lists of 0 to 300 elements with many ties (the order of equal totals with `>=`; which hits'
-//! HSPs end sorted). NCBI's percent-identity comparators are strict weak orders of a list unless
-//! an HSP has no identities; on a list that they order in a cycle, NCBI's order is the one of its
-//! C++ library's merge procedure, and LOSAT's is described at `sort_hsps_by_percent_identity` and
-//! `sort_hits_by_percent_identity`.
-
-use std::cmp::Ordering;
+//! NCBI sorts `std::list`s with comparators of which some are not strict weak orders (`>=`, and
+//! the percent-identity comparators on a list with an HSP without identities) and some sort the
+//! HSP lists of both hits they compare as a side effect, so the order is the one that the C++
+//! library's list sort gives with that comparator: `list_sort` hands the comparator the same
+//! elements in the same order (as observed with g++ 13), and the comparators keep their side
+//! effects on the hits' HSP orders.
 
 use super::pairwise::PairwiseHit;
 
@@ -229,6 +223,91 @@ impl HspScores {
     }
 }
 
+/// `list.sort(less)` of a C++ `std::list` holding the elements of `list` (NCBI's sorts of hits and
+/// HSPs): `less` is called with the same elements, in the same argument order and in the same
+/// sequence as the list sort of the C++ library that NCBI's BLAST+ 2.17.0 is built with (GCC 13),
+/// and the elements end in the order that the answers give. The steps were written from what
+/// g++ 13's `std::list::sort` did with comparators that recorded each call and answered from a
+/// script or at random (every answer sequence for lists of up to 9 elements, and random answers
+/// for lists of up to 20,000 elements); the fixture of the test `list_sort_calls_as_observed`
+/// (`tests/unit/list_sort_observed`) keeps a part of those records.
+///
+/// A list of fewer than two elements is left as it is, without a call. Otherwise the sort reads
+/// the elements from the front, one at a time, and keeps those read as runs: stretches of
+/// consecutive elements, merged in order, whose lengths are distinct powers of two, the longer
+/// runs nearer the front. Each element read is a new run of one at the back; then, while the run
+/// before the last one has the same length as the last one, the two are merged into one. When all
+/// the elements are read, the runs are merged from the back: the last run with the one before it,
+/// then that run with the one before it, up to the first run.
+///
+/// Two neighbouring runs are merged by taking their elements from the front: while both have
+/// elements left, `less(later, earlier)` is asked with the first element left of the run behind
+/// (`later`) and the first one left of the run in front (`earlier`); the answer true takes the
+/// element of the run behind, false the one of the run in front. When one run is used up, the rest
+/// of the other follows without a call. With a strict weak order `less` this is a stable sort
+/// (elements that compare equal keep their order); with any other comparator the order is still
+/// the one that the same answers give in NCBI's sort.
+fn list_sort(list: &mut [usize], mut less: impl FnMut(&usize, &usize) -> bool) {
+    let len = list.len();
+    if len < 2 {
+        return;
+    }
+    let mut front_run = Vec::with_capacity(len);
+    for read in 1..=len {
+        // The runs are the binary digits of `read - 1` before this element is read.
+        let mut size = 1;
+        while (read - 1) & size != 0 {
+            merge_runs(
+                list,
+                read - 2 * size,
+                read - size,
+                read,
+                &mut front_run,
+                &mut less,
+            );
+            size *= 2;
+        }
+    }
+    let (mut start, mut left) = (len, len);
+    while left != 0 {
+        let size = left & left.wrapping_neg();
+        merge_runs(list, start - size, start, len, &mut front_run, &mut less);
+        start -= size;
+        left -= size;
+    }
+}
+
+/// Merges the run `list[start..middle]` with the run `list[middle..end]` behind it, as
+/// `list_sort` describes; `front_run` is scratch space for the run in front.
+fn merge_runs(
+    list: &mut [usize],
+    start: usize,
+    middle: usize,
+    end: usize,
+    front_run: &mut Vec<usize>,
+    less: &mut impl FnMut(&usize, &usize) -> bool,
+) {
+    if start == middle || middle == end {
+        return;
+    }
+    front_run.clear();
+    front_run.extend_from_slice(&list[start..middle]);
+    let (mut front, mut behind, mut next) = (0, middle, start);
+    while front < front_run.len() && behind < end {
+        if less(&list[behind], &front_run[front]) {
+            list[next] = list[behind];
+            behind += 1;
+        } else {
+            list[next] = front_run[front];
+            front += 1;
+        }
+        next += 1;
+    }
+    // The rest of the run behind is in place already; the rest of the run in front fills the gap.
+    let rest = &front_run[front..];
+    list[next..next + rest.len()].copy_from_slice(rest);
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1383-1400
 // ```c++
 // bool CAlignFormatUtil::
@@ -242,36 +321,9 @@ impl HspScores {
 //
 // }
 // ```
-/// `SortHspByScoreDescending` as an order: `info1` before `info2` when its bit score is higher,
-/// equal (kept in their order by the stable sort) when the scores are equal.
-pub(crate) fn hsp_by_score_descending(info1: &HspScores, info2: &HspScores) -> Ordering {
-    cmp_f64(info2.bits, info1.bits)
-}
-
-/// `a` against `b` as C++ compares two doubles with `<`, `>` and `==` (-0.0 equals 0.0), with a
-/// NaN above every number and equal to another NaN so that the order is total, as `sort_by`
-/// needs. The values that the sorts compare (bit scores, E-values, their sums, identity ratios and
-/// percentages) are never NaN.
-fn cmp_f64(a: f64, b: f64) -> Ordering {
-    a.partial_cmp(&b)
-        .unwrap_or_else(|| a.is_nan().cmp(&b.is_nan()))
-}
-
-/// Sorts `order` with Rust's stable sort by the order that NCBI's comparator `less` gives: `x`
-/// before `y` when `less(x, y)`, after it when `less(y, x)`, else equal (kept in their order, as
-/// the stable `std::list::sort` keeps them). Called only on lists of which `less` is a strict weak
-/// order, the condition under which the C++ standard defines `list::sort`'s result and under which
-/// this is a total order of the list's elements.
-fn sort_by_comparator(order: &mut [usize], less: impl Fn(usize, usize) -> bool) {
-    order.sort_by(|&x, &y| {
-        if less(x, y) {
-            Ordering::Less
-        } else if less(y, x) {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        }
-    });
+/// `SortHspByScoreDescending`.
+pub(crate) fn hsp_by_score_descending(info1: &HspScores, info2: &HspScores) -> bool {
+    info1.bits > info2.bits
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1403-1431
@@ -291,13 +343,13 @@ fn sort_by_comparator(order: &mut [usize], less: impl Fn(usize, usize) -> bool) 
 //         return start1 < start2;
 //     }
 // ```
-/// `SortHspByMasterStartAscending` as an order: the lower query start first, equal starts by the
-/// lower E-value, equal starts and E-values equal.
-pub(crate) fn hsp_by_query_start_ascending(info1: &HspScores, info2: &HspScores) -> Ordering {
-    info1
-        .query_from
-        .cmp(&info2.query_from)
-        .then_with(|| cmp_f64(info1.evalue, info2.evalue))
+/// `SortHspByMasterStartAscending`.
+pub(crate) fn hsp_by_query_start_ascending(info1: &HspScores, info2: &HspScores) -> bool {
+    if info1.query_from == info2.query_from {
+        info1.evalue < info2.evalue
+    } else {
+        info1.query_from < info2.query_from
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1433-1458
@@ -314,13 +366,13 @@ pub(crate) fn hsp_by_query_start_ascending(info1: &HspScores, info2: &HspScores)
 //         return start1 < start2;
 //     }
 // ```
-/// `SortHspBySubjectStartAscending` as an order: the lower subject start first, equal starts by
-/// the lower E-value, equal starts and E-values equal.
-pub(crate) fn hsp_by_subject_start_ascending(info1: &HspScores, info2: &HspScores) -> Ordering {
-    info1
-        .subject_from
-        .cmp(&info2.subject_from)
-        .then_with(|| cmp_f64(info1.evalue, info2.evalue))
+/// `SortHspBySubjectStartAscending`.
+pub(crate) fn hsp_by_subject_start_ascending(info1: &HspScores, info2: &HspScores) -> bool {
+    if info1.subject_from == info2.subject_from {
+        info1.evalue < info2.evalue
+    } else {
+        info1.subject_from < info2.subject_from
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1261-1296
@@ -365,86 +417,6 @@ pub(crate) fn hsp_by_percent_identity_descending(
     } else {
         info1.evalue < info2.evalue
     }
-}
-
-/// `list.sort(SortHspByPercentIdentityDescending)` of the HSPs `order` of `hsps` (with NCBI's
-/// `kTranslation`, `translation`).
-///
-/// Between two HSPs with identities the comparator is the higher ratio first, equal ratios by the
-/// lower E-value (`>=` decides only unequal ratios, where it is `>`); an HSP without identities
-/// compares with every HSP by E-value. That is a strict weak order of the list, and NCBI's order is
-/// the stable one, unless the list holds an HSP without identities (`order_holds`): two HSPs with
-/// identities whose ratio order goes against their E-values (the higher ratio, the larger or equal
-/// E-value) and an HSP without identities whose E-value lies between theirs (ends included) are
-/// ordered in a cycle (or tie with an HSP that they do not tie with). On such a list NCBI's order
-/// is the one that its C++ library's merge procedure gives, which no order of the HSPs reproduces;
-/// LOSAT puts the HSPs with identities first, by ratio and E-value as NCBI's comparator orders
-/// them, then those without, by E-value (each group stable).
-fn sort_hsps_by_percent_identity(
-    hsps: &[HspScores],
-    order: &mut [usize],
-    tblastx: bool,
-    translation: bool,
-) {
-    let identities = |k: usize| {
-        let hsp = &hsps[k];
-        let length = hsp.alignment_length(tblastx, translation);
-        (hsp.num_ident > 0 && length > 0).then(|| hsp.num_ident as f64 / length as f64)
-    };
-    if percent_identity_order_holds(hsps, order, identities) {
-        sort_by_comparator(order, |x, y| {
-            hsp_by_percent_identity_descending(&hsps[x], &hsps[y], tblastx, translation)
-        });
-    } else {
-        order.sort_by(|&x, &y| match (identities(x), identities(y)) {
-            (Some(ratio1), Some(ratio2)) => {
-                cmp_f64(ratio2, ratio1).then_with(|| cmp_f64(hsps[x].evalue, hsps[y].evalue))
-            }
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => cmp_f64(hsps[x].evalue, hsps[y].evalue),
-        });
-    }
-}
-
-/// Whether `SortHspByPercentIdentityDescending` is a strict weak order of the HSPs `order` of
-/// `hsps`, whose identity ratios `identities` gives (`None` without identities): no E-value is
-/// NaN, and no HSP without identities has an E-value from `e_low` to `e_high` (ends included)
-/// where an HSP with identities and E-value `e_high` has a higher ratio than one with E-value
-/// `e_low` (the largest ratio among the HSPs with identities whose E-value is at least the HSP's
-/// is above the smallest ratio among those whose E-value is at most the HSP's).
-fn percent_identity_order_holds(
-    hsps: &[HspScores],
-    order: &[usize],
-    identities: impl Fn(usize) -> Option<f64>,
-) -> bool {
-    if order.iter().any(|&k| hsps[k].evalue.is_nan()) {
-        return false;
-    }
-    let with: Vec<(f64, f64)> = order
-        .iter()
-        .filter_map(|&k| identities(k).map(|ratio| (ratio, hsps[k].evalue)))
-        .collect();
-    if with.len() < 2 {
-        return true;
-    }
-    order
-        .iter()
-        .filter(|&&k| identities(k).is_none())
-        .all(|&k| {
-            let evalue = hsps[k].evalue;
-            let mut highest_at_or_above = f64::NEG_INFINITY;
-            let mut lowest_at_or_below = f64::INFINITY;
-            for &(ratio, other) in &with {
-                if other >= evalue {
-                    highest_at_or_above = highest_at_or_above.max(ratio);
-                }
-                if other <= evalue {
-                    lowest_at_or_below = lowest_at_or_below.min(ratio);
-                }
-            }
-            highest_at_or_above <= lowest_at_or_below
-        })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3163-3171
@@ -696,22 +668,34 @@ pub(crate) fn sort_query_hits(
     let mut orders: Vec<Vec<usize>> = hits.iter().map(|hsps| (0..hsps.len()).collect()).collect();
     let mut order: Vec<usize> = (0..hits.len()).collect();
     match sort.hits {
-        Some(2) => sort_hits_by_total_score(hits, &orders, &mut order),
-        Some(1) => sort_hits_by_score(hits, &mut orders, &mut order),
-        Some(3) => {
-            sort_hits_by_percent_identity(hits, &mut orders, &mut order, tblastx, translation)
-        }
-        Some(4) => sort_hits_by_query_coverage(hits, &orders, &mut order),
+        Some(2) => list_sort(&mut order, |&a, &b| {
+            total_score(&hits[a], &orders[a]) >= total_score(&hits[b], &orders[b])
+        }),
+        Some(1) => list_sort(&mut order, |&a, &b| {
+            hit_by_score_descending(hits, &mut orders, a, b)
+        }),
+        Some(3) => list_sort(&mut order, |&a, &b| {
+            hit_by_percent_identity_descending(hits, &mut orders, a, b, tblastx, translation)
+        }),
+        Some(4) => list_sort(&mut order, |&a, &b| {
+            hit_by_query_coverage_descending(hits, &orders, a, b)
+        }),
         _ => {}
     }
     for (hsps, hsp_order) in hits.iter().zip(orders.iter_mut()) {
         match sort.hsps {
-            Some(2) => hsp_order.sort_by(|&x, &y| hsp_by_query_start_ascending(&hsps[x], &hsps[y])),
-            Some(3) => sort_hsps_by_percent_identity(hsps, hsp_order, tblastx, translation),
-            Some(1) => hsp_order.sort_by(|&x, &y| hsp_by_score_descending(&hsps[x], &hsps[y])),
-            Some(4) => {
-                hsp_order.sort_by(|&x, &y| hsp_by_subject_start_ascending(&hsps[x], &hsps[y]))
-            }
+            Some(2) => list_sort(hsp_order, |&x, &y| {
+                hsp_by_query_start_ascending(&hsps[x], &hsps[y])
+            }),
+            Some(3) => list_sort(hsp_order, |&x, &y| {
+                hsp_by_percent_identity_descending(&hsps[x], &hsps[y], tblastx, translation)
+            }),
+            Some(1) => list_sort(hsp_order, |&x, &y| {
+                hsp_by_score_descending(&hsps[x], &hsps[y])
+            }),
+            Some(4) => list_sort(hsp_order, |&x, &y| {
+                hsp_by_subject_start_ascending(&hsps[x], &hsps[y])
+            }),
             _ => {}
         }
     }
@@ -739,26 +723,6 @@ pub(crate) fn total_score(hsps: &[HspScores], order: &[usize]) -> f64 {
     order.iter().fold(0.0, |total, &k| total + hsps[k].bits)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3074-3075
-// ```c++
-//     if (hit_sort == eTotalScore) {
-//         seqalign_hit_list.sort(SortHitByTotalScoreDescending);
-// ```
-/// `seqalign_hit_list.sort(SortHitByTotalScoreDescending)` of the hits `order` (in the search's
-/// order), each with its HSPs in `orders`: the higher total first. The comparator's `>=` holds
-/// both ways for equal totals; `std::list::sort` with it ends equal totals in the reverse of their
-/// order (seen in every list of 0 to 300 elements that g++ 13's `std::list::sort` sorted with a
-/// `>=` comparator): the list reversed, then sorted stably by total.
-fn sort_hits_by_total_score(hits: &[Vec<HspScores>], orders: &[Vec<usize>], order: &mut [usize]) {
-    let totals: Vec<f64> = hits
-        .iter()
-        .zip(orders)
-        .map(|(hsps, hsp_order)| total_score(hsps, hsp_order))
-        .collect();
-    order.reverse();
-    order.sort_by(|&a, &b| cmp_f64(totals[b], totals[a]));
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1298-1316
 // ```c++
 // bool CAlignFormatUtil::
@@ -775,22 +739,21 @@ fn sort_hits_by_total_score(hits: &[Vec<HspScores>], orders: &[Vec<usize>], orde
 //     return bits1 > bits2;
 // }
 // ```
-/// `seqalign_hit_list.sort(SortHitByScoreDescending)` of the hits `order`, each with its HSPs in
-/// `orders`. Each comparison sorts both hits' HSPs by score, and the hits keep that order of their
-/// HSPs. With two hits or more every hit takes part in a comparison (in every list of 2 to 300
-/// elements that g++ 13's `std::list::sort` sorted), so every hit's HSPs end sorted by score; a
-/// stable sort of HSPs already in that order leaves them as they are, so one sort per hit gives the
-/// same order. One hit is not compared and keeps its order. The hits then go by their first HSP's
-/// bit score, the highest first (`>`, a strict weak order: equal scores keep their order).
-fn sort_hits_by_score(hits: &[Vec<HspScores>], orders: &mut [Vec<usize>], order: &mut [usize]) {
-    if order.len() < 2 {
-        return;
-    }
-    for &hit in order.iter() {
+/// `SortHitByScoreDescending` of hits `a` and `b`: sorts both hits' HSPs by score (kept: the
+/// order of their HSPs afterwards), then compares their first HSPs' bit scores.
+fn hit_by_score_descending(
+    hits: &[Vec<HspScores>],
+    orders: &mut [Vec<usize>],
+    a: usize,
+    b: usize,
+) -> bool {
+    for hit in [a, b] {
         let hsps = &hits[hit];
-        orders[hit].sort_by(|&x, &y| hsp_by_score_descending(&hsps[x], &hsps[y]));
+        list_sort(&mut orders[hit], |&x, &y| {
+            hsp_by_score_descending(&hsps[x], &hsps[y])
+        });
     }
-    order.sort_by(|&a, &b| cmp_f64(hits[b][orders[b][0]].bits, hits[a][orders[a][0]].bits));
+    hits[a][orders[a][0]].bits > hits[b][orders[b][0]].bits
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1543-1595
@@ -847,13 +810,28 @@ fn sort_hits_by_score(hits: &[Vec<HspScores>], orders: &mut [Vec<usize>], order:
 //     ...
 //     hasScore = s_GetBlastScore(aln.GetScore(),evalue,bitScore, totalBitScore,percentCoverage,percentIdent,hspNum,totalLen,rawScore,sum_n,use_this_gi);
 // ```
-/// `SortHitByPercentIdentityDescendingEx` of two hits whose `GetSeqAlignSetCalcPercentIdent` are
-/// `percent1` and `percent2`. The Seq-aligns of a BLAST+ search carry none of the "seq_*" scores
-/// that `GetSeqAlignSetCalcParamsFromASN` reads, so both E-values and percentages start at -1 and
-/// the comparison takes the percentages of `s_CalcAlnPercentIdent`; equal percentages, or one not
-/// above 0, compare their E-values of -1 (`-1 < -1`, false).
-fn hit_by_percent_identity_descending(percent1: f64, percent2: f64) -> bool {
+/// `SortHitByPercentIdentityDescendingEx` of hits `a` and `b`. The Seq-aligns of a BLAST+ search
+/// carry none of the "seq_*" scores that `GetSeqAlignSetCalcParamsFromASN` reads, so both
+/// E-values and percentages start at -1: the comparison sorts both hits' HSPs by percent
+/// identity (kept) and takes their `GetSeqAlignSetCalcPercentIdent`; equal percentages, or one
+/// not above 0, compare their E-values of -1 (`-1 < -1`, false).
+fn hit_by_percent_identity_descending(
+    hits: &[Vec<HspScores>],
+    orders: &mut [Vec<usize>],
+    a: usize,
+    b: usize,
+    tblastx: bool,
+    translation: bool,
+) -> bool {
     let (evalue1, evalue2) = (-1.0f64, -1.0f64);
+    for hit in [a, b] {
+        let hsps = &hits[hit];
+        list_sort(&mut orders[hit], |&x, &y| {
+            hsp_by_percent_identity_descending(&hsps[x], &hsps[y], tblastx, translation)
+        });
+    }
+    let percent1 = set_percent_identity(&hits[a], &orders[a], tblastx, translation);
+    let percent2 = set_percent_identity(&hits[b], &orders[b], tblastx, translation);
     if percent1 > 0.0 && percent2 > 0.0 {
         if percent1 == percent2 {
             evalue1 < evalue2
@@ -862,59 +840,6 @@ fn hit_by_percent_identity_descending(percent1: f64, percent2: f64) -> bool {
         }
     } else {
         evalue1 < evalue2
-    }
-}
-
-/// `SortHitByPercentIdentityDescending(seqalign_hit_list, kTranslation)` of the hits `order`, each
-/// with its HSPs in `orders` (`translation`: NCBI's `kTranslation`).
-///
-/// Each comparison sorts both hits' HSPs by percent identity (`s_CalcAlnPercentIdent`), and the
-/// hits keep that order. As with `sort_hits_by_score`, two hits or more mean that every hit's
-/// HSPs end sorted, and one sort per hit gives that order (a second sort leaves a list that its
-/// comparator orders as it is); one hit is not compared. The hits then go by their percentages, the
-/// higher first: `>=` decides only unequal percentages, where it is `>`; equal percentages tie. A
-/// percentage not above 0 (the first HSP of the highest score has no identities) ties with every
-/// hit, so the comparator is a strict weak order of the list only when there is no such hit or the
-/// other hits' percentages are all equal (`holds`), and NCBI's order is then the stable one.
-/// Otherwise NCBI's order is the one that its C++ library's merge procedure gives, and LOSAT puts
-/// the hits with a percentage above 0 first, the higher first, then the others (each group
-/// stable). The same holds within a hit whose HSPs `sort_hsps_by_percent_identity` cannot order as
-/// NCBI does: NCBI sorts them again at each comparison of the hit.
-fn sort_hits_by_percent_identity(
-    hits: &[Vec<HspScores>],
-    orders: &mut [Vec<usize>],
-    order: &mut [usize],
-    tblastx: bool,
-    translation: bool,
-) {
-    if order.len() < 2 {
-        return;
-    }
-    for &hit in order.iter() {
-        sort_hsps_by_percent_identity(&hits[hit], &mut orders[hit], tblastx, translation);
-    }
-    let percents: Vec<f64> = hits
-        .iter()
-        .zip(orders.iter())
-        .map(|(hsps, hsp_order)| set_percent_identity(hsps, hsp_order, tblastx, translation))
-        .collect();
-    let above: Vec<f64> = order
-        .iter()
-        .map(|&hit| percents[hit])
-        .filter(|&percent| percent > 0.0)
-        .collect();
-    let holds = above.len() == order.len() || above.iter().all(|&percent| percent == above[0]);
-    if holds {
-        sort_by_comparator(order, |a, b| {
-            hit_by_percent_identity_descending(percents[a], percents[b])
-        });
-    } else {
-        order.sort_by(|&a, &b| {
-            let (percent1, percent2) = (percents[a], percents[b]);
-            (percent2 > 0.0)
-                .cmp(&(percent1 > 0.0))
-                .then_with(|| cmp_f64(percent2, percent1))
-        });
     }
 }
 
@@ -935,23 +860,23 @@ fn sort_hits_by_percent_identity(
 //
 //     return retval;
 // ```
-/// `seqalign_hit_list.sort(SortHitByMasterCoverageDescending)` of the hits `order`, each with its
-/// HSPs in `orders`: the higher query coverage first, equal coverages by their first HSP's lower
-/// E-value (a strict weak order: equal coverages and E-values keep their order).
-fn sort_hits_by_query_coverage(
+/// `SortHitByMasterCoverageDescending` of hits `a` and `b` (their first HSPs in their current
+/// orders).
+fn hit_by_query_coverage_descending(
     hits: &[Vec<HspScores>],
     orders: &[Vec<usize>],
-    order: &mut [usize],
-) {
-    if order.len() < 2 {
-        return;
+    a: usize,
+    b: usize,
+) -> bool {
+    let cov1 = query_coverage(&hits[a]);
+    let cov2 = query_coverage(&hits[b]);
+    if cov1 > cov2 {
+        true
+    } else if cov1 == cov2 {
+        hits[a][orders[a][0]].evalue < hits[b][orders[b][0]].evalue
+    } else {
+        false
     }
-    let coverages: Vec<u64> = hits.iter().map(query_coverage).collect();
-    order.sort_by(|&a, &b| {
-        coverages[b]
-            .cmp(&coverages[a])
-            .then_with(|| cmp_f64(hits[a][orders[a][0]].evalue, hits[b][orders[b][0]].evalue))
-    });
 }
 
 #[cfg(test)]

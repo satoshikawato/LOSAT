@@ -1,6 +1,7 @@
-//! Tests of `hit_sort`: NCBI's comparators, the orders of `sort_query_hits` (ties, the
-//! comparisons' side effects on the hits' HSP orders, HSPs without identities) and the values that
-//! the description table's columns read.
+//! Tests of `hit_sort`: the replay of the calls that the C++ library's list sort was seen to make
+//! (`LOSAT/tests/unit/list_sort_observed/README.md`), NCBI's comparators, the orders of
+//! `sort_query_hits` (ties, the comparisons' side effects on the hits' HSP orders, HSPs without
+//! identities) and the values that the description table's columns read.
 
 use super::*;
 
@@ -67,28 +68,13 @@ fn hsp_scores_read_the_seqalign_identities() {
 fn hsp_comparators_break_ties_by_e_value() {
     let a = hsp(50.0, 1e-5, 40, 50, (10, 59), 3);
     let b = hsp(50.0, 1e-6, 40, 50, (10, 59), 3);
-    // Equal scores: `>` is false both ways, equal.
-    assert_eq!(hsp_by_score_descending(&a, &b), Ordering::Equal);
-    let higher = hsp(51.0, 1e-5, 40, 50, (10, 59), 3);
-    assert_eq!(hsp_by_score_descending(&higher, &a), Ordering::Less);
-    assert_eq!(hsp_by_score_descending(&a, &higher), Ordering::Greater);
+    // Equal scores: `>` is false both ways.
+    assert!(!hsp_by_score_descending(&a, &b) && !hsp_by_score_descending(&b, &a));
     // Equal starts: the lower E-value first.
-    assert_eq!(hsp_by_query_start_ascending(&b, &a), Ordering::Less);
-    assert_eq!(hsp_by_query_start_ascending(&a, &b), Ordering::Greater);
-    assert_eq!(hsp_by_subject_start_ascending(&b, &a), Ordering::Less);
-    assert_eq!(hsp_by_subject_start_ascending(&a, &b), Ordering::Greater);
-    assert_eq!(hsp_by_query_start_ascending(&a, &a), Ordering::Equal);
+    assert!(hsp_by_query_start_ascending(&b, &a) && !hsp_by_query_start_ascending(&a, &b));
+    assert!(hsp_by_subject_start_ascending(&b, &a) && !hsp_by_subject_start_ascending(&a, &b));
     let c = hsp(10.0, 1.0, 1, 5, (9, 9), 2);
-    assert_eq!(hsp_by_query_start_ascending(&c, &a), Ordering::Less);
-    assert_eq!(hsp_by_subject_start_ascending(&c, &a), Ordering::Less);
-    // -0.0 and 0.0 are equal, as C++ compares them.
-    let zero = hsp(0.0, 0.0, 1, 5, (9, 9), 2);
-    let minus_zero = hsp(-0.0, -0.0, 1, 5, (9, 9), 2);
-    assert_eq!(hsp_by_score_descending(&zero, &minus_zero), Ordering::Equal);
-    assert_eq!(
-        hsp_by_query_start_ascending(&zero, &minus_zero),
-        Ordering::Equal
-    );
+    assert!(hsp_by_query_start_ascending(&c, &a) && hsp_by_subject_start_ascending(&c, &a));
     // Equal identity ratios (40/50 and 4/5): the E-values.
     let d = hsp(20.0, 1e-7, 4, 5, (0, 4), 0);
     assert!(hsp_by_percent_identity_descending(&d, &a, false, false));
@@ -355,125 +341,99 @@ fn hsp_sorts_apply_to_every_hit() {
     assert_eq!(sorted(by(None, Some(4)), false, &hits).hits, vec![0, 1]);
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1282-1293
-// ```c++
-//     if(length1 > 0 && length2 > 0 && num_ident1 > 0 &&num_ident2 > 0 ) {
-//         if (((double)num_ident1)/length1 == ((double)num_ident2)/length2) {
-//
-//             retval = evalue1 < evalue2;
-//
-//         } else {
-//             retval = ((double)num_ident1)/length1 >= ((double)num_ident2)/length2;
-//
-//         }
-//     } else {
-//         retval = evalue1 < evalue2;
-//     }
-// ```
-// An HSP without identities compares by E-value with every HSP. Where that orders the list, the
-// order is the comparator's; where it orders three HSPs in a cycle, the HSPs with identities come
-// first.
-#[test]
-fn hsps_without_identities_sort_by_e_value_where_the_comparator_orders_them() {
-    let sort3 = |hsps: Vec<HspScores>| sorted(by(None, Some(3)), false, &[hsps]).hsps[0].clone();
-    // 90 %, E 1e-3; no identities, E 1e-5: the E-values decide.
-    let high = hsp(30.0, 1e-3, 9, 10, (0, 9), 0);
-    let none = hsp(35.0, 1e-5, 0, 10, (20, 29), 20);
-    assert_eq!(sort3(vec![high, none]), vec![1, 0]);
-    assert_eq!(sort3(vec![none, high]), vec![0, 1]);
-    // Two without identities and one with: by E-value (an order).
-    let none2 = hsp(20.0, 1e-1, 0, 10, (40, 49), 40);
-    assert_eq!(sort3(vec![none2, high, none]), vec![2, 1, 0]);
-    // 50 % with E 1e-10 and 90 % with E 1e-3, the one without identities at E 1e-20: the
-    // comparator orders the three (E 1e-20 first, then 90 % before 50 %).
-    let low = hsp(60.0, 1e-10, 25, 50, (60, 109), 60);
-    let best = hsp(70.0, 1e-20, 0, 10, (120, 129), 120);
-    assert_eq!(sort3(vec![low, high, best]), vec![2, 1, 0]);
-    // The one without identities at E 1e-5, between the two: a cycle (1e-10 before 1e-5 before
-    // 1e-3 by E-value, 90 % before 50 %). The HSPs with identities first, by ratio, then the other.
-    assert_eq!(sort3(vec![low, none, high]), vec![2, 0, 1]);
-    // At an end of the interval (E 1e-3, equal to the 90 % HSP's): no order either.
-    let tie = hsp(25.0, 1e-3, 0, 10, (140, 149), 140);
-    assert_eq!(sort3(vec![tie, low, high]), vec![2, 1, 0]);
-}
+/// The fields of a line of `list_sort_calls.txt`: the list's length, the answers, the calls (the
+/// input positions of the comparator's first and second elements) and the order after the sort.
+type ObservedSort = (usize, Vec<bool>, Vec<(usize, usize)>, Vec<usize>);
 
-#[test]
-fn percent_identity_order_holds_only_without_a_cycle() {
-    let hsps = vec![
-        hsp(30.0, 1e-3, 9, 10, (0, 9), 0),
-        hsp(60.0, 1e-10, 25, 50, (0, 49), 0),
-        hsp(35.0, 1e-5, 0, 10, (0, 9), 0),
-        hsp(70.0, 1e-20, 0, 10, (0, 9), 0),
-        hsp(71.0, f64::NAN, 5, 10, (0, 9), 0),
-    ];
-    let identities = |k: usize| {
-        let h = &hsps[k];
-        (h.num_ident > 0).then(|| h.num_ident as f64 / h.length as f64)
+fn observed_sort(line: &str) -> ObservedSort {
+    let fields: Vec<&str> = line.split(' ').collect();
+    let (n, answers, calls, order) = match fields[0] {
+        "T" => (fields[1], fields[2], fields[3], fields[4]),
+        "R" => (fields[2], fields[4], fields[5], fields[6]),
+        kind => panic!("a line of kind {kind}: {line}"),
     };
-    let holds = |order: &[usize]| percent_identity_order_holds(&hsps, order, identities);
-    assert!(holds(&[0, 1]) && holds(&[0, 2]) && holds(&[2, 3]) && holds(&[0, 1, 3]));
-    assert!(!holds(&[0, 1, 2]));
-    // A NaN E-value: not an order.
-    assert!(!holds(&[0, 4]));
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1584-1593
-// ```c++
-//     if(percentIdent1 > 0 &&percentIdent2 > 0) {
-//         if (percentIdent1 == percentIdent2) {
-//             retval = evalue1 < evalue2;
-//
-//         } else {
-//             retval = percentIdent1 >= percentIdent2;
-//         }
-//     } else {
-//         retval = evalue1 < evalue2;
-//     }
-// ```
-// A hit whose highest-scoring HSP has no identities (0 %) ties with every hit.
-#[test]
-fn a_hit_of_zero_percent_ties_with_every_hit() {
-    let zero = vec![hsp(50.0, 1e-20, 0, 20, (0, 19), 0)];
-    let half = vec![hsp(30.0, 1e-5, 10, 20, (0, 19), 0)];
-    let most = vec![hsp(40.0, 1e-7, 18, 20, (0, 19), 0)];
-    let order = |hits: &[Vec<HspScores>]| sorted(by(Some(3), None), false, hits).hits;
-    // The comparator orders these lists: the order stays.
-    assert_eq!(order(&[zero.clone(), half.clone()]), vec![0, 1]);
-    assert_eq!(
-        order(&[half.clone(), zero.clone(), half.clone()]),
-        vec![0, 1, 2]
-    );
-    assert_eq!(order(&[half.clone(), most.clone()]), vec![1, 0]);
-    // 50 % and 90 % with a 0 % hit between: not an order (90 % before 50 %, both tie with 0 %);
-    // the hits above 0 % first, by percentage, then the others.
-    assert_eq!(
-        order(&[half.clone(), zero.clone(), most.clone()]),
-        vec![2, 0, 1]
-    );
-    assert_eq!(order(&[zero.clone(), most, half]), vec![1, 2, 0]);
-}
-
-#[test]
-fn nan_values_sort_without_a_panic() {
-    let nan = hsp(f64::NAN, f64::NAN, 1, 2, (0, 1), 0);
-    let one = hsp(10.0, 1e-3, 1, 2, (0, 1), 0);
-    let two = hsp(20.0, 1e-4, 2, 2, (0, 1), 0);
-    let hits = vec![vec![nan, one, two], vec![one], vec![nan], vec![two, nan]];
-    for hit_sort in 0..=4 {
-        for hsp_sort in 0..=4 {
-            for tblastx in [false, true] {
-                let sort = by(Some(hit_sort), Some(hsp_sort));
-                if let Some(order) = sort_query_hits(sort, tblastx, &hits) {
-                    let mut seen = order.hits.clone();
-                    seen.sort_unstable();
-                    assert_eq!(seen, vec![0, 1, 2, 3], "{sort:?}");
-                }
-            }
+    let split = |field: &str| -> Vec<String> {
+        if field == "-" {
+            Vec::new()
+        } else {
+            field.split(',').map(str::to_string).collect()
         }
+    };
+    let answers = if answers == "-" {
+        Vec::new()
+    } else {
+        answers.bytes().map(|answer| answer == b'1').collect()
+    };
+    let calls = split(calls)
+        .iter()
+        .map(|call| {
+            let (first, second) = call.split_once(':').unwrap();
+            (first.parse().unwrap(), second.parse().unwrap())
+        })
+        .collect();
+    let order = split(order).iter().map(|k| k.parse().unwrap()).collect();
+    (n.parse().unwrap(), answers, calls, order)
+}
+
+// For each recorded sequence of answers (every one for lists of 0 to 5 elements, and random ones
+// for lists of 6 to 257 elements), `list_sort` hands the comparator the elements that g++ 13's
+// `std::list::sort` handed it, in the same argument order and sequence, and leaves the same order.
+#[test]
+fn list_sort_calls_as_observed() {
+    let records = include_str!("../../tests/unit/list_sort_observed/list_sort_calls.txt");
+    let (mut lists, mut all_calls) = (0, 0);
+    for line in records.lines() {
+        let (n, answers, calls, order) = observed_sort(line);
+        assert_eq!(answers.len(), calls.len(), "{line}");
+        let mut list: Vec<usize> = (0..n).collect();
+        let mut asked = Vec::new();
+        list_sort(&mut list, |&first, &second| {
+            asked.push((first, second));
+            answers[asked.len() - 1]
+        });
+        assert_eq!(asked, calls, "{line}");
+        assert_eq!(list, order, "{line}");
+        lists += 1;
+        all_calls += calls.len();
     }
-    // The bit scores: a NaN counts as above every number.
+    assert_eq!((lists, all_calls), (182, 7563));
+}
+
+// NCBI BLAST+ 2.17.0 (blastp -threshold 9 -comp_based_stats 0 -seg no, outfmt 0 -sorthsps 3)
+// printed one subject's HSPs of 100 % (E-value 2e-14), 51 % (2e-13), 0 % (2e-06) and 80 % (3e-04)
+// in that order, the order without -sorthsps. SortHspByPercentIdentityDescending compares the
+// HSP without identities with every HSP by E-value, so it orders these four in a cycle (80 %
+// before 51 % by ratio, 51 % before 0 % and 0 % before 80 % by E-value), and the order is the one
+// that the calls of the list sort give.
+#[test]
+fn hsps_in_a_cycle_take_the_order_of_ncbi_s_calls() {
+    let hsps = vec![
+        hsp(55.5, 2e-14, 26, 26, (0, 25), 0),
+        hsp(53.1, 2e-13, 20, 39, (30, 68), 30),
+        hsp(32.3, 2e-6, 0, 24, (70, 93), 70),
+        hsp(25.8, 3e-4, 8, 10, (100, 109), 100),
+    ];
+    let hits = vec![hsps];
     assert_eq!(
-        sorted(by(None, Some(1)), false, &hits).hsps[0],
-        vec![0, 2, 1]
+        sorted(by(None, Some(3)), false, &hits).hsps,
+        vec![vec![0, 1, 2, 3]]
     );
+    assert_eq!(
+        sorted(by(Some(3), Some(3)), false, &hits).hsps,
+        vec![vec![0, 1, 2, 3]]
+    );
+}
+
+// NCBI BLAST+ 2.17.0 (the same options, -sorthits 3) printed the subjects of 100 % (E-value
+// 3e-16), 0 % (6e-08) and 80 % (1e-05) in that order: a hit of 0 % ties with every hit
+// (SortHitByPercentIdentityDescendingEx compares its E-values of -1), while 80 % goes after 100 %,
+// so the order is the one that the calls of the list sort give.
+#[test]
+fn a_hit_of_zero_percent_takes_the_order_of_ncbi_s_calls() {
+    let hits = vec![
+        vec![hsp(55.5, 3e-16, 26, 26, (0, 25), 0)],
+        vec![hsp(32.3, 6e-8, 0, 24, (70, 93), 0)],
+        vec![hsp(25.8, 1e-5, 8, 10, (100, 109), 0)],
+    ];
+    assert_eq!(sorted(by(Some(3), None), false, &hits).hits, vec![0, 1, 2]);
 }

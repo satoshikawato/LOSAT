@@ -361,6 +361,9 @@ pub(crate) struct ReportedSubjects {
     /// by query ordinal, where the format's writer places them at the reads
     /// (`report::query_warnings::ReadCursor`; `ShownSubjects::query_reads`).
     query_reads: std::collections::BTreeMap<usize, crate::report::query_warnings::QueryReads>,
+    /// The number of each query's lists that the writers show, by query ordinal, where the run
+    /// merged several volumes (`for_batch`'s `cut`; empty otherwise: every list).
+    shown_lists: std::collections::BTreeMap<usize, usize>,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -542,6 +545,7 @@ impl ReportedSubjects {
         structured: bool,
         taxids: bool,
         joined: bool,
+        cut: Option<usize>,
         taxonomy: bool,
         words: crate::report::tabular::PrintedIds,
         prefetched: bool,
@@ -579,6 +583,37 @@ impl ReportedSubjects {
                 }
             }
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:347-380
+        // and c++/src/objtools/align_format/align_format_util.cpp:1014-1042 (`PruneSeqalign`,
+        // quoted at `shared::joined_cut`)
+        // The merge of several volumes keeps each volume's lists (`s_MergeAlignSet`), which NCBI's
+        // formatter cuts to the hit list size (`cut`) counting subjects: a copy of one record that
+        // follows another counts with it (`shared::joined_cut`, as rpsblast's cut). The cut is
+        // made at each writer (the uncut lists give outfmt 7's `# N hits found`).
+        let mut shown_lists = std::collections::BTreeMap::new();
+        if let (true, Some(cut)) = (reports, cut) {
+            for batch in batches.iter() {
+                for (qidx, lists) in batch.queries.iter().enumerate() {
+                    let at: Vec<usize> = (0..lists.len())
+                        .filter(|&at| super::report::reported(&lists[at], gapped))
+                        .collect();
+                    let kept = shared::joined_cut(
+                        batch.query_ordinal + qidx,
+                        cut,
+                        at.iter().map(|&at| {
+                            let ordinal = u32::try_from(lists[at].oid).ok()?;
+                            Some((ordinal, parsed.get(&lists[at].oid)?.as_ref()))
+                        }),
+                        database.db.oid_map(),
+                        database.program,
+                    )?;
+                    shown_lists.insert(
+                        batch.query_ordinal + qidx,
+                        at.get(kept).copied().unwrap_or(lists.len()),
+                    );
+                }
+            }
+        }
         // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below),
         // with the `Hit`s that the writer makes (`blast_xml::write_blastx_xml`: the reported lists
         // of each query, `report::reported`).
@@ -611,7 +646,10 @@ impl ReportedSubjects {
             },
         );
         let taxdb_found = database.db.taxdb_found();
-        let mut reported = ReportedSubjects::default();
+        let mut reported = ReportedSubjects {
+            shown_lists,
+            ..ReportedSubjects::default()
+        };
         for (&oid, title) in &listed {
             let ordinal = u32::try_from(oid)?;
             let shown = title.is_some();
@@ -1032,6 +1070,15 @@ impl ReportedSubjects {
     /// batch prefetched).
     pub(crate) fn query_fetches(&self, ordinal: usize) -> &[u8] {
         self.query_fetches.get(&ordinal).map_or(&[], Vec::as_slice)
+    }
+
+    /// The number of the lists of the query `ordinal` that the writers show: the run's cut over
+    /// several volumes (`for_batch`'s `cut`), else all of them.
+    pub(crate) fn shown_lists(&self, ordinal: usize) -> usize {
+        self.shown_lists
+            .get(&ordinal)
+            .copied()
+            .unwrap_or(usize::MAX)
     }
 
     /// The texts of the subjects that the query `ordinal`'s report reads one by one, where its
@@ -1471,6 +1518,7 @@ mod tests {
                 false,
                 false,
                 false,
+                None,
                 false,
                 crate::report::tabular::PrintedIds::default(),
                 false,
@@ -1546,6 +1594,7 @@ mod tests {
                 false,
                 false,
                 false,
+                None,
                 false,
                 crate::report::tabular::PrintedIds::default(),
                 false,

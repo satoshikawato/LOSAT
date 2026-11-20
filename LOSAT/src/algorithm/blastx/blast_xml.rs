@@ -1391,7 +1391,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     // (PS15a-1, followup `rps_lcl_query_title.md`), as rpsblast's XML is
     // (`common::database::refuse_generated_query_id`).
     let generated_scopes = match shown {
-        ShownSubjects::Database { .. } if options.program().lower == "rpstblastn" => {
+        ShownSubjects::Database { .. } if options.rpstblastn.is_some() => {
             let ids: Vec<(
                 &str,
                 Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
@@ -1416,7 +1416,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 break;
             }
             // Several volumes: the merged lists cut once per query (`TrimSeqAlign`).
-            let lists = &lists[..lists.len().min(options.shown_lists())];
+            let lists = &lists[..lists
+                .len()
+                .min(shown.shown_lists(batch.query_ordinal + qidx))];
             if let (
                 Some(scopes),
                 ShownSubjects::Database {
@@ -1473,7 +1475,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     let mut texts = texts.iter();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
-            let lists = &lists[..lists.len().min(options.shown_lists())];
+            let lists = &lists[..lists
+                .len()
+                .min(shown.shown_lists(batch.query_ordinal + qidx))];
             let query = &queries[batch.query_ordinal + qidx];
             let Some(text) = texts.next() else {
                 // The held report that is never written (`written_queries`); the one held before

@@ -125,6 +125,9 @@ pub(super) struct PrelimRun<'a> {
 /// which are not sorted or cut and print no query warnings.
 pub(super) struct PrelimOutcome {
     pub(super) rps_gapped_k: Option<Vec<f64>>,
+    /// Each query's search space in RPS-BLAST's last volume where the volumes have their own
+    /// (`RpsSearched::last_volume_spaces`; empty otherwise).
+    pub(super) rps_last_volume_spaces: Vec<i64>,
     pub(super) rps_multi_volume: bool,
 }
 
@@ -249,6 +252,7 @@ where
     // which the ordinary traceback in `run_call` after this stage hands on, and each query's
     // outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
+    let mut rps_last_volume_spaces: Vec<i64> = Vec::new();
     // A database of several volumes: its merged lists are not sorted or cut in `run_call` after
     // this stage, and it prints no query warnings; so even when no batch is searched (every query
     // invalid), as NCBI merges the volumes' empty results (review A of PS12a, S2's rpsblast half).
@@ -299,6 +303,7 @@ where
             }
         })?;
         rps_gapped_k = Some(searched.gapped_k);
+        rps_last_volume_spaces = searched.last_volume_spaces;
         rps_multi_volume = searched.volumes > 1;
     } else if let Some(psi) = args.psi_search.as_deref() {
         pssm_hooks::pssm_prelim(
@@ -670,6 +675,7 @@ where
     }
     Ok(PrelimOutcome {
         rps_gapped_k,
+        rps_last_volume_spaces,
         rps_multi_volume,
     })
 }

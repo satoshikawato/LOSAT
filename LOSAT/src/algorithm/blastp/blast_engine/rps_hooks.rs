@@ -394,6 +394,21 @@ pub(super) struct RpsSearched {
     pub(super) gapped_k: Vec<f64>,
     /// The number of volumes searched.
     pub(super) volumes: usize,
+    /// Each query's effective search space in the last volume searched, where the volumes have
+    /// their own spaces (`per_volume_search_spaces`; empty otherwise): the archive's
+    /// `EffectiveSearchSpace` option of a batch.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:351-355
+    /// ```c++
+    /// 	if(m_opt_handle->GetOptions().GetEffectiveSearchSpace()!= 0)
+    /// 		return;
+    ///
+    /// 	if(m_opt_handle->GetOptions().GetDbLength()!= 0)
+    /// 		return;
+    /// ```
+    /// (With `-dbsize` the handle's options are left to each volume's set-up, and the option that
+    /// the archive reads is the one the last search of the sequential run left behind.)
+    pub(super) last_volume_spaces: Vec<i64>,
 }
 
 /// The RPS search of every query of the run against each volume of the database in turn: the
@@ -509,6 +524,7 @@ pub(super) fn rps_search(
         }
     }
     let mut gapped_k = Vec::new();
+    let mut last_volume_spaces: Vec<i64> = Vec::new();
     let mut setup = RpsVolumeSetup::new("RPSBLAST", args.window_size as i32)
         .with_database(database.name(), db_volumes.len());
     // The workers' scratch, kept from volume to volume (`RpsWorkers`).
@@ -564,6 +580,9 @@ pub(super) fn rps_search(
                 }
             })
             .collect::<Result<Vec<i64>>>()?;
+        if per_volume_spaces {
+            last_volume_spaces.clone_from(&search_spaces);
+        }
         let engine = RpsRun {
             queries: run
                 .contexts
@@ -720,6 +739,7 @@ pub(super) fn rps_search(
     Ok(RpsSearched {
         gapped_k,
         volumes: order.len(),
+        last_volume_spaces,
     })
 }
 

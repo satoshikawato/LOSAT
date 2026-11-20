@@ -606,16 +606,13 @@ impl ResolvedOptions {
             .is_some_and(|search| search.merges_volumes())
     }
 
-    /// The number of a query's lists the tabular reports write: the merge of several volumes
-    /// keeps each volume's lists (`s_MergeAlignSet`), which NCBI's formatter cuts to the hit
-    /// list size after counting their hits (as rpsblast's `psiblast_hits_found`); all of them
-    /// otherwise.
-    pub(crate) fn shown_lists(&self) -> usize {
-        if self.merged_volumes() {
-            usize::try_from(self.hitlist_size).unwrap_or(0)
-        } else {
-            usize::MAX
-        }
+    /// The hit list size to which the writers cut the lists of a merge of several volumes
+    /// (`ReportedSubjects::for_batch`'s `cut`: the merge keeps each volume's lists,
+    /// `s_MergeAlignSet`, and NCBI's formatter cuts them to the hit list size after counting
+    /// their hits (as rpsblast's `psiblast_hits_found`), by subjects); `None` otherwise.
+    pub(crate) fn merged_cut(&self) -> Option<usize> {
+        self.merged_volumes()
+            .then(|| usize::try_from(self.hitlist_size).unwrap_or(0))
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:184 (blastx_app.cpp:247-249

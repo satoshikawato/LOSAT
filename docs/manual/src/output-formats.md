@@ -108,7 +108,7 @@ That is 50 field names. The GI fields print `0` where a sequence has no GI. The 
 ## ASN.1 and the archive (8, 9, 11)
 
 - `8` and `9` write the alignments as an ASN.1 Seq-align, in text (`8`) and binary (`9`).
-- `11` writes the BLAST archive, which holds the query, the search settings and the results. `rpsbproc` reads it for the CDD domain report. The environment variable `ARCHIVE_FORMAT` chooses the encoding as in NCBI: unset for ASN.1 text, a value starting with `bin` for ASN.1 binary, `xml` for XML.
+- `11` writes the BLAST archive, which holds the query, the search settings and the results. A message stored in it carries LOSAT's wording where LOSAT words that message as its own (the manual's name, the exception headers), as in the other formats' messages; the rest is NCBI's bytes. `rpsbproc` reads it for the CDD domain report. The environment variable `ARCHIVE_FORMAT` chooses the encoding as in NCBI: unset for ASN.1 text, a value starting with `bin` for ASN.1 binary, `xml` for XML.
 - A title, id or database name with a byte that NCBI's stream replaces is written with `#` and NCBI's error message for each byte, as NCBI does.
 
 ## SAM (17)

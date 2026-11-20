@@ -9351,16 +9351,24 @@ fn context0_searched(
     searchsp: Option<i64>,
     exact_search_spaces: &[Option<i64>],
     search_spaces: &[SearchSpace],
+    last_volume_spaces: &[i64],
     first: usize,
 ) -> crate::report::archive::SearchedContext0 {
+    // RPS-BLAST's volumes with their own search spaces: the option is the last volume's.
+    let last_volume = last_volume_spaces
+        .get(first)
+        .copied()
+        .filter(|&space| query_valid[first] && space > 0);
     crate::report::archive::SearchedContext0 {
-        space: context0_search_space(
-            query_valid,
-            searchsp,
-            exact_search_spaces,
-            search_spaces,
-            first,
-        ),
+        space: last_volume.unwrap_or_else(|| {
+            context0_search_space(
+                query_valid,
+                searchsp,
+                exact_search_spaces,
+                search_spaces,
+                first,
+            )
+        }),
         query_length: if query_valid[first] {
             contexts[first].aa_len as i64
         } else {
@@ -11163,6 +11171,7 @@ fn run_call(
     // merge are read below.
     let prelim_run::PrelimOutcome {
         rps_gapped_k,
+        rps_last_volume_spaces,
         rps_multi_volume,
     } = prelim_run::run_preliminary(
         &prelim_run::PrelimRun {
@@ -11278,6 +11287,7 @@ fn run_call(
                     args.searchsp,
                     &exact_search_spaces,
                     &search_spaces,
+                    &rps_last_volume_spaces,
                     first,
                 )
             })
@@ -12188,6 +12198,7 @@ fn run_call(
             args.searchsp,
             &exact_search_spaces,
             &search_spaces,
+            &rps_last_volume_spaces,
             first,
         );
         if !query_valid[first] {
@@ -12210,7 +12221,15 @@ fn run_call(
                 contexts[first].karlin_params,
                 (!args.ungapped).then_some(gapped),
             )),
-            search_space: context0.space,
+            // The statistics block's space is volume 0's; the option is the last volume's where
+            // the volumes have their own spaces (`context0_searched`).
+            search_space: context0_search_space(
+                &query_valid,
+                args.searchsp,
+                &exact_search_spaces,
+                &search_spaces,
+                first,
+            ),
             length_adjustment: search_spaces[first].length_adjustment,
             context0_space: context0.space,
             context0_length: context0.query_length,

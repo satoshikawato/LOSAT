@@ -10,17 +10,19 @@
 
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+mod temp_support;
 
 fn engine() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
 /// A directory of the test's own holding the inflated `rps_cdd` files and a copy of the CDD data
-/// files, removed at the end.
-struct RunDir(PathBuf);
+/// files, removed at the end (`temp_support::TempPath`).
+struct RunDir(temp_support::TempPath);
 
 impl RunDir {
     fn new(stem: &str) -> Self {
@@ -52,13 +54,7 @@ impl RunDir {
             let entry = entry.unwrap();
             fs::copy(entry.path(), dir.join("data").join(entry.file_name())).unwrap();
         }
-        RunDir(dir)
-    }
-}
-
-impl Drop for RunDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        RunDir(temp_support::TempPath::new(dir))
     }
 }
 

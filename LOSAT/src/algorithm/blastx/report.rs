@@ -817,6 +817,15 @@ pub(crate) enum ShownSubjects<'a> {
 }
 
 impl ShownSubjects<'_> {
+    /// The number of the lists of the query `ordinal` that the writers show
+    /// (`ReportedSubjects::shown_lists`): all of them for a subject FASTA.
+    pub(crate) fn shown_lists(&self, ordinal: usize) -> usize {
+        match self {
+            ShownSubjects::Database { reported, .. } => reported.shown_lists(ordinal),
+            ShownSubjects::Fasta { .. } => usize::MAX,
+        }
+    }
+
     /// The taxonomy database's messages of the query `ordinal`'s own fetches, which follow its
     /// warnings where `PRE_FETCH_SEQS_LIMIT` turned its batch's prefetch off
     /// (`ReportedSubjects::fetch_by_query`); empty otherwise.
@@ -1073,8 +1082,10 @@ fn check_failed_lookups(
     for batch in batches {
         crate::report::tabular::check_failed_lookups(
             options.tabular,
-            batch.queries.iter().map(|lists| {
-                lists[..lists.len().min(options.shown_lists())]
+            batch.queries.iter().enumerate().map(|(qidx, lists)| {
+                lists[..lists
+                    .len()
+                    .min(shown.shown_lists(batch.query_ordinal + qidx))]
                     .iter()
                     .filter(|list| {
                         list.hsps

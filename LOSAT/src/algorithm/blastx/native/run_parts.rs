@@ -351,6 +351,7 @@ impl ArchiveBatch<'_> {
                             false,
                             false,
                             false,
+                            None,
                             false,
                             crate::report::tabular::PrintedIds::default(),
                             false,

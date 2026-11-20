@@ -578,8 +578,10 @@ pub(super) fn write_blastx_tabular(
                     .map_or(searched_length, |range| range.length());
                 let tabular_query =
                     TabularQuery::of_ids(query.believed(), query.shown_id(), query_length);
-                // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
-                let listed = &lists[..lists.len().min(options.shown_lists())];
+                // Several volumes: the merged lists cut once per query (`ReportedSubjects::shown_lists`).
+                let listed = &lists[..lists
+                    .len()
+                    .min(shown.shown_lists(batch.query_ordinal + qidx))];
                 // The query's formatter (`TabularRows`).
                 let mut table_rows = TabularRows::default();
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
@@ -1013,7 +1015,7 @@ fn write_blastx_tax_report(
                 length: queries[ordinal].placement().length,
                 // A query of a batch that NCBI did not search has no Seq-align-set.
                 hsps: (!skipped).then(|| {
-                    lists[..lists.len().min(options.shown_lists())]
+                    lists[..lists.len().min(shown.shown_lists(ordinal))]
                         .iter()
                         .flat_map(|list| {
                             list.hsps

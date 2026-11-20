@@ -1608,6 +1608,7 @@ pub(super) fn reported_batch(
         asks.structured,
         asks.taxids,
         asks.joined,
+        options.merged_cut(),
         asks.taxonomy,
         asks.words,
         asks.prefetched && !unfetched,

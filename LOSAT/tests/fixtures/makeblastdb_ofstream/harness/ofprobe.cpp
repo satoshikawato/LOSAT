@@ -19,6 +19,7 @@
 #include <dlfcn.h>
 // shim_set / shim_mark come from shim.so (LD_PRELOAD); without it they do nothing
 static void shim_set(long long l, int m) { auto f = (void (*)(long long, int))dlsym(RTLD_DEFAULT, "shim_set"); if (f) f(l, m); }
+static void shim_close_err(int e) { auto f = (void (*)(int))dlsym(RTLD_DEFAULT, "shim_close_err"); if (f) f(e); }
 static void shim_mark(const char *s) { auto f = (void (*)(const char *))dlsym(RTLD_DEFAULT, "shim_mark"); if (f) f(s); }
 static unsigned long long ctr = 0;
 static std::string chunk(size_t n) {
@@ -43,7 +44,7 @@ int main(int argc, char **argv) {
             long long limit; int mode;
             is >> limit >> mode;
             shim_set(limit, mode);
-            ctr = 0; op = 0; seq++;
+            ctr = 0; op = 0; seq++; shim_close_err(0);
             snprintf(mark, sizeof mark, "SEQ %ld limit=%lld mode=%d", seq, limit, mode);
             shim_mark(mark);
             f = new std::ofstream();
@@ -79,6 +80,7 @@ int main(int argc, char **argv) {
         else if (c == "E") *f << std::endl;
         else if (c == "S") { long long p; is >> p; f->seekp((std::streamoff)p); }
         else if (c == "C") f->close();
+        else if (c == "K") { int e; is >> e; shim_close_err(e); }
         else if (c == "X") f->clear(std::ios::goodbit);
         else if (c == "T") { int b; is >> b; f->setstate((std::ios::iostate)b); }
         printf("STATE %d\n", (int)f->rdstate());

@@ -19,7 +19,13 @@
 //! make `write` fail past a byte limit (`LOSAT/tests/fixtures/makeblastdb_ofstream/`, its
 //! `README` names the binaries, hosts and dates). The rules below are the ones that
 //! reproduce those tables; the standard leaves a file buffer's size and when it calls `write`
-//! open.
+//! open. Where a rule is what the observed C++ runtime (GCC 13 series) does and the standard's
+//! text says something else or nothing, the rule says so.
+//!
+//! The call pattern (`writev` of the held bytes and the new bytes, then `write` for what is
+//! left) is the Linux x64 one. On other targets the bytes written are the same, because
+//! every short count is continued, but the calls differ (Rust's default vectored write on
+//! Windows and WASI takes the first non-empty segment only).
 //!
 //! # Observed rules
 //!
@@ -36,25 +42,31 @@
 //! * `put` of one byte: held when `b < 8191`. Otherwise the byte is added to the held bytes
 //!   (making `b + 1`, one past the put area) and all of them go out in one `write`; if that
 //!   fails the byte stays held, so the next `put` after `clear` holds `b + 2`, and the stream
-//!   sets `badbit`.
+//!   sets `badbit` (observed behaviour; the standard does not say how much an `overflow` that
+//!   failed leaves in the buffer).
 //! * `flush`: the held bytes go out in one `write` (nothing when none are held, and no
 //!   `fsync`); on failure they stay held and the stream sets `badbit`.
 //! * `seekp(pos)`: the held bytes go out as in `flush`, then `lseek(pos, SEEK_SET)`; either failing
 //!   sets `failbit` (a stream with no file fails).
-//! * `close`: the held bytes go out as in `flush`, then the file is closed whatever happened;
-//!   a failure of the write, or a stream with no file, sets `failbit`. The held bytes are
-//!   then dropped.
+//! * `close`: the held bytes go out as in `flush`, then `close(2)` is called whatever happened
+//!   (the held bytes are ignored from then on); a failure of the write, a failure of
+//!   `close(2)` (observed with `EIO`, `ENOSPC` and `EDQUOT`, `ENOSPC` also on a full
+//!   device; no retry, the descriptor is gone either way), or a stream with no file, sets
+//!   `failbit` (the standard: `close()` sets `failbit` when the file buffer's `close` fails).
+//!   Nothing is written for a failed `close(2)`, and later writes see a stream with no file.
 //! * The destructor does what `close` does, without a state.
 //! * `open`: a stream with a file sets `failbit` and keeps it. Otherwise the file is created
 //!   or truncated; success clears the state (`clear()`), failure sets `failbit`. The buffer starts
 //!   empty.
 //! * The `sentry` of `write`, `put`, `flush`, `endl` and `insert`: a stream whose state is not
 //!   `goodbit` does nothing, and if `badbit` is set it also sets `failbit` (`eofbit` alone
-//!   does nothing without a second bit). `seekp` acts with `eofbit` set, does nothing with
-//!   `failbit` set, and with `badbit` sets `failbit`.
+//!   does nothing without a second bit). `seekp` acts with `eofbit` set and does nothing with
+//!   `failbit` set (both as the standard says); with `badbit` set it also sets `failbit`
+//!   (observed behaviour, not in the standard's text).
 //! * `endl` is `put('\n')` and then `flush`, each with its own sentry.
 //!
-//! `close(2)` failing is not modelled: Rust's `File` does not report it.
+//! `close(2)` is reported on Unix (rustix's `try_close`); other targets close by dropping the
+//! file and never see a close error.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, IoSlice, Seek, SeekFrom, Write};
@@ -88,7 +100,7 @@ impl BitOr for IoState {
     }
 }
 
-/// A file as the stream uses it: `write` and `writev` (one system call each), `lseek`, close.
+/// A file as the stream uses it: `write` and `writev` (one system call each), `lseek`, `close`.
 pub(crate) trait RawFile: Sized {
     /// Creates or truncates the file for writing.
     fn open(path: &Path) -> io::Result<Self>;
@@ -96,8 +108,8 @@ pub(crate) trait RawFile: Sized {
     fn write(&mut self, segments: &[&[u8]]) -> io::Result<usize>;
     /// `lseek(pos, SEEK_SET)`.
     fn seek(&mut self, pos: u64) -> io::Result<()>;
-    /// Closes the file.
-    fn close(self);
+    /// `close(2)`: the descriptor is released whether or not it reports an error.
+    fn close(self) -> io::Result<()>;
 }
 
 /// A file on disk.
@@ -116,10 +128,8 @@ impl RawFile for DiskFile {
     fn write(&mut self, segments: &[&[u8]]) -> io::Result<usize> {
         match segments {
             [one] => self.0.write(one),
-            _ => {
-                let slices: Vec<IoSlice<'_>> = segments.iter().map(|s| IoSlice::new(s)).collect();
-                self.0.write_vectored(&slices)
-            }
+            [a, b] => self.0.write_vectored(&[IoSlice::new(a), IoSlice::new(b)]),
+            _ => unreachable!("the stream writes one or two segments"),
         }
     }
 
@@ -127,8 +137,19 @@ impl RawFile for DiskFile {
         self.0.seek(SeekFrom::Start(pos)).map(|_| ())
     }
 
-    fn close(self) {
+    #[cfg(unix)]
+    fn close(self) -> io::Result<()> {
+        use std::os::fd::IntoRawFd;
+        let fd = self.0.into_raw_fd();
+        // SAFETY: `fd` was just taken out of the `File`, which no longer owns it, and nothing
+        // else closes it.
+        unsafe { rustix::io::try_close(fd) }.map_err(io::Error::from)
+    }
+
+    #[cfg(not(unix))]
+    fn close(self) -> io::Result<()> {
         drop(self.0);
+        Ok(())
     }
 }
 
@@ -143,13 +164,13 @@ impl<F: RawFile> FileBuf<F> {
     /// Writes all of `segments` (the first call as given, the calls after a short count with
     /// the segments the count finished dropped). `false` when a call fails; the file keeps the
     /// bytes the earlier calls took.
-    fn write_all(file: &mut F, segments: &[&[u8]]) -> bool {
-        let mut segments: Vec<&[u8]> = segments.to_vec();
+    fn write_all(file: &mut F, segments: &mut [&[u8]]) -> bool {
+        let mut segments = segments;
         loop {
-            if segments.is_empty() {
+            if segments.iter().all(|s| s.is_empty()) {
                 return true;
             }
-            let mut taken = match file.write(&segments) {
+            let mut taken = match file.write(segments) {
                 // A call that takes nothing of bytes still to go would repeat for ever.
                 Ok(0) => return false,
                 Ok(n) => n,
@@ -157,11 +178,11 @@ impl<F: RawFile> FileBuf<F> {
                 Err(_) => return false,
             };
             while let Some(first) = segments.first() {
-                if taken < first.len() {
+                if taken < first.len() || segments.len() == 1 {
                     break;
                 }
                 taken -= first.len();
-                segments.remove(0);
+                segments = &mut std::mem::take(&mut segments)[1..];
             }
             if let Some(first) = segments.first_mut() {
                 *first = &first[taken..];
@@ -178,7 +199,7 @@ impl<F: RawFile> FileBuf<F> {
             self.held.extend_from_slice(data);
             return true;
         }
-        if FileBuf::write_all(file, &[&self.held, data]) {
+        if FileBuf::write_all(file, &mut [&self.held, data]) {
             self.held.clear();
             true
         } else {
@@ -197,7 +218,7 @@ impl<F: RawFile> FileBuf<F> {
         if !overflow {
             return true;
         }
-        if FileBuf::write_all(file, &[&self.held]) {
+        if FileBuf::write_all(file, &mut [&self.held]) {
             self.held.clear();
             true
         } else {
@@ -213,7 +234,7 @@ impl<F: RawFile> FileBuf<F> {
         if self.held.is_empty() {
             return true;
         }
-        if FileBuf::write_all(file, &[&self.held]) {
+        if FileBuf::write_all(file, &mut [&self.held]) {
             self.held.clear();
             true
         } else {
@@ -232,16 +253,14 @@ impl<F: RawFile> FileBuf<F> {
     }
 
     /// `close`: `sync`, then the file is closed whatever `sync` did. `false` for a stream with
-    /// no file or a failed `sync`.
+    /// no file, a failed `sync` or a failed `close(2)`.
     fn close(&mut self) -> bool {
         if self.file.is_none() {
             return false;
         }
         let synced = self.sync();
-        if let Some(file) = self.file.take() {
-            file.close();
-        }
-        synced
+        let closed = self.file.take().is_some_and(|file| file.close().is_ok());
+        synced && closed
     }
 }
 

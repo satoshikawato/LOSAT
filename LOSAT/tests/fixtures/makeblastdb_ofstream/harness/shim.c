@@ -30,15 +30,19 @@ static int logfd = -2;
 static long long g_limit = -1;
 static int g_mode = 0;
 static int g_have_cfg = 0;
+static int g_close_err = 0;   /* errno close(2) fails with on tracked fds (0: no failure) */
 
 static void cfg(void) {
     if (g_have_cfg) return;
     g_have_cfg = 1;
     const char *l = getenv("SHIM_LIMIT");
     if (l && *l) g_limit = atoll(l);
+    const char *ce = getenv("SHIM_CLOSE_ERR");
+    if (ce && *ce) g_close_err = atoi(ce);
     const char *m = getenv("SHIM_MODE");
     if (m && *m) g_mode = atoi(m);
 }
+void shim_close_err(int e) { g_close_err = e; }
 void shim_set(long long limit, int mode) { g_have_cfg = 1; g_limit = limit; g_mode = mode; }
 static void logline(const char *fmt, ...) {
     if (logfd == -2) {
@@ -108,7 +112,14 @@ int openat64(int dfd, const char *path, int flags, ...) {
     return openat(dfd, path, flags, mode);
 }
 int close(int fd) {
-    if (fd >= 0 && fd < MAXFD && tracked[fd]) { tracked[fd] = 0; logline("%s close\n", names[fd]); }
+    if (fd >= 0 && fd < MAXFD && tracked[fd]) {
+        tracked[fd] = 0;
+        int inj = injected[fd] && g_close_err;
+        if (inj) logline("%s close -> -1 E%d\n", names[fd], g_close_err); else logline("%s close\n", names[fd]);
+        long r = syscall(SYS_close, fd);   /* the descriptor is released either way (Linux) */
+        if (inj) { errno = g_close_err; return -1; }
+        return (int)r;
+    }
     return (int)syscall(SYS_close, fd);
 }
 /* how many bytes of a call of `count` bytes the shim lets through, or -1 for a refusal */
@@ -175,7 +186,14 @@ FILE *fopen(const char *path, const char *mode) {
 FILE *fopen64(const char *path, const char *mode) { return fopen(path, mode); }
 int fclose(FILE *fp) {
     int fd = fileno(fp);
-    if (fd >= 0 && fd < MAXFD && tracked[fd]) { tracked[fd] = 0; logline("%s close\n", names[fd]); }
+    int inj = 0;
+    if (fd >= 0 && fd < MAXFD && tracked[fd]) {
+        tracked[fd] = 0;
+        inj = injected[fd] && g_close_err;
+        if (inj) logline("%s close -> -1 E%d\n", names[fd], g_close_err); else logline("%s close\n", names[fd]);
+    }
     int (*real)(FILE *) = (int (*)(FILE *))dlsym(RTLD_NEXT, "fclose");
-    return real(fp);
+    int r = real(fp);
+    if (inj) { errno = g_close_err; return EOF; }
+    return r;
 }

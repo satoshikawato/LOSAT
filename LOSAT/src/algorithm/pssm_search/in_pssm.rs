@@ -316,6 +316,64 @@ impl PssmReader<'_> {
     }
 }
 
+/// The bytes of an input file argument that is read whole (`-in_pssm`, psiblast's `-in_msa`;
+/// `name` is the argument's name in NCBI's message): `-` is the standard input; a file that
+/// cannot be opened is NCBI's "File is not accessible"; a stream that opens and cannot be read (a
+/// directory, as the file or as the standard input) gives the bytes it gave before it failed,
+/// none for a directory, as NCBI's stream does.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
+/// ```c++
+/// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
+/// {
+///     if ( !m_Ios ) {
+///         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
+///             "File is not accessible",AsString()));
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
+/// ```c++
+///     if (AsString() == "-") {
+/// #if defined(NCBI_OS_MSWIN)
+///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+/// #endif
+///         m_Ios  = &cin;
+/// ```
+/// `-` is the standard input (`kArgPSIInputChkPntFile` and `kArgMSAInputFile` are `eInputFile`s),
+/// as `-query -` is; NCBI's messages name the file `-`. `cin` is always there, so `-` is never
+/// "not accessible": a standard input that cannot be read (`< .`, a directory) is an empty
+/// stream to the reader (NCBI BLAST+ 2.17.0: `-in_pssm - < .` ends with "Unsupported format for
+/// PSSM", `-in_msa - < .` with the alignment reader's failure; review probes `manual/closed` of
+/// line PS item PS6, O4).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-732
+/// ```c++
+///             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+///             if ( !fstrm->is_open() ) {
+///                 delete fstrm;
+///                 fstrm = NULL;
+///             } else {
+///                 m_DeleteFlag = true;
+/// ```
+/// Only a file that cannot be opened is "not accessible": one that opens and cannot be read (a
+/// directory) gives the reader no bytes, which NCBI's format guess takes as an unsupported
+/// format (probe `pf.dir` of line PS PS7).
+pub(crate) fn read_input_argument(name: &str, path: &Path) -> Result<Vec<u8>> {
+    if path.as_os_str() == "-" {
+        return Ok(bytes_until_failure(std::io::stdin().lock()));
+    }
+    std::fs::File::open(path)
+        .map(bytes_until_failure)
+        .map_err(|_| crate::cli::inaccessible(name, path))
+}
+
+/// The bytes that `stream` gives before it ends or fails: a failed read is the end of the stream
+/// (none from a directory), as for NCBI's readers of an `istream` whose read failed.
+fn bytes_until_failure(mut stream: impl std::io::Read) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let _ = stream.read_to_end(&mut bytes);
+    bytes
+}
+
 /// Reads `-in_pssm path`: NCBI's errors for a file it cannot read or guess, the messages of NCBI's
 /// reader (to `diagnostics`), LOSAT's refusals of what it does not read, then the PSSM search's
 /// query, rows and values, and the PSSM as NCBI's object holds it when the search starts
@@ -325,48 +383,7 @@ pub(crate) fn read_in_pssm(
     reader: PssmReader<'_>,
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<(PsiSearch, InPssmFile)> {
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
-    // ```c++
-    // void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-    // {
-    //     if ( !m_Ios ) {
-    //         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-    //             "File is not accessible",AsString()));
-    // ```
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
-    // ```c++
-    //     if (AsString() == "-") {
-    // #if defined(NCBI_OS_MSWIN)
-    //         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-    // #endif
-    //         m_Ios  = &cin;
-    // ```
-    // `-in_pssm -` is the standard input (`kArgPSIInputChkPntFile` is an `eInputFile`), as
-    // `-query -` is; NCBI's messages name the file `-`.
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:726-731
-    // ```c++
-    //             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-    //             if ( !fstrm->is_open() ) {
-    //                 delete fstrm;
-    //                 fstrm = NULL;
-    //             } else {
-    //                 m_DeleteFlag = true;
-    // ```
-    // Only a file that cannot be opened is "not accessible": one that opens and cannot be read (a
-    // directory) gives the reader no bytes, which NCBI's format guess takes as an unsupported
-    // format (probe `pf.dir` of line PS PS7).
-    let bytes = if path.as_os_str() == "-" {
-        let mut bytes = Vec::new();
-        std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut bytes).map(|_| bytes)
-    } else {
-        std::fs::File::open(path).map(|mut file| {
-            // The bytes the stream gave before it failed (none from a directory).
-            let mut bytes = Vec::new();
-            let _ = std::io::Read::read_to_end(&mut file, &mut bytes);
-            bytes
-        })
-    }
-    .map_err(|_| crate::cli::inaccessible("in_pssm", path))?;
+    let bytes = read_input_argument("in_pssm", path)?;
     let text = match guess_format(&bytes) {
         PssmFileFormat::TextAsn { start } => &bytes[start..],
         PssmFileFormat::Unsupported => {
@@ -731,6 +748,7 @@ fn stopped_as_query_joins_scope(
         defline_reads_annot,
         round_query: None,
         split_setup: None,
+        from_msa: false,
     };
     let file = InPssmFile {
         object: pssm,
@@ -740,9 +758,9 @@ fn stopped_as_query_joins_scope(
     (search, file)
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqset/Seq_entry_.cpp (generated by datatool: the
-// `CInvalidChoiceSelection` of `CSeq_entry_Base::GetSeq()` of another variant; NCBI BLAST+ 2.17.0
-// `Seq_entry_.cpp", line 99`)
+// The throw site NCBI BLAST+ 2.17.0 prints for `CSeq_entry::GetSeq()` of another variant: the
+// `CInvalidChoiceSelection` of datatool-generated code (`Seq_entry_.cpp`, line 99, as its binary
+// reports it; the file is not in the source tree, so this is a reference to the printed text only).
 const SEQ_ENTRY_GET_SEQ: crate::ncbi_exception::ThrowSite = crate::ncbi_exception::ThrowSite {
     file: "src/objects/seqset/Seq_entry_.cpp",
     line: 99,
@@ -750,12 +768,59 @@ const SEQ_ENTRY_GET_SEQ: crate::ncbi_exception::ThrowSite = crate::ncbi_exceptio
     function: None,
 };
 
+/// The PSSM search of a PSSM that has no query Seq-entry (the alignment's `-in_msa` PSSM, whose
+/// query NCBI's `x_ExtractQueryForPssm` did not find): the application adds the empty entry to
+/// its scope and `GetSeq()` of it ends the run after the prolog, before any report.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537-540 (quoted at
+/// `psi_search_and_object`)
+/// ```c++
+/// 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+///
+/// 		CRef<CSeq_loc> sl(new CSeq_loc());
+/// 		sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
+/// ```
+/// (NCBI BLAST+ 2.17.0: `CSeq_entry::GetSeq(): Invalid choice selection: NCBI-Seqset::Seq-entry.not
+/// set`, exit status 255; PS6 corpus `e.stop`, `r.ch.q.star`.)
+pub(crate) fn psi_search_unset_query(pssm: PssmWithParameters) -> (PsiSearch, InPssmFile) {
+    let annot = super::annot_index::AnnotOutcome {
+        abort: Some(super::annot_index::Abort::of(
+            crate::cli::NativeError::exception(&NcbiException::new(
+                SEQ_ENTRY_GET_SEQ,
+                "CSeq_entry::GetSeq(): Invalid choice selection: NCBI-Seqset::Seq-entry.not set",
+            )),
+            false,
+        )),
+        ..super::annot_index::AnnotOutcome::default()
+    };
+    stopped_as_query_joins_scope(pssm, annot, false)
+}
+
 /// The PSSM search of `pssm` and the PSSM as NCBI's `CPsiBlastImpl` leaves it before the first
 /// round: a PSSM of frequency ratios only gets the scores and gapped values that the PSSM engine
 /// computes for it (`with_computed_scores`).
 pub(crate) fn psi_search_and_object(
     pssm: PssmWithParameters,
     reader: PssmReader<'_>,
+) -> Result<(PsiSearch, InPssmFile)> {
+    psi_search_and_object_of(pssm, reader, IDS_OF_THE_PSSM)
+}
+
+/// What LOSAT's refusals of a query Seq-id (`believed::refused_id`) call the place the id comes
+/// from, for a PSSM read from `-in_pssm`: the PSSM's query.
+const IDS_OF_THE_PSSM: &str = "the PSSM";
+
+/// The same for the PSSM that psiblast makes of `-in_msa`'s alignment (`psiblast::in_msa`): the
+/// user gave no PSSM, and the query's ids are those of the master sequence's row (N1 of the PS6
+/// review).
+pub(crate) const IDS_OF_THE_MASTER_SEQUENCE: &str = "the alignment's master sequence";
+
+/// [`psi_search_and_object`] of a PSSM whose query's Seq-ids the refusals name as those of
+/// `ids_of` ([`IDS_OF_THE_PSSM`], [`IDS_OF_THE_MASTER_SEQUENCE`]).
+pub(crate) fn psi_search_and_object_of(
+    pssm: PssmWithParameters,
+    reader: PssmReader<'_>,
+    ids_of: &str,
 ) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-540
     // ```c++
@@ -924,12 +989,9 @@ pub(crate) fn psi_search_and_object(
             "a PSSM query without a Seq-id (NCBI BLAST+ makes the query's Seq-loc of its first Seq-id)",
         ));
     }
-    if let Some(refusal) = crate::blastinput::fasta_reader::believed::refused_id(
-        ids,
-        "query",
-        "the PSSM",
-        reader.program,
-    ) {
+    if let Some(refusal) =
+        crate::blastinput::fasta_reader::believed::refused_id(ids, "query", ids_of, reader.program)
+    {
         return Err(refusal);
     }
     // A local id among other ids: without `-parse_deflines` NCBI's reports show the title alone
@@ -1282,6 +1344,7 @@ pub(crate) fn psi_search_and_object(
         defline_reads_annot,
         round_query: None,
         split_setup: None,
+        from_msa: false,
     };
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI
@@ -1636,6 +1699,26 @@ pub(crate) fn with_computed_scores(
     }
 }
 
+/// The matrix as the score block holds it, with its smallest and largest scores
+/// (`sbp->loscore` and `sbp->hiscore`, `BlastScoreBlkMatrixFill`).
+pub(crate) fn score_table(
+    matrix: ScoringMatrix,
+) -> ([[i32; BLASTAA_SIZE]; BLASTAA_SIZE], i32, i32) {
+    let mut table = [[0i32; BLASTAA_SIZE]; BLASTAA_SIZE];
+    let (mut loscore, mut hiscore) = (i32::MAX, i32::MIN);
+    for (i, row) in table.iter_mut().enumerate() {
+        for (j, score) in row.iter_mut().enumerate() {
+            *score = crate::utils::matrix::protein_score(matrix, i as u8, j as u8);
+            if *score <= BLAST_SCORE_MIN || *score >= i16::MAX as i32 {
+                continue;
+            }
+            loscore = loscore.min(*score);
+            hiscore = hiscore.max(*score);
+        }
+    }
+    (table, loscore, hiscore)
+}
+
 /// The score block of `CPssmEngine::x_InitializeScoreBlock` that the engine reads.
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:525-577
 // ```c++
@@ -1717,18 +1800,7 @@ pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<Ps
     // (`stats::protein_options`, the standard matrices only).
     let data = crate::core::composition_adjustment::adjust_scores::compo_matrix_data(matrix)
         .ok_or_else(|| anyhow::anyhow!("no frequency ratios for {}", matrix.ncbi_name()))?;
-    let mut table = [[0i32; BLASTAA_SIZE]; BLASTAA_SIZE];
-    let (mut loscore, mut hiscore) = (i32::MAX, i32::MIN);
-    for (i, row) in table.iter_mut().enumerate() {
-        for (j, score) in row.iter_mut().enumerate() {
-            *score = crate::utils::matrix::protein_score(matrix, i as u8, j as u8);
-            if *score <= BLAST_SCORE_MIN || *score >= i16::MAX as i32 {
-                continue;
-            }
-            loscore = loscore.min(*score);
-            hiscore = hiscore.max(*score);
-        }
-    }
+    let (table, loscore, hiscore) = score_table(matrix);
     let std_comp = crate::stats::karlin_calc::compute_std_aa_composition();
     let sfp = crate::stats::karlin_calc::compute_score_freq_profile_for_matrix(
         &std_comp, &std_comp, loscore, hiscore, matrix,
@@ -1755,6 +1827,51 @@ pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<Ps
 mod tests {
     use super::*;
     use crate::report::serial::asn_types::Value;
+
+    /// A stream that gives `self.0` and then fails, as a directory given as the standard input
+    /// does at once (`read`: EISDIR).
+    struct FailsAfter(&'static [u8]);
+
+    impl std::io::Read for FailsAfter {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if self.0.is_empty() {
+                return Err(std::io::Error::other("Is a directory"));
+            }
+            let count = self.0.len().min(buffer.len());
+            buffer[..count].copy_from_slice(&self.0[..count]);
+            self.0 = &self.0[count..];
+            Ok(count)
+        }
+    }
+
+    // O4 of the PS6 review: a standard input that cannot be read is an empty stream, not an
+    // inaccessible file (NCBI BLAST+ 2.17.0, `-in_pssm - < .`: "Unsupported format for PSSM";
+    // `-in_msa - < .`: the alignment reader's failure), and the bytes before a failure are kept.
+    #[test]
+    fn a_stream_that_fails_ends_where_it_fails() {
+        assert_eq!(bytes_until_failure(FailsAfter(b"")), b"");
+        assert_eq!(bytes_until_failure(FailsAfter(b"PssmWith")), b"PssmWith");
+        assert!(matches!(guess_format(b""), PssmFileFormat::Unsupported));
+    }
+
+    // A file that cannot be opened is the argument's "File is not accessible"; a directory opens
+    // and gives no bytes (probe `pf.dir` of line PS PS7).
+    #[test]
+    fn only_a_file_that_does_not_open_is_inaccessible() {
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-in-pssm-input-{}",
+            crate::utils::test_dir::process_id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("none.asn");
+        let error = read_input_argument("in_pssm", &missing).unwrap_err();
+        let expected = crate::cli::inaccessible("in_pssm", &missing);
+        assert_eq!(error.to_string(), expected.to_string());
+        #[cfg(unix)]
+        assert_eq!(read_input_argument("in_msa", &dir).unwrap(), b"");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use crate::report::serial::pssm::Seqdesc;
 
     // The expected answers are NCBI BLAST+ 2.17.0's (psiblast and tblastn `-in_pssm`, the probes of line RG D3-1
@@ -1915,7 +2032,7 @@ mod tests {
                 let abort = search.annot.abort.as_ref().unwrap();
                 (
                     String::from_utf8(search.annot.posts.text()).unwrap(),
-                    abort.message.clone(),
+                    String::from_utf8(abort.message.clone()).unwrap(),
                 )
             })
         };
@@ -1982,7 +2099,9 @@ mod tests {
                     .annot
                     .abort
                     .as_ref()
-                    .map_or_else(String::new, |abort| abort.message.clone())
+                    .map_or_else(String::new, |abort| {
+                        String::from_utf8(abort.message.clone()).unwrap()
+                    })
             })
         };
         let ids = "embl { accession \"AAA00001\", version 1 }, genbank { accession \"AAA00001\", version 1 }";

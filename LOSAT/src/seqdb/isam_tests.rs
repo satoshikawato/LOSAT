@@ -381,7 +381,7 @@ fn file_names_and_missing_files() {
     let error = StringIsam::open_volume("/nonexistent/none", true).unwrap_err();
     assert_eq!(
         error.ncbi_message().unwrap(),
-        "Error: Could not open input file (/nonexistent/none.psi//nonexistent/none.psd)"
+        b"Error: Could not open input file (/nonexistent/none.psi//nonexistent/none.psd)"
     );
 }
 
@@ -432,7 +432,7 @@ fn rejected_headers_leave_the_index_uninitialised() {
         let error = isam.ids_to_oids(0, &mut ids).unwrap_err();
         assert_eq!(
             error.ncbi_message().unwrap(),
-            "Error: Unable to use ISAM index in batch mode.",
+            b"Error: Unable to use ISAM index in batch mode.",
             "{name}"
         );
         assert_eq!(ids[0].oid, None);
@@ -442,7 +442,7 @@ fn rejected_headers_leave_the_index_uninitialised() {
             .unwrap_err();
         assert_eq!(
             error.ncbi_message().unwrap(),
-            "Error: Unable to use ISAM index in batch mode.",
+            b"Error: Unable to use ISAM index in batch mode.",
             "{name}"
         );
         // An empty list needs no index.

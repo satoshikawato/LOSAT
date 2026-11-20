@@ -1,0 +1,97 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_s.fna).
+           2 sequences; 262 total letters
+
+
+
+Query= lcl|Query_1 qn1 query nucleotide one
+
+Length=480
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 subject nucleotide alpha                                          159     8e-44
+sn2 subject nucleotide beta reverse                                   145     2e-39
+
+
+> sn1 subject nucleotide alpha
+Length=488
+
+ Score = 159 bits (86),  Expect = 8e-44
+ Identities = 92/95 (97%), Gaps = 0/95 (0%)
+ Strand=Plus/Plus
+
+Query  31   ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGAC  90
+            |||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||
+Sbjct  46   ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGAC  105
+
+Query  91   GACCCGAAAATACGGGATGGGCCCATGGCTGTAAT  125
+            ||||||||||||||||||||||||||||||| |||
+Sbjct  106  GACCCGAAAATACGGGATGGGCCCATGGCTGCAAT  140
+
+
+> sn2 subject nucleotide beta reverse
+Length=477
+
+ Score = 145 bits (78),  Expect = 2e-39
+ Identities = 90/96 (94%), Gaps = 0/96 (0%)
+ Strand=Plus/Minus
+
+Query  355  TCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCAC  414
+            |||||| |||| |||||||||| |||||||||||||| |||||||||||||||| |||||
+Sbjct  136  TCTCTCTGGCAATGGAAAATTAGCCATGACGCTAACTGTGAGAAACTTAAGATCCTCCAC  77
+
+Query  415  TACATGGTGGGTCATGGGAGAACAGCATCTGAGGGC  450
+            ||||||||||||||||||||||||||| ||||||||
+Sbjct  76   TACATGGTGGGTCATGGGAGAACAGCAGCTGAGGGC  41
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 113740
+
+
+Query= lcl|Query_2 qn2 unrelated nucleotide (no hits expected)
+
+Length=90
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 20172
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 262
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

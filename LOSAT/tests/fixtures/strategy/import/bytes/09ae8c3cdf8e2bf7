@@ -1,0 +1,169 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: arch_sprot
+           2 sequences; 279 total letters
+
+
+
+Query= lcl|Query_1 qn1 plus strand gene
+
+Length=366
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             223     1e-81
+sp2 subject protein beta, distant                                     132     2e-45
+
+
+>sp1 subject protein alpha
+Length=137
+
+ Score = 223 bits (569),  Expect = 1e-81
+ Identities = 98/108 (91%), Positives = 101/108 (94%), Gaps = 0/108 (0%)
+ Frame = +1
+
+Query  37   MWMEHSVLRAVFAVRRKVMDFPKIRDGPIAVMKGWENHCWPANMSWKVLMKYEFSSDIHP  216
+            MWMEHSVL+AVFAVRRKVMD PKIRDGP+AVMKGWEN+CWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  217  WICWIPKEQQQPGWWKTDTLHMAEMGLWMHKYPKCMCVMVHPGHPSLR  360
+            WICWIPKEQQ PGWWKTDTLHMAEMGLWMHKYPKCMCVMV     SLR
+Sbjct  61   WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLR  108
+
+
+>sp2 subject protein beta, distant
+Length=142
+
+ Score = 132 bits (332),  Expect = 2e-45
+ Identities = 70/114 (61%), Positives = 78/114 (68%), Gaps = 9/114 (8%)
+ Frame = +1
+
+Query  40   WMEHSVLRAVFAVRRKVMDFPKIRDGPIAVMKGWENHCWP----ANMSWKVLMKYEFSSD  207
+            WMEHSVL+A     RKVMD PKIRDGP+AVMK WE++C+     ANMS  VLMKYEF S 
+Sbjct  2    WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSG  61
+
+Query  208  IHP---WICWIPKEQQQPGWWKTDTLHMAEMGLWMHKYPKCMCVMVHPGHPSLR  360
+            IHP   W CWIPK    PGW  TDTLH++EMGLWMH  P  MC MV     +LR
+Sbjct  62   IHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALR  113
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 24823
+
+
+Query= lcl|Query_2 qn2 minus strand gene
+
+Length=378
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp2 subject protein beta, distant                                     246     2e-90
+sp1 subject protein alpha                                             143     6e-50
+
+
+>sp2 subject protein beta, distant
+Length=142
+
+ Score = 246 bits (628),  Expect = 2e-90
+ Identities = 111/115 (97%), Positives = 111/115 (97%), Gaps = 0/115 (0%)
+ Frame = -3
+
+Query  370  SWLTADWLQLRKVMDDPKIRDGPMAVMKVWESYCFILTSIANMSAHVLMKYEFQSGIHPC  191
+            S L AD LQLRKVMDDPKIRDGPMAVMKVWESYCFIL SIANMSAHVLMKYEFQSGIHPC
+Sbjct  6    SVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPC  65
+
+Query  190  NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI  26
+            NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI
+Sbjct  66   NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI  120
+
+
+ Score = 13.1 bits (22),  Expect = 3.6
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+ Frame = +1
+
+Query  67  PGPCDT  84
+           PG C T
+Sbjct  79  PGWCPT  84
+
+
+>sp1 subject protein alpha
+Length=137
+
+ Score = 143 bits (361),  Expect = 6e-50
+ Identities = 74/115 (64%), Positives = 81/115 (70%), Gaps = 9/115 (8%)
+ Frame = -3
+
+Query  370  SWLTADWLQLRKVMDDPKIRDGPMAVMKVWESYCFILTSIANMSAHVLMKYEFQSGIHPC  191
+            S L A +   RKVMDDPKIRDGPMAVMK WE+YC+     ANMS  VLMKYEF S IHP 
+Sbjct  6    SVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSDIHP-  60
+
+Query  190  NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHWKIN  32
+              W CWIPK    PGW  TDTLH++EMGLWMH  P  MC MVR T  +LRHW+IN
+Sbjct  61   --WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEIN  113
+
+
+ Score = 13.9 bits (24),  Expect = 2.0
+ Identities = 6/21 (29%), Positives = 12/21 (57%), Gaps = 0/21 (0%)
+ Frame = -1
+
+Query  222  NTNFSPEFTRVTNGRVGYQST  160
+            NT+ + E  ++ +  VG+  T
+Sbjct  113  NTDANFEKLKILHHMVGHGRT  133
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25787
+
+
+Query= lcl|Query_3 qn3 no hits
+
+Length=150
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 9690
+
+
+  Database: arch_sprot
+    Posted date:  Oct 23, 2026  11:17 AM
+  Number of letters in database: 279
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

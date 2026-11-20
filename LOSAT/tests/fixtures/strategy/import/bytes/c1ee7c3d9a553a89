@@ -1,0 +1,3 @@
+Warning: [blastp] Overriding database/subject in saved strategy
+Warning: [blastp] Overriding query in saved strategy
+Warning: [blastp] mt_mode cannot be overridden when using a search strategy

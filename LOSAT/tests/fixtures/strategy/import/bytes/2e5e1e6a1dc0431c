@@ -1,0 +1,92 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: snucdb
+           3 sequences; 1,122 total letters
+
+
+
+Query= ovr_p1 override protein
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 plus strand gene                                                  209     1e-75
+sn2 minus strand gene                                                 159     9e-56
+
+
+>sn1 plus strand gene
+Length=501
+
+ Score = 209 bits (533),  Expect = 1e-75, Method: Compositional matrix adjust.
+ Identities = 104/120 (87%), Positives = 106/120 (88%), Gaps = 3/120 (3%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVLKA FAV RKVMDDPKIRDGP AVMKGWENYCWPANMSWKVLM YEFSSDIHP
+Sbjct  61   MWMEHSVLKAVFAVRRKVMDDPKIRDGPEAVMKGWENYCWPANMSWKVLMTYEFSSDIHP  240
+
+Query  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+               W CWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  241  ---WWCWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  411
+
+
+ Score = 14.2 bits (25),  Expect = 1.9, Method: Compositional matrix adjust.
+ Identities = 7/18 (39%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+ Frame = +3
+
+Query  6    SVLKANFAVLRKVMDDPK  23
+            SVLK      R+   DP+
+Sbjct  372  SVLKTLGD*YRRQFRDPQ  425
+
+
+>sn2 minus strand gene
+Length=471
+
+ Score = 159 bits (402),  Expect = 9e-56, Method: Compositional matrix adjust.
+ Identities = 85/123 (69%), Positives = 90/123 (73%), Gaps = 6/123 (5%)
+ Frame = -3
+
+Query  2    WMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSD  57
+            WMEHSVLKA+   LRKVMDDPKIRDGPMAVMK WE+YC+     ANM   VLMKYEF S 
+Sbjct  448  WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMGAHVLMKYEFQSG  269
+
+Query  58   IHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMH  117
+            IHPCN W CWIPK MA PGW  TDTL +SEMGLWMH  P  MC MVR T  +LRHWKI  
+Sbjct  268  IHPCNQWTCWIPKYMAVPGWCYTDTLDVSEMGLWMHCEP--MCHMVRETTHALRHWKINE  95
+
+Query  118  DAN  120
+              N
+Sbjct  94   ICN  86
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.511    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 31400
+
+
+  Database: snucdb
+    Posted date:  Oct 24, 2026  1:15 AM
+  Number of letters in database: 1,122
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

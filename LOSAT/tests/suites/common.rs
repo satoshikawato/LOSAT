@@ -43,6 +43,8 @@ mod entry_names;
 mod export_search_strategy;
 #[path = "../function_size_limit.rs"]
 mod function_size_limit;
+#[path = "../import_search_strategy.rs"]
+mod import_search_strategy;
 #[path = "../library_api.rs"]
 mod library_api;
 #[path = "../library_examples.rs"]

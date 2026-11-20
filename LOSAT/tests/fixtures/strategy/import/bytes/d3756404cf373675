@@ -1,0 +1,84 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: arch_snucl
+           2 sequences; 965 total letters
+
+
+
+Query= ovr_n1 override nucleotide
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 subject nucleotide alpha                                          287     6e-82
+sn2 subject nucleotide beta reverse                                   180     1e-49
+
+
+>sn1 subject nucleotide alpha
+Length=488
+
+ Score = 287 bits (155),  Expect = 6e-82
+ Identities = 165/170 (97%), Gaps = 0/170 (0%)
+ Strand=Plus/Plus
+
+Query  31   ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGAC  90
+            |||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||
+Sbjct  46   ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGAC  105
+
+Query  91   GACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGG  150
+            ||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||
+Sbjct  106  GACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGG  165
+
+Query  151  CCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGA  200
+            ||||||||||| |||||||||||||||||||||| |||||||||||||||
+Sbjct  166  CCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGA  215
+
+
+>sn2 subject nucleotide beta reverse
+Length=477
+
+ Score = 180 bits (97),  Expect = 1e-49
+ Identities = 145/168 (86%), Gaps = 3/168 (2%)
+ Strand=Plus/Minus
+
+Query  36   GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCC  95
+            ||||||||||||||||||||||||||||||||||| |||| || ||||||||||||| ||
+Sbjct  452  GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGGGCTTAGTGAAGTGATGGACGATCC  393
+
+Query  96   GAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGC  155
+             ||||||| | ||||||| ||||||||||||||||||  |||| ||||||||  ||||||
+Sbjct  392  CAAAATACAGTATGGGCCAATGGCTGTAATGAAGGGCATGGAGCACTATTGCCCGCCCGC  333
+
+Query  156  GAATATGAGCTGGAAAGTCCTTATGA--AGTA-TGAGTTTTCCTCCGA  200
+             ||| ||||||||||||||| ||||   |||  || |||||| |||||
+Sbjct  332  TAATCTGAGCTGGAAAGTCCGTATGTTTAGTTTTGGGTTTTCATCCGA  285
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 178227
+
+
+  Database: arch_snucl
+    Posted date:  Oct 22, 2026  11:14 PM
+  Number of letters in database: 965
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

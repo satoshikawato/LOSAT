@@ -1,0 +1,103 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: snucdb
+           3 sequences; 1,122 total letters
+
+
+
+Query= lcl|Query_1 qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 plus strand gene                                                  99.8    2e-33
+sn2 minus strand gene                                                 72.0    1e-22
+
+
+>sn1 plus strand gene
+Length=501
+
+ Score = 99.8 bits (247),  Expect = 2e-33, Method: Compositional matrix adjust.
+ Identities = 47/51 (92%), Positives = 47/51 (92%), Gaps = 0/51 (0%)
+ Frame = +1
+
+Query  10   ANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            A FAV RKVMDDPKIRDGP AVMKGWENYCWPANMSWKVLM YEFSSDIHP
+Sbjct  88   AVFAVRRKVMDDPKIRDGPEAVMKGWENYCWPANMSWKVLMTYEFSSDIHP  240
+
+
+>sn2 minus strand gene
+Length=471
+
+ Score = 72.0 bits (175),  Expect = 1e-22, Method: Compositional matrix adjust.
+ Identities = 37/50 (74%), Positives = 39/50 (78%), Gaps = 4/50 (8%)
+ Frame = -3
+
+Query  15   LRKVMDDPKIRDGPMAVMKGWENYCW----PANMSWKVLMKYEFSSDIHP  60
+            LRKVMDDPKIRDGPMAVMK WE+YC+     ANM   VLMKYEF S IHP
+Sbjct  409  LRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMGAHVLMKYEFQSGIHP  260
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.135    0.471    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 12284
+
+
+Query= lcl|Query_2 qp2 unrelated protein (no hits expected)
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 plus strand gene                                                  12.7    1.4  
+
+
+>sn1 plus strand gene
+Length=501
+
+ Score = 12.7 bits (21),  Expect = 1.4, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+ Frame = +1
+
+Query  27   EHLTFQWCNYFW  38
+            E +   W NY W
+Sbjct  145  EAVMKGWENYCW  180
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.136    0.526    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 9369
+
+
+  Database: snucdb
+    Posted date:  Oct 24, 2026  1:15 AM
+  Number of letters in database: 1,122
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -1,0 +1,179 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set.
+           3 sequences; 576 total letters
+
+
+
+Query= ovr_n1 override nucleotide
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx1 plus strand gene                                                  127     5e-35  1
+sx2 minus strand gene                                                 62.0    9e-19  2
+sx3 no hits                                                           12.5    2.7    1
+
+
+> sx1 plus strand gene
+Length=218
+
+ Score = 127 bits (273),  Expect = 5e-35
+ Identities = 50/52 (96%), Positives = 50/52 (96%), Gaps = 0/52 (0%)
+ Frame = +1/+1
+
+Query  43   HSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSS  198
+            HSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSS
+Sbjct  31   HSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSS  186
+
+
+ Score = 99.1 bits (210),  Expect = 2e-26
+ Identities = 43/55 (78%), Positives = 47/55 (85%), Gaps = 0/55 (0%)
+ Frame = -1/-1
+
+Query  200  SEENSYFIRTFQLIFAGQQ*FSQPFITAMGPSRIFGSSITLRSTAKFAFSTECSI  36
+            S+ENSYFI+TFQ IFAGQQ*FSQPFITAMGPS IFGSS+TLR TA  AF T C +
+Sbjct  188  SDENSYFIKTFQDIFAGQQ*FSQPFITAMGPSLIFGSSMTLRLTANTAFKTLCRL  24
+
+
+ Score = 62.9 bits (131),  Expect = 2e-15
+ Identities = 25/45 (56%), Positives = 29/45 (64%), Gaps = 0/45 (0%)
+ Frame = -3/-3
+
+Query  198  GGKLILHKDFPAHIRGPAIVLPALHYSHGPIPYFRVVHHFTKHGK  64
+            G KLILH DFP HI  PAI+ PA H  HGP+  F V+H  T  G+
+Sbjct  186  GRKLILH*DFPRHICWPAIIFPAFHNRHGPVSDFWVIHDLTPDGE  52
+
+
+ Score = 50.1 bits (103),  Expect = 1e-11
+ Identities = 26/52 (50%), Positives = 32/52 (62%), Gaps = 0/52 (0%)
+ Frame = +2/+2
+
+Query  44   TPC*KQILPCFVK*WTTRKYGMGPWL**RAGRTIAGPRI*AGKSL*SMSFPP  199
+            T  *+   P  V+ W T+K   GPW  *+AG+ IAG +I  GKS *SMSF P
+Sbjct  32   TAF*RPCSPSGVRSWMTQKSETGPWRL*KAGKIIAGQQICLGKS**SMSFRP  187
+
+
+ Score = 50.1 bits (103),  Expect = 1e-11
+ Identities = 27/51 (53%), Positives = 33/51 (65%), Gaps = 0/51 (0%)
+ Frame = +3/+3
+
+Query  48   RAKSKFCRAS*SDGRPENTGWAHGCNEGLGELLLAREYELESPYEV*VFLR  200
+            R K +  R +*  G P+N   AHG  E LG+LLLA +Y LES  EV*VF+R
+Sbjct  36   RFKGRVRRQA*GHG*PKNQRRAHGGYERLGKLLLASKYVLESLNEV*VFVR  188
+
+
+ Score = 19.4 bits (36),  Expect = 0.023
+ Identities = 10/24 (42%), Positives = 11/24 (46%), Gaps = 0/24 (0%)
+ Frame = -2/-2
+
+Query  118  PWAHPVFSGRPSLYEARQNLLLAR  47
+            PWA   F G P  Y  R+   L R
+Sbjct  106  PWARL*FLGHP*PYA*RRTRPLKR  35
+
+
+ Score = 11.1 bits (18),  Expect = 6.9
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -2/-2
+
+Query  118  PW  113
+            PW
+Sbjct  106  PW  101
+
+
+> sx2 minus strand gene
+Length=208
+
+ Score = 62.0 bits (129),  Expect(2) = 9e-19
+ Identities = 23/26 (88%), Positives = 25/26 (96%), Gaps = 0/26 (0%)
+ Frame = +1/-1
+
+Query  73   LRKVMDDPKIRDGPMAVMKGWENYCW  150
+            LRKVMDDPKIRDGPMAVMK WE+YC+
+Sbjct  193  LRKVMDDPKIRDGPMAVMKVWESYCF  116
+
+
+ Score = 28.1 bits (55),  Expect(2) = 9e-19
+ Identities = 12/15 (80%), Positives = 12/15 (80%), Gaps = 0/15 (0%)
+ Frame = +1/-1
+
+Query  154  ANMSWKVLMKYEFSS  198
+            ANMS  VLMKYEF S
+Sbjct  100  ANMSAHVLMKYEFQS  56
+
+
+ Score = 39.6 bits (80),  Expect(2) = 1e-09
+ Identities = 18/32 (56%), Positives = 23/32 (72%), Gaps = 0/32 (0%)
+ Frame = -1/+3
+
+Query  170  FQLIFAGQQ*FSQPFITAMGPSRIFGSSITLR  75
+            F + ++ +Q* S  FITA+GPS I GSSIT R
+Sbjct  96   FAIEWSMKQ*LSHTFITAIGPSLILGSSITFR  191
+
+
+ Score = 19.4 bits (36),  Expect(2) = 1e-09
+ Identities = 8/15 (53%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+ Frame = -3/+2
+
+Query  198  GGKLILHKDFPAHIR  154
+            G KLI H D   H+R
+Sbjct  56   GLKLIFH*DMS*HVR  100
+
+
+ Score = 25.4 bits (49),  Expect = 4e-04
+ Identities = 10/20 (50%), Positives = 14/20 (70%), Gaps = 0/20 (0%)
+ Frame = +3/-3
+
+Query  87   GRPENTGWAHGCNEGLGELL  146
+            GRP +   ++GC E +GELL
+Sbjct  179  GRP*DKRRSNGCYESVGELL  120
+
+
+ Score = 18.9 bits (35),  Expect = 0.031
+ Identities = 8/18 (44%), Positives = 10/18 (56%), Gaps = 0/18 (0%)
+ Frame = +2/-2
+
+Query  86   WTTRKYGMGPWL**RAGR  139
+            WTT +     WL *+ GR
+Sbjct  180  WTTLR*ETVQWLL*KCGR  127
+
+
+> sx3 no hits
+Length=150
+
+ Score = 12.5 bits (21),  Expect = 2.7
+ Identities = 6/13 (46%), Positives = 8/13 (62%), Gaps = 0/13 (0%)
+ Frame = -1/-3
+
+Query  110  PSRIFGSSITLRS  72
+            P+R   + I LRS
+Sbjct  91   PTRQGANVIGLRS  53
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 7800
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 576
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

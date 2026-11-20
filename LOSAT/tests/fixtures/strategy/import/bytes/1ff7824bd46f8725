@@ -1,0 +1,3 @@
+Warning: [blastn] Overriding megablast BLAST DB indexed options in saved strategy
+BLAST query/options error: Can not deduce database index name
+Please refer to the BLAST+ user manual.

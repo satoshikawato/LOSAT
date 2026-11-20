@@ -1,0 +1,345 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastx</program>
+      <version>BLASTX 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <query-gencode>1</query-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>lcl|Query_1 qn1 plus strand gene</query-title>
+              <query-len>366</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>sp1</id>
+                      <title>sp1 subject protein alpha</title>
+                    </HitDescr>
+                  </description>
+                  <len>137</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>204.527</bit-score>
+                      <score>519</score>
+                      <evalue>5.07274e-74</evalue>
+                      <identity>98</identity>
+                      <positive>101</positive>
+                      <query-from>37</query-from>
+                      <query-to>360</query-to>
+                      <query-frame>1</query-frame>
+                      <hit-from>1</hit-from>
+                      <hit-to>108</hit-to>
+                      <align-len>108</align-len>
+                      <gaps>0</gaps>
+                      <qseq>MWMEHSVLRAVFAVRRKVMDFPKIRDGPIAVMKGWENHCWPANMSWKVLMKYEFSSDIHPWICWIPKEQQQPGWWKTDTLHMAEMGLWMHKYPKCMCVMVHPGHPSLR</qseq>
+                      <hseq>MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLR</hseq>
+                      <midline>MWMEHSVL+AVFAVRRKVMD PKIRDGP+AVMKGWEN+CWPANMSWKVLMKYEFSSDIHPWICWIPKEQQ PGWWKTDTLHMAEMGLWMHKYPKCMCVMV     SLR</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>sp2</id>
+                      <title>sp2 subject protein beta, distant</title>
+                    </HitDescr>
+                  </description>
+                  <len>142</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>120.939</bit-score>
+                      <score>302</score>
+                      <evalue>6.98361e-41</evalue>
+                      <identity>70</identity>
+                      <positive>78</positive>
+                      <query-from>40</query-from>
+                      <query-to>360</query-to>
+                      <query-frame>1</query-frame>
+                      <hit-from>2</hit-from>
+                      <hit-to>113</hit-to>
+                      <align-len>114</align-len>
+                      <gaps>9</gaps>
+                      <qseq>WMEHSVLRAVFAVRRKVMDFPKIRDGPIAVMKGWENHCWP----ANMSWKVLMKYEFSSDIHP---WICWIPKEQQQPGWWKTDTLHMAEMGLWMHKYPKCMCVMVHPGHPSLR</qseq>
+                      <hseq>WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALR</hseq>
+                      <midline>WMEHSVL+A     RKVMD PKIRDGP+AVMK WE++C+     ANMS  VLMKYEF S IHP   W CWIPK    PGW  TDTLH++EMGLWMH  P  MC MV     +LR</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>19</hsp-len>
+                  <eff-space>24823</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastx</program>
+      <version>BLASTX 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <query-gencode>1</query-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>lcl|Query_2 qn2 minus strand gene</query-title>
+              <query-len>378</query-len>
+              <query-masking>
+                <Range>
+                  <from>225</from>
+                  <to>261</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>sp2</id>
+                      <title>sp2 subject protein beta, distant</title>
+                    </HitDescr>
+                  </description>
+                  <len>142</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>232.261</bit-score>
+                      <score>591</score>
+                      <evalue>7.71912e-85</evalue>
+                      <identity>111</identity>
+                      <positive>111</positive>
+                      <query-from>26</query-from>
+                      <query-to>370</query-to>
+                      <query-frame>-3</query-frame>
+                      <hit-from>6</hit-from>
+                      <hit-to>120</hit-to>
+                      <align-len>115</align-len>
+                      <gaps>0</gaps>
+                      <qseq>SWLTADWLQLRKVMDDPKIRDGPMAVMKVWESYCFILTSIANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI</qseq>
+                      <hseq>SVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI</hseq>
+                      <midline>S L AD LQLRKVMDDPKIRDGPMAVMKVWESYCFIL SIANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>11.927</bit-score>
+                      <score>19</score>
+                      <evalue>7.83278</evalue>
+                      <identity>4</identity>
+                      <positive>4</positive>
+                      <query-from>67</query-from>
+                      <query-to>84</query-to>
+                      <query-frame>1</query-frame>
+                      <hit-from>79</hit-from>
+                      <hit-to>84</hit-to>
+                      <align-len>6</align-len>
+                      <gaps>0</gaps>
+                      <qseq>PGPCDT</qseq>
+                      <hseq>PGWCPT</hseq>
+                      <midline>PG C T</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>sp1</id>
+                      <title>sp1 subject protein alpha</title>
+                    </HitDescr>
+                  </description>
+                  <len>137</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>132.109</bit-score>
+                      <score>331</score>
+                      <evalue>2.22506e-45</evalue>
+                      <identity>73</identity>
+                      <positive>80</positive>
+                      <query-from>32</query-from>
+                      <query-to>364</query-to>
+                      <query-frame>-3</query-frame>
+                      <hit-from>8</hit-from>
+                      <hit-to>113</hit-to>
+                      <align-len>113</align-len>
+                      <gaps>9</gaps>
+                      <qseq>LTADWLQLRKVMDDPKIRDGPMAVMKVWESYCFILTSIANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHWKIN</qseq>
+                      <hseq>LKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEIN</hseq>
+                      <midline>L A +   RKVMDDPKIRDGPMAVMK WE+YC+     ANMS  VLMKYEF S IHP   W CWIPK    PGW  TDTLH++EMGLWMH  P  MC MVR T  +LRHW+IN</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>14.6234</bit-score>
+                      <score>26</score>
+                      <evalue>1.13821</evalue>
+                      <identity>6</identity>
+                      <positive>12</positive>
+                      <query-from>160</query-from>
+                      <query-to>222</query-to>
+                      <query-frame>-1</query-frame>
+                      <hit-from>113</hit-from>
+                      <hit-to>133</hit-to>
+                      <align-len>21</align-len>
+                      <gaps>0</gaps>
+                      <qseq>NTNFSPEFTRVTNGRVGYQST</qseq>
+                      <hseq>NTDANFEKLKILHHMVGHGRT</hseq>
+                      <midline>NT+ + E  ++ +  VG+  T</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>19</hsp-len>
+                  <eff-space>25787</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastx</program>
+      <version>BLASTX 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <query-gencode>1</query-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_3</query-id>
+              <query-title>lcl|Query_3 qn3 no hits</query-title>
+              <query-len>150</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>sp2</id>
+                      <title>sp2 subject protein beta, distant</title>
+                    </HitDescr>
+                  </description>
+                  <len>142</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>11.1566</bit-score>
+                      <score>17</score>
+                      <evalue>5.49953</evalue>
+                      <identity>5</identity>
+                      <positive>6</positive>
+                      <query-from>63</query-from>
+                      <query-to>119</query-to>
+                      <query-frame>3</query-frame>
+                      <hit-from>22</hit-from>
+                      <hit-to>40</hit-to>
+                      <align-len>19</align-len>
+                      <gaps>0</gaps>
+                      <qseq>PG*ADSPNGS*DLLHCSCF</qseq>
+                      <hseq>PKIRDGPMAVMKVWESYCF</hseq>
+                      <midline>P   D P     +    CF</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>12</hsp-len>
+                  <eff-space>9690</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

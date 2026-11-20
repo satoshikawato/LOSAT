@@ -63,11 +63,14 @@ impl Drop for RunDir {
 }
 
 /// `losat words...` in `dir`, without LOSAT or NCBI variables and registry files.
+/// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
+/// (`cargo test --all-features`, as in CI coverage) needs that file name as soon as a search
+/// has more than one thread, and it selects nothing.
 fn losat(dir: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if text.starts_with("LOSAT_")
+        if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
             || text.starts_with("NCBI_")
             || matches!(text.as_ref(), "BLASTDB" | "BATCH_SIZE" | "ARCHIVE_FORMAT")
         {

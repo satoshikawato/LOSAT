@@ -175,8 +175,14 @@ pub(crate) fn kernel_x_drop_fits(x_dropoff: i32, gap_open: i32, gap_extend: i32)
 /// The refusal of an X-drop in bits (`option`, as the command line names it) whose raw X-drop
 /// NCBI's gapped kernels cannot size (`kernel_x_drop_fits`) in `program`'s search.
 pub(crate) fn kernel_x_drop_error(program: &str, option: &str, bits: f64) -> anyhow::Error {
+    kernel_x_drop_value_error(program, option, &format!("{bits:?} bits"))
+}
+
+/// [`kernel_x_drop_error`] of an option value given in its own words (`value`): BLASTN's
+/// matrix-only scoring reads the X-drop options as raw scores, not bits.
+pub(crate) fn kernel_x_drop_value_error(program: &str, option: &str, value: &str) -> anyhow::Error {
     anyhow::anyhow!(
-        "an {option} of {bits:?} bits, whose raw X-drop makes the sizes of NCBI BLAST+'s gapped alignment kernels leave 32-bit integers (undefined behaviour), is not supported by LOSAT's {program}"
+        "an {option} of {value}, whose raw X-drop makes the sizes of NCBI BLAST+'s gapped alignment kernels leave 32-bit integers (undefined behaviour), is not supported by LOSAT's {program}"
     )
 }
 

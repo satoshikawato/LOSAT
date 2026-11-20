@@ -402,6 +402,7 @@ impl Batches<'_> {
                     sink: OutputSink::Writer(&mut report),
                 }],
                 diagnostics: &mut sink,
+                later_warnings: None,
                 hits: Some(&mut on_hits),
                 observer: Some(&mut observer),
             };
@@ -487,6 +488,7 @@ mod tests {
     use super::*;
     use crate::api::{run_collect, validate, FastaRecord, Program};
 
+    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
     const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 
     #[test]

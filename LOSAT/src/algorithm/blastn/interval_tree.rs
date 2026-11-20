@@ -1655,24 +1655,42 @@ impl BlastIntervalTree {
     // ...
     //         mid_index = s_IntervalNodeInit(tree, root_index, which_half, &retval);
     // ```
-    /// `add_hsp` (eQueryAndSubject) of an HSP of TBLASTN's one-hit word finder, or `false`, the
-    /// tree unchanged, where NCBI's insertion would split a node `[p, p]` to the right into the
-    /// inverted node `[p + 1, p]` (whose middle is `p` again: `BlastIntervalTreeAddHSP` repeats
-    /// that split without end and never returns). Only two kinds of range lead there, which only
-    /// that word finder gives (`tblastn::search_gapped::x_add_one_hit_hsp`; a range in order and
-    /// inside `[p, p]` straddles its middle `p`): one that starts past the tree's `s_max`, and one
-    /// whose start is one past its end (a gapped alignment of score 0 whose right extension did not
-    /// run, which a cutoff of 0 keeps: blast_gapalign.c:4290-4295, blast_stat.c:5236-5266), which
-    /// never straddles a middle. An HSP whose query and subject ranges are in order and lie inside
-    /// the tree's bounds (`x_insertion_ends`) goes to `add_hsp` at once. For any other HSP the
-    /// insertion is first walked without changing the tree (`x_insert_inverts`); only if that walk
-    /// makes an inverted node are NCBI's end-point checks, which run before the insertion and may
-    /// drop the HSP or a leaf on its way (end points only empty a slot), run on a copy of the tree
-    /// and the walk repeated there. `add_hsp` and the functions it calls keep their code.
+    /// `add_hsp` (eQueryAndSubject) of an HSP of TBLASTN's one-hit word finder or of RPS-BLAST's
+    /// gapped stage, or `false`, the tree unchanged, where NCBI's insertion would split a node
+    /// `[p, p]` to the right into the inverted node `[p + 1, p]` (whose middle is `p` again:
+    /// `BlastIntervalTreeAddHSP` repeats that split without end and never returns), or split a
+    /// node into another inverted one (a root `[0, R]` with `R` below 0). Only ranges that leave
+    /// the tree's bounds or are out of order lead there (a range in order and inside `[p, p]`
+    /// straddles its middle `p`): in the TBLASTN word finder
+    /// (`tblastn::search_gapped::x_add_one_hit_hsp`) one that starts past the tree's `s_max`, and
+    /// one whose start is one past its end (a gapped alignment of score 0 whose right extension did
+    /// not run, which a cutoff of 0 keeps: blast_gapalign.c:4290-4295, blast_stat.c:5236-5266),
+    /// which never straddles a middle; in RPS-BLAST a query range that starts past the root's end,
+    /// where an alias file's `LENGTH` and `NSEQ` make the concatenated length that the root covers
+    /// shorter than the profiles (`rps_search::prelim`). An HSP whose query and subject ranges are
+    /// in order and lie inside the tree's bounds (`x_insertion_ends`) goes to `add_hsp` at once.
+    /// For any other HSP the insertion is first walked without changing the tree
+    /// (`x_insert_inverts`); only if that walk makes an inverted node are NCBI's end-point checks,
+    /// which run before the insertion and may drop the HSP or a leaf on its way (end points only
+    /// empty a slot), run on a copy of the tree and the walk repeated there. `add_hsp` and the
+    /// functions it calls keep their code.
+    ///
+    /// The test of the bounds is inlined into the caller (RPS-BLAST's gapped stage adds every HSP
+    /// through here); the walk is out of line.
+    #[inline]
     pub fn try_add_hsp(&mut self, hsp: TreeHsp, query_context_offset: i32) -> bool {
-        if !self.x_insertion_ends(&hsp, query_context_offset)
-            && self.x_insert_inverts(&hsp, query_context_offset)
-        {
+        if self.x_insertion_ends(&hsp, query_context_offset) {
+            self.add_hsp(hsp, query_context_offset, IndexMethod::QueryAndSubject);
+            return true;
+        }
+        self.x_try_add_hsp_outside(hsp, query_context_offset)
+    }
+
+    /// `try_add_hsp` of an HSP that leaves the tree's bounds or is out of order.
+    #[cold]
+    #[inline(never)]
+    fn x_try_add_hsp_outside(&mut self, hsp: TreeHsp, query_context_offset: i32) -> bool {
+        if self.x_insert_inverts(&hsp, query_context_offset) {
             let mut copy = self.clone();
             let x_on = copy.x.usable;
             let dropped =
@@ -1696,6 +1714,7 @@ impl BlastIntervalTree {
     /// tree's bounds, so each node the insertion enters or makes holds the range it compares (a
     /// split goes to the half that holds it) and every split makes a smaller node; a node `[p, p]`
     /// holding the range sees it straddle its middle.
+    #[inline(always)]
     fn x_insertion_ends(&self, hsp: &TreeHsp, query_context_offset: i32) -> bool {
         let root = &self.nodes[0];
         hsp.query_offset <= hsp.query_end
@@ -2669,6 +2688,108 @@ mod tests {
         assert!(
             endless > 100 && endless_inverted > 20 && added > 10_000,
             "endless {endless} (no letters {endless_inverted}) added {added}"
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:603-793 (quoted at
+    // `try_add_hsp`) and c++/src/algo/blast/core/blast_gapalign.c:3830-3831
+    // ```c
+    //       tree = Blast_IntervalTreeInit(0, query->length+1,
+    //                                     0, subject->length+1);
+    // ```
+    // RPS-BLAST's tree (line RG D1a-4): the root `[0, Lc + 1]` of a concatenated length `Lc` that
+    // an alias file's `LENGTH` and `NSEQ` make shorter than the profiles, also negative (a root
+    // whose end is below its start), with query ranges in order that start and end past the root's
+    // end or cross it, in profiles at several offsets, and subject ranges inside the bounds. A
+    // second range that starts past the end splits without end (a root end `R` of 0 or more:
+    // `[R + 1, R]`; below 0 every split), unless NCBI's end-point checks drop it or the leaf it
+    // meets; `try_add_hsp` answers as NCBI's loop and builds its trees.
+    #[test]
+    fn try_add_hsp_agrees_with_ncbi_on_query_ranges_past_the_root() {
+        let mut state = 0x6a09_e667_f3bc_c908u64;
+        let mut next = |n: i32| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n as u64) as i32
+        };
+        // Root [0, 21] (`Lc` 20): [30, 40] goes to the right spine's end; [25, 26] meets it.
+        let mut tree = BlastIntervalTree::new(0, 21, 0, 101);
+        assert!(tree.try_add_hsp(make_tree_hsp(30, 40, 10, 20, 30, 1), 0));
+        // One range crossing the end straddles a middle of the spine and is added.
+        assert!(tree.try_add_hsp(make_tree_hsp(15, 35, 50, 70, 25, 1), 0));
+        let nodes = tree.node_count();
+        assert!(!tree.try_add_hsp(make_tree_hsp(25, 26, 80, 81, 20, 1), 0));
+        assert_eq!(tree.node_count(), nodes, "the tree is unchanged");
+        // Root [0, -1] (`Lc` -2): a range at 0 straddles the middle 0, one at 1 goes right.
+        let mut tree = BlastIntervalTree::new(0, -1, 0, 101);
+        assert!(tree.try_add_hsp(make_tree_hsp(0, 3, 10, 13, 30, 1), 0));
+        assert!(tree.try_add_hsp(make_tree_hsp(1, 4, 20, 23, 30, 1), 0));
+        assert!(!tree.try_add_hsp(make_tree_hsp(5, 9, 40, 44, 30, 1), 0));
+
+        let (mut endless, mut added, mut dropped) = (0, 0, 0);
+        for round in 0..3000 {
+            // The root's end `Lc + 1`, from -12 to 47, and the subject's.
+            let q_root = next(60) - 12;
+            let s_root = 8 + next(120);
+            let mut tried = BlastIntervalTree::new(0, q_root, 0, s_root);
+            let mut last: Option<TreeHsp> = None;
+            for step in 0..(1 + next(30)) {
+                // A profile at its offset in the concatenation, a range inside it; one in four
+                // starts where the last one did (NCBI's end-point checks drop it, or unlink the
+                // leaf of the lower score).
+                let offset = next(4) * 25;
+                let (offset, q0, s0) = match last {
+                    Some(last) if next(4) == 0 => (
+                        last.query_context_offset,
+                        last.query_offset,
+                        last.subject_offset,
+                    ),
+                    _ => (offset, next(24), next(s_root + 1)),
+                };
+                let q1 = q0 + next(24 - q0);
+                let s1 = s0 + next(s_root - s0 + 1);
+                let mut hsp = make_tree_hsp(q0, q1, s0, s1, 1 + next(50), 1);
+                hsp.query_context_offset = offset;
+                last = Some(hsp);
+                let (ncbi, checked) = ncbi_insertion_capped(&tried, hsp, offset);
+                let at = format!("round {round} step {step}: root {q_root} +{offset} {hsp:?}");
+                let nodes = tried.node_count();
+                let ok = tried.try_add_hsp(hsp, offset);
+                match ncbi {
+                    NcbiInsertion::Endless => {
+                        endless += 1;
+                        assert!(offset + q0 > q_root, "a range past the end, {at}");
+                        assert!(!ok, "{at}");
+                        assert_eq!(tried.node_count(), nodes, "unchanged, {at}");
+                    }
+                    NcbiInsertion::Added(t) => {
+                        added += 1;
+                        assert!(ok, "{at}");
+                        assert_eq!(
+                            format!("{:?}", tried.nodes),
+                            format!("{:?}", t.nodes),
+                            "{at}"
+                        );
+                    }
+                    NcbiInsertion::Dropped => {
+                        dropped += 1;
+                        assert!(ok, "{at}");
+                        assert_eq!(
+                            format!("{:?}", tried.nodes),
+                            format!("{:?}", checked.nodes),
+                            "{at}"
+                        );
+                    }
+                }
+                if !ok {
+                    break;
+                }
+            }
+        }
+        assert!(
+            endless > 500 && added > 2_000 && dropped > 50,
+            "endless {endless} added {added} dropped {dropped}"
         );
     }
 

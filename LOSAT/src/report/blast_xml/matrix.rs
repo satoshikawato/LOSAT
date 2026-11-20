@@ -216,7 +216,7 @@ fn is_blast_xml(outfmt: &str) -> bool {
 pub fn unsupported_score_matrix() -> anyhow::Error {
     crate::cli::NativeError {
         exit: 3,
-        message: "BLAST engine error: unsupported score matrix\n".to_string(),
+        message: "BLAST engine error: unsupported score matrix\n".into(),
     }
     .into()
 }
@@ -314,8 +314,11 @@ mod tests {
         let error = unsupported_score_matrix();
         let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
         assert_eq!(
-            (native.exit, native.message.as_str()),
-            (3, "BLAST engine error: unsupported score matrix\n")
+            (native.exit, native.message.as_slice()),
+            (
+                3,
+                b"BLAST engine error: unsupported score matrix\n".as_slice()
+            )
         );
     }
 

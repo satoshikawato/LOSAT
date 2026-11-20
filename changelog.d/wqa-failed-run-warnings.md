@@ -1,7 +1,5 @@
 - Web: the warnings of a run are the command line's for the run's options, then what the command
-  line writes for the other formats that the run writes (outfmt 0, 6 and 7; with a structured
-  `-outfmt`, 5, 8, 9 or 11 to 17, their option warnings but not yet their queries' warnings, such as
-  "Sequence contains no data"). A run that fails shows
+  line writes for the other formats that the run writes (outfmt 0, 6 and 7). A run that fails shows
   only the warnings that the command line writes before its error: no formatting warning of a format
   that its options do not ask for, and no warning or error of the run's other search. A run of two
   searches (`-num_descriptions`, `-num_alignments`) completes or fails as the search of its own

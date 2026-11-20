@@ -8,6 +8,9 @@
 
 // NCBI app/blast/blast_app_util.hpp and blastinput/blast_args.cpp: the application layer.
 pub mod app;
+// NCBI objtools/readers/aln_reader.cpp, alnread.cpp, aln_formatguess.cpp: the alignment reader
+// of psiblast's `-in_msa`.
+pub(crate) mod aln_reader;
 pub mod compressed;
 // NCBI blastinput/blast_args.cpp (s_GetTaxIDList): the taxid options of a database search.
 pub mod db_filter;

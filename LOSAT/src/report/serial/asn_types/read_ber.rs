@@ -468,7 +468,7 @@ impl<S: AsnSource> Ber<S> {
     //     m_CurrentDataLimit = m_DataLimits.back();
     //     m_DataLimits.pop_back();
     // ```
-    // NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:72-87
+    // NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:72-88
     // ```c++
     // inline
     // bool CIStreamBuffer::SkipExpectedChar(char c, size_t offset)

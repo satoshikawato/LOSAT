@@ -249,11 +249,12 @@ impl<'b> AsnBinaryEncoder<'b> {
     /// void CObjectOStreamAsnBinary::BeginClassMember(const CMemberId& id)
     /// {
     ///     ...
-    ///     WriteTag(eContextSpecific, eConstructed, id.GetTag());  // [i], explicit
+    ///     WriteTag(eContextSpecific, eConstructed, id.GetTag());
     ///     WriteIndefiniteLength();
     /// }
     /// ```
-    /// (the tags of Seq-annot's modules are below 31, so the identifier is one byte.)
+    /// (`[i]`, an explicit tag; the tags of Seq-annot's modules are below 31, so the identifier is
+    /// one byte.)
     fn context_open(&mut self, tag: u8) {
         debug_assert!(tag < 31, "a one-byte context tag");
         self.out.push(TAG_CONTEXT | tag);
@@ -383,10 +384,11 @@ impl Encoder for AsnBinaryEncoder<'_> {
     /// digits of `DoubleToStringPosix`. (NCBI marks a NaN or an infinity by another form
     /// byte, which LOSAT does not write: BLAST reports have none.)
     ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:797-814
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:797-819
     /// ```c++
     ///     WriteLength(width + 1);
     ///     if (width) {
+    ///         ...
     ///         WriteByte(type);
     ///         WriteBytes(buffer, width);
     ///     } else {
@@ -407,7 +409,7 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.out.extend_from_slice(value);
     }
 
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:874-879
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:874-880
     /// ```c++
     /// void CObjectOStreamAsnBinary::WriteStringStore(const string& str)
     /// {

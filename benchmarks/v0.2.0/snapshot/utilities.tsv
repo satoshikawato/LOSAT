@@ -1,0 +1,4 @@
+case	label	threads	losat_wall_s	ncbi_wall_s	speedup	losat_rss_mib	ncbi_rss_mib	mem_reduction	losat_sha16	ncbi_sha16	runs
+mkdb_16s	makeblastdb (nucl: 16S rRNA, 28,036 seqs)	1	0.193	0.691	3.5803	9.0	52.0	5.7778	0	0	3
+mkdb_sprot	makeblastdb (prot: Swiss-Prot, 575,748 seqs)	1	2.197	8.537	3.8858	16.0	58.38	3.6484	0	0	3
+rpsbproc	rpsbproc (4,300 E. coli proteins XML, CDD v3.22)	1	1.309	2.61	1.9939	62.0	331.0	5.3387	258a6a89bcc175af	258a6a89bcc175af	3

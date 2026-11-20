@@ -12092,11 +12092,14 @@ fn run_call(
                 context0_length: context0.query_length,
             };
         }
+        // rpsblast's first query of a batch has its profile's K (`RPS_K_MULT` times the `.aux`
+        // value, `rps_search::engine::batch_gapped_k`), the others the table's.
+        let mut gapped = gapped_params;
+        if let Some(k) = rps_gapped_k.as_ref() {
+            gapped.k = k[first];
+        }
         super::archive::FirstContext {
-            karlin: Some((
-                contexts[first].karlin_params,
-                (!args.ungapped).then_some(gapped_params),
-            )),
+            karlin: Some((contexts[first].karlin_params, (!args.ungapped).then_some(gapped))),
             search_space: context0.space,
             length_adjustment: search_spaces[first].length_adjustment,
             context0_space: context0.space,

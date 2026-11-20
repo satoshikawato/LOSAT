@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::report::serial::pssm::{asn_text, PssmWithParameters, SeqEntry};
-use crate::utils::glibc_fma_libm::GlibcLibm;
 
 fn fixture(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -123,6 +122,7 @@ fn reals_are_read_with_ncbis_arithmetic() {
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 fn libm_pow10_is_glibcs_pow() {
     use crate::report::serial::asn_text_reader::libm_pow10;
+    use crate::utils::glibc_fma_libm::GlibcLibm;
 
     for exp in -400..=400 {
         let pow = 10f64.glibc_pow(f64::from(exp));

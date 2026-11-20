@@ -851,15 +851,21 @@ pub(crate) enum SwWindowRedo {
 }
 
 /// The round loop of one window of `Blast_RedoOneMatchSmithWaterman`, after its composition
-/// adjustment, for BLASTP's square matrix and RPS-BLAST's PSSM: the score-only scan, the
-/// significance test (`significance`; before the query's first alignment also
-/// `would_insert(evalue, score)`, NCBI's `BlastCompo_HeapWouldInsert` of the query's heap, which
-/// the window's first alignment is), the start scan, the X-drop traceback from the start
+/// adjustment, for the square matrix of BLASTP's and TBLASTN's windows and RPS-BLAST's PSSM: the
+/// score-only scan, the significance test (`significance`; before the query's first alignment also
+/// `would_insert(evalue, score)`, NCBI's `BlastCompo_HeapWouldInsert` of the query's heap), the start
+/// scan, the X-drop traceback from the start
 /// (`traceback((query_start, query_end), (match_start, match_end), score)`, NCBI's
 /// `new_xdrop_align`), and for a window of two or more HSPs the range of each alignment made
 /// forbidden and the next round. The forbidden ranges are set to the window's query length
 /// (NCBI's `Blast_ForbiddenRangesInitialize` with the queries' longest length, every range of the
 /// window inside of it) and cleared.
+///
+/// The query's first alignment is the first alignment of the match's call for that query
+/// (`alignments[query_index] == NULL`), not of the window: `query_had_none` says that the query had
+/// no alignment when the window started (true for one window per query, as BLASTP's and RPS-BLAST's
+/// protein windows are; TBLASTN's translated windows of one query follow each other in one call),
+/// and the heap is asked only while that holds and the window has made none.
 ///
 /// The regime of a significant score of 0 is decided at the window's first significant round. When
 /// the score of 0 passes the threshold (`s_EvalueFromScore(0, ..) = searchsp * K < cutoff_e`, or
@@ -1003,11 +1009,12 @@ pub(crate) enum SwWindowRedo {
 ///
 ///     return obj != NULL ? 0 : -1;
 /// ```
-// Generic over the caller's rows, heap and traceback: one instance per redo (BLASTP's, RPS-BLAST's),
-// each on the Smith-Waterman path only.
+// Generic over the caller's rows, heap and traceback: one instance per redo (the square matrix's
+// match body, `smith_waterman_match`, and RPS-BLAST's), each on the Smith-Waterman path only.
 pub(crate) fn smith_waterman_redo_window<'r, F, H, T>(
     window: &SwWindow<'_, F>,
     significance: SwSignificance,
+    query_had_none: bool,
     mut would_insert: H,
     mut traceback: T,
     rounds: &mut SwRounds,
@@ -1033,7 +1040,7 @@ where
             &mut rounds.scan,
         );
         let (evalue, mut alignment_is_significant) = significance.test(end.score);
-        if let (Some(evalue), true) = (evalue, alignments.is_empty()) {
+        if let (Some(evalue), true) = (evalue, query_had_none && alignments.is_empty()) {
             alignment_is_significant = alignment_is_significant && would_insert(evalue, end.score);
         }
         if !alignment_is_significant {

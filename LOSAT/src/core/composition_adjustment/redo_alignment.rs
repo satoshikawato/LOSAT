@@ -1553,8 +1553,7 @@ fn translated_subject_window_sequence(
 // end = align->matchEnd - range->begin;
 // Blast_GetCompositionRange(&left, &right, data, length, start, end);
 // Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
-#[allow(dead_code)] // TBLASTN enters this after its translated-range callback is connected.
-fn translated_subject_composition(
+pub(crate) fn translated_subject_composition(
     translation: &[u8],
     range: &BlastCompoSequenceRange,
     align: &BlastCompoAlignment,

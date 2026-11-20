@@ -1302,13 +1302,10 @@ where
 #[cold]
 #[inline(never)]
 fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::Error {
-    let error = if first_query.n > 0 {
-        anyhow::anyhow!(
-            "a query batch whose last match fails its Smith-Waterman redo (-use_sw_tback) after a match of the batch's first query was redone and kept, with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's BLASTP"
-        )
-    } else {
-        crate::blastinput::app::engine_error("Traceback failed")
-    };
+    let error = crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
+        "blastp",
+        first_query.n > 0,
+    );
     super::database::HeaderReadError {
         query: batch_start,
         error,
@@ -1330,9 +1327,7 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
 fn sw_endless(batch_start: usize) -> anyhow::Error {
     super::database::HeaderReadError {
         query: batch_start,
-        error: anyhow::anyhow!(
-            "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0) is not supported by LOSAT's BLASTP"
-        ),
+        error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error("blastp", "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"),
     }
     .into()
 }

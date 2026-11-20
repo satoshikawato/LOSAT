@@ -29,8 +29,8 @@ use std::process::Command;
 
 mod reach_support;
 mod temp_support;
-use temp_support::{worker_log_if_unset, TempFile, TempPath};
 use temp_support::InLosatWords;
+use temp_support::{worker_log_if_unset, TempFile, TempPath};
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

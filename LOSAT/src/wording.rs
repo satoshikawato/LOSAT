@@ -90,7 +90,10 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
                     // A report glued to the text before it (`Object type= BlastOutput2NCBI C++
                     // Exception:`) is set off by `: `, as a tag inside a line is; after a space
                     // (`[blastn] NCBI C++ Exception:`) nothing stands for it.
-                    if out.last().is_some_and(|&b| !matches!(b, b' ' | b'\n' | b':')) {
+                    if out
+                        .last()
+                        .is_some_and(|&b| !matches!(b, b' ' | b'\n' | b':'))
+                    {
                         glue(&mut out);
                     }
                     i += j + place;
@@ -200,7 +203,8 @@ fn asn_string(text: &[u8], quote: usize) -> Option<(Vec<u8>, usize)> {
 }
 
 fn find(text: &[u8], needle: &[u8]) -> Option<usize> {
-    text.windows(needle.len()).position(|window| window == needle)
+    text.windows(needle.len())
+        .position(|window| window == needle)
 }
 
 fn contains(text: &[u8], needle: &[u8]) -> bool {
@@ -379,7 +383,10 @@ pub(crate) mod tests {
             let path = entry.unwrap().path();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
             if path.is_dir() {
-                if !matches!(name.as_str(), "node_modules" | "dist" | "target" | "__pycache__") {
+                if !matches!(
+                    name.as_str(),
+                    "node_modules" | "dist" | "target" | "__pycache__"
+                ) {
                     files(&path, extensions, out);
                 }
             } else if path
@@ -403,7 +410,9 @@ pub(crate) mod tests {
                 .collect();
             let code = rest[class.len()..].strip_prefix("::").unwrap_or("(");
             (class.ends_with("Exception") || SERIAL_EXCEPTION_CLASSES.contains(&class.as_str()))
-                && code.find(')').is_some_and(|close| !code[..close].contains('('))
+                && code
+                    .find(')')
+                    .is_some_and(|close| !code[..close].contains('('))
         })
     }
 
@@ -455,9 +464,13 @@ pub(crate) mod tests {
             for (number, line) in lines {
                 let bare_blast_plus = !is_rust
                     && line.matches("BLAST+").count() > line.matches("NCBI BLAST+").count();
-                if [NCBI_USER_MANUAL_FOOTER, "NCBI C++ Exception", "NCBI C++ Toolkit"]
-                    .iter()
-                    .any(|needle| line.contains(needle))
+                if [
+                    NCBI_USER_MANUAL_FOOTER,
+                    "NCBI C++ Exception",
+                    "NCBI C++ Toolkit",
+                ]
+                .iter()
+                .any(|needle| line.contains(needle))
                     || (is_rust && has_tag(line))
                     || bare_blast_plus
                 {
@@ -486,7 +499,10 @@ pub(crate) mod tests {
             let mut search = 0;
             while let Some(found) = find(&data[search..], ARCHIVE_MESSAGE) {
                 let at = search + found;
-                let line_start = data[..at].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+                let line_start = data[..at]
+                    .iter()
+                    .rposition(|&b| b == b'\n')
+                    .map_or(0, |i| i + 1);
                 let quote = at + ARCHIVE_MESSAGE.len() - 1;
                 search = quote + 1;
                 if !data[line_start..at].iter().all(|&b| b == b' ') {

@@ -9,10 +9,7 @@ use super::*;
 fn message(e: NcbiException) -> String {
     let report = e.report_default_ex(106, 15, "Application's initialization failed");
     let first = report.lines().next().unwrap();
-    first
-        .strip_prefix("Error: ")
-        .unwrap()
-        .to_string()
+    first.strip_prefix("Error: ").unwrap().to_string()
 }
 
 // PS16a probe 4: NCBI's rpsbproc on data files with numbers that do not convert printed
@@ -50,11 +47,15 @@ fn conversions_fail_with_ncbis_messages() {
     );
     assert_eq!(
         message(string_to_uint(b"4294967296").unwrap_err()),
-        crate::wording::losat_text("Cannot convert string '4294967296' to unsigned int, overflow (m_Pos = 0)")
+        crate::wording::losat_text(
+            "Cannot convert string '4294967296' to unsigned int, overflow (m_Pos = 0)"
+        )
     );
     assert_eq!(
         message(string_to_uint(b"18446744073709551616").unwrap_err()),
-        crate::wording::losat_text("Cannot convert string '18446744073709551616' to Uint8 (m_Pos = 19)")
+        crate::wording::losat_text(
+            "Cannot convert string '18446744073709551616' to Uint8 (m_Pos = 19)"
+        )
     );
     // ncbistr.cpp:798-873, 635-643 (quoted at `ncbi_str::string_to_int8`, `string_to_int`).
     assert_eq!(string_to_int(b"-17", 0), Ok(-17));
@@ -64,11 +65,15 @@ fn conversions_fail_with_ncbis_messages() {
     );
     assert_eq!(
         message(string_to_int(b"2147483648", 0).unwrap_err()),
-        crate::wording::losat_text("Cannot convert string '2147483648' to int, overflow (m_Pos = 0)")
+        crate::wording::losat_text(
+            "Cannot convert string '2147483648' to int, overflow (m_Pos = 0)"
+        )
     );
     assert_eq!(
         message(string_to_int(b"9223372036854775808", 0).unwrap_err()),
-        crate::wording::losat_text("Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)")
+        crate::wording::losat_text(
+            "Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)"
+        )
     );
     // ncbistr.cpp:1312-1375, 1386-1403 (quoted at `ncbi_str::string_to_double`).
     assert_eq!(string_to_double(b"55.5"), Ok(55.5));

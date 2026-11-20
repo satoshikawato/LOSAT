@@ -35,8 +35,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod reach_support;
 mod temp_support;
-use temp_support::TempPath;
 use temp_support::InLosatWords;
+use temp_support::TempPath;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

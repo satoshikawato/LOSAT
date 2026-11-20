@@ -674,6 +674,7 @@ fn parse_blastp_args(
         request_inputs: None,
         app: blastp::args::BlastpApp::Blastp,
         taxdb_setting: None,
+        matrix_search: None,
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,

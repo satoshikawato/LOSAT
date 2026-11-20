@@ -48,7 +48,7 @@ use crate::report::{
 use crate::stats::compute_blosum62_ideal_karlin_params;
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{
-    blast_spouge_etos, blast_spouge_stoe, lookup_protein_gumbel_params, lookup_protein_params,
+    blast_spouge_etos, blast_spouge_stoe, lookup_protein_gumbel_params,
     lookup_protein_params_ungapped, BlastGumbelBlk, KarlinParams,
 };
 use crate::utils::matrix::standard_score;
@@ -1514,10 +1514,12 @@ fn blastp_word_cutoff_score_for_context(
 /// The word cutoff of a valid context in an ungapped search: `BLAST_Cutoffs` for the e-value
 /// `CUTOFF_E_BLASTP` (1e-300) in the search space `MIN(subject length, query length) * subject
 /// length` of the context's own block, at most the gap trigger and the hit-saving cutoff
-/// `hit_cutoff_score` (`cutoff_score_max`). `word_subject_length` is the sequence source's average
-/// length (`BlastSeqSrcGetAvgSeqLen`), or the subject's length with the statistics of each subject
-/// (`BlastInitialWordParametersUpdate`). There is no link parameter set in BLASTP, so the gap decay
-/// rate is 0 (`hit_params->link_hsp_params` is NULL) and the scale factor 1.
+/// `hit_cutoff_score` (`cutoff_score_max`): `word_cutoff_score_for_update`, the function that
+/// ports these lines for TBLASTX too, with BLASTP's E-value. `word_subject_length` is the sequence
+/// source's average length (`BlastSeqSrcGetAvgSeqLen`), or the subject's length with the
+/// statistics of each subject (`BlastInitialWordParametersUpdate`). There is no link parameter
+/// set in BLASTP, so the gap decay rate is 0 (`hit_params->link_hsp_params` is NULL) and the
+/// scale factor 1.
 fn blastp_ungapped_word_cutoff_score_for_context(
     hit_cutoff_score: i32,
     ctx: &QueryContext,
@@ -1528,7 +1530,8 @@ fn blastp_ungapped_word_cutoff_score_for_context(
         return i32::MAX;
     }
     let gap_trigger = gap_trigger_raw_score(bits, &ctx.karlin_params);
-    crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_for_update_tblastx(
+    crate::algorithm::tblastx::ncbi_cutoffs::word_cutoff_score_for_update(
+        crate::algorithm::tblastx::ncbi_cutoffs::CUTOFF_E_BLASTP,
         ctx.aa_len as i64,
         i64::from(word_subject_length),
         gap_trigger,
@@ -1682,6 +1685,52 @@ fn blastp_prelim_cutoffs(
     gapped_params: &KarlinParams,
     gapped_gumbel: Option<&BlastGumbelBlk>,
 ) -> BlastpPrelimCutoffs {
+    if args.ungapped {
+        blastp_prelim_cutoffs_of::<true>(
+            args,
+            contexts,
+            subject_length,
+            word_subject_length,
+            mode,
+            exact_spaces,
+            gapped_params,
+            gapped_gumbel,
+        )
+    } else {
+        blastp_prelim_cutoffs_of::<false>(
+            args,
+            contexts,
+            subject_length,
+            word_subject_length,
+            mode,
+            exact_spaces,
+            gapped_params,
+            gapped_gumbel,
+        )
+    }
+}
+
+/// `blastp_prelim_cutoffs` of a search whose mode is `UNGAPPED` (`args.ungapped`), for the
+/// callers that decide the mode once outside their loops (`call_setup::subject_parameters`): the
+/// instance of a gapped search reads the call's gapped block and takes the gapped word cutoff for
+/// every context, with no test of the mode in the loops over the contexts. An ungapped search
+/// reads each context's block (`call_setup::block_of`) and takes the word cutoff of
+/// `BlastInitialWordParametersUpdate` for its programs without gapped extension
+/// (`blastp_ungapped_word_cutoff_score_for_context`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1015-1025 (quoted at
+/// `call_setup::subject_parameters`)
+#[inline(always)]
+fn blastp_prelim_cutoffs_of<const UNGAPPED: bool>(
+    args: &ResolvedBlastpArgs,
+    contexts: &[QueryContext],
+    subject_length: i32,
+    word_subject_length: i32,
+    mode: BlastpCompositionMode,
+    exact_spaces: &[Option<i64>],
+    gapped_params: &KarlinParams,
+    gapped_gumbel: Option<&BlastGumbelBlk>,
+) -> BlastpPrelimCutoffs {
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()
         .zip(exact_spaces)
@@ -1691,7 +1740,7 @@ fn blastp_prelim_cutoffs(
                 args.evalue,
                 subject_length,
                 mode,
-                call_setup::context_block(args, gapped_params, ctx),
+                call_setup::block_of::<UNGAPPED>(gapped_params, ctx),
                 gapped_gumbel,
                 space.unwrap_or(0),
             )
@@ -1701,7 +1750,7 @@ fn blastp_prelim_cutoffs(
         .iter()
         .zip(contexts)
         .map(|(&hit_cutoff_score, ctx)| {
-            if args.ungapped {
+            if UNGAPPED {
                 blastp_ungapped_word_cutoff_score_for_context(
                     hit_cutoff_score,
                     ctx,
@@ -6077,7 +6126,7 @@ fn subject_taxonomy(
 /// The part of `run` after the files are opened: NCBI's processing of the options,
 /// `Query is Empty!`, the reading of the queries and the search.
 fn search_cli(
-    args: BlastpArgs,
+    mut args: BlastpArgs,
     list: Option<crate::seqdb::DbList>,
     query_file: Option<crate::blastinput::input_files::InputFile>,
     subjects: &SubjectSet<'_>,
@@ -6088,11 +6137,11 @@ fn search_cli(
     use crate::blastinput::fasta_reader::{
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
     };
+    // An ungapped search's `-matrix` that NCBI's tables do not have is looked for as a file with
+    // the settings' search when the options are resolved (`BlastpArgs::matrix_search`); the first
+    // query batch is refused then, and a run without a batch reads no file.
+    args.matrix_search = Some(settings.matrix_search.clone());
     let mut resolved = args.check_options(outputs.diagnostics)?;
-    // An ungapped search's `-matrix` that NCBI's tables do not have is looked for as a file when
-    // NCBI sets up a query batch (`ResolvedBlastpArgs::find_matrix_file`); a run without a batch
-    // reads no file.
-    resolved.find_matrix_file(&settings)?;
     // rpsblast: NCBI's check of the database's frequency ratios comes between the options and
     // the database (`rps_hooks::check_freq_ratio_file`).
     if resolved.rps_search.is_some() {
@@ -6652,7 +6701,7 @@ pub fn run_local_database(
 
 /// `run_local_database` from the taxid or seqid list on.
 fn search_database(
-    args: BlastpArgs,
+    mut args: BlastpArgs,
     query_records: &[FastaRecord],
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
@@ -6663,8 +6712,8 @@ fn search_database(
         .resolve(&settings, &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
+    args.matrix_search = Some(settings.matrix_search.clone());
     let mut resolved = resolve_for_formats(&args, outputs)?;
-    resolved.find_matrix_file(&settings)?;
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
     let xinclude = xinclude_format(&args, outputs)?;
@@ -9136,8 +9185,10 @@ fn write_reports_without_queries(
                     gap_extend: args.scoring.gap_extend,
                     word_threshold: args.threshold,
                     window_size: args.window_size as i32,
-                    gapped_karlin: lookup_protein_params(&args.scoring),
-                    gumbel: if !args.old_fsc {
+                    // None for an ungapped search, whose gap costs NCBI does not read
+                    // (`call_setup::gapped_block`).
+                    gapped_karlin: call_setup::gapped_block(args).unwrap_or_default(),
+                    gumbel: if args.has_gumbel() {
                         Some(
                             lookup_protein_gumbel_params(&args.scoring, total_db_len).context(
                                 "missing NCBI gumbel parameters for supported blastp scoring",
@@ -10886,11 +10937,7 @@ fn run_call(
                     file,
                     "BLASTP",
                 ),
-                None => crate::algorithm::blastx::query_setup::unknown_matrix_message_of(
-                    query_records[first.searched.clone()]
-                        .iter()
-                        .map(|record| record.sequence.is_empty()),
-                ),
+                None => unknown_matrix_message(&query_records[first.searched.clone()]),
             };
             return Err(preliminary_search_error(
                 &args,
@@ -10920,19 +10967,13 @@ fn run_call(
     // (BLASTX refuses the same subject, `blastx::database::too_long`). The refusal belongs to the
     // first batch with a valid context, as the reader's errors do.
     if args.ungapped && query_valid.iter().any(|valid| *valid) {
-        let too_long = |what: String, length: usize| {
-            anyhow::anyhow!(
-                "{what} has {length} residues; a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP",
-                crate::core::subject_split::MAX_DBSEQ_LEN
-            )
-        };
         match subject_source {
             BlastpSubjectSource::Fasta(records) => {
                 if let Some((index, record)) = records.iter().enumerate().find(|(_, record)| {
                     record.sequence.len() > crate::core::subject_split::MAX_DBSEQ_LEN
                 }) {
-                    return Err(too_long(
-                        format!("subject sequence {}", index + 1),
+                    return Err(too_long_subject_refusal(
+                        &format!("subject sequence {}", index + 1),
                         record.sequence.len(),
                     ));
                 }
@@ -10940,7 +10981,7 @@ fn run_call(
             BlastpSubjectSource::Database(database) => {
                 let longest = database.seqdb().max_length() as usize;
                 if longest > crate::core::subject_split::MAX_DBSEQ_LEN {
-                    return Err(too_long("a database sequence".to_string(), longest));
+                    return Err(too_long_subject_refusal("a database sequence", longest));
                 }
             }
         }
@@ -11012,7 +11053,7 @@ fn run_call(
         && crate::stats::setup::setup_subject_length(
             total_db_len,
             num_subjects,
-            (!args.old_fsc).then_some((cutoff_subject_length, false)),
+            args.has_gumbel().then_some((cutoff_subject_length, false)),
         )
         .is_none()
     {
@@ -11721,6 +11762,11 @@ fn run_call(
                 hit_list.prune_by_size(args.traceback_hitlist_size());
             }
         }
+    }
+    // An ungapped search's HSP of length 0 that the cuts above left in a shown list: its report
+    // is not ported yet (`traceback::refuse_empty_alignments`).
+    if args.ungapped {
+        traceback::refuse_empty_alignments(&hit_lists)?;
     }
     // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a
     // subject that the seqid list keeps without a definition line (line DBID item lineless).
@@ -12583,6 +12629,35 @@ fn run_call(
     Ok(())
 }
 
+/// NCBI's error of a query batch whose score block cannot load an unknown `-matrix` name
+/// (`blastx::query_setup::unknown_matrix_message`): the error of each query, then the messages of
+/// its reader, as NCBI's `TSearchMessages::ToString` writes them: the O warning of a protein
+/// query and `Sequence contains no data` of a record without letters (`query_messages`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 (quoted at
+/// `blastx::query_setup::unknown_matrix_message`)
+fn unknown_matrix_message(records: &[FastaRecord]) -> String {
+    crate::algorithm::blastx::query_setup::unknown_matrix_message_of(records.iter().map(
+        |record| crate::report::query_warnings::query_messages(record.seq(), true, false, false),
+    ))
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
+// ```c
+// /** Split subject sequences if longer than this */
+// #define MAX_DBSEQ_LEN 5000000
+// ```
+/// The refusal of an ungapped search of a subject longer than `MAX_DBSEQ_LEN` (`what` names it):
+/// NCBI searches it in overlapping parts and merges their HSP lists (`Blast_HSPListsMerge`,
+/// blast_engine.c:578-584), which `-ungapped` does not port (BLASTX refuses the same subject,
+/// `blastx::database::too_long`).
+fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{what} has {length} residues; a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP",
+        crate::core::subject_split::MAX_DBSEQ_LEN
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -12741,6 +12816,223 @@ mod tests {
         }
     }
 
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/linkhsp_unit_test.cpp:674-695 UngappedBlastpCutoffs
+    // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/linkhsp_unit_test.cpp:674-695
+    // (`kGoodCutoffs`, `testAllCutoffs`): the ungapped word cutoff of BLASTP, `cutoff_score_ungapped`
+    // 41, is the same for the three subject lengths 400, 60 and 3000 and for the database's
+    // average of 500 (`kDbLength` 500000000 / `kDbNumSeqs` 1000000): the gap trigger of 22 bits at
+    // BLOSUM62's ungapped block (41), below the hit-saving cutoff of 66 that the case lists. The
+    // case's x-drops (16), its final cutoff (66, which depends on its query gi|129295) and its
+    // sum-statistics cutoffs are not asserted.
+    #[test]
+    fn ungapped_blastp_word_cutoff_is_41_for_the_cases_subject_lengths() {
+        let karlin = crate::stats::lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let context = QueryContext {
+            q_idx: 0,
+            frame: 0,
+            aa_seq: vec![0; 302],
+            aa_seq_nomask: None,
+            aa_len: 300,
+            orig_len: 300,
+            frame_base: 0,
+            is_valid: true,
+            karlin_params: karlin,
+        };
+        assert_eq!(gap_trigger_raw_score(22.0, &karlin), 41);
+        for subject_length in [400, 60, 3000, 500] {
+            assert_eq!(
+                blastp_ungapped_word_cutoff_score_for_context(66, &context, 22.0, subject_length),
+                41,
+                "subject length {subject_length}"
+            );
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:346-374 and
+    // c++/include/algo/blast/core/blast_parameters.h:77,80 (`CUTOFF_E_BLASTP` and
+    // `CUTOFF_E_TBLASTX`, both 1e-300): BLASTP's word cutoff is the function that TBLASTX's calls
+    // (`word_cutoff_score_for_update`), with the E-value of its own program, and equals TBLASTX's at
+    // the same lengths; a program with another cutoff E-value gets another score.
+    #[test]
+    fn blastp_and_tblastx_word_cutoffs_are_one_function() {
+        use crate::algorithm::tblastx::ncbi_cutoffs::{
+            cutoff_score_for_update_tblastx, word_cutoff_score_for_update, CUTOFF_E_BLASTP,
+            CUTOFF_E_TBLASTX,
+        };
+        assert_eq!(CUTOFF_E_BLASTP, 1e-300);
+        assert_eq!(CUTOFF_E_TBLASTX, 1e-300);
+        let karlin = crate::stats::lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        for (query, subject, trigger, cap) in [
+            (300_i64, 1_000_i64, 1000, 1000),
+            (300, 40, 1000, 1000),
+            (2, 3, 41, 1000),
+            (300, 250_000, 41, 30),
+        ] {
+            let tblastx =
+                cutoff_score_for_update_tblastx(query, subject, trigger, cap, 0.0, &karlin, 1.0);
+            let blastp = word_cutoff_score_for_update(
+                CUTOFF_E_BLASTP,
+                query,
+                subject,
+                trigger,
+                cap,
+                0.0,
+                &karlin,
+                1.0,
+            );
+            assert_eq!(blastp, tblastx, "{query} {subject} {trigger} {cap}");
+        }
+        // The E-value is the program's: 1.0 (BLASTX's) lowers the score below the gap trigger.
+        let loose = word_cutoff_score_for_update(1.0, 300, 1_000, 1000, 1000, 0.0, &karlin, 1.0);
+        let tight =
+            word_cutoff_score_for_update(CUTOFF_E_BLASTP, 300, 1_000, 1000, 1000, 0.0, &karlin, 1.0);
+        assert!(loose < tight, "{loose} {tight}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:766-769 and
+    // c++/src/algo/blast/core/blast_hits.c:1833-1839 (quoted at `call_setup::context_block`): the
+    // block of a context's statistics is the call's gapped block in a gapped search and the
+    // context's own `kbp_std` in an ungapped one, whichever way the mode is given.
+    #[test]
+    fn context_block_is_the_gapped_block_or_the_contexts_own() {
+        let own = crate::stats::lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let shared = KarlinParams {
+            lambda: 0.267,
+            k: 0.041,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        let context = QueryContext {
+            q_idx: 0,
+            frame: 0,
+            aa_seq: vec![0; 12],
+            aa_seq_nomask: None,
+            aa_len: 10,
+            orig_len: 10,
+            frame_base: 0,
+            is_valid: true,
+            karlin_params: own,
+        };
+        let mut args = make_blastp_args();
+        args.comp_based_stats = "0".to_string();
+        let gapped = args.resolve().expect("gapped");
+        args.ungapped = true;
+        let ungapped = args.resolve().expect("ungapped");
+        assert!(std::ptr::eq(
+            call_setup::context_block(&gapped, &shared, &context),
+            &shared
+        ));
+        assert!(std::ptr::eq(
+            call_setup::context_block(&ungapped, &shared, &context),
+            &context.karlin_params
+        ));
+        assert!(std::ptr::eq(
+            call_setup::block_of::<false>(&shared, &context),
+            &shared
+        ));
+        assert!(std::ptr::eq(
+            call_setup::block_of::<true>(&shared, &context),
+            &context.karlin_params
+        ));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527 (quoted at
+    // `call_setup::gapped_block`): an ungapped search does not read its gap costs, so a run
+    // without a query batch writes the report for costs that are not in the matrix's table (and
+    // for a matrix name that NCBI's tables do not have), with no `Gap Penalties:` line; a gapped
+    // search writes it. The three commands of the review of line O4b (`printf '' | blastp -db ...
+    // -ungapped -comp_based_stats 0 -gapopen 5 -gapextend 5`, `-matrix PAM30 -gapopen 11 -gapextend 1`,
+    // `-matrix FOO`).
+    #[test]
+    fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_table() {
+        use crate::api::local_blast::{FormatOutput, FormatRefusal, OutputSink};
+        let report = |extra: &[(&str, &str)], ungapped: bool| -> String {
+            let mut args = make_blastp_args();
+            args.ungapped = ungapped;
+            args.comp_based_stats = "0".to_string();
+            for &(name, value) in extra {
+                match name {
+                    "matrix" => args.matrix = Some(value.to_string()),
+                    "gapopen" => args.gap_open = Some(value.parse().unwrap()),
+                    "gapextend" => args.gap_extend = Some(value.parse().unwrap()),
+                    _ => unreachable!(),
+                }
+            }
+            let resolved = args.resolve().expect("resolved");
+            let mut sink: Vec<u8> = Vec::new();
+            let mut diagnostics: Vec<u8> = Vec::new();
+            {
+                let mut outputs = ReportOutputs {
+                    formats: vec![FormatOutput {
+                        outfmt: "0",
+                        refusal: FormatRefusal::FailsCall,
+                        sink: OutputSink::Writer(&mut sink),
+                    }],
+                    diagnostics: &mut diagnostics,
+                    hits: None,
+                    observer: None,
+                };
+                write_reports_without_queries(
+                    &resolved,
+                    BlastpSubjectSource::Fasta(&[]),
+                    "",
+                    &mut outputs,
+                )
+                .expect("the report of a run without queries");
+            }
+            String::from_utf8(sink).expect("text")
+        };
+        for extra in [
+            &[("gapopen", "5"), ("gapextend", "5")][..],
+            &[("matrix", "PAM30"), ("gapopen", "11"), ("gapextend", "1")][..],
+            &[("matrix", "FOO")][..],
+        ] {
+            let text = report(extra, true);
+            assert!(text.starts_with("BLASTP 2.17.0+\n"), "{extra:?}: {text}");
+            assert!(!text.contains("Gap Penalties:"), "{extra:?}: {text}");
+        }
+        let gapped = report(&[], false);
+        assert!(gapped.contains("Gap Penalties: Existence: 11, Extension: 1"), "{gapped}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 and
+    // c++/src/algo/blast/api/blast_setup_cxx.cpp:919-926 (quoted at
+    // `blastx::query_setup::unknown_matrix_message[_of]`): the error of a batch whose score block
+    // cannot load the matrix holds each query's error followed by its messages: the O warning of a
+    // protein query (positions of its first 20 O) and `Sequence contains no data` of an empty one.
+    #[test]
+    fn the_unknown_matrix_error_names_each_querys_messages() {
+        let records = [
+            FastaRecord::new("Query_1", b"a", b"MKOVL"),
+            FastaRecord::new("Query_2", b"b", b""),
+            FastaRecord::new("Query_3", b"c", b"OKVOL"),
+            FastaRecord::new("Query_4", b"d", b"MKVL"),
+        ];
+        assert_eq!(
+            unknown_matrix_message(&records),
+            "Error: Unknown error code -1 Warning: One or more O characters replaced by X for alignment score calculations at positions 2 \
+             Error: Unknown error code -1 Warning: Sequence contains no data \
+             Error: Unknown error code -1 Warning: One or more O characters replaced by X for alignment score calculations at positions 0, 3 \
+             Error: Unknown error code -1 "
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54 (quoted at
+    // `too_long_subject_refusal`).
+    #[test]
+    fn the_long_subject_refusal_names_the_subject_and_its_length() {
+        assert_eq!(
+            too_long_subject_refusal("subject sequence 3", 5_000_001).to_string(),
+            "subject sequence 3 has 5000001 residues; a subject longer than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP"
+        );
+        assert_eq!(
+            too_long_subject_refusal("a database sequence", 6_000_000).to_string(),
+            "a database sequence has 6000000 residues; a subject longer than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP"
+        );
+    }
+
+    use crate::stats::lookup_protein_params;
     use crate::stats::KarlinParams;
     use crate::utils::matrix::ncbistdaa;
 
@@ -12875,6 +13167,7 @@ mod tests {
             request_inputs: None,
             app: BlastpApp::Blastp,
             taxdb_setting: None,
+            matrix_search: None,
             inclusion_ethresh: None,
             gap_trigger: None,
             sum_stats: false,

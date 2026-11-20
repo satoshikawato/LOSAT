@@ -626,6 +626,13 @@ pub struct BlastpArgs {
     /// files). Not a public option.
     #[arg(skip)]
     pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
+    /// The settings by which the options' resolution looks up the file of an ungapped search's
+    /// `-matrix` that NCBI's tables do not have (`ResolvedBlastpArgs::matrix_file`): the command
+    /// line's own settings (`search_cli`, `search_database`) and, for a search of the library with
+    /// `-subject`, the call's (`api::run`, from its application start); `None` in LOSAT Web, which
+    /// has no file system. Not a public option.
+    #[arg(skip)]
+    pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
     // ```c++
     //     if (args[kArgPSIInclusionEThreshold]) {
@@ -815,8 +822,8 @@ pub struct ResolvedBlastpArgs {
     /// (blast_args.cpp:303-307, blast_stat.c:921-923).
     pub searchsp: Option<i64>,
     /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP,
-    /// PSIBLAST and RPSBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`),
-    /// or an ungapped search (BLASTP's `-ungapped`: `blast_setup.c:517-527` frees the block).
+    /// PSIBLAST and RPSBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`).
+    /// An ungapped search has none either, whatever this says (`has_gumbel`).
     pub old_fsc: bool,
     pub task: String,
     pub evalue: f64,
@@ -896,9 +903,10 @@ pub struct ResolvedBlastpArgs {
     /// `preliminary_search_error`).
     pub unknown_matrix: bool,
     /// The file that NCBI BLAST+ reads for `unknown_matrix`'s name
-    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line and the
-    /// library API after the options are resolved (`find_matrix_file`); `None` in LOSAT Web. The
-    /// first query batch is refused then (`blastx::query_setup::matrix_error_message`).
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found with the settings' search of
+    /// the call (`BlastpArgs::matrix_search`) where the options are resolved, so for every entry of
+    /// a search alike; `None` without such a file and in LOSAT Web. The first query batch is
+    /// refused then (`blastx::query_setup::matrix_error_message`).
     pub matrix_file: Option<PathBuf>,
     pub scoring: ProteinScoringSpec,
     /// The composition mode that the search runs: the `-comp_based_stats` value, or mode 0 when
@@ -958,23 +966,14 @@ pub struct ResolvedBlastpArgs {
 }
 
 impl ResolvedBlastpArgs {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306 (quoted at
-    // `ncbi_environment::ApplicationSettings::matrix_file`: `BlastFindMatrixPath`)
-    /// Looks up the file that NCBI reads for `unknown_matrix`'s name with the settings' search
-    /// (`MatrixSearch::file`) into `matrix_file`, after the options are resolved: the command
-    /// line's search and the library's database search (`blastx::args::ResolvedOptions::
-    /// find_matrix_file`).
-    pub(crate) fn find_matrix_file(
-        &mut self,
-        settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
-    ) -> Result<()> {
-        if self.unknown_matrix {
-            self.matrix_file = settings
-                .matrix_search
-                .file(&self.matrix_name)
-                .map_err(anyhow::Error::msg)?;
-        }
-        Ok(())
+    /// Whether the search has a Gumbel block (the finite-size correction): not with `-searchsp`
+    /// or `OLD_FSC` (`old_fsc`), and not in an ungapped search, whose score block frees it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527 (quoted at
+    /// `blast_engine::call_setup::gapped_block`) and c++/src/algo/blast/core/blast_stat.c:921-923
+    /// (quoted at `ResolvedBlastpArgs::old_fsc`'s resolution, `BlastpArgs::check_options`)
+    pub fn has_gumbel(&self) -> bool {
+        !self.ungapped && !self.old_fsc
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:213-224
@@ -1056,6 +1055,17 @@ impl BlastpArgs {
     /// whether it was given (`culling_limit`).
     pub fn culling_limit_value(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
+    /// that NCBI looks for as a file (`ResolvedBlastpArgs::unknown_matrix`, which the resolution
+    /// sets for such a search; a gapped one refuses the name first).
+    pub(crate) fn unknown_matrix_name(&self) -> bool {
+        self.ungapped
+            && self
+                .matrix
+                .as_deref()
+                .is_some_and(|name| name.parse::<ScoringMatrix>().is_err())
     }
 
     /// The options as `check_options` resolves them, without NCBI's warnings.
@@ -1421,6 +1431,16 @@ impl BlastpArgs {
             }
         }
         let matrix = matrix.unwrap_or(ScoringMatrix::Blosum62);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306 (quoted at
+        // `ncbi_environment::ApplicationSettings::matrix_file`: `BlastFindMatrixPath`)
+        // The file that NCBI reads for that name, looked up with the settings' search where every
+        // entry of a search resolves the options (`matrix_search`).
+        let matrix_file = match (&self.matrix_search, unknown_matrix) {
+            (Some(search), true) => search
+                .file(&options.matrix_name)
+                .map_err(anyhow::Error::msg)?,
+            _ => None,
+        };
         let psi_pssm = self
             .psiblast_pssm
             .as_ref()
@@ -1468,9 +1488,7 @@ impl BlastpArgs {
             //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
             // ```
             // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307); every app reads the variable.
-            old_fsc: self.searchsp.is_some()
-                || self.ungapped
-                || crate::blastinput::app::old_fsc_environment(),
+            old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,
@@ -1529,7 +1547,7 @@ impl BlastpArgs {
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
             unknown_matrix,
-            matrix_file: None,
+            matrix_file,
             scoring: ProteinScoringSpec {
                 matrix,
                 gap_open: options.gap_open,
@@ -1772,11 +1790,18 @@ mod tests {
         let unknown = resolve(&["-ungapped", "-comp_based_stats", "0", "-matrix", "FOO"])
             .expect("an ungapped search with an unknown matrix");
         assert!(unknown.unknown_matrix);
-        assert!(unknown.old_fsc, "no Gumbel block in an ungapped search");
+        assert!(
+            !unknown.has_gumbel(),
+            "no Gumbel block in an ungapped search"
+        );
+        assert!(!unknown.old_fsc, "`old_fsc` is -searchsp or OLD_FSC only");
         let known = resolve(&["-ungapped", "-comp_based_stats", "0"]).expect("resolved");
         assert!(!known.unknown_matrix);
-        assert!(known.old_fsc);
+        assert!(!known.has_gumbel());
         assert!(known.matrix_file.is_none());
+        let searchsp = resolve(&["-ungapped", "-comp_based_stats", "0", "-searchsp", "1000"])
+            .expect("resolved");
+        assert!(searchsp.old_fsc && !searchsp.has_gumbel());
         let refused = resolve(&[
             "-ungapped",
             "-comp_based_stats",
@@ -1791,7 +1816,7 @@ mod tests {
         );
         // A gapped search keeps its own default: the Gumbel block.
         let gapped = resolve(&["-comp_based_stats", "0"]).expect("resolved");
-        assert!(!gapped.old_fsc);
+        assert!(!gapped.old_fsc && gapped.has_gumbel());
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391

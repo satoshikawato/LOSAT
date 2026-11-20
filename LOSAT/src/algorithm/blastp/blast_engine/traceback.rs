@@ -537,8 +537,8 @@ impl UngappedFinish<'_> {
     ///          (hsp->score*kbp[hsp->context]->Lambda -
     ///           kbp[hsp->context]->logK) / NCBIMATH_LN2;
     /// ```
-    /// An HSP of length 0 would have no letter to align; NCBI's bytes for it are not known, so
-    /// the search stops (open item D5 of task O4b).
+    /// An HSP of length 0 has no letter to align: it goes on to the lists of the report, where
+    /// `refuse_empty_alignments` stops a search whose shown lists hold one (task O4b, D5).
     pub(super) fn run(
         &self,
         preliminary_hit_lists: &mut [Option<BlastpHitList>],
@@ -593,12 +593,10 @@ impl UngappedFinish<'_> {
             best_evalue: f64::MAX,
         };
         for &(hsp, e_value) in hsps {
+            // The kernel deleted the HSPs of a negative length (`Blast_HSPTest`); one of length 0
+            // is `Sub(0)`.
             let length = hsp.query_end - hsp.query_start;
-            if length <= 0 {
-                anyhow::bail!(
-                    "an ungapped alignment of length 0, whose report NCBI BLAST+ 2.17.0 does not define here, is not supported by LOSAT's BLASTP"
-                );
-            }
+            debug_assert!(length >= 0, "ungapped_subject deletes a negative length");
             let mut final_hsp = final_hsp(
                 &hsp,
                 vec![GapEditOp::Sub(length as u32)],
@@ -613,6 +611,32 @@ impl UngappedFinish<'_> {
         }
         Ok((!hsp_list.hsps.is_empty()).then_some(hsp_list))
     }
+}
+
+/// The refusal of a search whose shown lists hold an ungapped alignment of length 0: LOSAT does
+/// not write the report of such an alignment yet (a follow-up replaces the refusal by NCBI's
+/// bytes, which every format but outfmt 1 to 4 defines).
+pub(super) const EMPTY_ALIGNMENT_REFUSAL: &str =
+    "the report of an ungapped alignment of length 0 is not ported yet; this is not supported by LOSAT's BLASTP";
+
+/// Stops an ungapped search whose final hit lists hold an HSP of length 0, after the steps of the
+/// traceback's end have cut them (`-max_hsps`, `-qcov_hsp_perc`, the hit list size): the lists
+/// that reach the reports.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:845-865 (quoted at
+/// `run_call`'s final loop: `Blast_TrimHSPListByMaxHsps`, `Blast_HSPListReapByQueryCoverage`)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:773-780 (`align_length` of an
+/// ungapped HSP is the length of its query range; an HSP of length 0 is kept, one of a negative
+/// length is deleted by `Blast_HSPTest`)
+pub(super) fn refuse_empty_alignments(hit_lists: &[Option<BlastpHitList>]) -> Result<()> {
+    for hit_list in hit_lists.iter().flatten() {
+        for list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
+            if list.hsps.iter().any(|hsp| hsp.length == 0) {
+                anyhow::bail!(EMPTY_ALIGNMENT_REFUSAL);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A preliminary list of one query and one subject, full or compact.
@@ -898,6 +922,7 @@ fn get_offsets_for_gapped_alignment(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::blastp::encoding::EncodedProtein;
 
     // NCBIstdaa: A 1, C 3, W 20 (BLOSUM62: W/W 11, A/A 4, W/C -2, A/W -3).
     const A: u8 = 1;
@@ -950,6 +975,109 @@ mod tests {
         assert_eq!(record.mismatch, 2);
         assert_eq!(record.raw_score, 7);
         assert!((record.identity - 50.0).abs() < 1e-12);
+    }
+
+    /// A context of the query `letters` (NCBIstdaa, without sentinels) with BLOSUM62's ungapped
+    /// block, as an ungapped search's contexts hold it.
+    fn context_of(letters: &[u8]) -> QueryContext {
+        let mut aa_seq = vec![0u8];
+        aa_seq.extend_from_slice(letters);
+        aa_seq.push(0);
+        QueryContext {
+            q_idx: 0,
+            frame: 0,
+            aa_seq,
+            aa_seq_nomask: None,
+            aa_len: letters.len(),
+            orig_len: letters.len(),
+            frame_base: 0,
+            is_valid: true,
+            karlin_params: crate::stats::lookup_protein_params_ungapped(ScoringMatrix::Blosum62),
+        }
+    }
+
+    fn encoded(letters: &[u8]) -> EncodedProtein {
+        let mut aa_seq = vec![0u8];
+        aa_seq.extend_from_slice(letters);
+        aa_seq.push(0);
+        EncodedProtein {
+            aa_seq,
+            aa_len: letters.len(),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1685-1704 and
+    // c++/src/algo/blast/core/blast_hits.c:1918-1928 (quoted at `UngappedFinish`): an ungapped
+    // search's final HSP is the preliminary one with its bit score from the context's own block
+    // and the E-value that the preliminary stage gave it; an HSP of length 0 is kept.
+    #[test]
+    fn ungapped_finish_keeps_the_evalue_and_scores_with_the_contexts_block() {
+        let contexts = [context_of(&[W, A, C, A, W])];
+        let subjects = [encoded(&[C, W, A, C, A, W])];
+        let finish = UngappedFinish {
+            contexts: &contexts,
+            subjects: XRedoSubjects::Encoded(&subjects),
+            matrix: ScoringMatrix::Blosum62,
+            hitlist_size: 10,
+            sorts_results: true,
+        };
+        let mut long = hsp((0, 5), (1, 6));
+        long.raw_score = 28;
+        let mut empty = hsp((2, 2), (3, 3));
+        empty.raw_score = 4;
+        let list = finish
+            .finish_list(0, 0, 3, &[(long, 0.125), (empty, 0.5)])
+            .expect("the list is finished")
+            .expect("a list with HSPs");
+        assert_eq!((list.oid, list.query_index), (0, 3));
+        assert_eq!(list.hsps.len(), 2);
+        let karlin = contexts[0].karlin_params;
+        let (first, second) = (&list.hsps[0], &list.hsps[1]);
+        assert_eq!(first.e_value, 0.125);
+        assert_eq!(second.e_value, 0.5);
+        let bits = |score: i32| (f64::from(score) * karlin.lambda - karlin.k.ln()) / std::f64::consts::LN_2;
+        assert!((first.bit_score - bits(28)).abs() < 1e-9, "{}", first.bit_score);
+        assert!((second.bit_score - bits(4)).abs() < 1e-9, "{}", second.bit_score);
+        assert_eq!((first.q_start, first.q_end, first.length), (1, 5, 5));
+        assert_eq!((first.num_ident, first.gapopen), (5, 0));
+        // Length 0: no letter, the query range [2, 2) written as q_start 3, q_end 2.
+        assert_eq!((second.q_start, second.q_end, second.length), (3, 2, 0));
+        assert_eq!(second.num_ident, 0);
+        assert_eq!(second.identity, 0.0);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:773-780 (an ungapped HSP's
+    // `align_length` is the length of its query range): the search of a list whose shown HSPs hold
+    // one of length 0 stops, with the refusal's text; lists without one pass.
+    #[test]
+    fn a_shown_hsp_of_length_zero_is_refused() {
+        let contexts = [context_of(&[W, A, C, A, W])];
+        let subjects = [encoded(&[C, W, A, C, A, W])];
+        let finish = UngappedFinish {
+            contexts: &contexts,
+            subjects: XRedoSubjects::Encoded(&subjects),
+            matrix: ScoringMatrix::Blosum62,
+            hitlist_size: 10,
+            sorts_results: true,
+        };
+        let lists = |hsps: &[(BlastpPreliminaryHsp, f64)]| {
+            let list = finish.finish_list(0, 0, 0, hsps).unwrap().unwrap();
+            let mut hit_list = BlastpHitList::new(10);
+            hit_list.update(list);
+            vec![None, Some(hit_list)]
+        };
+        let mut ordinary = hsp((0, 5), (1, 6));
+        ordinary.raw_score = 28;
+        let mut empty = hsp((2, 2), (3, 3));
+        empty.raw_score = 4;
+        refuse_empty_alignments(&lists(&[(ordinary, 0.1)])).expect("no HSP of length 0");
+        refuse_empty_alignments(&[]).expect("no list");
+        let error = refuse_empty_alignments(&lists(&[(ordinary, 0.1), (empty, 0.2)]))
+            .expect_err("a shown HSP of length 0");
+        assert_eq!(
+            error.to_string(),
+            "the report of an ungapped alignment of length 0 is not ported yet; this is not supported by LOSAT's BLASTP"
+        );
     }
 
     #[test]

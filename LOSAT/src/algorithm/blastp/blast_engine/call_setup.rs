@@ -42,7 +42,8 @@ use super::x_subject_meta::XSubjectMeta;
 use super::{
     blastp_aa_lookup, blastp_aa_lookup_on_block_spare, blastp_compressed_lookup,
     blastp_concatenated_query_length, blastp_context_lookup_bounds, blastp_is_archive,
-    blastp_is_xml, blastp_offset_array_size, blastp_prelim_cutoffs, blastp_prelim_evalue,
+    blastp_is_xml, blastp_offset_array_size, blastp_prelim_cutoffs, blastp_prelim_cutoffs_of,
+    blastp_prelim_evalue,
     blastp_preliminary_cutoff_subject_length, blastp_query_anchored_view,
     blastp_query_frames_marked, blastp_seqalign_format, blastp_x_dropoff_init_for_context,
     blastp_xml2_kind, build_blastp_concatenated_query, build_redone_match_heaps,
@@ -109,6 +110,15 @@ pub(super) struct CallSetup<'s, 'a> {
     pub(super) blastp_num_threads: usize,
     pub(super) ranges: &'s BlastpRanges<'a>,
     pub(super) reports: &'s BlastpReports<'a>,
+}
+
+/// The refusal of the Seq-align formats (outfmt 8, 9, 11, 12) of an ungapped search, whose
+/// Dense-diag Seq-align LOSAT's BLASTP does not write (`requested_reports`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
+/// (`BLASTUngappedHspListToSeqAlign`)
+fn ungapped_format_refusal(number: i32) -> String {
+    format!("output format {number} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTP")
 }
 
 /// The reports that the call's output formats ask for, in the formats' order (`BlastpReport`:
@@ -182,8 +192,10 @@ pub(super) fn requested_reports(
         for (format, report) in outputs.formats.iter().zip(&requested_formats) {
             if matches!(report, BlastpReport::Seqalign(_) | BlastpReport::Archive) {
                 bail!(
-                    "output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTP",
-                    crate::blastinput::app::parse_formatting_string(format.outfmt)?.number
+                    "{}",
+                    ungapped_format_refusal(
+                        crate::blastinput::app::parse_formatting_string(format.outfmt)?.number
+                    )
                 );
             }
         }
@@ -418,14 +430,37 @@ pub(super) fn call_subjects<'a>(
 /// The one owner of the Karlin block of the search's statistics for a context (decision D3 of
 /// task O4b): the call's shared gapped block (`shared`: the matrix's gap costs row) in a gapped
 /// search, and in an ungapped one the context's own `kbp_std` (`QueryContext::karlin_params`, with
-/// the matrix's ungapped alpha and beta, `call_lookup`). The effective lengths, the cutoffs, the
-/// preliminary E-values, the bit scores, the XML statistics and the footer read it here.
+/// the matrix's ungapped alpha and beta, `call_lookup`). The effective lengths, the cutoffs and
+/// the XML statistics of the call read it here; the preliminary E-values, the bit scores and the
+/// footer of an ungapped search (`prelim_kernel::ungapped_subject`, `traceback::UngappedFinish`,
+/// the report's `ungapped_karlin`) read `ctx.karlin_params` themselves, which is the same block.
+///
+/// The selection is made once for a call by the caller of a per-subject or per-context loop:
+/// `block_of` takes it as a constant, so the loops of a gapped search read `shared` as they did
+/// before `-ungapped` (`subject_parameters`, `blastp_prelim_cutoffs`).
 pub(super) fn context_block<'b>(
     args: &ResolvedBlastpArgs,
     shared: &'b KarlinParams,
     ctx: &'b QueryContext,
 ) -> &'b KarlinParams {
     if args.ungapped {
+        block_of::<true>(shared, ctx)
+    } else {
+        block_of::<false>(shared, ctx)
+    }
+}
+
+/// `context_block` for a search whose mode is known at compile time (`UNGAPPED` is
+/// `args.ungapped`): the block that a loop of one mode reads, without a test of the mode.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1833-1839 (quoted at
+/// `context_block`)
+#[inline(always)]
+pub(super) fn block_of<'b, const UNGAPPED: bool>(
+    shared: &'b KarlinParams,
+    ctx: &'b QueryContext,
+) -> &'b KarlinParams {
+    if UNGAPPED {
         &ctx.karlin_params
     } else {
         shared
@@ -445,6 +480,26 @@ pub(super) struct BlastpScoring {
     pub(super) gapped_params: KarlinParams,
     pub(super) x_drop_gapped: i32,
     pub(super) x_drop_gapped_final: i32,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527
+// ```c
+//        if (scoring_options->gapped_calculation) {
+//        ...
+//        } else {
+//           ASSERT(sbp->kbp_gap == NULL);
+//           /* for ungapped cases we do not have gbp filled */
+//           if (sbp->gbp) {
+//               sfree(sbp->gbp);
+//               sbp->gbp=NULL;
+// ```
+/// The matrix's gapped Karlin block for the gap costs of `args`, or none for an ungapped search:
+/// NCBI makes no `kbp_gap` for it and does not read its gap costs, which therefore need not be in
+/// the matrix's table (`lookup_protein_params` stops for costs outside it). The owner for the
+/// search (`call_scoring`) and for the reports of a run without a query batch
+/// (`write_reports_without_queries`).
+pub(super) fn gapped_block(args: &ResolvedBlastpArgs) -> Option<KarlinParams> {
+    (!args.ungapped).then(|| lookup_protein_params(&args.scoring))
 }
 
 /// The call's `BlastpScoring` of `args`, with the refusal of an X-drop that NCBI's gapped kernels
@@ -485,27 +540,14 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     // An ungapped search has no gapped Karlin block (`-gapopen` and `-gapextend` are ignored,
     // blast_setup.c:517-527), and so no gapped X-drops: its statistics are those of each
     // context's own block (`context_block`).
-    //
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527
-    // ```c
-    //        if (scoring_options->gapped_calculation) {
-    //        ...
-    //        } else {
-    //           ASSERT(sbp->kbp_gap == NULL);
-    //           /* for ungapped cases we do not have gbp filled */
-    //           if (sbp->gbp) {
-    //               sfree(sbp->gbp);
-    //               sbp->gbp=NULL;
-    // ```
-    if args.ungapped {
+    let Some(gapped_params) = gapped_block(args) else {
         return Ok(BlastpScoring {
             ideal_ungapped_lambda,
             gapped_params: KarlinParams::default(),
             x_drop_gapped: 0,
             x_drop_gapped_final: 0,
         });
-    }
-    let gapped_params = lookup_protein_params(&args.scoring);
+    };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:457-463
     // ```c
     // params->gap_x_dropoff = (Int4)
@@ -898,7 +940,7 @@ pub(super) fn db_extent(
             database.statistics().gumbel_db_length
         })
     };
-    let gapped_gumbel = if !args.old_fsc {
+    let gapped_gumbel = if args.has_gumbel() {
         Some(
             lookup_protein_gumbel_params(&args.scoring, gumbel_db_length)
                 .context("missing NCBI gumbel parameters for supported blastp scoring")?,
@@ -938,10 +980,10 @@ pub(super) fn db_extent(
         Some(database) => rps_hooks::dbsize_volume_num_seqs(args, database)
             .map_or_else(|| database.statistics_num_sequences(), |count| count as i32),
     };
-    // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
-    // statistics' average (blast_setup.c:975, quoted at the check of the average in `run_call`),
-    // which divides by their number of sequences.
-    if let Some(database) = database.filter(|_| args.old_fsc) {
+    // Without the Gumbel block (`-searchsp`, `OLD_FSC`, an ungapped search: `has_gumbel`) NCBI's
+    // shortest subject length is the statistics' average (blast_setup.c:975, quoted at the check
+    // of the average in `run_call`), which divides by their number of sequences.
+    if let Some(database) = database.filter(|_| !args.has_gumbel()) {
         database.check_statistics_count(args.app.name())?;
         // RPS-BLAST's first volume of none of the profiles (`rps_hooks::dbsize_volume_num_seqs`)
         // gives the same division by 0: the same refusal (DECISIONS 14 of line RG), not a panic.
@@ -1017,6 +1059,7 @@ pub(super) fn db_extent(
 ///     BlastQueryInfo* query_info,
 ///     BlastScoreBlk* sbp,
 /// ```
+#[derive(Clone, Copy)]
 pub(super) struct CallStatistics<'s> {
     pub(super) args: &'s ResolvedBlastpArgs,
     pub(super) database: Option<&'s BlastpDatabase>,
@@ -1079,7 +1122,7 @@ pub(super) fn call_search_spaces<'s>(
     //              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
     //          }
     // ```
-    // Without the Gumbel block (`old_fsc`: `-searchsp` or `OLD_FSC`) the hit cutoffs read
+    // Without the Gumbel block (`!has_gumbel`: `-searchsp`, `OLD_FSC` or an ungapped search) the hit cutoffs read
     // each context's search space, which the exact computation hands them
     // (`exact_search_spaces`; `blastp_cutoff_score_max`).
     let options_searchsp = args.searchsp.unwrap_or(0);
@@ -1314,7 +1357,13 @@ pub(super) fn prelim_cutoffs(
     } = *statistics;
     // The setup's cutoffs; psiblast's `-sum_stats true` lowers the cutoff of the HSPs a search
     // keeps (`cutoff_score`) to the sum statistics' cutoff where that is smaller, and the
-    // preliminary stage links the HSPs of each subject (`BlastpSumStats`).
+    // preliminary stage links the HSPs of each subject (`BlastpSumStats`). Only an ungapped
+    // search's word cutoffs read the sequence source's average subject length.
+    let word_subject_length = if args.ungapped {
+        average_subject_length(statistics)
+    } else {
+        cutoff_subject_length
+    };
     let BlastpPrelimCutoffs {
         hit_cutoff_scores,
         word_cutoff_scores,
@@ -1323,7 +1372,7 @@ pub(super) fn prelim_cutoffs(
         args,
         contexts,
         cutoff_subject_length,
-        average_subject_length(statistics),
+        word_subject_length,
         args.comp_based_stats.mode,
         preliminary_exact_spaces,
         gapped_params,
@@ -1409,14 +1458,9 @@ pub(super) fn subject_parameters<'s>(
     preliminary_search_spaces: &'s [SearchSpace],
     preliminary_exact_spaces: &'s [Option<i64>],
 ) -> impl Fn(usize) -> Result<BlastpSubjectParameters, SearchSpaceOverflow> + 's {
-    let CallStatistics {
-        args,
-        contexts,
-        gapped_params,
-        gapped_gumbel,
-        num_subjects,
-        ..
-    } = *statistics;
+    // `CallStatistics` holds references and numbers only: the closure keeps its own copy.
+    let statistics_of_call = *statistics;
+    let args = statistics_of_call.args;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1015-1025
     // ```c
     //    /* Update cutoff scores in hit saving parameters */
@@ -1446,6 +1490,9 @@ pub(super) fn subject_parameters<'s>(
     // the query information, which the traceback of a list does not read, and its hit-saving
     // cutoffs, which only the complexity adjustment reads, and links with the traceback's
     // parameters, which no word parameters update).
+    // The mode is decided here, once for a subject, outside the loops over the contexts: the
+    // instance of a gapped search reads the call's gapped block for every context and the word
+    // cutoff's gapped rule, as it did before `-ungapped` (`context_block`, `block_of`).
     move |subject_length: usize| -> Result<
         BlastpSubjectParameters,
         crate::stats::setup::SearchSpaceOverflow,
@@ -1453,42 +1500,80 @@ pub(super) fn subject_parameters<'s>(
         let option_spaces = preliminary_option_spaces
             .as_deref()
             .expect("the statistics of each subject have their preliminary option spaces");
-        let mut search_spaces = preliminary_search_spaces.to_vec();
-        let mut exact_spaces = preliminary_exact_spaces.to_vec();
-        for (ctx_idx, ctx) in contexts.iter().enumerate() {
-            if !ctx.is_valid || ctx.aa_len == 0 {
-                continue;
-            }
-            let lengths = crate::stats::setup::subject_eff_lengths(
-                ctx.aa_len as i64,
-                subject_length as i64,
-                num_subjects,
-                args.dbsize,
-                option_spaces[ctx_idx],
-                false,
-                context_block(args, gapped_params, ctx),
-                args.app.name(),
-            )?;
-            search_spaces[ctx_idx] = SearchSpace {
-                effective_space: lengths.eff_searchsp as f64,
-                length_adjustment: i64::from(lengths.length_adjustment),
-            };
-            exact_spaces[ctx_idx] = Some(lengths.eff_searchsp);
+        if args.ungapped {
+            one_subject::<true>(
+                statistics_of_call,
+                option_spaces,
+                preliminary_search_spaces,
+                preliminary_exact_spaces,
+                subject_length,
+            )
+        } else {
+            one_subject::<false>(
+                statistics_of_call,
+                option_spaces,
+                preliminary_search_spaces,
+                preliminary_exact_spaces,
+                subject_length,
+            )
         }
-        Ok(BlastpSubjectParameters {
-            search_spaces,
-            cutoffs: blastp_prelim_cutoffs(
-                args,
-                contexts,
-                subject_length as i32,
-                subject_length as i32,
-                BlastpCompositionMode::NoCompositionBasedStats,
-                &exact_spaces,
-                gapped_params,
-                gapped_gumbel.as_ref(),
-            ),
-        })
     }
+}
+
+/// The statistics of one subject (`subject_parameters`) of a search whose mode is `UNGAPPED`
+/// (`args.ungapped`): each valid context's effective lengths with the context's block
+/// (`block_of`), then the cutoffs (`blastp_prelim_cutoffs_of`).
+#[inline(always)]
+fn one_subject<const UNGAPPED: bool>(
+    statistics: CallStatistics<'_>,
+    option_spaces: &[i64],
+    preliminary_search_spaces: &[SearchSpace],
+    preliminary_exact_spaces: &[Option<i64>],
+    subject_length: usize,
+) -> Result<BlastpSubjectParameters, SearchSpaceOverflow> {
+    let CallStatistics {
+        args,
+        contexts,
+        gapped_params,
+        gapped_gumbel,
+        num_subjects,
+        ..
+    } = statistics;
+    let mut search_spaces = preliminary_search_spaces.to_vec();
+    let mut exact_spaces = preliminary_exact_spaces.to_vec();
+    for (ctx_idx, ctx) in contexts.iter().enumerate() {
+        if !ctx.is_valid || ctx.aa_len == 0 {
+            continue;
+        }
+        let lengths = crate::stats::setup::subject_eff_lengths(
+            ctx.aa_len as i64,
+            subject_length as i64,
+            num_subjects,
+            args.dbsize,
+            option_spaces[ctx_idx],
+            false,
+            block_of::<UNGAPPED>(gapped_params, ctx),
+            args.app.name(),
+        )?;
+        search_spaces[ctx_idx] = SearchSpace {
+            effective_space: lengths.eff_searchsp as f64,
+            length_adjustment: i64::from(lengths.length_adjustment),
+        };
+        exact_spaces[ctx_idx] = Some(lengths.eff_searchsp);
+    }
+    Ok(BlastpSubjectParameters {
+        search_spaces,
+        cutoffs: blastp_prelim_cutoffs_of::<UNGAPPED>(
+            args,
+            contexts,
+            subject_length as i32,
+            subject_length as i32,
+            BlastpCompositionMode::NoCompositionBasedStats,
+            &exact_spaces,
+            gapped_params,
+            gapped_gumbel.as_ref(),
+        ),
+    })
 }
 
 /// What the call's preliminary stage and redo write (`prelim_sinks`): the culling writer, the first
@@ -1707,4 +1792,20 @@ pub(super) fn scan_shape<'a>(
         total_query_span,
         x_soft_subjects,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440 (quoted at
+    // `ungapped_format_refusal`): the text of the refusal of the Seq-align formats of an ungapped
+    // search.
+    #[test]
+    fn the_seqalign_formats_of_an_ungapped_search_are_refused_by_name() {
+        assert_eq!(
+            ungapped_format_refusal(8),
+            "output format 8 with -ungapped (an ungapped search) is not supported by LOSAT's BLASTP"
+        );
+    }
 }

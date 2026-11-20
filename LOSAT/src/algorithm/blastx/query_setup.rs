@@ -327,17 +327,39 @@ pub(crate) fn matrix_error_message(records: &[FastaRecord], options: &ResolvedOp
 /// error, which `RemoveDuplicates` sorts first (`CSearchMessage::operator<`,
 /// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`).
 pub(crate) fn unknown_matrix_message(records: &[FastaRecord]) -> String {
-    unknown_matrix_message_of(records.iter().map(|record| record.sequence.is_empty()))
+    unknown_matrix_message_of(records.iter().map(|record| {
+        if record.sequence.is_empty() {
+            vec![crate::blastinput::query_batch::NO_DATA_MESSAGE.to_string()]
+        } else {
+            Vec::new()
+        }
+    }))
 }
 
-/// [`unknown_matrix_message`] of queries given by whether each has no letters (BLASTP's records
-/// are another type).
-pub(crate) fn unknown_matrix_message_of(without_letters: impl IntoIterator<Item = bool>) -> String {
+/// [`unknown_matrix_message`] of queries given by the messages that each has besides the error
+/// (BLASTP's queries hold the O warning of a protein reader as well as `Sequence contains no
+/// data`, and its records are another type): each query's error, then its messages as warnings,
+/// sorted and without repeats as NCBI keeps them (`TSearchMessages::RemoveDuplicates`,
+/// `report::query_warnings::sorted_query_messages`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 (quoted at
+/// `unknown_matrix_message`: the text is `search_messages.ToString()`, every message of each query)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:919-926
+/// ```c++
+///     if (warnings && replaced_residues.size() > 0) {
+///         *warnings += "One or more O characters replaced by X for ";
+///         *warnings += "alignment score calculations at positions ";
+/// ```
+pub(crate) fn unknown_matrix_message_of(
+    messages: impl IntoIterator<Item = Vec<String>>,
+) -> String {
     let mut message = String::new();
-    for empty in without_letters {
+    for query in messages {
         message.push_str("Error: Unknown error code -1 ");
-        if empty {
-            message.push_str("Warning: Sequence contains no data ");
+        for warning in crate::report::query_warnings::sorted_query_messages(&query) {
+            message.push_str("Warning: ");
+            message.push_str(warning);
+            message.push(' ');
         }
     }
     message

@@ -941,7 +941,7 @@ impl BlastpPrelimKernel<'_> {
     /// }
     /// ```
     /// (BLASTP has no `link_hsp_params` without psiblast's `-sum_stats`, which has no `-ungapped`;
-    /// the bit scores are made by the final stage, `OrdinaryTraceback::finish_ungapped`.)
+    /// the bit scores are made by the final stage, `UngappedFinish::run`.)
     #[cold]
     #[inline(never)]
     fn ungapped_subject(
@@ -1052,7 +1052,7 @@ impl BlastpPrelimKernel<'_> {
         // BLASTP has no `-perc_identity` and its minimum hit length is 0: the test deletes an HSP
         // of a negative length (`align_length` of an ungapped HSP is the length of its query range,
         // blast_hits.c:773-780) and keeps the others, whose scores did not change, in their order.
-        preliminary_hsp_list.retain(|hsp| hsp.query_end - hsp.query_start >= 0);
+        delete_failed_hsp_tests(&mut preliminary_hsp_list);
         // The lists of the queries (`Blast_HSPListSplitByQuery` of the HSP stream's writer), then
         // each list's E-values from the context's own block (`context_block`), the reap by the
         // preliminary E-value and by `-qcov_hsp_perc`, as NCBI's lines quoted above do on the
@@ -1767,5 +1767,67 @@ impl BlastpPrelimKernel<'_> {
         scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
         scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2713-2733 (quoted at
+// `BlastpPrelimKernel::ungapped_subject`) and c++/src/algo/blast/core/blast_hits.c:993-999
+// ```c
+// static Boolean s_HSPTest(const BlastHSP* hsp,
+//                          const BlastHitSavingOptions* hit_options,
+//                          Int4 align_length)
+// {
+// 	   return ((hsp->num_ident * 100.0 <
+// 			   align_length * hit_options->percent_identity) ||
+// 			   align_length < hit_options->min_hit_length) ;
+// ```
+/// `Blast_HSPTest` of the HSPs of an ungapped search's subject (`Blast_HSPListReevaluateUngapped`):
+/// BLASTP has no `-perc_identity` and its minimum hit length is 0, so the test deletes an HSP of a
+/// negative length (`align_length` of an ungapped HSP is the length of its query range,
+/// blast_hits.c:773-780) and keeps the others, an HSP of length 0 among them, in their order (their
+/// scores did not change).
+fn delete_failed_hsp_tests(hsps: &mut Vec<BlastpPreliminaryHsp>) {
+    hsps.retain(|hsp| hsp.query_end - hsp.query_start >= 0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hsp(query: (i32, i32), score: i32) -> BlastpPreliminaryHsp {
+        BlastpPreliminaryHsp {
+            query_start: query.0,
+            query_end: query.1,
+            subject_start: query.0,
+            subject_end: query.1,
+            gapped_query_start: query.0,
+            gapped_subject_start: query.0,
+            raw_score: score,
+            query_context: 0,
+            query_frame: 0,
+            subject_frame: 0,
+            query_length: 100,
+            q_idx: 0,
+            s_idx: 0,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-999 (quoted at
+    // `delete_failed_hsp_tests`): `Blast_HSPTest` of a BLASTP HSP fails for a negative length only.
+    #[test]
+    fn hsp_test_deletes_a_negative_length_and_keeps_zero_in_order() {
+        let mut hsps = vec![
+            hsp((10, 20), 30),
+            hsp((12, 11), 25),
+            hsp((5, 5), 20),
+            hsp((40, 39), 15),
+            hsp((7, 9), 10),
+        ];
+        delete_failed_hsp_tests(&mut hsps);
+        let kept: Vec<(i32, i32, i32)> = hsps
+            .iter()
+            .map(|hsp| (hsp.query_start, hsp.query_end, hsp.raw_score))
+            .collect();
+        assert_eq!(kept, [(10, 20, 30), (5, 5, 20), (7, 9, 10)]);
     }
 }

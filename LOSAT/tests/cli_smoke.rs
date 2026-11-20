@@ -168,7 +168,8 @@ fn startup_trace_needs_the_diagnostics_feature() {
 // ```
 // NCBI's handlers read the subjects and open the query before the options are checked, so a
 // missing file is reported first; LOSAT's rejection of an option that NCBI runs comes where
-// NCBI checks the options.
+// NCBI checks the options. The option here is `-use_sw_tback` without composition-based
+// statistics, which BLASTP still refuses (with them it runs: line RG item X4).
 #[test]
 fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     let missing_query = temp_path("missing_query", "faa");
@@ -178,7 +179,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&missing_query)
         .arg("-subject")
         .arg(&missing_subject)
-        .arg("-use_sw_tback")
+        .args(["-use_sw_tback", "-comp_based_stats", "0"])
         .output()
         .expect("run unsupported blastp");
     assert!(!output.status.success(), "a missing subject should fail");
@@ -197,7 +198,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&query)
         .arg("-subject")
         .arg(&subject)
-        .arg("-use_sw_tback")
+        .args(["-use_sw_tback", "-comp_based_stats", "0"])
         .output()
         .expect("run unsupported blastp");
     let _ = std::fs::remove_file(&query);
@@ -206,7 +207,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains(
-            "-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's BLASTP"
+            "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's BLASTP yet"
         ),
         "unsupported error should name program, option, and reason: {stderr}"
     );
@@ -1364,9 +1365,11 @@ fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
     assert_eq!(output.stdout, plain_blastn.stdout);
     // Megablast without an index: NCBI's warning, then the search without the index.
     let root = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
-    let warning = format!(
+    // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+    let warning = losat::wording::losat_text(&format!(
         "Warning: (1.1) [blastn] NCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 795: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New() - no database volume has an index\n\nNCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 1026: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old() - no index file specified or index 'db/plain*' not found.\n Database index will not be used.\n"
-    );
+    ))
+    .into_owned();
     let megablast = [
         "blastn", "-query", "q.fna", "-db", "db/plain", "-outfmt", "6",
     ];
@@ -1466,7 +1469,7 @@ fn blastx_seg_error_comes_from_the_filtering_handler() {
         ">p\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV\n",
     )
     .unwrap();
-    let error = "BLAST query/options error: Invalid number of arguments to filtering option\nPlease refer to the BLAST+ user manual.\n";
+    let error = "BLAST query/options error: Invalid number of arguments to filtering option\nPlease refer to the LOSAT user manual.\n";
     for extra in [&["-num_descriptions", "5"][..], &["-query_loc", "5-1"], &[]] {
         let output = clean_losat_command()
             .current_dir(&dir)
@@ -1478,7 +1481,10 @@ fn blastx_seg_error_comes_from_the_filtering_handler() {
             .expect("run LOSAT");
         assert_eq!(output.status.code(), Some(1), "{extra:?} {output:?}");
         assert!(output.stdout.is_empty(), "{extra:?}");
-        assert_eq!(String::from_utf8_lossy(&output.stderr), error, "{extra:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Please refer to the LOSAT user manual."));
+        assert!(!stderr.contains("Please refer to the BLAST+ user manual."));
+        assert_eq!(stderr, error, "{extra:?}");
     }
     fs::remove_dir_all(&dir).unwrap();
 }

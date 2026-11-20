@@ -1,0 +1,229 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qok1 BDT63546.1 with W first"
+                  }
+                }
+              },
+              title "qok1 BDT63546.1 with W first"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 124,
+              seq-data ncbieaa "WATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALS
+IGLIVVAIMNLRMGMGNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYTTRLK"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sfail tks_M with D first, twice: two HSPs with
+ tks_W, W against D"
+                }
+              }
+            },
+            title "sfail tks_M with D first, twice: two HSPs with tks_W, W
+ against D"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 160,
+            seq-data ncbieaa "DQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVK
+HSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKDQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLF
+VKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIK"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sok1 BDT63546.1 of PajaWSV"
+                }
+              }
+            },
+            title "sok1 BDT63546.1 of PajaWSV"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 124,
+            seq-data ncbieaa "MATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIG
+LIVVAIMNLRMGMGNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYTTRLK"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 4 }
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 1000
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean TRUE
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 638
+          },
+          {
+            id str "blast_score",
+            value int 638
+          },
+          {
+            id str "e_value",
+            value real { 384900666250164, 10, -87 }
+          },
+          {
+            id str "bit_score",
+            value real { 250365561715315, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 123
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 124
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_2"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            124
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 318629775691868, 10, -15 },
+        k { 134790740728501, 10, -15 },
+        h { 390272610261837, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 1000",
+      "Effective search space used: 1000",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST engine error: Traceback failed"
+    }
+  }
+}

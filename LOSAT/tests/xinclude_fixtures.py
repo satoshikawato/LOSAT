@@ -62,7 +62,11 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import losat_wording  # noqa: E402  (LOSAT's words in NCBI's frozen bytes, AGENTS.md rule 8)
 
 XINCLUDE = "xinclude"
 PSSM = "pssm"
@@ -227,12 +231,13 @@ def problems(result: Result, row: dict[str, str], frozen: Path, first_difference
         out.append(f"stdout is not empty ({len(result.run.stdout)} bytes)")
     if result.master is None:
         out.append("no master file")
-    elif result.master != expected:
-        out.append("master " + first_difference(expected, result.master))
+    elif result.master != losat_wording.losat_output_bytes(expected):
+        out.append("master " + first_difference(losat_wording.losat_output_bytes(expected), result.master))
     if len(result.sides) != len(expected_sides):
         out.append(f"{len(result.sides)} side files, expected {len(expected_sides)}")
     else:
         for n, (want, got) in enumerate(zip(expected_sides, result.sides), 1):
+            want = losat_wording.losat_output_bytes(want)
             if want != got:
                 out.append(f"side file {n} " + first_difference(want, got))
     if result.stray:

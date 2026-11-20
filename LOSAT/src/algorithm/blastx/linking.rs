@@ -90,18 +90,11 @@ pub fn link_parameters(options: &ResolvedOptions) -> Option<LinkParameters> {
     if !options.sum_stats {
         return None;
     }
-    let max_gap = (options.max_intron_length - 2) / 3;
-    let intron = if options.gapped {
-        if options.max_intron_length == 0 {
-            40
-        } else if max_gap <= 0 {
-            return None;
-        } else {
-            max_gap
-        }
-    } else {
-        max_gap.max(0)
-    };
+    // The conversion of `-max_intron_length` above has one owner, shared with TBLASTN.
+    let intron = crate::core::link_hsps::translated_longest_intron(
+        options.max_intron_length,
+        options.gapped,
+    )?;
     Some(LinkParameters {
         gap_size: 40,
         overlap_size: 9,

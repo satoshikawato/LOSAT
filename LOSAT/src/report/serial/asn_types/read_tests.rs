@@ -178,25 +178,28 @@ fn enumerated_and_named_integers() {
         Value::Sequence(vec![(biomol, Value::Enum(99))])
     );
     let report = exception(named::SEQ_INST, &seq_inst(",\n  topology 99999999999"));
+    // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
     assert_eq!(
         report,
-        [
-            "NCBI C++ Exception:\n".to_string(),
-            util(
-                "src/util/strbuffer.cpp",
-                583,
-                "ncbi::CIStreamBuffer::NumberOverflow() - number overflow in line 4"
-            ),
-            util(
-                "src/serial/enumerated.cpp",
-                428,
-                "ncbi::CEnumeratedTypeInfo::ReadEnum() - invalid enum value"
-            ),
-            member_frame("topology"),
-            class_frame("Seq-inst"),
-            named_frame("Seq-inst"),
-        ]
-        .concat()
+        crate::wording::losat_text(
+            &[
+                "NCBI C++ Exception:\n".to_string(),
+                util(
+                    "src/util/strbuffer.cpp",
+                    583,
+                    "ncbi::CIStreamBuffer::NumberOverflow() - number overflow in line 4"
+                ),
+                util(
+                    "src/serial/enumerated.cpp",
+                    428,
+                    "ncbi::CEnumeratedTypeInfo::ReadEnum() - invalid enum value"
+                ),
+                member_frame("topology"),
+                class_frame("Seq-inst"),
+                named_frame("Seq-inst"),
+            ]
+            .concat()
+        )
     );
 }
 
@@ -349,9 +352,10 @@ fn members_are_named_or_tagged_in_module_order() {
             &format!("{function}() - {text} (m_Pos = 1)"),
         )
     };
+    // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
     assert_eq!(
         report,
-        [
+        crate::wording::losat_text(&[
             "NCBI C++ Exception:\n".to_string(),
             string(870, "ncbi::NStr::StringToInt8", "Cannot convert string '1x' to Int8"),
             report_line(
@@ -373,11 +377,14 @@ fn members_are_named_or_tagged_in_module_order() {
                 "ncbi::CObjectIStream::Read() -  Frame type= eFrameNamed, Object type= Date-std (m_Pos = 1)"
             ),
         ]
-        .concat()
+        .concat())
     );
     // The member frame of the first member names none.
-    assert!(exception(named::DATE_STD, &date("[99999999999] 2024"))
-        .contains("Frame type= eFrameClassMember (m_Pos = 0)"));
+    assert!(
+        exception(named::DATE_STD, &date("[99999999999] 2024")).contains(
+            &*crate::wording::losat_text("Frame type= eFrameClassMember (m_Pos = 0)")
+        )
+    );
 }
 
 // The frames of a number overflow in a descriptor (probe c07 of SURVEY_D3: Date-std's year in a
@@ -396,9 +403,10 @@ fn the_report_has_a_line_per_frame() {
             &format!("ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= {kind}, {what}"),
         )
     };
+    // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
     assert_eq!(
         report,
-        [
+        crate::wording::losat_text(&[
             "NCBI C++ Exception:\n".to_string(),
             util(
                 "src/util/strbuffer.cpp",
@@ -423,7 +431,7 @@ fn the_report_has_a_line_per_frame() {
             ),
             named_frame("Seq-descr"),
         ]
-        .concat()
+        .concat())
     );
 }
 
@@ -888,7 +896,8 @@ fn a_nest_of_any_depth_is_read_without_recursion() {
                 "{}",
                 report.lines().count()
             );
-            assert!(report.contains("NumberOverflow"));
+            // NCBI's first exception (`CIStreamBuffer::NumberOverflow`) in LOSAT's words.
+            assert!(report.starts_with("number overflow in line "), "{report}");
             let copy = exception.clone();
             assert!(copy == exception);
             drop(copy);

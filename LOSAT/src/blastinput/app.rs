@@ -9,6 +9,8 @@ use std::path::Path;
 use crate::blastinput::value_parsers::SegSpec;
 use crate::cli::NativeError;
 
+use crate::wording::USER_MANUAL_FOOTER;
+
 /// An error that NCBI raises as `CInputException` (an option handler or `Validate`).
 ///
 /// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-176
@@ -19,12 +21,12 @@ use crate::cli::NativeError;
 ///         exit_code = BLAST_INPUT_ERROR;                                      \
 ///     }                                                                       \
 /// ```
+/// Exception (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 12): directs users to
+/// `USER_MANUAL_FOOTER` ("Please refer to the LOSAT user manual.").
 pub fn options_error(message: &str) -> anyhow::Error {
     NativeError {
         exit: 1,
-        message: format!(
-            "BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n"
-        ),
+        message: format!("BLAST query/options error: {message}\n{USER_MANUAL_FOOTER}\n"),
     }
     .into()
 }
@@ -45,6 +47,41 @@ pub fn engine_error(message: &str) -> anyhow::Error {
     }
     .into()
 }
+
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302 (TBLASTX's
+// loop is the same, tblastx_app.cpp:176-207)
+// ```c++
+//             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+// ...
+//                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
+//                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+//                     results = lcl_blast.Run();
+// ...
+//                     ITERATE(CSearchResultSet, result, *results) {
+//                         formatter.PrintOneResultSet(**result, query);
+//                     }
+// ```
+/// An error of a query batch's search that comes after the reports of the batches before, for
+/// every program: NCBI searches a batch and prints its reports before it reads the next one, so
+/// when the search of a batch stops NCBI has printed the reports of the batches before, without
+/// the epilog. The error held is the run's error as it is: NCBI's own (`engine_error`, exit 3) or
+/// LOSAT's refusal of a step where NCBI crashes, does not finish or stops (exit 1). The batch loop
+/// that meets it writes those reports (for the first batch, the prologs), then the failing batch's
+/// reader messages and search strategy posts, and returns the error it holds, its message
+/// unchanged: TBLASTX's (`tblastx::blast_engine::run_impl`, the X2c form, the Owner's decision of
+/// 2026-11-16 on line RG's Q-X2c: "the results of the query batches before are written") and
+/// TBLASTN's (`tblastn::tblastn_app::batch_failure`). Any other refusal of a batch's search comes
+/// before the run's first byte.
+#[derive(Debug)]
+pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
+
+impl std::fmt::Display for ErrorAfterBatchReports {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for ErrorAfterBatchReports {}
 
 /// NCBI's error for a search without `-subject` (and without `-db`), which the handler of
 /// the database arguments raises before the query and the output are opened.
@@ -1258,7 +1295,7 @@ mod tests {
             .contains("Delimiter format is invalid"));
         assert_eq!(
             message(parse_formatting_string("abc").unwrap_err()),
-            "1 BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n"
+            "1 BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
         );
         assert_eq!(
             message(parse_formatting_string("22").unwrap_err()),
@@ -1435,11 +1472,8 @@ mod tests {
             spec: String::new(),
             delimiter: String::new(),
         };
-        let options = |text: &str| {
-            format!(
-                "1 BLAST query/options error: {text}\nPlease refer to the BLAST+ user manual.\n"
-            )
-        };
+        let options =
+            |text: &str| format!("1 BLAST query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
         for program in PROGRAMS {
             let sam = formatting_handler_check(&choice(SAM), program);
             if program.is_sam() {
@@ -1570,9 +1604,10 @@ mod tests {
             assert_eq!(native.exit, 255, "{text:?}");
             assert_eq!(
                 native.message,
-                format!(
+                // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
+                crate::wording::losat_text(&format!(
                     "Error: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{text}' to {kind} (m_Pos = {pos})\n\n"
-                ),
+                )),
                 "{text:?}"
             );
         }

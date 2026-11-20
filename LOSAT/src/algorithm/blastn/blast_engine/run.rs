@@ -9383,7 +9383,7 @@ fn megablast_index(
     // A megablast search with a template (`-template_type` and `-template_length`, which
     // require each other) looks for no index.
     let warning = if args.template_length.is_some() {
-        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".to_string()
+        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".as_bytes().to_vec()
     } else {
         if index_name.contains(',') {
             return Ok(MegablastIndex::VolumeRange);
@@ -9427,16 +9427,19 @@ fn megablast_index(
         // `DbIndexInit`'s `result` (blast_dbindex.cpp:1145-1168): the new-style loader's
         // `e.what()`, a line feed, the old-style loader's `e.what()`; `ERR_POST_EX` adds
         // " Database index will not be used." (setup_factory.cpp:455).
-        format!(
-            "Warning: (1.1) [blastn] {}\n{} Database index will not be used.\n",
-            new_style.what(),
-            old_style.what()
-        )
+        [
+            b"Warning: (1.1) [blastn] ".as_slice(),
+            &new_style.what(),
+            b"\n",
+            &old_style.what(),
+            b" Database index will not be used.\n",
+        ]
+        .concat()
     };
     // One diagnostic: the archive saves it as one message.
     match &args.archive {
-        Some(handle) => handle.write_warning(diagnostics, warning.as_bytes())?,
-        None => diagnostics.write_all(warning.as_bytes())?,
+        Some(handle) => handle.write_warning(diagnostics, &warning)?,
+        None => diagnostics.write_all(&warning)?,
     }
     Ok(MegablastIndex::NotAsked)
 }

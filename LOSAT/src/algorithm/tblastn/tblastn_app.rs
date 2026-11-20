@@ -6,10 +6,10 @@ use std::io::Write;
 
 use super::args::{search_settings, ResolvedTblastnArgs, SearchSettings, TblastnArgs};
 use super::database::TblastnDatabase;
-use super::stage_d_pipeline::SetupEngineError;
 use super::stage_d_pipeline::{
     run_local_for_report_threads, LocalStageDProfile, SubjectSetNumbers,
 };
+use super::stage_d_pipeline::{SetupEngineError, SetupRefusal};
 use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::{render, ShownSubjects};
 use super::x_subject_store::SubjectLetters;
@@ -20,16 +20,29 @@ use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::tabular::SubjectFetch;
 
+/// Whether `error` may fail one batch, after the reports of the batches before, rather than the
+/// run: the errors `batch_failure` reads (a read of the database, the batch's setup, LOSAT's
+/// refusal of the setup where NCBI's crashes). The batches searched ahead are then searched again
+/// one at a time, so that the batch that fails does in its place (`batch_failure` decides).
+fn fails_one_batch(error: &anyhow::Error) -> bool {
+    error.is::<XReadError>() || error.is::<SetupEngineError>() || error.is::<SetupRefusal>()
+}
+
 /// The failure of a batch whose search failed where NCBI's fails it with its engine error: a
 /// read of the database (`common::x_db_stream::XReadError`), as the check's error fails the first
 /// batch with a valid context, when the reader's error is NCBI's own, and the batch's setup
 /// (`stage_d_pipeline::SetupEngineError`: a PSSM query whose `kbp_psi` is not valid, the average
-/// subject length). LOSAT's refusal (and any other
-/// error) is returned as `Err` to stop the run.
+/// subject length), or LOSAT's refusal of the setup where NCBI's crashes
+/// (`stage_d_pipeline::SetupRefusal`). LOSAT's other refusals (and any other error) are returned
+/// as `Err` to stop the run.
 fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
     if let Some(SetupEngineError(text)) = error.downcast_ref::<SetupEngineError>() {
         return Ok(crate::blastinput::app::engine_error(text));
     }
+    let error = match error.downcast::<SetupRefusal>() {
+        Ok(SetupRefusal(refusal)) => return Ok(refusal),
+        Err(error) => error,
+    };
     let error = match error.downcast::<XReadError>() {
         Ok(XReadError(read)) => read,
         Err(error) => return Err(error),
@@ -1611,10 +1624,9 @@ fn search(
         old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
     };
     // Without the Gumbel block NCBI's shortest subject length is the statistics' average
-    // (blast_setup.c:975), which divides by their number of sequences.
-    if let Some(database) = database.filter(|_| subject_set.old_fsc) {
-        database.check_statistics_count()?;
-    }
+    // (blast_setup.c:975), which divides by their number of sequences: a count of 0 is LOSAT's
+    // refusal in the setup of the first batch with a valid context
+    // (`stage_d_pipeline::run_local_search_with_pool`).
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     let subject_path = match database {
         Some(_) => None,
@@ -1986,8 +1998,8 @@ fn search(
                 .collect(),
         };
         // A read of the database that failed while the batches were searched ahead, or a batch
-        // whose setup failed (`SetupEngineError`): they are searched again one at a time below, so
-        // that the batch that fails does after the reports of the batches before.
+        // whose setup failed (`SetupEngineError`, `SetupRefusal`): they are searched again one at a
+        // time below, so that the batch that fails does after the reports of the batches before.
         let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,
@@ -2015,7 +2027,7 @@ fn search(
         );
         let mut x_searched = match x_searched_ahead {
             Ok(searched) => searched.map(Vec::into_iter),
-            Err(error) if error.is::<XReadError>() || error.is::<SetupEngineError>() => None,
+            Err(error) if fails_one_batch(&error) => None,
             Err(error) => return Err(error),
         };
         for range in query_input
@@ -2954,6 +2966,28 @@ mod tests {
         assert_eq!(
             native.message,
             b"BLAST engine error: The average subject length is too short\n"
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // A statistics count of 0 without the Gumbel block (NCBI's division by 0, D1a-5 of line RG)
+    // fails the batch after the reports of the batches before, with LOSAT's refusal itself (not
+    // an engine error).
+    #[test]
+    fn a_setup_count_of_zero_fails_the_batch_with_the_refusal() {
+        let refusal =
+            crate::algorithm::common::database::check_setup_count(100, 0, false, "TBLASTN")
+                .expect_err("the refusal");
+        let failed = batch_failure(SetupRefusal(refusal).into()).expect("the batch's failure");
+        assert!(failed.downcast_ref::<crate::cli::NativeError>().is_none());
+        assert!(failed
+            .to_string()
+            .starts_with(crate::algorithm::common::database::STATISTICS_COUNT_ZERO));
+        assert!(
+            crate::algorithm::common::database::check_setup_count(100, 0, true, "TBLASTN").is_ok()
+        );
+        assert!(
+            crate::algorithm::common::database::check_setup_count(0, 0, false, "TBLASTN").is_ok()
         );
     }
 }

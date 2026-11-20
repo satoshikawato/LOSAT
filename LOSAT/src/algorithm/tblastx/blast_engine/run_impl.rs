@@ -5453,6 +5453,20 @@ fn search_query_batch<S: TbxScore>(
             x_timing: Vec::new(),
         });
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // A count of 0 (of a positive total) is the division by 0 where NCBI's setup of this first
+    // batch with a valid context crashes, before it reads a sequence: LOSAT's refusal
+    // (`common::database::check_setup_count`, D1a-5 of line RG), after the reports of the batches
+    // before, also where the sequences could not be read (NCBI 2.17.0: `NSEQ 0` over a volume
+    // without its `.nsq`, SIGFPE; review A of D1a-5, F1). A run whose batches have no valid context
+    // does not reach it and is reported as NCBI's.
+    crate::algorithm::common::database::check_setup_count(
+        db_length_nucl,
+        i32::try_from(db_num_seqs).unwrap_or(i32::MAX),
+        false,
+        "TBLASTX",
+    )
+    .map_err(ErrorAfterBatchReports)?;
     // `-db` whose sequences could not be read: this first batch with a valid context fails
     // (`run_in_pool` raises the kept read error).
     if matches!(subjects, Subjects::Unreadable) {

@@ -401,7 +401,7 @@ pub(crate) const SUBJECT_LENGTH_TOO_SHORT: &str = "The average subject length is
 /// too short`: with the Gumbel block (`gumbel_min`: `GetMinLength`, and whether the subject is
 /// translated) the shortest length (divided by 3 for a translated subject), else the statistics'
 /// total `total_length` over their number `num_seqs` as NCBI's `Int4`. A `num_seqs` of 0 (NCBI
-/// divides by 0: LOSAT refuses it before, `common::database::check_statistics_count`) gives `None`
+/// divides by 0: LOSAT refuses it before, `common::database::check_setup_count`) gives `None`
 /// here too, so that no input reaches a division by 0.
 pub(crate) fn setup_subject_length(
     total_length: i64,

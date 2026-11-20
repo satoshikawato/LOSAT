@@ -919,16 +919,19 @@ fn a_callers_sink_writes_an_output_s_error_where_the_command_line_does() {
     }
 }
 
-// Line WQA's sweep, D11 (2026-11-20): a caller's `-logfile` name is read as the command line on
-// Linux reads it where the name's directories exist (`RunFiles::log_target`). NCBI BLAST+ 2.17.0
-// and LOSAT's command line, with a `.ncbirc` of the one byte 0xEF, which NCBI cannot read (the
-// usage report's `Error: (110.4) Error reading the registry after line 1: `, written to the
-// standard error at once), and the run's warning (`-max_target_seqs 1`; TBLASTX writes it where
+// Line WQA's sweep, D11 (2026-11-20) and its round 2: a caller's `-logfile` name is read as the
+// command line on Linux reads it where the name's directories exist (`RunFiles::log_target`). NCBI
+// BLAST+ 2.17.0 and LOSAT's command line, with a `.ncbirc` of the one byte 0xEF, which NCBI cannot
+// read (the usage report's `Error: (110.4) Error reading the registry after line 1: `, written to
+// the standard error at once), and the run's warning (`-max_target_seqs 1`; TBLASTX writes it where
 // the diagnostics go): `-logfile -` writes the error once to the standard error; `/dev/stderr` is a
-// file there, which gets the error too, so the standard error has it twice; `logs/run.log` and
-// `/dev/stdout` are files, which get it (the command line writes the second into its standard
-// output); `logs/` names a directory, which NCBI cannot open: as `-`. The run's warning goes to the
-// file in TBLASTX, else to the standard error.
+// file there, which gets the error too, so the standard error has it twice; `logs/run.log`,
+// `/dev/stdout`, `logs/` (the file `logs`) and ` run.log` (`run.log`) are files, which get it (the
+// command line writes `/dev/stdout`'s into its standard output); `/dev/fd/2`, `/proc/self/fd/2` and
+// `/dev/fd/1` are files on procfs, which reports no free space, so they get nothing; `logs/.` names
+// a directory and `/dev/fd/3` a file descriptor that the run has not opened, which NCBI cannot
+// open: as `-`. The run's warning goes to the file in TBLASTX, else
+// to the standard error.
 #[test]
 fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
     use crate::blastinput::ncbi_environment::{ApplicationStart, TextPlace};
@@ -937,16 +940,30 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
     let files = Files(vec![("./.ncbirc", b"\xef")]);
     let error = "Error: (110.4) Error reading the registry after line 1: \n";
     let warning = "Warning: w\n";
+    // Where the name sends the start's messages: `cerr`, a file that is the standard error, a file
+    // of the run, or nowhere (a file system without free space).
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        Stderr,
+        StderrFile,
+        File,
+        Nowhere,
+    }
     for program in ["blastn", "tblastx"] {
         let follows = program == "tblastx";
-        for (logfile, twice, file) in [
-            ("-", false, false),
-            ("/dev/stderr", true, false),
-            ("/proc/self/fd/2", true, false),
-            ("logs/run.log", false, true),
-            ("/tmp/run.log", false, true),
-            ("/dev/stdout", false, true),
-            ("logs/", false, false),
+        for (logfile, kind) in [
+            ("-", Kind::Stderr),
+            ("/dev/stderr", Kind::StderrFile),
+            ("/proc/self/fd/2", Kind::Nowhere),
+            ("/dev/fd/2", Kind::Nowhere),
+            ("/dev/fd/1", Kind::Nowhere),
+            ("logs/run.log", Kind::File),
+            ("/tmp/run.log", Kind::File),
+            ("/dev/stdout", Kind::File),
+            ("logs/", Kind::File),
+            (" run.log", Kind::File),
+            ("logs/.", Kind::Stderr),
+            ("/dev/fd/3", Kind::Stderr),
         ] {
             let words = ["-logfile", logfile];
             let kept = std::sync::Arc::new(Kept::default());
@@ -965,28 +982,29 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
                 .unwrap();
             started.finish().unwrap();
             let label = format!("{program} -logfile {logfile}");
-            let to_file = follows && file;
+            let warned = !follows || matches!(kind, Kind::Stderr | Kind::StderrFile);
             let expected_stderr = format!(
                 "{}{}",
-                error.repeat(if twice { 2 } else { 1 }),
-                if to_file { "" } else { warning }
+                error.repeat(if kind == Kind::StderrFile { 2 } else { 1 }),
+                if warned { warning } else { "" }
             );
             assert_eq!(
                 String::from_utf8(stderr).unwrap(),
                 expected_stderr,
                 "{label}"
             );
-            let expected_files = match file {
-                true => vec![(
+            let expected_files = match kind {
+                Kind::File => vec![(
                     logfile.as_bytes().to_vec(),
                     format!("{error}{}", if follows { warning } else { "" }).into_bytes(),
                 )],
-                false => Vec::new(),
+                _ => Vec::new(),
             };
             assert_eq!(*kept.0.lock().unwrap(), expected_files, "{label}");
-            let expected_place = match to_file {
-                true => TextPlace::LogFile,
-                false => TextPlace::StandardError,
+            let expected_place = match (follows, kind) {
+                (false, _) | (true, Kind::Stderr | Kind::StderrFile) => TextPlace::StandardError,
+                (true, Kind::File) => TextPlace::LogFile,
+                (true, Kind::Nowhere) => TextPlace::Nowhere,
             };
             assert_eq!(place, expected_place, "{label}");
         }

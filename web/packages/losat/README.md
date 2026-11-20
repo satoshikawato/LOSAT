@@ -83,7 +83,8 @@ the place of its error, each a little-endian unsigned integer (`discardSignal` r
 host drops everything that arrived of that stream, which then stays empty. The place is where the
 run wrote the error, as the command line writes the error of that output. A BLAST+ error goes where
 the run's messages go: stream 3, or the file of `-logfile` (stream 8) in TBLASTX with
-`-logfile NAME`, or nowhere (`PLACE_NOWHERE`: TBLASTX's `-logfile ""` or `-logfile /dev/null`).
+`-logfile NAME`, or nowhere (`PLACE_NOWHERE`: TBLASTX's `-logfile ""`, `-logfile /dev/null` or
+`-logfile /dev/fd/2`).
 LOSAT's own refusal goes to stream 3 whatever `-logfile` is, as the command line writes it to its
 standard error. The signal comes for each output that fails on its own,
 whether or not some of its chunks were sent, and for each output of a search that fails in a run of
@@ -103,14 +104,17 @@ file of `-conffile` under that name to `engine.validate(argv, registry)` and as
 second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
 run fails, `runFilesOf(error)` returns it. The engine reads a `-logfile` name as the command line on
 Linux reads it where the name's directories exist: the file's name is the whole name, which may
-contain `/` (`logs/run.log`, `/tmp/run.log`, `/dev/stdout`); show and save it as a name, not as a
-path. The standard error (`/dev/stderr`) and a directory (`logs/`) give no file: their messages
-are on stream 3.
+contain `/` (`logs/run.log`, `/tmp/run.log`, `/dev/stdout`, `logs/`, which the command line makes as
+the file `logs`); show and save it as a name, not as a path. The standard error (`/dev/stderr`) and
+a directory (`.`, `logs/.`) give no file: their messages are on stream 3. `/dev/fd/2` and
+`/proc/self/fd/2` give no file and send the messages that go to the file nowhere, as `/dev/null`
+does: the command line writes nothing to a log on a file system without free space, which these
+are.
 
 `RuntimeInfo.messages` says where the run's messages went (the warnings that the command line writes
 to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile'` (the file of
-`-logfile`, where TBLASTX with `-logfile NAME` writes them) or `'nowhere'` (TBLASTX's `-logfile ""`
-or `-logfile /dev/null`). The engine sends it once per run, before the outputs, on stream 10
+`-logfile`, where TBLASTX with `-logfile NAME` writes them) or `'nowhere'` (TBLASTX's `-logfile ""`,
+`-logfile /dev/null` or `-logfile /dev/fd/2`). The engine sends it once per run, before the outputs, on stream 10
 (`MESSAGES_STREAM`): 4 bytes, the place as a little-endian unsigned integer (`messagesSignal` reads
 it). An empty stream 3 means no warnings only where it is `'diagnostics'`; where it is `'logfile'`,
 an empty file means none.

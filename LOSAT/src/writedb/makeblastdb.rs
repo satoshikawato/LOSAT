@@ -1657,8 +1657,13 @@ pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&str> {
 // standard error stream, and the build stops where makeblastdb opens the log,
 // after the checks of the database name and the title, with "Command line
 // argument error: Argument "logfile". File is not accessible:  `F'" and exit
-// status 1. LOSAT opens the file once and writes both streams through the one
-// handle. Three names are special. `-` keeps the diagnostics on the standard
+// status 1. The diagnostics' file is the one that NCBI's diagnostics open for the
+// name (`ncbi_environment::diag_target`) and the log's the one that the system opens
+// under the name as written (`log_of`): one file for most names, two where NCBI's
+// diagnostics read the name otherwise (` mk.log` is `mk.log` there, `a/../mk.log`
+// the `mk.log` beside the link `a`), and no log for `logs/`, which the
+// diagnostics read as the file `logs` (NCBI BLAST+ 2.17.0; line WQA's D11 round 2,
+// 2026-11-20). Three names are special. `-` keeps the diagnostics on the standard
 // error stream and opens the standard output for the log: makeblastdb runs as
 // without `-logfile`. `/dev/null` (that name, on every platform) and the empty
 // name discard the diagnostics; the log then goes to the file `/dev/null`, and
@@ -1707,8 +1712,7 @@ pub(crate) fn run_with(
     // The diagnostics go to the target of `-logfile` (`ncbi_environment::diag_target`, which
     // owns the special names), and the log to `AsOutputFile` of the same name (`log_of`).
     let target = diag_target(Some(std::ffi::OsStr::new(name)));
-    let mut opened = None;
-    let log = log_of(&target, name, &mut opened);
+    let log = log_of(name);
     let mut diag = DiagStream {
         target: &target,
         stderr: err,
@@ -1754,32 +1758,24 @@ pub(crate) fn run_with(
 //                    ? args["logfile"].AsOutputFile()
 //                    : cout);
 // ```
-/// The log of `-logfile name` (`AsOutputFile`, append) beside its diagnostics' `target`
-/// (`diag_target` of the same name): the target's open file itself; for a name whose
-/// diagnostics go nowhere (`/dev/null`), that file, opened into `opened`; none for the empty name
-/// and a file that cannot be opened. The log writes through this shared reference to the target's
-/// file (`Write for &File`) while the diagnostics write to the target (`DiagStream`, which holds
-/// it by a shared reference too): one handle, so the two streams append in the order they are
-/// written, as NCBI's two appending streams on the file do, on every target. (A copy of the
-/// handle, `try_clone`, is a copy of its descriptor, which the WASI targets cannot make: the run
-/// stopped with "File is not accessible".)
-fn log_of<'a>(
-    target: &'a DiagTarget,
-    name: &str,
-    opened: &'a mut Option<std::fs::File>,
-) -> Option<&'a std::fs::File> {
-    match target {
-        DiagTarget::File(file) => Some(file),
-        _ if name.is_empty() => None,
-        _ => {
-            *opened = std::fs::OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(name)
-                .ok();
-            opened.as_ref()
-        }
+/// The log of `-logfile name` (`AsOutputFile`, append): the file that the system opens under
+/// the name as written; none for the empty name and a name that it cannot open (`logs/`). The
+/// diagnostics open the file of NCBI's reading of the name (`diag_target`), which is this file
+/// for most names and another one where that reading differs (` mk.log`, `a/../mk.log` beside
+/// a link `a`; NCBI BLAST+ 2.17.0 makeblastdb writes its log to ` mk.log` and its
+/// diagnostics to `mk.log`; line WQA's D11 round 2, 2026-11-20). Both append, so where they are
+/// one file the two streams land in it in the order they are written, as NCBI's two appending
+/// streams on the file do. (A second open, not a copy of the diagnostics' handle, `try_clone`,
+/// which the WASI targets cannot make: the run stopped with "File is not accessible".)
+fn log_of(name: &str) -> Option<std::fs::File> {
+    if name.is_empty() {
+        return None;
     }
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(name)
+        .ok()
 }
 
 /// The error message and the exit code of a build, then the messages of
@@ -1906,25 +1902,18 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201 (quoted at
     // `log_of`): the log appends to the `-logfile` file, where the diagnostics append too.
-    /// The log of `-logfile F` is the diagnostics' open file itself, not a second handle of it
-    /// (which the WASI targets cannot make): the two streams, both open at once, land in F in the
-    /// order they are written, after what F held, and nothing goes to the standard error. The
-    /// empty name and a file in a missing directory have no log.
+    /// The log of `-logfile F` is F opened by the system, beside the diagnostics' file: where the
+    /// two are one file, the two streams land in F in the order they are written, after what F
+    /// held, and nothing goes to the standard error. The empty name and a file in a missing
+    /// directory have no log.
     #[test]
-    fn the_log_and_the_diagnostics_write_through_one_open_file() {
+    fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
         let tmp = crate::writedb::tests::TempDir::new("log-one-file");
         let name = tmp.base("mk.log");
         std::fs::write(&name, b"before\n").unwrap();
         let target = diag_target(Some(std::ffi::OsStr::new(&name)));
-        let mut opened = None;
-        let mut log = log_of(&target, &name, &mut opened).expect("the log of a file that opens");
-        let DiagTarget::File(file) = &target else {
-            panic!("the target of a file that opens is the file");
-        };
-        assert!(
-            std::ptr::eq(log, file),
-            "the log is the target's own handle"
-        );
+        assert!(matches!(target, DiagTarget::File(_)));
+        let mut log = log_of(&name).expect("the log of a file that opens");
         let mut stderr = Vec::new();
         {
             let mut diag = DiagStream {
@@ -1936,20 +1925,45 @@ mod tests {
             log.write_all(b"log 2\n").unwrap();
             diag.write_all(b"diagnostic 2\n").unwrap();
         }
-        assert!(opened.is_none(), "no other file is opened");
         assert!(stderr.is_empty());
         assert_eq!(
             std::fs::read(&name).unwrap(),
             b"before\nlog 1\ndiagnostic\nlog 2\ndiagnostic 2\n"
         );
         for missing in [String::new(), tmp.base("nodir/mk.log")] {
-            let target = diag_target(Some(std::ffi::OsStr::new(&missing)));
-            let mut opened = None;
-            assert!(
-                log_of(&target, &missing, &mut opened).is_none(),
-                "{missing:?}"
-            );
+            assert!(log_of(&missing).is_none(), "{missing:?}");
         }
+    }
+
+    /// Where NCBI's diagnostics read a `-logfile` name otherwise than the system
+    /// (`ncbi_environment::log_file_name`), the log and the diagnostics are two files: the log
+    /// is the name as the system opens it (line WQA's D11 round 2, 2026-11-20; NCBI BLAST+
+    /// 2.17.0 makeblastdb `-logfile a/../mk.log` with a link `a` to `sub/deep` writes its log to
+    /// `sub/mk.log` and its diagnostics to `mk.log`, and `-logfile logs/` makes the file `logs`
+    /// for its diagnostics and stops with "File is not accessible" for the log).
+    #[cfg(unix)]
+    #[test]
+    fn the_log_is_the_name_as_the_system_opens_it() {
+        let tmp = crate::writedb::tests::TempDir::new("log-two-files");
+        std::fs::create_dir_all(tmp.0.join("sub/deep")).unwrap();
+        std::os::unix::fs::symlink(tmp.0.join("sub/deep"), tmp.0.join("a")).unwrap();
+        let name = tmp.base("a/../mk.log");
+        let target = diag_target(Some(std::ffi::OsStr::new(&name)));
+        let mut log = log_of(&name).expect("the log of a file that opens");
+        target.write_text(b"diagnostic\n", &mut std::io::sink());
+        log.write_all(b"log\n").unwrap();
+        assert_eq!(
+            std::fs::read(tmp.0.join("mk.log")).unwrap(),
+            b"diagnostic\n"
+        );
+        assert_eq!(std::fs::read(tmp.0.join("sub/mk.log")).unwrap(), b"log\n");
+        let name = tmp.base("logs/");
+        assert!(matches!(
+            diag_target(Some(std::ffi::OsStr::new(&name))),
+            DiagTarget::File(_)
+        ));
+        assert!(tmp.0.join("logs").is_file());
+        assert!(log_of(&name).is_none());
     }
 
     #[test]

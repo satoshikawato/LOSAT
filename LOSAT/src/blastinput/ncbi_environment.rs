@@ -2082,11 +2082,18 @@ impl Write for DiagStream<'_> {
 /// The target of the `-logfile` value `name` (a file NCBI fails to open leaves `cerr`). The file
 /// is opened (made when it does not exist) at once, as NCBI's first `SetupDiag` does, before
 /// `-version` (NCBI BLAST+ 2.17.0 makeblastdb and blastdbcmd `-version -logfile F` make `F`:
-/// g_reg probes `ver_log_ok`, `ver_log_ok2`).
+/// g_reg probes `ver_log_ok`, `ver_log_ok2`). Outside Windows the file is the one NCBI opens
+/// (`log_file_name`): its directory must exist, and a file opened where the file system has less
+/// than 20 KiB free gets no message (`DiagTarget::Discard`; `/dev/fd/2`, `/proc/self/fd/2`, a
+/// terminal's `/dev/pts/N`). On Windows, whose paths NCBI reads by other rules, the name is opened
+/// as it is.
 pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
     match (special_log_target(name), name) {
         (Some(target), _) => target,
         (None, None) => DiagTarget::Stderr,
+        #[cfg(not(windows))]
+        (None, Some(name)) => open_log_file(name),
+        #[cfg(windows)]
         (None, Some(name)) => match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -2095,6 +2102,249 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
             Ok(file) => DiagTarget::File(file),
             Err(_) => DiagTarget::Stderr,
         },
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6554-6559
+// ```c++
+// void CFileHandleDiagHandler::SetLogName(const string& log_name)
+// {
+//     string abs_name = CDirEntry::IsAbsolutePath(log_name) ? log_name
+//         : CDirEntry::CreateAbsolutePath(log_name);
+//     TParent::SetLogName(abs_name);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6456-6461 (`m_LogName` is a
+// `char[2048]`, ncbidiag.hpp:2597)
+// ```c++
+// void CStreamDiagHandler_Base::SetLogName(const string& log_name)
+// {
+//     size_t len = min(log_name.length(), sizeof(m_LogName) - 1);
+//     memcpy(m_LogName, log_name.data(), len);
+//     m_LogName[len] = '\0';
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6592-6614 (`Reopen`; the handle opens
+// `CFile::ConvertToOSPath(fname)` with `O_WRONLY | O_APPEND | O_CREAT`, 6502-6516)
+// ```c++
+//     m_LowDiskSpace = false;
+//     CDiagFileHandleHolder* new_handle;
+//     new_handle = new CDiagFileHandleHolder(GetLogName(), flags);
+//     new_handle->AddReference();
+//     if (new_handle->GetHandle() == -1) {
+//         new_handle->RemoveReference();
+//         new_handle = NULL;
+//     }
+//     else {
+//         // Need at least 20K of free space to write logs
+//         try {
+//             CDirEntry entry(GetLogName());
+//             m_LowDiskSpace = CFileUtil::GetFreeDiskSpace(entry.GetDir()) < 1024*20;
+//         }
+//         catch (const CException&) {
+//             // Ignore error - could not check free space for some reason.
+//             // Try to open the file anyway.
+//         }
+//         if (m_LowDiskSpace) {
+//             new_handle->RemoveReference();
+//             new_handle = NULL;
+//         }
+//     }
+// ```
+// Without a handle the handler collects the messages (`Post`) and writes them when a later
+// `Reopen`, 65 seconds on, finds the space; `Valid` holds with `m_LowDiskSpace`, so the log is
+// set up (ncbidiag.hpp:2672-2677). A file system that reports no free space (procfs, sysfs,
+// devpts, mqueue) never has it: its messages are lost.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:745-750, 665-669, 693-696, 776-788
+// ```c++
+// string CDirEntry::ConvertToOSPath(const string& path)
+// {
+//     // Not process empty or absolute path
+//     if ( path.empty()  ||  IsAbsolutePathEx(path)) {
+//         return NormalizePath(path);
+//     }
+// ...
+// string CDirEntry::CreateAbsolutePath(const string& path, ERelativeToWhat rtw)
+// {
+//     if ( IsAbsolutePath(path) ) {
+//         return NormalizePath(path);
+//     }
+// ...
+//         case eRelativeToCwd:
+//             result = ConcatPath(CDir::GetCwd(), path);
+// ...
+// string CDirEntry::ConcatPath(const string& first, const string& second)
+// {
+//     // Prepare first part of path
+//     string path = AddTrailingPathSeparator(NStr::TruncateSpaces(first));
+//     // Remove leading separator in "second" part
+//     string part = NStr::TruncateSpaces(second);
+//     if ( !path.empty()  &&  part.length() > 0  &&  part[0] == DIR_SEPARATOR ) {
+//         part.erase(0,1);
+//     }
+// ```
+/// The paths that NCBI reads from a `-logfile` name that is not `""`, `-` or `/dev/null`
+/// (`log_file_name`, on Unix).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct LogFileName {
+    /// `CFile(file_name).GetDir()` (`SetLogFile`, quoted at `diag_target`): unless it is a
+    /// directory, the log is not set up and the messages stay on `cerr`; empty: not checked.
+    pub directory: Vec<u8>,
+    /// `ConvertToOSPath(GetLogName())`: the file that is opened, made where it does not exist; a
+    /// directory cannot be opened (`cerr`).
+    pub path: Vec<u8>,
+    /// `CDirEntry(GetLogName()).GetDir()`: where its file system has less than 20 KiB free
+    /// (`LOW_DISK_SPACE`), the opened file gets no message.
+    pub space: Vec<u8>,
+}
+
+/// The free space under which NCBI's log file gets no message (`Reopen`, quoted above).
+pub(crate) const LOW_DISK_SPACE: u64 = 1024 * 20;
+
+/// NCBI's reading of the `-logfile` name `name` on Unix, in the working directory `cwd` (`None`
+/// where it cannot be read: `CDir::GetCwd` gives ""): the one reading of these names for the
+/// command line (`diag_target`) and LOSAT Web (`report::run_files::RunFiles::log_target`, in a
+/// working directory of its own). A relative name is made absolute with the spaces at its ends cut
+/// (` run.log` is `run.log`) and normalized (`logs/` is `logs`, `a/../run.log` is `run.log` also
+/// where `a` is a link); an absolute name is normalized only where it is opened, and its free space
+/// is that of its directory as written (`/dev/fd/2`: `/dev/fd/`, which is procfs). NCBI keeps 2047
+/// bytes of the name it makes. The checks of `directory`, of the opened `path` and of the free
+/// space at `space` are the caller's.
+pub(crate) fn log_file_name(name: &[u8], cwd: Option<&[u8]>) -> LogFileName {
+    let mut log_name = if name.first() == Some(&b'/') {
+        name.to_vec()
+    } else {
+        let mut path = crate::ncbi_str::truncate_spaces(cwd.unwrap_or_default()).to_vec();
+        if path.last().is_some_and(|byte| *byte != b'/') {
+            path.push(b'/');
+        }
+        let mut part = crate::ncbi_str::truncate_spaces(name);
+        if !path.is_empty() {
+            part = part.strip_prefix(b"/").unwrap_or(part);
+        }
+        path.extend_from_slice(part);
+        normalize_path(&path, None).expect("a path normalized without links has no link limit")
+    };
+    log_name.truncate(2047);
+    LogFileName {
+        directory: dir_entry_dir(name),
+        path: normalize_path(&log_name, None)
+            .expect("a path normalized without links has no link limit"),
+        space: dir_entry_dir(&log_name),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-313, 358-368, 475-483
+// ```c++
+// void CDirEntry::Reset(const string& path)
+// {
+//     m_Path = path;
+//     size_t len = path.length();
+//     // Root dir
+//     if ((len == 1)  &&  IsPathSeparator(path[0])) {
+//         return;
+//     }
+// ...
+//     m_Path = DeleteTrailingPathSeparator(path);
+// }
+// ...
+//     size_t pos = path.find_last_of(ALL_SEPARATORS);
+//     string filename = (pos == NPOS) ? path : path.substr(pos+1);
+//
+//     // Get dir
+//     if ( dir ) {
+//         *dir = (pos == NPOS) ? kEmptyStr : path.substr(0, pos+1);
+//     }
+// ...
+// string CDirEntry::GetDir(EIfEmptyPath mode) const
+// {
+//     string dir;
+//     SplitPath(GetPath(), &dir);
+//     if ( dir.empty()  &&  mode == eIfEmptyPath_Current  &&  !GetPath().empty() ) {
+//         return string(DIR_CURRENT) + DIR_SEPARATOR;
+//     }
+//     return dir;
+// }
+// ```
+/// `CDirEntry(path).GetDir()` on Unix: the directory of `path` without its trailing '/'s, with its
+/// last '/' (`./` for a name without one; empty for a path of '/'s only, which `Reset` empties).
+fn dir_entry_dir(path: &[u8]) -> Vec<u8> {
+    let path = if path == b"/" {
+        path
+    } else {
+        trim_trailing_slashes(path)
+    };
+    match path.iter().rposition(|byte| *byte == b'/') {
+        Some(at) => path[..=at].to_vec(),
+        None if path.is_empty() => Vec::new(),
+        None => b"./".to_vec(),
+    }
+}
+
+/// The target of the `-logfile` name `name` (not a special one) on the file system: the file that
+/// NCBI opens (`log_file_name`), `cerr` where its directory is not one or it cannot be opened, and
+/// no message where its file system has less than 20 KiB free (the file is made all the same).
+#[cfg(not(windows))]
+fn open_log_file(name: &OsStr) -> DiagTarget {
+    let cwd = std::env::current_dir().ok();
+    let file = log_file_name(
+        name.as_encoded_bytes(),
+        cwd.as_ref().map(|cwd| cwd.as_os_str().as_encoded_bytes()),
+    );
+    fn path(bytes: &[u8]) -> &Path {
+        // SAFETY: each path is made of the bytes of `name` and of the working directory, both of
+        // the platform's encoding, joined and cut at '/' and at ASCII spaces, which are boundaries
+        // of it.
+        Path::new(unsafe { OsStr::from_encoded_bytes_unchecked(bytes) })
+    }
+    if !file.directory.is_empty() && !path(&file.directory).is_dir() {
+        return DiagTarget::Stderr;
+    }
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path(&file.path))
+    {
+        Ok(_) if free_disk_space(path(&file.space)).is_some_and(|free| free < LOW_DISK_SPACE) => {
+            DiagTarget::Discard
+        }
+        Ok(opened) => DiagTarget::File(opened),
+        Err(_) => DiagTarget::Stderr,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:4819-4830, 5177-5179 (Linux; Darwin's
+// branch, 5262-5264, takes the same `GET_STATFS_INFO`)
+// ```c++
+// #define GET_STATFS_INFO                                        \
+//     struct statfs st;                                          \
+//     memset(&st, 0, sizeof(st));                                \
+//     if (statfs(path.c_str(), &st) != 0) {                      \
+//         CNcbiError::SetFromErrno();                            \
+//         NCBI_THROW(CFileErrnoException, eFileSystemInfo,  string(msg) + path); \
+//     }                                                          \
+//     info->total_space  = (Uint8)st.f_bsize * st.f_blocks;      \
+//     info->free_space   = (Uint8)st.f_bsize * st.f_bavail;      \
+// ...
+// #  if (defined(NCBI_OS_LINUX) || defined(NCBI_OS_CYGWIN))  &&  defined(HAVE_STATFS)
+//
+//     GET_STATFS_INFO;
+// ```
+/// `CFileUtil::GetFreeDiskSpace(path)` on Linux and macOS: the bytes free to a user on the file
+/// system of `path` (`statfs`'s `f_bsize * f_bavail`); `None` where it cannot be read, as NCBI's
+/// exception, which `Reopen` ignores, and on the other platforms.
+#[cfg(not(windows))]
+fn free_disk_space(path: &Path) -> Option<u64> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let stat = rustix::fs::statfs(path).ok()?;
+        let free = i128::from(stat.f_bsize) * i128::from(stat.f_bavail);
+        Some(u64::try_from(free).unwrap_or(u64::MAX))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = path;
+        None
     }
 }
 
@@ -4205,6 +4455,110 @@ mod tests {
         assert!(matches!(
             diag_target(Some(OsStr::new("/nonexistent-dir-of-losat/log.txt"))),
             DiagTarget::Stderr
+        ));
+    }
+
+    /// NCBI's reading of a `-logfile` name (quoted at `log_file_name`): the directory that
+    /// `SetLogFile` checks, the file that is opened and the directory whose free space counts
+    /// (line WQA's D11 round 2, 2026-11-20; NCBI BLAST+ 2.17.0 makes `logs` for `logs/`,
+    /// `run.log` for ` run.log`, `run.log` for `a/../run.log` where `a` is a link, and
+    /// `abs/run.log` for `<dir>/abs/run.log/`).
+    #[test]
+    fn a_log_name_is_read_as_ncbi_reads_it() {
+        let read = |name: &[u8], cwd: Option<&[u8]>| {
+            let file = log_file_name(name, cwd);
+            (file.directory, file.path, file.space)
+        };
+        let paths = |directory: &str, path: &str, space: &str| {
+            (directory.into(), path.into(), space.into())
+        };
+        let cwd = Some(&b"/w"[..]);
+        for (name, read_as) in [
+            ("run.log", paths("./", "/w/run.log", "/w/")),
+            ("logs/", paths("./", "/w/logs", "/w/")),
+            ("logs//", paths("./", "/w/logs", "/w/")),
+            ("run.log/", paths("./", "/w/run.log", "/w/")),
+            ("a/b/", paths("a/", "/w/a/b", "/w/a/")),
+            ("a/./", paths("a/", "/w/a", "/w/")),
+            (" run.log", paths("./", "/w/run.log", "/w/")),
+            ("run.log\t", paths("./", "/w/run.log", "/w/")),
+            (
+                " logs/run.log",
+                paths(" logs/", "/w/logs/run.log", "/w/logs/"),
+            ),
+            (" /run.log", paths(" /", "/w/run.log", "/w/")),
+            ("a/../run.log", paths("a/../", "/w/run.log", "/w/")),
+            ("../run.log", paths("../", "/run.log", "/")),
+            (".", paths("./", "/w", "/")),
+            ("  ", paths("./", "/w", "/")),
+            (
+                "/tmp/abs/run.log/",
+                paths("/tmp/abs/", "/tmp/abs/run.log", "/tmp/abs/"),
+            ),
+            ("/dev/fd/2", paths("/dev/fd/", "/dev/fd/2", "/dev/fd/")),
+            (
+                "//dev/./stderr",
+                paths("//dev/./", "/dev/stderr", "//dev/./"),
+            ),
+            (
+                "/dev/fd/../stderr",
+                paths("/dev/fd/../", "/dev/stderr", "/dev/fd/../"),
+            ),
+            ("/", paths("/", "/", "/")),
+            ("///", paths("", "/", "")),
+        ] {
+            assert_eq!(read(name.as_bytes(), cwd), read_as, "{name:?}");
+        }
+        // Without a working directory (`GetCwd` gives "") the name stays relative.
+        assert_eq!(
+            read(b"logs/", None),
+            (b"./".to_vec(), b"logs".to_vec(), b"./".to_vec())
+        );
+        // NCBI keeps 2047 bytes of the name that it makes.
+        let long = vec![b'x'; 3000];
+        let (_, path, space) = read(&long, cwd);
+        assert_eq!(path, [b"/w/".as_slice(), &long[..2044]].concat());
+        assert_eq!(space, b"/w/");
+    }
+
+    /// The command line opens the file that NCBI opens (`log_file_name`) and drops the messages
+    /// of a file whose file system reports no free space (line WQA's D11 round 2, 2026-11-20;
+    /// NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/fd/2` and `/proc/self/fd/2` write no message).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_command_line_opens_the_file_that_ncbi_opens() {
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-ncbi-environment-log-name-{}",
+            crate::utils::test_dir::process_id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("deep/x")).unwrap();
+        std::fs::create_dir(dir.join("logs")).unwrap();
+        std::os::unix::fs::symlink(dir.join("deep/x"), dir.join("a")).unwrap();
+        let target = |name: &str| {
+            let name = format!("{}/{name}", dir.display());
+            diag_target(Some(OsStr::new(&name)))
+        };
+        // A trailing '/' names the file without it; a directory stays `cerr`.
+        assert!(matches!(target("run.log/"), DiagTarget::File(_)));
+        assert!(dir.join("run.log").is_file());
+        assert!(matches!(target("logs/"), DiagTarget::Stderr));
+        assert!(matches!(target("missing/run.log"), DiagTarget::Stderr));
+        // ".." is read before the link is followed: `a/..` is `dir`, not `deep`.
+        assert!(matches!(target("a/../linked.log"), DiagTarget::File(_)));
+        assert!(dir.join("linked.log").is_file());
+        assert!(!dir.join("deep/linked.log").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+        // procfs reports no free space: the file is opened and gets nothing.
+        for name in ["/dev/fd/2", "/proc/self/fd/2", "/dev/fd/../stderr"] {
+            assert!(
+                matches!(diag_target(Some(OsStr::new(name))), DiagTarget::Discard),
+                "{name}"
+            );
+        }
+        assert!(matches!(
+            diag_target(Some(OsStr::new("/dev/stderr"))),
+            DiagTarget::File(_)
         ));
     }
 

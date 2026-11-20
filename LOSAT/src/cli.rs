@@ -2443,8 +2443,24 @@ pub fn tie_standard_output() -> std::io::Result<()> {
 /// `write_all` of the stream, which `std::io::Stderr` writes under one lock of standard error, so
 /// that no other thread's message comes inside it. An empty write is no write of NCBI's to `cerr`
 /// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
-/// report.
+/// report. Where the standard error is the file of `-logfile` (tblastx's, rpsblast's and
+/// rpstblastn's run, `DiagTarget::into_standard_error`), a failed write is dropped, as NCBI's
+/// handler of that file drops it (`CFileHandleDiagHandler::Post`, ncbidiag.cpp:6695-6696: `if
+/// (NcbiSys_write(...)) {/*dummy*/}`; NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and
+/// writes its report; line WQA's D11 round 2, 2026-11-20).
 pub struct CliStderr(std::io::Stderr);
+
+impl CliStderr {
+    /// `result` of a write, dropped where the standard error is the file of `-logfile`.
+    fn logged<T: Default>(result: std::io::Result<T>) -> std::io::Result<T> {
+        match result {
+            Err(_) if crate::blastinput::ncbi_environment::terminal_stderr().is_some() => {
+                Ok(T::default())
+            }
+            result => result,
+        }
+    }
+}
 
 impl CliStderr {
     /// The process's standard error.
@@ -2459,7 +2475,7 @@ impl std::io::Write for CliStderr {
             return Ok(0);
         }
         tie_standard_output()?;
-        self.0.write(buf)
+        Self::logged(self.0.write_all(buf)).map(|()| buf.len())
     }
 
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
@@ -2467,7 +2483,7 @@ impl std::io::Write for CliStderr {
             return Ok(());
         }
         tie_standard_output()?;
-        self.0.write_all(buf)
+        Self::logged(self.0.write_all(buf))
     }
 
     fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
@@ -2588,11 +2604,15 @@ pub(crate) fn create_out_file(
 // }
 // ```
 /// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
-/// that the run already wrote (`post_native_error`) is not written again.
+/// that the run already wrote (`post_native_error`) is not written again. A failed write is
+/// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
+/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20).
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
         if !posted(&e.message) {
-            eprint!("{}", catch_all_text(&e.message));
+            let mut stderr = std::io::stderr();
+            let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message).as_bytes());
+            let _ = std::io::Write::flush(&mut stderr);
         }
         if e.exit < 0 {
             std::process::abort();

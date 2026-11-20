@@ -35,14 +35,15 @@ impl RunFiles {
     /// The target of the `-logfile` value `name` (`None` without one). On `Disk` the file
     /// system's (`diag_target`). For a `Receiver`: NCBI's special names as there
     /// (`special_log_target`), and any other name as the command line on Linux reads it in a
-    /// working directory where the name's directories exist (`log_name`), as LOSAT Web reads a
-    /// `-conffile` name as a path of the command line's working directory (line WQA's sweep, D11,
-    /// 2026-11-20; it refused a name with a directory before): `cerr` for a directory, which NCBI
-    /// cannot open as a file; the file that is the standard error (`DiagTarget::StderrFile`) for
-    /// its names; no output for another spelling of `/dev/null`; and for any other name a file in
-    /// memory under the whole name, which `deliver_log` hands over (`logs/run.log`, `/tmp/run.log`,
-    /// and `/dev/stdout`, whose bytes the command line writes into its standard output among the
-    /// report's, where their place depends on the report's buffering).
+    /// working directory of its own where the name's directories exist (`log_name`), as LOSAT Web
+    /// reads a `-conffile` name as a path of the command line's working directory (line WQA's
+    /// sweep, D11, 2026-11-20; it refused a name with a directory before): `cerr` for a directory,
+    /// which NCBI cannot open as a file; the file that is the standard error
+    /// (`DiagTarget::StderrFile`) for `/dev/stderr`; no output for another spelling of `/dev/null`
+    /// and for a name in a file system that reports no free space (`/dev/fd/2`); and for any other
+    /// name a file in memory under the whole name, which `deliver_log` hands over (`logs/run.log`,
+    /// `logs/`, `/tmp/run.log`, and `/dev/stdout`, whose bytes the command line writes into its
+    /// standard output among the report's, where their place depends on the report's buffering).
     pub fn log_target(&self, name: Option<&OsStr>) -> DiagTarget {
         match self {
             RunFiles::Disk => diag_target(name),
@@ -50,9 +51,9 @@ impl RunFiles {
                 (Some(target), _) => target,
                 (None, None) => DiagTarget::Stderr,
                 (None, Some(name)) => match log_name(name.as_encoded_bytes()) {
-                    LogName::Directory => DiagTarget::Stderr,
+                    LogName::Unopened => DiagTarget::Stderr,
                     LogName::StandardError => DiagTarget::StderrFile,
-                    LogName::NullDevice => DiagTarget::Discard,
+                    LogName::Nowhere => DiagTarget::Discard,
                     LogName::File => DiagTarget::Memory(Default::default()),
                 },
             },
@@ -75,53 +76,229 @@ impl RunFiles {
     }
 }
 
-/// What a `-logfile` name that is not one of NCBI's special names names, for a `Receiver`
+/// What a `-logfile` name that is not one of NCBI's special names gives, for a `Receiver`
 /// (`RunFiles::log_target`).
 #[derive(Debug, PartialEq, Eq)]
 enum LogName {
-    /// A directory, which NCBI cannot open as a file (`cerr`).
-    Directory,
-    /// The process's standard error.
+    /// A name that NCBI cannot open, a directory: the messages stay on `cerr`.
+    Unopened,
+    /// The process's standard error, opened as a file.
     StandardError,
-    /// The null device, written otherwise than NCBI's special `/dev/null`.
-    NullDevice,
+    /// No message: the null device written otherwise than NCBI's special `/dev/null`, or a file
+    /// system that reports no free space.
+    Nowhere,
     /// A file of that name.
     File,
 }
 
-/// What the `-logfile` name `name` names on the command line on Linux, in a working directory
-/// where the name's directories exist (No NCBI counterpart: LOSAT Web has no file system; line
-/// WQA's sweep, D11, 2026-11-20). A name whose last component is empty (it ends with `/`), `.` or
-/// `..` is a directory: NCBI's open of it fails, so its messages go to `cerr` (NCBI BLAST+ 2.17.0
-/// and LOSAT's command line: `-logfile .`, `logs/`, `logs/.`). An absolute name is read
-/// lexically (`//` and `/./` are `/`, `..` takes the component before it away): `/dev/stderr`,
-/// `/dev/fd/2` and `/proc/self/fd/2` are the standard error, where LOSAT's command line writes the
-/// file's bytes (NCBI's `-logfile /dev/stderr` too), and `/dev/null` is the null device. Every
-/// other name is a file, made in its directory (`logs/run.log`, `./run.log`, `/tmp/run.log`);
-/// so are the standard output's names (`/dev/stdout`).
+/// The directories of LOSAT Web's Linux (`log_name`) besides the working directory, its
+/// ancestors and the name's own: those of the Filesystem Hierarchy Standard at the root and the
+/// directories of the file systems that report no free space (`NO_FREE_SPACE`), each with its
+/// ancestors.
+const DIRECTORIES: [&[u8]; 23] = [
+    b"/bin",
+    b"/boot",
+    b"/dev/fd",
+    b"/dev/mqueue",
+    b"/dev/pts",
+    b"/dev/shm",
+    b"/etc",
+    b"/home",
+    b"/lib",
+    b"/lib64",
+    b"/media",
+    b"/mnt",
+    b"/opt",
+    b"/proc/self/fd",
+    b"/proc/thread-self/fd",
+    b"/root",
+    b"/run",
+    b"/sbin",
+    b"/srv",
+    b"/sys",
+    b"/tmp",
+    b"/usr",
+    b"/var",
+];
+
+/// The file systems of Linux that report no free space (`statfs`'s `f_bavail` is 0): procfs,
+/// sysfs, devpts and mqueue, where they are mounted.
+const NO_FREE_SPACE: [&[u8]; 4] = [b"/proc", b"/sys", b"/dev/pts", b"/dev/mqueue"];
+
+/// The devices of LOSAT Web's Linux whose writes are lost: the null device written otherwise than
+/// NCBI's special `/dev/null` (`//dev/null`), `/dev/full` (whose writes fail, which NCBI does not
+/// check), `/dev/zero`, `/dev/random` and `/dev/urandom`.
+const LOST_DEVICES: [&[u8]; 5] = [
+    b"/dev/null",
+    b"/dev/full",
+    b"/dev/zero",
+    b"/dev/random",
+    b"/dev/urandom",
+];
+
+/// The files of procfs that a process may open for writing as a user, of the process
+/// (`/proc/self`) and of its thread (`/proc/thread-self`): those of Linux 5.15, which
+/// `open(O_WRONLY | O_APPEND | O_CREAT)` opens (line WQA's sweep, D11 round 2, 2026-11-20). The
+/// file descriptors 0 to 2 (`fd/0`...) are the standard streams.
+const PROCESS_FILES: [&[u8]; 18] = [
+    b"attr/current",
+    b"attr/exec",
+    b"attr/fscreate",
+    b"attr/keycreate",
+    b"attr/sockcreate",
+    b"clear_refs",
+    b"comm",
+    b"coredump_filter",
+    b"gid_map",
+    b"loginuid",
+    b"mem",
+    b"oom_adj",
+    b"oom_score_adj",
+    b"projid_map",
+    b"sched",
+    b"timens_offsets",
+    b"timerslack_ns",
+    b"uid_map",
+];
+const THREAD_FILES: [&[u8]; 15] = [
+    b"attr/current",
+    b"attr/exec",
+    b"attr/fscreate",
+    b"attr/keycreate",
+    b"attr/sockcreate",
+    b"clear_refs",
+    b"comm",
+    b"gid_map",
+    b"loginuid",
+    b"mem",
+    b"oom_adj",
+    b"oom_score_adj",
+    b"projid_map",
+    b"sched",
+    b"uid_map",
+];
+
+/// Whether `path` is `directory` or a directory in it, component by component.
+fn within(path: &[u8], directory: &[u8]) -> bool {
+    path.strip_prefix(directory)
+        .is_some_and(|rest| rest.is_empty() || rest[0] == b'/' || directory.ends_with(b"/"))
+}
+
+/// Whether the system opens `path`, a path without links whose directories exist: a file that a
+/// name may make or write, also a device (No NCBI counterpart). In procfs, only the standard
+/// streams and the files of `PROCESS_FILES` and `THREAD_FILES` (a name that procfs does not have
+/// is not made there); sysfs and devpts open none of a user's names, and LOSAT Web's run has no
+/// terminal (`/dev/tty`); an mqueue file is a name in `/dev/mqueue`.
+fn opens(path: &[u8]) -> bool {
+    if let Some(file) = path.strip_prefix(b"/proc/self/") {
+        return matches!(file, b"fd/0" | b"fd/1" | b"fd/2") || PROCESS_FILES.contains(&file);
+    }
+    if let Some(file) = path.strip_prefix(b"/proc/thread-self/") {
+        return THREAD_FILES.contains(&file);
+    }
+    if let Some(queue) = path.strip_prefix(b"/dev/mqueue/") {
+        return !queue.contains(&b'/');
+    }
+    ![b"/proc".as_slice(), b"/sys", b"/dev/pts"]
+        .iter()
+        .any(|system| within(path, system))
+        && path != b"/dev/tty"
+}
+
+/// Whether `path`, a path without links, is a file of LOSAT Web's Linux, which is no directory
+/// (`/dev/null/x` and `/dev/stdout/../stderr` name no file): an entry of `/proc/self/fd`, a file
+/// of `PROCESS_FILES` or `THREAD_FILES`, a device of `LOST_DEVICES` or `/dev/tty`.
+fn known_file(path: &[u8]) -> bool {
+    path.strip_prefix(b"/proc/self/fd/")
+        .is_some_and(|fd| !fd.is_empty())
+        || path
+            .strip_prefix(b"/proc/self/")
+            .is_some_and(|file| PROCESS_FILES.contains(&file))
+        || path
+            .strip_prefix(b"/proc/thread-self/")
+            .is_some_and(|file| THREAD_FILES.contains(&file))
+        || LOST_DEVICES.contains(&path)
+        || path == b"/dev/tty"
+}
+
+/// What the `-logfile` name `name` gives on the command line on Linux (No NCBI counterpart: LOSAT
+/// Web has no file system; line WQA's sweep, D11, 2026-11-20 and its round 2). The name is read as
+/// NCBI reads it (`ncbi_environment::log_file_name`, the command line's reading too) in a working
+/// directory of its own, where the directories that the name gives exist (those that NCBI checks
+/// and those of the file it opens) on a file system with free space: `logs/run.log`, ` run.log`
+/// (`run.log`), `logs/` (the file `logs`) and `/tmp/run.log` are files. The system then follows
+/// the links of Linux in the path that NCBI opens and in the directory whose free space it reads:
+/// `/dev/fd` (`/proc/self/fd`), `/dev/stdin`, `/dev/stdout` and `/dev/stderr` (`/proc/self/fd/0`
+/// to `2`), `/proc/self/cwd` (the working directory) and `/proc/self/root` (`/`), also of
+/// `/proc/thread-self`. The opened path is a directory, which NCBI cannot open (`cerr`), where it
+/// is the working directory or one of its ancestors, a directory that the name gives, one of
+/// `DIRECTORIES` or an ancestor of any of them (`.`, `logs/.`, `a/b/..`, `/tmp/`,
+/// `/proc/self/cwd`); NCBI cannot open a path that the system does not open either (`opens`:
+/// `/dev/fd/3`, `/proc/self/status`, `/sys/...`, `/dev/pts/0`, `/dev/tty`), nor one whose
+/// directory is a file (`known_file`: `/dev/null/x`). A file opened in a
+/// file system that reports no free space (`NO_FREE_SPACE`) gets no message, as NCBI checks the
+/// space before it writes (`/dev/fd/2`, `/proc/self/fd/1`, `/proc/self/comm`, `/dev/mqueue/q`,
+/// `/dev/fd/../stderr`, whose directory is `/proc/self`). Otherwise `/dev/stderr` is the standard
+/// error, also written otherwise (`//dev/stderr`); the standard input is the null device
+/// (`/dev/stdin`), as for a command line run without one; the devices whose writes are lost
+/// (`LOST_DEVICES`) give no message; `/dev/stdout` is a file of that name, whose bytes the command
+/// line writes into its standard output among the report's, and `/proc/self/cwd/run.log` the file
+/// `run.log` of the working directory, under the name as typed. The model's command line is a
+/// user's, with no terminal, its standard output and error being pipes, as a shell's `|` gives.
 fn log_name(name: &[u8]) -> LogName {
-    let last = name.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
-    if matches!(last, b"" | b"." | b"..") {
-        return LogName::Directory;
+    // A working directory deeper than the name's ".." reach, of components no name has (a
+    // command line's words have no NUL byte): its ancestors are never the root's directories.
+    let climbs = crate::ncbi_str::truncate_spaces(name)
+        .split(|byte| *byte == b'/')
+        .filter(|part| *part == b"..")
+        .count();
+    let cwd = b"/\0".repeat(climbs + 1);
+    let file = crate::blastinput::ncbi_environment::log_file_name(name, Some(&cwd));
+    let link = |path: &[u8]| -> Option<Vec<u8>> {
+        Some(match path {
+            b"/dev/fd" | b"/proc/thread-self/fd" => b"/proc/self/fd".to_vec(),
+            b"/dev/stdin" => b"/proc/self/fd/0".to_vec(),
+            b"/dev/stdout" => b"/proc/self/fd/1".to_vec(),
+            b"/dev/stderr" => b"/proc/self/fd/2".to_vec(),
+            b"/proc/self/cwd" | b"/proc/thread-self/cwd" => cwd.clone(),
+            b"/proc/self/root" | b"/proc/thread-self/root" => b"/".to_vec(),
+            _ => return None,
+        })
+    };
+    let resolve = |path: &[u8]| {
+        crate::blastinput::ncbi_environment::normalize_path(path, Some(&link))
+            .expect("the links of LOSAT Web's Linux end")
+    };
+    let given = if file.directory.first() == Some(&b'/') {
+        file.directory.clone()
+    } else {
+        [cwd.as_slice(), b"/", &file.directory].concat()
+    };
+    let mut directories: Vec<Vec<u8>> = given
+        .iter()
+        .enumerate()
+        .filter(|(_, byte)| **byte == b'/')
+        .map(|(at, _)| resolve(&given[..=at]))
+        .collect();
+    directories.push(cwd.clone());
+    directories.extend(DIRECTORIES.iter().map(|directory| directory.to_vec()));
+    let path = resolve(&file.path);
+    if file.path.is_empty()
+        || directories
+            .iter()
+            .any(|directory| within(directory, &path) || known_file(directory))
+        || !opens(&path)
+    {
+        return LogName::Unopened;
     }
-    if name.first() != Some(&b'/') {
-        return LogName::File;
+    let space = resolve(&file.space);
+    if NO_FREE_SPACE.iter().any(|system| within(&space, system)) {
+        return LogName::Nowhere;
     }
-    let mut parts: Vec<&[u8]> = Vec::new();
-    for part in name.split(|byte| *byte == b'/') {
-        match part {
-            b"" | b"." => {}
-            b".." => {
-                parts.pop();
-            }
-            part => parts.push(part),
-        }
-    }
-    match parts.as_slice() {
-        [b"dev", b"stderr"] | [b"dev", b"fd", b"2"] | [b"proc", b"self", b"fd", b"2"] => {
-            LogName::StandardError
-        }
-        [b"dev", b"null"] => LogName::NullDevice,
+    match path.as_slice() {
+        b"/proc/self/fd/2" => LogName::StandardError,
+        b"/proc/self/fd/0" => LogName::Nowhere,
+        path if LOST_DEVICES.contains(&path) => LogName::Nowhere,
         _ => LogName::File,
     }
 }
@@ -142,9 +319,11 @@ mod tests {
     }
 
     /// The names of `-logfile` of a receiver: NCBI's special names, the names of directories and
-    /// of the standard error, other spellings of `/dev/null`, and a file in memory, handed over
-    /// under its whole name, also with a directory (line WQA's sweep, D11, 2026-11-20: refused
-    /// before).
+    /// of the standard error, the null device and the file systems without free space, and a file
+    /// in memory, handed over under its whole name, also with a directory (line WQA's sweep, D11,
+    /// 2026-11-20: refused before) and as NCBI reads it (its round 2: `logs/` and ` run.log` are
+    /// files, `/dev/fd/2` and `/proc/self/fd/2` give no message, `/dev/fd/3` and
+    /// `/proc/self/status` do not open, `/proc/self/cwd/run.log` is `run.log`).
     #[test]
     fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         let kept = Arc::new(Kept::default());
@@ -155,24 +334,76 @@ mod tests {
         assert!(matches!(target(Some("")), DiagTarget::Discard));
         assert!(matches!(target(Some("/dev/null")), DiagTarget::Discard));
         for name in [
-            ".", "..", "/", "logs/", "logs/.", "a/b/..", "/tmp/", "./", "//",
+            ".",
+            "..",
+            "../..",
+            "/",
+            "logs/.",
+            "a/b/..",
+            "a/./",
+            "/tmp/",
+            "/tmp",
+            "./",
+            "//",
+            "  ",
+            "/dev/fd",
+            "/proc/self/fd/",
+            "/home/../usr",
+            "/dev/fd/3",
+            "/dev/fd/63",
+            "/proc/self/fd/3",
+            "/proc/self/status",
+            "/proc/1/comm",
+            "/proc/self/losat",
+            "/proc/self/cwd",
+            "/proc/self/cwd/../stderr",
+            "/dev/null/x",
+            "/dev/stderr/x",
+            "/dev/fd/2/x",
+            "/dev/stdout/../stderr",
+            "/dev/fd/1/../2",
+            "/dev/pts/0",
+            "/dev/pts/ptmx",
+            "/dev/mqueue/a/b",
+            "/sys/kernel/x",
+            "/dev/tty",
         ] {
             assert!(matches!(target(Some(name)), DiagTarget::Stderr), "{name}");
         }
         for name in [
             "/dev/stderr",
-            "/dev/fd/2",
-            "/proc/self/fd/2",
             "//dev/stderr",
             "/dev/./stderr",
-            "/dev/fd/../fd/2",
+            "/tmp/../dev/stderr",
+            "/dev/stderr/",
+            "/proc/self/root/dev/stderr",
         ] {
             assert!(
                 matches!(target(Some(name)), DiagTarget::StderrFile),
                 "{name}"
             );
         }
-        for name in ["//dev/null", "/dev/./null", "/tmp/../dev/null"] {
+        for name in [
+            "//dev/null",
+            "/dev/./null",
+            "/tmp/../dev/null",
+            "/dev/null/",
+            "/dev/fd/2",
+            "/dev/fd/1",
+            "/dev/fd/0",
+            "/dev/stdin",
+            "/proc/self/fd/2",
+            "/proc/thread-self/fd/1",
+            "/dev/fd/../stderr",
+            "/dev/fd/../fd/2",
+            "/dev/mqueue/q",
+            "/dev/full",
+            "/dev/zero",
+            "/proc/self/comm",
+            "/proc/thread-self/comm",
+            "/proc/self/oom_score_adj",
+            "/proc/self/attr/current",
+        ] {
             assert!(matches!(target(Some(name)), DiagTarget::Discard), "{name}");
         }
         let names = [
@@ -184,6 +415,18 @@ mod tests {
             "/dev/stdout",
             "dev/stderr",
             "../run.log",
+            "../proc/self/fd/2",
+            "logs/",
+            "logs//",
+            "run.log/",
+            "a/b/",
+            "/tmp/abs/run.log/",
+            " run.log",
+            "run.log ",
+            " logs/run.log",
+            "/home/run.log",
+            "/proc/self/cwd/run.log",
+            "/proc/self/root/tmp/run.log",
         ];
         for name in names {
             let log = target(Some(name));
@@ -197,6 +440,9 @@ mod tests {
             .unwrap();
         files
             .deliver_log(Some(OsStr::new("/dev/stderr")), DiagTarget::StderrFile)
+            .unwrap();
+        files
+            .deliver_log(Some(OsStr::new("/dev/fd/2")), DiagTarget::Discard)
             .unwrap();
         assert_eq!(
             *kept.0.lock().unwrap(),

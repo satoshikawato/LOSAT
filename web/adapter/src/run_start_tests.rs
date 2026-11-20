@@ -163,10 +163,16 @@ impl Drop for Registered {
 // archive of the run's files (stream 8), `""` and `/dev/null` make none, `-` is the standard error
 // (stream 3). A name with a directory is a file of the run under its whole name, as the command line
 // makes it where the directory exists; so is `/dev/stdout`, whose bytes the command line writes into
-// its standard output. The names of the standard error, and of a directory (which NCBI cannot open
-// as a file), send the messages to stream 3, and another spelling of `/dev/null` nowhere (NCBI
-// BLAST+ 2.17.0 and LOSAT's command line: `fix-logfile-dir/native` of line WQA, D11, 2026-11-20; a
-// name with a directory was refused before).
+// its standard output, and so are `logs/` and ` run.log`, which NCBI reads as `logs` and `run.log`.
+// The names of the standard error, of a directory and of what the system does not open (a file
+// descriptor that the run has not opened, `/proc/self/status`, a terminal's `/dev/pts/0` in a run
+// without one, a name in a device) send the messages to stream 3, as NCBI sends a log it cannot open
+// to `cerr`; another spelling of `/dev/null` and `/dev/stdin` (the null device in a run without a
+// standard input) send them nowhere, as a file in a file system that reports no free space does
+// (`/dev/fd/2`, `/proc/self/fd/2`, `/proc/self/comm`: NCBI writes nothing to a log file with less
+// than 20 KiB free). NCBI BLAST+ 2.17.0 and LOSAT's command line: `fix-logfile-dir/native` and
+// `fix-logfile-dir/r2` of line WQA, D11, 2026-11-20; a name with a directory was refused before,
+// and round 2 read the last ones as NCBI does.
 #[test]
 fn the_logfile_is_a_file_of_the_run() {
     for (program, _, _) in SEARCHES {
@@ -227,6 +233,12 @@ fn the_logfile_is_a_file_of_the_run() {
             "a/b/run.log",
             "/tmp/run.log",
             "/dev/stdout",
+            "logs/",
+            "run.log/",
+            "a/b/",
+            "/tmp/abs/run.log/",
+            " run.log",
+            "run.log ",
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", name]);
@@ -254,14 +266,25 @@ fn the_logfile_is_a_file_of_the_run() {
             ("", to_log),
             ("/dev/null", to_log),
             ("//dev/null", to_log),
+            ("/dev/fd/2", to_log),
+            ("/dev/fd/1", to_log),
+            ("/proc/self/fd/2", to_log),
+            ("/proc/thread-self/fd/2", to_log),
+            ("/dev/fd/../stderr", to_log),
+            ("/dev/stdin", to_log),
+            ("/proc/self/comm", to_log),
             ("-", false),
             ("/dev/stderr", false),
-            ("/dev/fd/2", false),
-            ("/proc/self/fd/2", false),
+            ("//dev/stderr", false),
             (".", false),
             ("..", false),
-            ("logs/", false),
             ("logs/.", false),
+            ("/tmp/", false),
+            ("  ", false),
+            ("/dev/fd/3", false),
+            ("/proc/self/status", false),
+            ("/dev/pts/0", false),
+            ("/dev/null/x", false),
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", value]);

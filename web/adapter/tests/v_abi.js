@@ -702,15 +702,25 @@ function checkFiles(reactor) {
 // that the name makes, under the name, or, for the names of the standard output, what the CLI writes there (its whole
 // standard output, the reports being in -out); stream 10 says where the warning went. `<dir>` is the run's directory.
 const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>/abs/run.log", "/dev/stdout", "/dev/fd/1",
-  "-", "/dev/stderr", "/dev/fd/2", "/proc/self/fd/2", "//dev/stderr", ".", "..", "logs/", "logs/.", "", "/dev/null", "//dev/null"];
+  "-", "/dev/stderr", "/dev/fd/2", "/proc/self/fd/2", "//dev/stderr", ".", "..", "logs/", "logs/.", "", "/dev/null", "//dev/null",
+  // Line WQA's D11 round 2 (2026-11-20): names that NCBI reads otherwise than the system: a trailing '/' names the file
+  // without it, the spaces at the ends of a relative name are cut, and a file system that reports no free space
+  // (procfs: /dev/fd, /proc) gets no message; and devices whose writes are lost.
+  "run.log/", "logs//", "a/b/", "<dir>/abs/run.log/", " run.log", "run.log ", " logs/run.log", "  ", "/proc/thread-self/fd/2",
+  "/dev/fd/../stderr", "/dev/full", "/dev/zero",
+  // What the system does not open (a file descriptor that the run has not opened, a file that the user may not write, a
+  // name in a device), and what it opens otherwise than by the name: the standard input (the null device), a file of
+  // procfs (no free space) and a file of the working directory through procfs.
+  "/dev/fd/3", "/proc/self/status", "/dev/null/x", "/dev/stdout/../stderr", "/dev/stdin", "/dev/fd/0", "/proc/self/comm",
+  "/proc/self/cwd/run.log"];
 
 // The CLI's run with its standard output and error on pipes, as a shell's `|` or a terminal gives them: node's child
 // processes get sockets, which `/dev/stdout` and `/dev/stderr` cannot open (ENXIO), so that NCBI and the CLI send the
-// log to `cerr` (python's subprocess makes pipes).
+// log to `cerr` (python's subprocess makes pipes). Its standard input is the null device, as LOSAT Web's run has none.
 function nativeOnPipes(native, argv, directory) {
   const outFile = path.join(directory, ".stdout"), errFile = path.join(directory, ".stderr");
   const script = "import subprocess, sys\n" +
-    "p = subprocess.run(sys.argv[3:], capture_output=True)\n" +
+    "p = subprocess.run(sys.argv[3:], capture_output=True, stdin=subprocess.DEVNULL)\n" +
     "open(sys.argv[1], 'wb').write(p.stdout); open(sys.argv[2], 'wb').write(p.stderr); sys.exit(p.returncode)\n";
   const result = require("node:child_process").spawnSync("python3", ["-I", "-c", script, outFile, errFile, native, ...argv],
                                                          { cwd: directory, env: { PATH: process.env.PATH, HOME: directory } });
@@ -721,11 +731,18 @@ function nativeOnPipes(native, argv, directory) {
   return { status: result.status, stdout, stderr };
 }
 
+// The regular files under `directory`, as paths.
+function filesIn(directory) {
+  return fs.readdirSync(directory, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(entry.parentPath ?? entry.path, entry.name));
+}
+
 async function checkLogfileNames(reactor, native, scratch, engine, waitForWorkers) {
   const inputs = path.join(ROOT, "LOSAT/tests/fasta/outfmt11");
   const query = path.join(inputs, "arch_tbx_q.fna"), subject = path.join(inputs, "arch_tbx_s.fna");
-  const standardOutput = new Set(["/dev/stdout", "/dev/fd/1"]);
-  const device = (name) => name === "-" || name === "" || /^\/+(dev|proc)\//.test(name);
+  const standardOutput = new Set(["/dev/stdout"]);
+  const device = (name) => name === "-" || name === "" || /^\/+(dev|proc|sys)\//.test(name);
   let rows = 0;
   for (const program of ["blastn", "tblastx"]) {
     const handles = [0, 1].map((role) => {
@@ -746,9 +763,16 @@ async function checkLogfileNames(reactor, native, scratch, engine, waitForWorker
         const directory = fs.mkdtempSync(path.join(scratch, "logfile."));
         const name = template.replace("<dir>", directory);
         const label = `${engine} ${program}${ncbirc ? " .ncbirc 0xEF" : ""} -logfile ${JSON.stringify(name)}`;
-        const slash = name.lastIndexOf("/");
-        if (slash > 0 && !device(name)) fs.mkdirSync(path.resolve(directory, name.slice(0, slash)), { recursive: true });
+        // The directories that the name gives: the one that NCBI checks (the name's, without its trailing '/'s) and that
+        // of the file it opens (the name without the spaces at its ends).
+        if (!device(name)) {
+          for (const given of [name.replace(/\/+$/, ""), name.trim().replace(/\/+$/, "")]) {
+            const slash = given.lastIndexOf("/");
+            if (slash > 0) fs.mkdirSync(path.resolve(directory, given.slice(0, slash)), { recursive: true });
+          }
+        }
         if (ncbirc) fs.writeFileSync(path.join(directory, ".ncbirc"), Buffer.from([0xef]));
+        const before = new Set(filesIn(directory));
         const words = [program, "-query", query, "-subject", subject, "-max_target_seqs", "1"];
         const outputs = new Map();
         let cli;
@@ -758,10 +782,12 @@ async function checkLogfileNames(reactor, native, scratch, engine, waitForWorker
           assert.equal(result.status, 0, `${label}: native outfmt ${format}: ${result.stderr}`);
           outputs.set(format, fs.readFileSync(out));
           fs.rmSync(out);
-          const target = path.resolve(directory, name);
-          const made = !device(name) && fs.existsSync(target) && fs.statSync(target).isFile() ? fs.readFileSync(target) : undefined;
+          // The file that the run made (NCBI's name for it: `logs` for `logs/`, `run.log` for ` run.log`).
+          const madeFiles = filesIn(directory).filter((file) => !before.has(file));
+          assert.ok(madeFiles.length <= 1, `${label}: native outfmt ${format} made ${madeFiles}`);
+          const made = madeFiles.length === 1 ? fs.readFileSync(madeFiles[0]) : undefined;
           // The next format's run appends to the file: each run starts without it.
-          if (made !== undefined) fs.rmSync(target);
+          if (made !== undefined) fs.rmSync(madeFiles[0]);
           if (format === 6) cli = { stderr: result.stderr, stdout: result.stdout, made };
         }
         const files = standardOutput.has(name) ? [[name, cli.stdout]] : cli.made === undefined ? [] : [[name, cli.made]];

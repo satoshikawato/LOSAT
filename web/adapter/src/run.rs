@@ -2407,6 +2407,7 @@ mod tests {
             error,
             "-db (a database search) is not supported in the browser yet"
         );
+        // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
         let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
         let query = [FastaRecord::new("Query_1", b"q", protein)];
         let subject = [FastaRecord::new("Subject_1", b"s", protein)];
